@@ -76,14 +76,23 @@ pub struct QueryResult {
 pub struct QueryEngine {
     root: PathBuf,
     limits: Limits,
+    /// One runtime for every query: a single memory cap for the process, and
+    /// DataFusion's Parquet metadata cache is reused across queries and
+    /// requests (segments are immutable, so cached footers never go stale).
+    runtime: Option<Arc<datafusion::execution::runtime_env::RuntimeEnv>>,
 }
 
 impl QueryEngine {
     /// Engine over the data root written by `openlens-storage`.
     pub fn new(root: impl Into<PathBuf>, limits: Limits) -> Self {
+        let runtime = RuntimeEnvBuilder::new()
+            .with_memory_pool(Arc::new(FairSpillPool::new(limits.memory)))
+            .build_arc()
+            .ok();
         Self {
             root: root.into(),
             limits,
+            runtime,
         }
     }
 
@@ -92,10 +101,13 @@ impl QueryEngine {
             .map_err(|e| QueryError::Storage(e.to_string()))?;
         std::fs::create_dir_all(&dir).map_err(|e| QueryError::Storage(e.to_string()))?;
 
-        let runtime = RuntimeEnvBuilder::new()
-            .with_memory_pool(Arc::new(FairSpillPool::new(self.limits.memory)))
-            .build_arc()
-            .map_err(|e| QueryError::Storage(e.to_string()))?;
+        let runtime = match &self.runtime {
+            Some(r) => r.clone(),
+            None => RuntimeEnvBuilder::new()
+                .with_memory_pool(Arc::new(FairSpillPool::new(self.limits.memory)))
+                .build_arc()
+                .map_err(|e| QueryError::Storage(e.to_string()))?,
+        };
         let config = SessionConfig::new()
             .with_target_partitions(2)
             .with_information_schema(false);
