@@ -50,6 +50,8 @@ These rules apply to every human and every coding agent working in this reposito
 
 ## Pull requests
 
+- Before opening a PR that changes behaviour, **run the real binary** on realistic data (`cargo xtask demo ./data`, start the server, exercise the change with curl or the CLI). It has caught more bugs than any CI job.
+
 30. `main` changes only through pull requests.
 31. Run the checks below for the crates you changed. In the PR, say exactly what ran and what did not, and never report a check that did not run as passed.
 32. Do not commit scratch files or your agent tool's own files (`.claude/`, `.cursor/`), and do not pass `--no-verify`.
@@ -73,7 +75,7 @@ Layers (checked by `cargo xtask layers`; register every new crate in `xtask/src/
 Checks:
 
 ```sh
-cargo xtask ci                                        # everything CI runs
+cargo xtask ci                                        # the PR gate (CI also runs the browser e2e when the SDK/capture changes)
 cargo test -p <crate>
 cargo clippy -p <crate> --all-targets -- -D warnings
 cargo xtask layers
