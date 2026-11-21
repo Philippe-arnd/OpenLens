@@ -1,6 +1,17 @@
 # openlens.features.yaml: the feature map an app's agents maintain (draft, M2).
 version: 1
 churn_after_days: 14
+session_gap_minutes: 30
+task_timeout_minutes: 30
+
+# Canonical roles, and the raw identify() values that map to them (first match wins).
+roles:
+  - key: admin
+    match: ["owner", "superadmin", "admin"]
+  - key: coach
+    match: ["coach", "therapist"]
+  - key: member
+    match: ["user", "member", "team_*"]
 features:
   - key: write-entry
     name: Write a journal entry

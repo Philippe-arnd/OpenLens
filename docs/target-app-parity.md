@@ -9,6 +9,9 @@ The reference is the public feature list of hosted product-analytics suites (suc
 | Capture | Server SDKs (Node, Python, Rust) | M9 | — |
 | Install | Stack detection and agent-applied install plan | M2 | — |
 | Install | Declared feature map with lint and verify | M2 | — |
+| Capture | Sessions, errors (count/rate), Core Web Vitals, failed requests | M1 | — |
+| Install | Declared roles with match rules, role history | M2 | — |
+| PM view | KPI strip by role (docs/kpis.md) | M3 | — |
 | PM view | Stick drivers, value moment, churn points, value journeys | M3 | — |
 | PM view | Feature pulse, roles × features matrix | M3 | — |
 | Agents | MCP analysis tools, read-only SQL, Parquet/JSONL export | M3 | — |

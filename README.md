@@ -5,6 +5,7 @@
 On first login you land on the **Focus board**: ranked insights on where the value is in your app and what to work on next. Underneath, OpenLens answers the questions product managers actually ask, with almost nothing to configure:
 
 - **What makes users stick, and where they churn:** the features and journeys that predict retention, and the last steps before users leave.
+- **Key KPIs by role:** DAU/MAU, churn, session duration and tasks performed; errors and Core Web Vitals; most and least used features and the longest tasks ([definitions](docs/kpis.md)).
 - **Who does what:** usage by user role (admin, editor, viewer…), by account and by plan.
 - **How each feature is used:** how often, by how many people, whether they come back, whether they like it, and whether it leads to conversion.
 - **Where people drop off:** funnels, retention, paths.

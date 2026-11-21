@@ -4,6 +4,8 @@ Status: **pre-alpha** (2026-11-21). Each milestone has exit criteria. A mileston
 
 **North star.** A product manager adds **one dependency** to a web app, or more often asks the agent that maintains it to. Within an hour they can answer: *which features and journeys make users stick, where they churn, and which roles use what, how often, and whether they like it.* The UI stays very simple. The full data is available to agents for deep analysis. We target the 80% of apps that are a web front end with logged-in users who have a role.
 
+The key KPIs are users (DAU/MAU, churn, average session duration, tasks performed), performance (errors, Core Web Vitals, failed requests) and features (most and least used, longest tasks). **All are split by user role.** Definitions are in [docs/kpis.md](docs/kpis.md).
+
 Priorities: **M0–M3 deliver the north star.** M4–M8 add the deeper tools. M9 makes it production-grade.
 
 ---
@@ -23,10 +25,14 @@ Priorities: **M0–M3 deliver the north star.** M4–M8 add the deeper tools. M9
   - automatic capture of page views, clicks, form submits and route changes in single-page apps
   - `identify(id, { role, account, plan })`
   - batching with `sendBeacon` on unload
+  - **sessions** (30-minute inactivity rule)
+  - **errors**: uncaught errors and unhandled rejections, counted and grouped by message and top frame (full grouping comes in M7)
+  - **Core Web Vitals** (LCP, INP, CLS, plus TTFB and FCP) measured from the W3C Performance APIs, our own implementation
+  - **failed requests** (fetch/XHR 5xx and network errors, path and status only)
   - do-not-track and consent switches
 - Event explorer in the UI: live tail and filters by event, person and property
 
-**Exit:** a page with one `<script>` tag shows events in the explorer within 5 s, and 10k events/s are ingested on 1 vCPU (see the benchmarks).
+**Exit:** a page with one `<script>` tag shows its events, sessions, errors and vitals in the explorer within 5 s, and 10k events/s are ingested on 1 vCPU (see the benchmarks).
 
 ## M2: Agent wiring kit and the feature map ("plug it in for me")
 Most apps are vibecoded or maintained by agents, so wiring is written **for agents first**: explicit, declarative and verifiable.
@@ -38,12 +44,14 @@ Most apps are vibecoded or maintained by agents, so wiring is written **for agen
   - optional **steps**: the expected journey inside the feature
   - an `owner`
 
+  The map also has a **`roles:` section**: the app's canonical roles, and the raw `identify()` values that match each one (exact values, lists or patterns). Unmatched values are surfaced as role gaps and never dropped. Role changes are stored with their date, so each event keeps the role the user had at the time (see docs/kpis.md).
+
   The schema is published as JSON Schema (`docs/schema/features.schema.json`). The server ingests the map on deploy (`openlens-cli features push`) and versions it, so metrics stay comparable across renames.
 - **Stack detection** (`crates/wire`):
   - Front ends: Next.js, React+Vite, Vue/Nuxt, SvelteKit, Angular
   - Server-rendered: Rails, Django, Laravel, Express, Phoenix
   - Plain HTML
-- **Install plan:** typed edits covering the dependency or script tag, init, `identify()` with role/account/plan at the login point, a first draft of the feature map built from routes, and `data-feature` attributes on the main actions.
+- **Install plan:** typed edits covering the dependency or script tag, init, `identify()` with role/account/plan at the login point, a first draft of the feature map built from routes (including `roles:`, filled from the role values found in the code), and `data-feature` attributes on the main actions.
 - `openlens-cli wire [--dry-run]` and the MCP tool `wire_project` return or apply the plan. `openlens-cli features lint` checks the map against the code: missing selectors, dead routes, features that never fire.
 - **Rules for the app's agents:** a short snippet added to the app's own `AGENTS.md`/`CLAUDE.md` saying "when you add or change a user-facing feature, update `openlens.features.yaml` and run `openlens-cli features lint`". This keeps the map in sync as the app evolves.
 - `openlens-cli verify`: sends a test event per feature entry point and confirms the round trip, including the role.
@@ -54,6 +62,12 @@ Most apps are vibecoded or maintained by agents, so wiring is written **for agen
 ## M3: Stick, churn, journeys (the PM view) and agent-grade data access
 The UI stays very simple. **The first login lands on the Focus board**, a dashboard of ranked insights telling the PM where the value is and what to work on, with no setup. The depth goes to agents.
 
+- **KPI strip** at the top of the Focus board, with a role selector:
+  - **Users:** DAU/WAU/MAU, stickiness, churn and resurrection, average session duration, tasks per user per day
+  - **Performance:** error rate, CWV grade at p75, failed-request rate
+  - **Features:** most and least used (by users), unused features, longest tasks (median and p90 duration, slowest step), task completion rate
+
+  Every number is split by role. The MCP tool `kpi_report` returns the same data.
 - **Focus board (home screen).** It holds 3–7 insight cards ranked by impact, each written in plain language, backed by numbers and cohort sizes, and with a drill-down. For example:
   - "Users who save 3 entries in week 1 stay 2.4× more"
   - "Admins never reach *AI insights*"
@@ -96,8 +110,8 @@ The UI stays very simple. **The first login lands on the Focus board**, a dashbo
 
 **Exit:** a 10-minute session replays faithfully and costs under 1 MB stored.
 
-## M7: Error analysis
-- Automatic capture of `window.onerror` and unhandled promise rejections, plus a server SDK hook
+## M7: Error analysis (deep)
+- Capture and error rate already ship in M1. This milestone adds: a server SDK hook,
 - Fingerprint grouping, uploaded source maps, trends, first and last seen, affected roles and features
 
 **Exit:** the same error thrown from 3 call paths groups as one issue, and minified stacks resolve to the original source.

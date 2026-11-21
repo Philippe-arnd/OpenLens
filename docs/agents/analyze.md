@@ -4,6 +4,7 @@ Draft, tools arrive in M3. Start from summaries and drill down only where someth
 
 | PM question | Tool | Drill down with |
 | --- | --- | --- |
+| Headline KPIs by role | `kpi_report --by role` | `cohort_compare` |
 | What makes users stick? | `stickiness_drivers` | `cohort_compare`, `journeys` |
 | Where do users churn? | `churn_points` | `user_timeline` on sample ids |
 | Which journeys lead to value? | `journeys --to <success event>` | `cohort_compare` retained vs churned |

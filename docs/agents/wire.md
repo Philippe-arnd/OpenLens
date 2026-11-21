@@ -3,7 +3,7 @@
 A step-by-step guide that a coding agent follows to plug OpenLens into a web app with as little human work as possible. Status: draft, the tooling arrives in M2.
 
 1. Run `openlens-cli wire --dry-run` at the app root. It detects the stack and prints an install plan: dependency or script tag, the init call, the `identify()` insertion point and feature naming hints.
-2. Show the plan to the user and confirm the **role source**: which field on the logged-in user holds the role (for example `user.role`, `membership.kind`). If none is found, ask; do not guess.
+2. Show the plan to the user and confirm the **role source**: which field on the logged-in user holds the role (for example `user.role`, `membership.kind`). Also confirm the canonical `roles:` mapping drafted from the values found in the code. If none is found, ask; do not guess.
 3. Run `openlens-cli wire` to apply the plan as a single commit on a branch.
 4. Run `openlens-cli verify`. It sends a test event and confirms it arrived with a role.
 5. Open a PR that lists the edits, what was verified and what was not.
