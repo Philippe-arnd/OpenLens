@@ -10,6 +10,8 @@ publish.workspace = true
 
 [dependencies]
 openlens-server = { path = "../../crates/server" }
+openlens-meta = { path = "../../crates/meta" }
+openlens-storage = { path = "../../crates/storage" }
 axum.workspace = true
 tokio.workspace = true
 tracing.workspace = true
