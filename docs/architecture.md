@@ -1,6 +1,6 @@
 # Architecture
 
-One process, few moving parts. The server takes events over HTTP, appends them to a write-ahead log, flushes them into compressed columnar Parquet files, and answers queries with DataFusion. Metadata (projects, keys, users, flags, feature catalog, saved insights) lives in SQLite. The UI is a Leptos (WebAssembly) bundle embedded in the binary.
+One process, few moving parts. The server takes events over HTTP, appends them to a write-ahead log, flushes them into compressed columnar Parquet files, and answers queries with DataFusion. Metadata (projects, keys, users, flags, feature catalog, saved insights) lives in SQLite. The UI is server-rendered HTML (maud) with SVG charts, served by the same binary; no client-side JavaScript.
 
 ```
 browser SDK / server SDKs
@@ -11,7 +11,7 @@ browser SDK / server SDKs
 │    │                 │                    funnel/retention/paths   WAL        │
 │    │                 ├─ flags  ├─ replay  ├─ errors ├─ heatmaps    Parquet    │
 │    │                 └─ wire (install plans)                      object_store │
-│    └─ ui-leptos (embedded)        mcp ◄── openlens-cli mcp         (fs / S3)   │
+│    └─ ui (server-rendered)     mcp ◄── openlens-cli mcp         (fs / S3)   │
 │                                   meta (SQLite)                               │
 └───────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -26,7 +26,7 @@ A crate depends only on crates in strictly lower layers. `cargo xtask layers` en
 | L1 | `storage`, `meta` | WAL, Parquet segments, compaction, object store; SQLite metadata |
 | L2 | `query`, `flags`, `replay`, `errors`, `heatmaps`, `wire` | Feature logic, each independent of the others |
 | L3 | `engine` | Command registry; the only API the upper layer uses |
-| L4 | `server`, `mcp`, `ui-leptos` | Front ends of the engine: HTTP, agents, browser |
+| L4 | `server`, `mcp`, `ui` | Front ends of the engine: HTTP, agents, browser |
 | L5 | `apps/openlens`, `apps/openlens-cli` | Binaries |
 
 ## Data model (first cut)

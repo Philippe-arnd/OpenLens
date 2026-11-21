@@ -3,7 +3,7 @@
 ## Requirements
 - Rust stable (pinned by `rust-toolchain.toml`)
 - Optional: `cargo-deny` (CI always runs it; `cargo xtask ci` says when it skipped it)
-- Later (M1+): Node 24 for `sdk/js`, `trunk` for the Leptos UI
+- Node 22+ for `sdk/js` (only to rebuild the SDK; the built file is committed)
 
 ## Everyday commands
 ```sh

@@ -17,7 +17,7 @@ pub const LAYERS: &[(&str, Option<u8>)] = &[
     ("openlens-engine", Some(3)),
     ("openlens-server", Some(4)),
     ("openlens-mcp", Some(4)),
-    ("openlens-ui-leptos", Some(4)),
+    ("openlens-ui", Some(4)),
     ("openlens", Some(5)),
     ("openlens-cli", Some(5)),
     ("openlens-testkit", None),

@@ -23,7 +23,7 @@ These rules apply to every human and every coding agent working in this reposito
 9. Fix the code that a lint flags. Do not silence it with `allow` or a lint-config edit.
 10. **Every action is an engine command** (`crates/engine`). The UI, the CLI and the MCP server dispatch commands; none of them has private logic. Anything you can do in the UI, an agent can do through MCP.
 11. **Do not present partial work as success.** An unfinished feature says it is not available, in the UI, the CLI and MCP results alike.
-12. **Rust only**, with one documented exception: the browser SDK in `sdk/js` (see `docs/decisions.md`, D-003). The UI is Leptos, not handwritten JS.
+12. **Rust only**, with one documented exception: the browser SDK in `sdk/js` (see `docs/decisions.md`, D-003). The UI is server-rendered HTML from Rust (maud) with no client-side JavaScript, except vendored, permissively licensed players where unavoidable (D-011).
 13. Dates and times go through `chrono`. Do not hand-roll UTC or calendar math.
 14. CI changes go in their own PR. A feature or fix PR does not touch `.github/workflows/`.
 15. The MCP entry point (`openlens-cli mcp`) refuses to start without `--automation-read-root` and `--automation-write-root`, and it refuses any file access outside them.
@@ -63,7 +63,7 @@ Layers (checked by `cargo xtask layers`; register every new crate in `xtask/src/
 - L1 `storage`, `meta`
 - L2 `query`, `flags`, `replay`, `errors`, `heatmaps`, `wire`
 - L3 `engine`
-- L4 `server`, `mcp`, `ui-leptos`
+- L4 `server`, `mcp`, `ui`
 - L5 `apps/openlens`, `apps/openlens-cli`
 - Test helpers: `testkit` (dev-dependencies only)
 

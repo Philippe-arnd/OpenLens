@@ -9,7 +9,7 @@ Append-only. Each entry: id, date, decision, why, consequences.
 **Why:** self-hosters are free; anyone hosting a modified version must publish it. Dependencies stay permissive so that combining them is never in doubt. **Consequences:** `deny.toml` enforces the allowlist, and MPL-2.0 is allowed only per crate and unmodified.
 
 ## D-003 (2026-11-21) Rust everywhere except the browser SDK
-**Why:** the SDK runs inside the customer's own pages. It must be tiny, needs no WebAssembly, and session recording relies on the rrweb recorder (MIT). **Consequences:** `sdk/js` is TypeScript, kept under 10 kB gzipped without replay. All other code, including the UI (Leptos), is Rust.
+**Why:** the SDK runs inside the customer's own pages. It must be tiny, needs no WebAssembly, and session recording relies on the rrweb recorder (MIT). **Consequences:** `sdk/js` is TypeScript, kept under 10 kB gzipped without replay. All other code, including the UI, is Rust (see D-011).
 
 ## D-004 (2026-11-21) Roles and features are first-class concepts
 **Why:** the main users are PMs who ask "which roles use which features". **Consequences:** `identify()` takes `role`/`account`/`plan`. These are promoted to columns and copied onto events at capture time. The feature catalog lives in `meta`, and the default dashboard is the roles × features matrix (M3).
@@ -31,3 +31,6 @@ Append-only. Each entry: id, date, decision, why, consequences.
 
 ## D-010 (2026-11-21) KPI catalog with fixed definitions; errors and Web Vitals move to M1
 **Why:** Phil's key KPIs cover users (DAU/MAU, churn, session duration, tasks), performance (errors, CWV) and features (most/least used, longest tasks), all split by role. **Consequences:** `docs/kpis.md` is the contract for the UI, MCP and exports. A "task" is formally a feature entry → success event. Basic error capture and CWV ship in the M1 SDK, while M7 keeps deep grouping and source maps.
+
+## D-011 (2026-11-21) UI is server-rendered HTML (maud), not Leptos/WASM
+**Why:** it is leaner still: there is no wasm toolchain, no client bundle, the binary is smaller, it works without JS, and it is trivially accessible. The dashboard is read-mostly (KPI strips, ranked cards, tables), which server rendering handles well. Charts are SVG generated in Rust. **Consequences:** `crates/ui` renders HTML with `maud` (MIT/Apache). Interactivity uses links and forms, and live tail uses periodic refresh. The only JS shown in the dashboard will be the vendored rrweb player on the replay page (M6), plus OpenLens's own SDK for dogfooding. This supersedes the Leptos part of D-003.
