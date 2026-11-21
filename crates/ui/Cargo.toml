@@ -1,6 +1,6 @@
 [package]
-name = "openlens-ui-leptos"
-description = "Web dashboard in Leptos, compiled to WebAssembly and embedded in the server binary."
+name = "openlens-ui"
+description = "Web dashboard: server-rendered HTML (maud) and SVG charts, no client-side JavaScript."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

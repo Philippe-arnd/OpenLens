@@ -105,7 +105,7 @@ The UI stays very simple. **The first login lands on the Focus board**, a dashbo
 
 ## M6: Session replay
 - Recording based on the rrweb format, loaded lazily (not in the base bundle), with privacy masking on by default
-- Chunked zstd storage and a player built in Leptos
+- Chunked zstd storage, and a player page that embeds the rrweb player (MIT, vendored, not handwritten; see D-011)
 - Links: event to the moment in the replay, and error to its replay
 
 **Exit:** a 10-minute session replays faithfully and costs under 1 MB stored.
