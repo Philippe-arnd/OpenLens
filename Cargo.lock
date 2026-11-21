@@ -2333,6 +2333,10 @@ dependencies = [
 [[package]]
 name = "openlens-flags"
 version = "0.0.1"
+dependencies = [
+ "serde",
+ "sha2",
+]
 
 [[package]]
 name = "openlens-heatmaps"
@@ -2392,6 +2396,7 @@ dependencies = [
  "openlens-engine",
  "openlens-event",
  "openlens-featuremap",
+ "openlens-flags",
  "openlens-meta",
  "openlens-query",
  "openlens-storage",
@@ -2437,6 +2442,7 @@ version = "0.0.1"
 dependencies = [
  "maud",
  "openlens-engine",
+ "openlens-flags",
 ]
 
 [[package]]

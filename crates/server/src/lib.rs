@@ -6,6 +6,7 @@
 mod api;
 mod auth;
 mod capture;
+mod flags;
 mod web;
 
 use std::path::PathBuf;
@@ -44,6 +45,7 @@ pub fn router(state: AppState) -> Router {
     let capture = Router::new()
         .route("/capture", post(capture::capture))
         .route("/e", post(capture::capture))
+        .route("/flags", get(flags::public))
         .layer(DefaultBodyLimit::max(MAX_BODY))
         .layer(CorsLayer::permissive());
     Router::new()
@@ -52,6 +54,7 @@ pub fn router(state: AppState) -> Router {
         .route("/agents.md", get(agents_guide))
         .merge(capture)
         .merge(api::routes())
+        .merge(flags::routes())
         .merge(web::routes())
         .with_state(state)
 }

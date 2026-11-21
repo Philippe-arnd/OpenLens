@@ -75,6 +75,11 @@ enum Command {
         #[arg(long)]
         out: PathBuf,
     },
+    /// Feature flags: list, set (create or update) and delete.
+    Flags {
+        #[command(subcommand)]
+        action: FlagsCmd,
+    },
     /// Print the rule to add to the app's AGENTS.md / CLAUDE.md so its agents
     /// keep the feature map current.
     Rules,
@@ -99,6 +104,47 @@ enum Command {
         /// Directory agents may write to.
         #[arg(long, required = true)]
         automation_write_root: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum FlagsCmd {
+    /// List the project's flags.
+    List {
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+    },
+    /// Create or update a flag.
+    Set {
+        /// Flag key, as used in code: openlens.isEnabled("<key>").
+        key: String,
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+        /// Share of eligible users, 0-100.
+        #[arg(long, default_value_t = 0)]
+        rollout: u8,
+        /// Create or leave it switched off.
+        #[arg(long)]
+        off: bool,
+        /// Only these canonical roles (comma-separated).
+        #[arg(long, value_delimiter = ',')]
+        roles: Vec<String>,
+        /// Always on for these accounts (comma-separated).
+        #[arg(long, value_delimiter = ',')]
+        accounts: Vec<String>,
+        /// What the flag is for.
+        #[arg(long, default_value = "")]
+        description: String,
+    },
+    /// Delete a flag.
+    Delete {
+        /// Flag key.
+        key: String,
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
     },
 }
 
@@ -167,6 +213,16 @@ impl Client {
         let auth = format!("Bearer {}", self.token);
         let resp = match (method, body) {
             ("GET", _) => self.agent.get(&url).header("authorization", &auth).call(),
+            ("DELETE", _) => self
+                .agent
+                .delete(&url)
+                .header("authorization", &auth)
+                .call(),
+            ("PUT", Some(Body::Json(v))) => self
+                .agent
+                .put(&url)
+                .header("authorization", &auth)
+                .send_json(&v),
             (_, Some(Body::Json(v))) => self
                 .agent
                 .post(&url)
@@ -339,6 +395,37 @@ fn run(cli: Cli) -> Result<bool, String> {
                 &json!({ "rows": rows, "file": path.display().to_string(), "days_truncated": truncated }),
             );
             Ok(true)
+        }
+        Command::Flags { action } => {
+            let c = client()?;
+            let (status, v) = match action {
+                FlagsCmd::List { project } => {
+                    c.call("GET", &format!("/api/projects/{project}/flags"), None)?
+                }
+                FlagsCmd::Set {
+                    key,
+                    project,
+                    rollout,
+                    off,
+                    roles,
+                    accounts,
+                    description,
+                } => c.call(
+                    "PUT",
+                    &format!("/api/projects/{project}/flags/{key}"),
+                    Some(Body::Json(json!({
+                        "key": key, "enabled": !off, "rollout": rollout, "roles": roles,
+                        "accounts": accounts, "description": description,
+                    }))),
+                )?,
+                FlagsCmd::Delete { key, project } => c.call(
+                    "DELETE",
+                    &format!("/api/projects/{project}/flags/{key}"),
+                    None,
+                )?,
+            };
+            out(&v);
+            Ok(status == 200)
         }
         Command::Rules => {
             println!("{}", RULES_SNIPPET);

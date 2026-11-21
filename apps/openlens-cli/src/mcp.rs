@@ -211,6 +211,31 @@ impl Tools for OpenLensTools {
                 let query = s(args, "query").ok_or("query is required")?;
                 Ok(json!({ "rows": c.sql(&project(args), &query)? }))
             }
+            "flags" => {
+                let (st, v) = c.call(
+                    "GET",
+                    &format!("/api/projects/{}/flags", project(args)),
+                    None,
+                )?;
+                ok_or(st, v)
+            }
+            "flag_set" => {
+                let key = s(args, "key").ok_or("key is required")?;
+                let body = json!({
+                    "key": key,
+                    "enabled": args.get("enabled").and_then(Value::as_bool).unwrap_or(true),
+                    "rollout": args.get("rollout").and_then(Value::as_u64).unwrap_or(0),
+                    "roles": args.get("roles").cloned().unwrap_or_else(|| json!([])),
+                    "accounts": args.get("accounts").cloned().unwrap_or_else(|| json!([])),
+                    "description": s(args, "description").unwrap_or_default(),
+                });
+                let (st, v) = c.call(
+                    "PUT",
+                    &format!("/api/projects/{}/flags/{key}", project(args)),
+                    Some(Body::Json(body)),
+                )?;
+                ok_or(st, v)
+            }
             "login_link" => {
                 let (st, v) = c.call("POST", "/api/login-links", None)?;
                 ok_or(st, v)

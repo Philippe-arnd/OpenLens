@@ -30,6 +30,8 @@ export interface Dimensions {
 export declare function track(event: string, props?: Props): void;
 /** Mark a use of a feature (a task start), for features without a data-feature control. */
 export declare function feature(key: string, props?: Props): void;
+/** Is a feature flag on for this user? Uses the last known answer (cached across page loads). */
+export declare function isEnabled(key: string): boolean;
 /** Identify the logged-in user and the dimensions OpenLens slices by. */
 export declare function identify(id: string, dims?: Dimensions): void;
 /** Forget the user (call on logout). */
@@ -47,6 +49,7 @@ declare const _default: {
     identify: typeof identify;
     track: typeof track;
     feature: typeof feature;
+    isEnabled: typeof isEnabled;
     reset: typeof reset;
     flush: typeof flush;
     setConsent: typeof setConsent;

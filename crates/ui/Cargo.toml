@@ -10,6 +10,7 @@ publish.workspace = true
 
 [dependencies]
 openlens-engine = { path = "../engine" }
+openlens-flags = { path = "../flags" }
 maud.workspace = true
 
 [lints]

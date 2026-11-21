@@ -94,6 +94,7 @@ var queue = [];
 var consent = "granted";
 var timer;
 var lastPath = "";
+var activeFlags = [];
 function uuid() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
@@ -136,6 +137,7 @@ function base() {
   if (state.dims.role) p.$role = state.dims.role;
   if (state.dims.account) p.$account = state.dims.account;
   if (state.dims.plan) p.$plan = state.dims.plan;
+  if (activeFlags.length) p.$flags = activeFlags.join(",");
   return p;
 }
 function track(event, props) {
@@ -158,6 +160,25 @@ function track(event, props) {
 function feature(key, props) {
   track("$feature", { ...props, $feature: key });
 }
+function loadFlags() {
+  var _a;
+  if (!cfg || !origFetch) return;
+  const q = new URLSearchParams({ key: cfg.key, distinct_id: (_a = state.uid) != null ? _a : state.anon });
+  if (state.dims.role) q.set("role", state.dims.role);
+  if (state.dims.account) q.set("account", state.dims.account);
+  origFetch(`${cfg.host.replace(/\/$/, "")}/flags?${q}`).then((r) => r.ok ? r.json() : null).then((j) => {
+    if (j == null ? void 0 : j.flags) {
+      activeFlags = j.flags;
+      try {
+        localStorage.setItem(`${storageKey()}_flags`, JSON.stringify(activeFlags));
+      } catch {
+      }
+    }
+  }).catch(() => void 0);
+}
+function isEnabled(key) {
+  return activeFlags.includes(key);
+}
 function identify(id, dims = {}) {
   if (!cfg || !id) return;
   const anon = state.uid ? void 0 : state.anon;
@@ -165,6 +186,7 @@ function identify(id, dims = {}) {
   state.dims = { ...state.dims, ...dims };
   save();
   track("$identify", anon ? { $anon_distinct_id: anon } : {});
+  loadFlags();
 }
 function reset() {
   if (!cfg) return;
@@ -307,7 +329,13 @@ function init(config) {
   cfg = config;
   origFetch = (_b = window.fetch) == null ? void 0 : _b.bind(window);
   state = load();
+  try {
+    activeFlags = JSON.parse(localStorage.getItem(`${storageKey()}_flags`) || "[]");
+  } catch {
+    activeFlags = [];
+  }
   if (consent === "denied") return;
+  loadFlags();
   if (config.autocapture !== false) autocapture();
   timer = setInterval(() => flush(), 5e3);
   addEventListener("visibilitychange", () => document.visibilityState === "hidden" && flush(true));
@@ -317,13 +345,14 @@ function shutdown() {
   if (timer) clearInterval(timer);
   flush(true);
 }
-var index_default = { init, identify, track, feature, reset, flush, setConsent, shutdown };
+var index_default = { init, identify, track, feature, isEnabled, reset, flush, setConsent, shutdown };
 export {
   index_default as default,
   feature,
   flush,
   identify,
   init,
+  isEnabled,
   reset,
   setConsent,
   shutdown,

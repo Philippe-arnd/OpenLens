@@ -490,3 +490,85 @@ async fn export_returns_one_day_as_jsonl_and_validates_the_date() {
         StatusCode::UNAUTHORIZED
     );
 }
+
+#[tokio::test]
+async fn flags_target_canonical_roles_and_need_the_token_to_change() {
+    let h = harness();
+    let map_put = router(h.state.clone())
+        .oneshot(
+            Request::put("/api/projects/default/feature-map")
+                .header("authorization", "Bearer adm_test")
+                .body(Body::from("roles:\n  - key: admin\n    match: [owner]\n"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(map_put.status(), StatusCode::OK);
+    let put = |auth: bool| {
+        let st = h.state.clone();
+        async move {
+            let mut req = Request::put("/api/projects/default/flags/new-editor")
+                .header("content-type", "application/json");
+            if auth {
+                req = req.header("authorization", "Bearer adm_test");
+            }
+            router(st)
+                .oneshot(
+                    req.body(Body::from(
+                        r#"{"key":"x","enabled":true,"rollout":100,"roles":["admin"]}"#,
+                    ))
+                    .unwrap(),
+                )
+                .await
+                .unwrap()
+                .status()
+        }
+    };
+    assert_eq!(put(false).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(put(true).await, StatusCode::OK);
+
+    let flags_for = |role: &'static str| {
+        let (st, key) = (h.state.clone(), h.key.clone());
+        async move {
+            let resp = router(st)
+                .oneshot(
+                    Request::get(format!("/flags?key={key}&distinct_id=u1&role={role}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let v: serde_json::Value = serde_json::from_slice(
+                &axum::body::to_bytes(resp.into_body(), 1 << 20)
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            v["flags"].clone()
+        }
+    };
+    assert_eq!(
+        flags_for("owner").await,
+        serde_json::json!(["new-editor"]),
+        "owner resolves to admin"
+    );
+    assert_eq!(flags_for("guest").await, serde_json::json!([]));
+
+    let cookie = login_cookie(&h).await;
+    let cross = router(h.state.clone())
+        .oneshot(
+            Request::post("/p/default/flags/new-editor")
+                .header("cookie", &cookie)
+                .header("origin", "https://evil.example")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("rollout=0"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        cross.status(),
+        StatusCode::FORBIDDEN,
+        "cross-site form posts are refused"
+    );
+}

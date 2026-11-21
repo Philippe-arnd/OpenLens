@@ -23,6 +23,10 @@ pub(crate) fn routes() -> Router<AppState> {
 }
 
 /// Strict headers for every HTML page: no scripts at all, no framing.
+pub(crate) fn html_page(status: StatusCode, m: Markup) -> Response {
+    html(status, m)
+}
+
 fn html(status: StatusCode, m: Markup) -> Response {
     let mut r = (status, m).into_response();
     let h = r.headers_mut();
