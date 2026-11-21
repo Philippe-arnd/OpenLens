@@ -263,7 +263,7 @@ fn release_compare(rel: &[openlens_engine::ReleaseRow]) -> Markup {
 fn insight_cards(b: &Board) -> Markup {
     let accent = |kind: &str| match kind {
         "stick_driver" | "value_moment" => ("mint", "★"),
-        "churn_point" | "friction" => ("coral", "↘"),
+        "churn_point" | "friction" | "funnel_drop" => ("coral", "↘"),
         "role_blind_spot" => ("violet", "◐"),
         "release_regression" | "flag_regression" => ("sun", "!"),
         "flag_win" => ("mint", "▲"),
@@ -432,6 +432,25 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
                     h2 { span.dot.mint {} "Who uses the app" }
                     (bars(&roles))
                     p.muted.small { "Distinct users per role, last 30 days." }
+                }
+                @if !b.funnels.is_empty() {
+                    section.card.wide {
+                        h2 { span.dot.sky {} "Funnels" }
+                        @for fun in &b.funnels {
+                            h3.small { (fun.feature) }
+                            table.bars {
+                                tbody { @for (i, st) in fun.steps.iter().enumerate() {
+                                    tr {
+                                        th scope="row" { span.muted { (i + 1) ". " } (st.event) }
+                                        td.meter { span.fill style={ "width:" (format!("{:.1}", st.conversion * 100.0)) "%" } {} }
+                                        td.num { (compact(st.users)) }
+                                        td.num.muted { (pct(st.conversion)) @if i > 0 { " · " (duration(st.median_secs)) } }
+                                    }
+                                } }
+                            }
+                        }
+                        p.muted.small { "From each feature's declared steps, in order, within a day, last 30 days. Time is the median from the previous step." }
+                    }
                 }
                 @if !b.flag_cohorts.is_empty() {
                     section.card.wide {
