@@ -1,12 +1,15 @@
 [package]
 name = "openlens-mcp"
-description = "MCP server exposing engine commands to agents, confined to explicit read and write roots."
+description = "Minimal MCP server (JSON-RPC 2.0 over stdio) exposing OpenLens tools to agents."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
+
+[dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true

@@ -210,6 +210,46 @@ fn bars(rows: &[(String, i64, String)]) -> Markup {
     }
 }
 
+fn insight_cards(b: &Board) -> Markup {
+    let accent = |kind: &str| match kind {
+        "stick_driver" | "value_moment" => ("mint", "★"),
+        "churn_point" | "friction" => ("coral", "↘"),
+        "role_blind_spot" => ("violet", "◐"),
+        "release_regression" => ("sun", "!"),
+        _ => ("sky", "⏱"),
+    };
+    html! {
+        section.insights aria-label="What to focus on" {
+            h2 { span.dot.violet {} "What to focus on" }
+            @if b.insights.is_empty() {
+                div.insight.waiting {
+                    @if b.readiness.judged_users < b.readiness.needed {
+                        p { strong { "Insights need a little history." } " They compare users who stayed with users who left, so they wait until "
+                            (b.readiness.needed) " users are older than the churn window (now " (b.readiness.judged_users) ")." }
+                        p.muted.small { "Backfilling past users and success events (" code { "openlens-cli import" } ") gets there on day one." }
+                    } @else {
+                        p { strong { "Nothing stands out right now." } " No feature, role, release or page differs enough from the rest to be worth your attention." }
+                    }
+                }
+            } @else {
+                ol.cards {
+                    @for (i, c) in b.insights.iter().enumerate() {
+                        @let (cls, icon) = accent(c.kind);
+                        li class={ "insight " (cls) } {
+                            span.rank aria-hidden="true" { (icon) }
+                            div {
+                                h3 { span.sr-only { "Insight " (i + 1) ": " } (c.title) }
+                                p.evidence { (c.evidence) }
+                                p.next { span.label { "Next step" } " " (c.next_step) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Empty state: no events yet. Shows exactly what the agent (or a human) must add.
 fn empty(p: &ProjectInfo<'_>, host: &str) -> Markup {
     let tag = format!(
@@ -242,7 +282,24 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
     let feats: Vec<_> = b
         .features
         .iter()
-        .map(|x| (x.key.clone(), x.users, format!("{} uses", compact(x.uses))))
+        .filter(|x| x.users > 0)
+        .map(|x| {
+            let extra = if x.declared && x.completed > 0 {
+                format!("{} uses · {} done", compact(x.uses), compact(x.completed))
+            } else {
+                format!("{} uses", compact(x.uses))
+            };
+            (
+                x.name.clone().unwrap_or_else(|| x.key.clone()),
+                x.users,
+                extra,
+            )
+        })
+        .collect();
+    let unused: Vec<_> = b
+        .features
+        .iter()
+        .filter(|x| x.declared && x.users == 0)
         .collect();
     let roles: Vec<_> = b
         .roles
@@ -270,6 +327,7 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
                 p.muted { "What " (scope) " did lately in " strong { (f.environment) } "." }
             }
             (filter_bar(p.id, b, f, ""))
+            (insight_cards(b))
             section.tiles aria-label="Key numbers" {
                 (tile("violet", "Daily active users", &compact(b.users.dau), &format!("{} weekly · {} monthly", compact(b.users.wau), compact(b.users.mau))))
                 (tile("mint", "Stickiness", &pct(b.users.stickiness), "DAU ÷ MAU"))
@@ -304,6 +362,21 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
                     @if feats.is_empty() { p.muted { "No feature has been used yet. Features come from " code { "data-feature" } " attributes and the feature map." } }
                     @else { (bars(&feats)) p.muted.small { "By distinct users, last 30 days." } }
                 }
+                @if !unused.is_empty() {
+                    section.card {
+                        h2 { span.dot.coral {} "Never used (last 30 days)" }
+                        ul.tags { @for x in &unused { li { (x.name.as_deref().unwrap_or(&x.key)) } } }
+                        p.muted.small { "Declared in the feature map, but nobody reached them. Hidden, broken, or not needed?" }
+                    }
+                }
+                @if !b.role_gaps.is_empty() {
+                    section.card {
+                        h2 { span.dot.sun {} "Role gaps" }
+                        p.small { "These raw role values match no role in the feature map, so they are counted apart:" }
+                        ul.tags { @for (raw, n) in &b.role_gaps { li { code { (raw) } " · " (compact(*n)) " users" } } }
+                        p.muted.small { "Ask your agent to map them under " code { "roles:" } " in openlens.features.yaml." }
+                    }
+                }
                 section.card {
                     h2 { span.dot.mint {} "Who uses the app" }
                     (bars(&roles))
@@ -328,7 +401,12 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
                     }
                 }
             }
-            p.muted.small.center { "Insight cards (what makes users stick, where they churn) arrive with the feature map — see the roadmap." }
+            p.muted.small.center {
+                @match b.map_version {
+                    Some(v) => { "Feature map v" (v) " in use. Cards compare users who stayed with users who churned; each shows the cohort sizes behind it." }
+                    None => { "No feature map yet: roles are raw and features come only from data-feature. Ask your agent to push openlens.features.yaml for sharper insights." }
+                }
+            }
         },
     )
 }

@@ -6,3 +6,5 @@
 .claude/
 .env
 node_modules/
+scripts/e2e/node_modules/
+scripts/e2e/package*.json

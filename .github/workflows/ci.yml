@@ -1,9 +1,14 @@
 name: CI
 
+# PR gate = the fast checks (target: ~5 min with a warm cache).
+# The slow end-to-end checks (Docker image + smoke, real browser) run on
+# every push to main, nightly and on demand; a failure there opens an issue.
 on:
+  pull_request:
   push:
     branches: [main]
-  pull_request:        # every PR, whatever its base (stacked PRs included)
+  schedule:
+    - cron: "17 3 * * *"
   workflow_dispatch:
 
 permissions:
@@ -27,6 +32,9 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: gate
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny
@@ -40,25 +48,78 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-      - name: build and check
-        working-directory: sdk/js
+      - working-directory: sdk/js
         run: |
-          if [ ! -f package-lock.json ]; then echo "SDK not built yet, skipping"; exit 0; fi
           npm ci
           npm run build
           npm run check
           git diff --exit-code -- dist || (echo "::error::sdk/js/dist is stale: run npm run build and commit"; exit 1)
 
   docker:
-    name: docker build + end-to-end smoke
+    name: docker image + end-to-end smoke
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    env:
+      OPENLENS_ADMIN_TOKEN: adm_ci_smoke
+      OPENLENS_PROJECT_KEY: pk_ci_smoke
     steps:
       - uses: actions/checkout@v6
-      - run: docker compose up -d --build --wait --wait-timeout 180
-      - run: curl -fsS localhost:8686/healthz
-      - name: end-to-end smoke (when present)
-        run: if [ -x scripts/smoke.sh ]; then scripts/smoke.sh http://localhost:8686; fi
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: openlens-openlens:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - run: docker compose up -d --wait --wait-timeout 60
+      - run: scripts/smoke.sh http://localhost:8686
       - if: failure()
         run: docker compose logs
       - if: always()
         run: docker compose down -v
+
+  browser:
+    name: browser e2e (one script tag, real server)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: gate
+          save-if: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: cargo build -p openlens
+      - name: install Playwright + Chromium (next to the script, for ESM resolution)
+        working-directory: scripts/e2e
+        run: |
+          npm init -y > /dev/null
+          npm install --no-audit --no-fund playwright@1
+          npx playwright install --with-deps chromium
+      - name: run
+        run: |
+          OPENLENS_DATA_DIR=$RUNNER_TEMP/ol OPENLENS_ADMIN_TOKEN=adm_ci OPENLENS_PROJECT_KEY=pk_ci \
+            ./target/debug/openlens > $RUNNER_TEMP/ol.log 2>&1 &
+          for i in $(seq 1 30); do curl -fs localhost:8686/healthz && break; sleep 1; done
+          node scripts/e2e/browser.mjs http://localhost:8686 pk_ci
+      - if: failure()
+        run: cat $RUNNER_TEMP/ol.log
+
+  report:
+    name: open an issue when main breaks
+    needs: [gate, sdk, docker, browser]
+    if: failure() && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue create -R "$GITHUB_REPOSITORY" --title "main is broken: CI failed on ${GITHUB_SHA::7}" \
+            --body "The end-to-end CI failed on main ($GITHUB_EVENT_NAME). Run: $RUN. Fix before merging new work."

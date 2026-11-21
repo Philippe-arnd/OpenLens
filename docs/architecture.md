@@ -32,13 +32,13 @@ A crate depends only on crates in strictly lower layers. `cargo xtask layers` en
 
 ## Data model (first cut)
 
-- **Event**: `uuid`, `event` (name), `timestamp`, `received_at`, `distinct_id`, `session_id`. Promoted columns: `url`, `path`, `feature`, `role` (raw), `account`, `plan`, `environment`, `release`. Everything else stays in `properties` (JSON). The `project`, `date` and `hour` columns come from the partition directories.
+- **Event**: `uuid`, `event` (name), `timestamp`, `received_at`, `distinct_id`, `session_id`. Promoted columns: `url`, `path`, `feature`, `role` (raw), `account`, `plan`, `environment`, `release`. Everything else stays in `properties` (JSON). The `project` and `date` columns come from the partition directories.
 - **Person**: `distinct_id` → properties, including `role`, `account` and `plan`, stored in SQLite and joined at query time. Person properties are also copied onto each event at capture time, so role breakdowns need no join.
 - **Feature map**: pushed from the app repo (`openlens.features.yaml`) and stored, versioned, in SQLite. Features and canonical roles are resolved at query time, so editing the map re-labels history without rewriting any files.
 
 ## Storage
 
-- Partitioning: `<root>/<project>/<yyyy-mm-dd>/<hh>/<segment>.parquet`. Small segments are compacted hourly.
+- Partitioning: `<root>/events/project=<p>/date=<yyyy-mm-dd>/<segment>.parquet` (daily: hourly partitions made 24× more small files and slowed every query). Closed days compact to one file; the current day compacts once it holds more than 24 segments.
 - The write-ahead log is fsynced per batch. On restart, unflushed segments are replayed.
 - Replay blobs are stored separately: `<root>/<project>/replay/<session>/<chunk>.zst`.
 - Backends go through the `object_store` crate: local filesystem first, S3-compatible in M9.

@@ -42,7 +42,7 @@ fn flushed_events_land_in_hive_partitions_and_count_back() {
     assert_eq!(count_rows(dir.path(), "p2").unwrap(), 1);
     assert!(
         dir.path()
-            .join("events/project=p1/date=2026-11-21/hour=10")
+            .join("events/project=p1/date=2026-11-21")
             .is_dir()
     );
 }
@@ -83,7 +83,7 @@ fn torn_wal_line_is_skipped_not_fatal() {
 }
 
 #[test]
-fn compaction_merges_old_partitions_and_keeps_every_row() {
+fn compaction_merges_closed_days_and_keeps_every_row() {
     let dir = tempfile::tempdir().unwrap();
     let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
     let old = Utc.with_ymd_and_hms(2026, 11, 20, 8, 0, 0).unwrap();
@@ -91,8 +91,8 @@ fn compaction_merges_old_partitions_and_keeps_every_row() {
         w.append(&[ev("p", old), ev("p", old)]).unwrap();
         w.flush().unwrap();
     }
-    let hour = dir.path().join("events/project=p/date=2026-11-20/hour=08");
-    let files = || std::fs::read_dir(&hour).unwrap().count();
+    let day = dir.path().join("events/project=p/date=2026-11-20");
+    let files = || std::fs::read_dir(&day).unwrap().count();
     assert!(files() > 1);
     assert_eq!(compact(dir.path(), "p", Utc::now()).unwrap(), 1);
     assert_eq!(files(), 1);

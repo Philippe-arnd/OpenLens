@@ -14,6 +14,7 @@ openlens-storage = { path = "../storage" }
 openlens-meta = { path = "../meta" }
 openlens-query = { path = "../query" }
 openlens-engine = { path = "../engine" }
+openlens-featuremap = { path = "../featuremap" }
 openlens-ui = { path = "../ui" }
 maud.workspace = true
 hmac.workspace = true

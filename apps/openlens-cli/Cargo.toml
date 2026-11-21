@@ -1,6 +1,6 @@
 [package]
 name = "openlens-cli"
-description = "Headless OpenLens CLI: queries, imports and the MCP entry point."
+description = "Agent toolkit for OpenLens: init, feature map push/lint, verify, login links, SQL, MCP."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,7 +9,15 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+openlens-featuremap = { path = "../../crates/featuremap" }
+openlens-mcp = { path = "../../crates/mcp" }
 clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ureq.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

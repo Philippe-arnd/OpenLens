@@ -97,3 +97,13 @@ fn login_links_work_once_and_expire() {
     assert!(!m.consume_login_link(&expired).unwrap());
     assert!(!m.consume_login_link("ll_made_up").unwrap());
 }
+
+#[test]
+fn feature_maps_are_versioned_and_identical_pushes_are_no_ops() {
+    let m = Meta::in_memory().unwrap();
+    assert!(m.feature_map("p").unwrap().is_none());
+    assert_eq!(m.save_feature_map("p", "a").unwrap(), 1);
+    assert_eq!(m.save_feature_map("p", "a").unwrap(), 1);
+    assert_eq!(m.save_feature_map("p", "b").unwrap(), 2);
+    assert_eq!(m.feature_map("p").unwrap().unwrap(), (2, "b".to_owned()));
+}

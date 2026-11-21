@@ -1,12 +1,16 @@
 [package]
 name = "openlens-testkit"
-description = "Test helpers: synthetic event generators and hostile-input corpora."
+description = "Test helpers: synthetic datasets with planted patterns and hostile-input corpora."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
+
+[dependencies]
+openlens-event = { path = "../event" }
+chrono.workspace = true
 
 [lints]
 workspace = true

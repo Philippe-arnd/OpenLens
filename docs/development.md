@@ -10,6 +10,8 @@
 cargo xtask ci          # the full gate
 cargo xtask layers      # layering only
 cargo run -p openlens   # OPENLENS_ADDR=0.0.0.0:8686 by default
+cargo xtask demo ./data # 300 synthetic users with planted patterns, to look at the board
+OPENLENS_DATA_DIR=./data OPENLENS_ADMIN_TOKEN=demo cargo run -p openlens  # then log in with "demo"
 ```
 
 ## Docker
