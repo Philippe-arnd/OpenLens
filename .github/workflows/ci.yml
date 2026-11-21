@@ -14,9 +14,11 @@ on:
 permissions:
   contents: read
 
+# PR runs supersede each other; main runs never cancel each other, so the
+# end-to-end checks complete for every merge.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
