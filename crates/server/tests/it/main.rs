@@ -136,3 +136,19 @@ async fn hostile_bodies_get_client_errors_not_crashes() {
         );
     }
 }
+
+#[tokio::test]
+async fn sdk_is_served_as_cacheable_javascript() {
+    let h = harness();
+    let resp = router(h.state.clone())
+        .oneshot(Request::get("/c.js").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let ct = resp.headers()["content-type"].to_str().unwrap().to_owned();
+    assert!(ct.starts_with("application/javascript"));
+    let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    assert!(body.len() > 1000);
+}
