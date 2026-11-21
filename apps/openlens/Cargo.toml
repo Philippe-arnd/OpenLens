@@ -12,6 +12,7 @@ publish.workspace = true
 openlens-server = { path = "../../crates/server" }
 openlens-meta = { path = "../../crates/meta" }
 openlens-storage = { path = "../../crates/storage" }
+openlens-query = { path = "../../crates/query" }
 axum.workspace = true
 tokio.workspace = true
 tracing.workspace = true

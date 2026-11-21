@@ -1,4 +1,418 @@
-//! Command registry: every user action is a command shared by the UI, the CLI and the MCP server.
+//! Commands shared by the dashboard, the CLI and the MCP server.
 //!
-//! Layer: L3 (see `docs/architecture.md`). Status: not started; the roadmap
-//! item that fills this crate is listed in `ROADMAP.md`.
+//! Every user-visible number is computed here, once, from the KPI
+//! definitions in `docs/kpis.md`. Front ends only render what these
+//! commands return.
+//!
+//! Layer: L3 (see `docs/architecture.md`).
+
+use chrono::{Duration, Utc};
+use openlens_query::{QueryEngine, QueryError};
+use serde::Serialize;
+use serde_json::{Map, Value};
+
+/// Engine errors.
+#[derive(Debug, thiserror::Error)]
+pub enum EngineError {
+    /// Query failed.
+    #[error(transparent)]
+    Query(#[from] QueryError),
+    /// A filter value is not acceptable.
+    #[error("invalid filter: {0}")]
+    InvalidFilter(&'static str),
+}
+
+/// Result alias.
+pub type Result<T> = std::result::Result<T, EngineError>;
+
+/// Filters every board number honours. No other knobs (D-014).
+#[derive(Debug, Clone, Serialize)]
+pub struct Filters {
+    /// Environment (default `production`).
+    pub environment: String,
+    /// Raw role value, or all roles.
+    pub role: Option<String>,
+    /// Release, or all releases.
+    pub release: Option<String>,
+}
+
+impl Default for Filters {
+    fn default() -> Self {
+        Self {
+            environment: "production".into(),
+            role: None,
+            release: None,
+        }
+    }
+}
+
+/// Quote a user-supplied value as a SQL string literal. Values are bounded
+/// and restricted to printable characters, then single quotes are doubled.
+fn lit(v: &str) -> Result<String> {
+    if v.is_empty() || v.len() > 200 || v.chars().any(char::is_control) {
+        return Err(EngineError::InvalidFilter("value"));
+    }
+    Ok(format!("'{}'", v.replace('\'', "''")))
+}
+
+impl Filters {
+    /// WHERE clause for these filters plus a time window of `days`.
+    fn clause(&self, days: i64) -> Result<String> {
+        let since = (Utc::now() - Duration::days(days))
+            .format("%Y-%m-%d")
+            .to_string();
+        let mut w = format!(
+            "date >= '{since}' AND timestamp >= now() - INTERVAL '{days} days' AND environment = {}",
+            lit(&self.environment)?
+        );
+        if let Some(r) = &self.role {
+            w.push_str(&format!(" AND role = {}", lit(r)?));
+        }
+        if let Some(r) = &self.release {
+            w.push_str(&format!(" AND release = {}", lit(r)?));
+        }
+        Ok(w)
+    }
+}
+
+/// Headline user numbers.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct Users {
+    /// Distinct users, last 24 h.
+    pub dau: i64,
+    /// Distinct users, last 7 days.
+    pub wau: i64,
+    /// Distinct users, last 30 days.
+    pub mau: i64,
+    /// DAU / MAU.
+    pub stickiness: f64,
+}
+
+/// Session numbers, last 7 days.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct Sessions {
+    /// Number of sessions.
+    pub count: i64,
+    /// Mean duration of non-bounce sessions, seconds.
+    pub avg_secs: f64,
+    /// Share of single-event sessions.
+    pub bounce_rate: f64,
+    /// Share of sessions with at least one `$error`.
+    pub error_rate: f64,
+    /// Completed tasks per active user per day (feature uses for now).
+    pub tasks_per_user_day: f64,
+}
+
+/// One Web Vital at p75.
+#[derive(Debug, Clone, Serialize)]
+pub struct Vital {
+    /// LCP, INP, CLS, FCP or TTFB.
+    pub name: String,
+    /// p75 value (ms, or unitless for CLS).
+    pub p75: f64,
+    /// good / needs-improvement / poor.
+    pub rating: String,
+    /// Samples.
+    pub samples: i64,
+}
+
+/// Usage of one feature.
+#[derive(Debug, Clone, Serialize)]
+pub struct FeatureUse {
+    /// Feature key.
+    pub key: String,
+    /// Uses (events carrying the feature).
+    pub uses: i64,
+    /// Distinct users.
+    pub users: i64,
+}
+
+/// Users per role.
+#[derive(Debug, Clone, Serialize)]
+pub struct RoleUsers {
+    /// Raw role value (`None` for unidentified).
+    pub role: Option<String>,
+    /// Distinct users, last 30 days.
+    pub users: i64,
+}
+
+/// KPIs of one release.
+#[derive(Debug, Clone, Serialize)]
+pub struct ReleaseRow {
+    /// Release name.
+    pub release: String,
+    /// First time seen.
+    pub first_seen: String,
+    /// Distinct users.
+    pub users: i64,
+    /// Sessions.
+    pub sessions: i64,
+    /// Share of sessions with an error.
+    pub error_rate: f64,
+}
+
+/// Everything the Focus board shows (M1 subset; insight cards come in M3).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct Board {
+    /// Filters applied.
+    pub filters: Option<Filters>,
+    /// All events ever, all environments (drives the empty state).
+    pub total_events: i64,
+    /// User KPIs.
+    pub users: Users,
+    /// Session KPIs.
+    pub sessions: Sessions,
+    /// Daily active users, last 14 days, oldest first.
+    pub dau_series: Vec<(String, i64)>,
+    /// Web Vitals at p75, last 7 days.
+    pub vitals: Vec<Vital>,
+    /// Most used features, last 30 days.
+    pub features: Vec<FeatureUse>,
+    /// Users per role, last 30 days.
+    pub roles: Vec<RoleUsers>,
+    /// Latest releases, newest first.
+    pub releases: Vec<ReleaseRow>,
+    /// Environments seen.
+    pub environments: Vec<String>,
+}
+
+fn int(row: &Map<String, Value>, k: &str) -> i64 {
+    row.get(k).and_then(Value::as_i64).unwrap_or(0)
+}
+fn float(row: &Map<String, Value>, k: &str) -> f64 {
+    row.get(k).and_then(Value::as_f64).unwrap_or(0.0)
+}
+fn text(row: &Map<String, Value>, k: &str) -> Option<String> {
+    row.get(k).and_then(Value::as_str).map(str::to_owned)
+}
+
+fn rating(name: &str, v: f64) -> &'static str {
+    let (good, poor) = match name {
+        "LCP" => (2500.0, 4000.0),
+        "INP" => (200.0, 500.0),
+        "CLS" => (0.1, 0.25),
+        "FCP" => (1800.0, 3000.0),
+        "TTFB" => (800.0, 1800.0),
+        _ => return "unknown",
+    };
+    if v <= good {
+        "good"
+    } else if v <= poor {
+        "needs-improvement"
+    } else {
+        "poor"
+    }
+}
+
+/// Compute the board for a project. Queries run concurrently.
+pub async fn board(q: &QueryEngine, project: &str, f: &Filters) -> Result<Board> {
+    let w30 = f.clause(30)?;
+    let w14 = f.clause(14)?;
+    let w7 = f.clause(7)?;
+    let all_releases = Filters {
+        release: None,
+        ..f.clone()
+    }
+    .clause(90)?;
+
+    let users_sql = format!(
+        "SELECT count(DISTINCT CASE WHEN timestamp >= now() - INTERVAL '1 day' THEN distinct_id END) AS dau, \
+         count(DISTINCT CASE WHEN timestamp >= now() - INTERVAL '7 days' THEN distinct_id END) AS wau, \
+         count(DISTINCT distinct_id) AS mau FROM events WHERE {w30}"
+    );
+    let sessions_sql = format!(
+        "SELECT count(*) AS sessions, \
+         avg(CASE WHEN n > 1 THEN secs END) AS avg_secs, \
+         avg(CASE WHEN n = 1 THEN 1.0 ELSE 0.0 END) AS bounce_rate, \
+         avg(CASE WHEN errors > 0 THEN 1.0 ELSE 0.0 END) AS error_rate, \
+         sum(tasks) AS tasks, count(DISTINCT uid) AS users \
+         FROM (SELECT session_id, min(distinct_id) AS uid, count(*) AS n, \
+               date_part('epoch', max(timestamp)) - date_part('epoch', min(timestamp)) AS secs, \
+               sum(CASE WHEN event = '$error' THEN 1 ELSE 0 END) AS errors, \
+               sum(CASE WHEN feature IS NOT NULL THEN 1 ELSE 0 END) AS tasks \
+               FROM events WHERE {w7} AND session_id IS NOT NULL GROUP BY session_id) s"
+    );
+    let dau_sql = format!(
+        "SELECT date, count(DISTINCT distinct_id) AS n FROM events WHERE {w14} GROUP BY date ORDER BY date"
+    );
+    let vitals_sql = format!(
+        "SELECT name, approx_percentile_cont(v, 0.75) AS p75, count(*) AS samples FROM ( \
+           SELECT regexp_match(properties, '\"\\$name\":\"([A-Z]+)\"')[1] AS name, \
+                  CAST(regexp_match(properties, '\"\\$value\":([0-9.eE+-]+)')[1] AS DOUBLE) AS v \
+           FROM events WHERE {w7} AND event = '$vital') x \
+         WHERE name IS NOT NULL AND v IS NOT NULL GROUP BY name ORDER BY name"
+    );
+    let features_sql = format!(
+        "SELECT feature AS key, count(*) AS uses, count(DISTINCT distinct_id) AS users \
+         FROM events WHERE {w30} AND feature IS NOT NULL GROUP BY feature ORDER BY users DESC, uses DESC LIMIT 12"
+    );
+    let roles_sql = format!(
+        "SELECT role, count(DISTINCT distinct_id) AS users FROM events WHERE {} \
+         GROUP BY role ORDER BY users DESC LIMIT 12",
+        Filters {
+            role: None,
+            ..f.clone()
+        }
+        .clause(30)?
+    );
+    let releases_sql = format!(
+        "SELECT release, CAST(min(timestamp) AS VARCHAR) AS first_seen, count(DISTINCT distinct_id) AS users, \
+         count(DISTINCT session_id) AS sessions, \
+         count(DISTINCT CASE WHEN event = '$error' THEN session_id END) AS error_sessions \
+         FROM events WHERE {all_releases} AND release IS NOT NULL \
+         GROUP BY release ORDER BY min(timestamp) DESC LIMIT 5"
+    );
+    let env_sql = "SELECT DISTINCT environment FROM events ORDER BY environment".to_owned();
+    let total_sql = "SELECT count(*) AS n FROM events".to_owned();
+
+    let (users, sessions, dau, vitals, features, roles, releases, envs, total) = futures::join!(
+        q.sql(project, &users_sql),
+        q.sql(project, &sessions_sql),
+        q.sql(project, &dau_sql),
+        q.sql(project, &vitals_sql),
+        q.sql(project, &features_sql),
+        q.sql(project, &roles_sql),
+        q.sql(project, &releases_sql),
+        q.sql(project, &env_sql),
+        q.sql(project, &total_sql),
+    );
+
+    let mut b = Board {
+        filters: Some(f.clone()),
+        ..Board::default()
+    };
+    if let Some(r) = users?.rows.first() {
+        b.users = Users {
+            dau: int(r, "dau"),
+            wau: int(r, "wau"),
+            mau: int(r, "mau"),
+            stickiness: if int(r, "mau") > 0 {
+                int(r, "dau") as f64 / int(r, "mau") as f64
+            } else {
+                0.0
+            },
+        };
+    }
+    if let Some(r) = sessions?.rows.first() {
+        let users = int(r, "users").max(1) as f64;
+        b.sessions = Sessions {
+            count: int(r, "sessions"),
+            avg_secs: float(r, "avg_secs"),
+            bounce_rate: float(r, "bounce_rate"),
+            error_rate: float(r, "error_rate"),
+            tasks_per_user_day: int(r, "tasks") as f64 / users / 7.0,
+        };
+    }
+    b.dau_series = dau?
+        .rows
+        .iter()
+        .map(|r| (text(r, "date").unwrap_or_default(), int(r, "n")))
+        .collect();
+    b.vitals = vitals?
+        .rows
+        .iter()
+        .filter_map(|r| {
+            let name = text(r, "name")?;
+            let p75 = float(r, "p75");
+            Some(Vital {
+                rating: rating(&name, p75).into(),
+                name,
+                p75,
+                samples: int(r, "samples"),
+            })
+        })
+        .collect();
+    b.features = features?
+        .rows
+        .iter()
+        .map(|r| FeatureUse {
+            key: text(r, "key").unwrap_or_default(),
+            uses: int(r, "uses"),
+            users: int(r, "users"),
+        })
+        .collect();
+    b.roles = roles?
+        .rows
+        .iter()
+        .map(|r| RoleUsers {
+            role: text(r, "role"),
+            users: int(r, "users"),
+        })
+        .collect();
+    b.releases = releases?
+        .rows
+        .iter()
+        .map(|r| {
+            let sessions = int(r, "sessions");
+            ReleaseRow {
+                release: text(r, "release").unwrap_or_default(),
+                first_seen: text(r, "first_seen").unwrap_or_default(),
+                users: int(r, "users"),
+                sessions,
+                error_rate: if sessions > 0 {
+                    int(r, "error_sessions") as f64 / sessions as f64
+                } else {
+                    0.0
+                },
+            }
+        })
+        .collect();
+    b.environments = envs?
+        .rows
+        .iter()
+        .filter_map(|r| text(r, "environment"))
+        .collect();
+    b.total_events = total?.rows.first().map_or(0, |r| int(r, "n"));
+    Ok(b)
+}
+
+/// One row of the recent-events view.
+#[derive(Debug, Clone, Serialize)]
+pub struct EventRow {
+    /// When.
+    pub timestamp: String,
+    /// Event name.
+    pub event: String,
+    /// User.
+    pub distinct_id: String,
+    /// Raw role.
+    pub role: Option<String>,
+    /// Page path.
+    pub path: Option<String>,
+    /// Feature.
+    pub feature: Option<String>,
+    /// Release.
+    pub release: Option<String>,
+}
+
+/// The latest events, newest first (at most 200).
+pub async fn recent_events(
+    q: &QueryEngine,
+    project: &str,
+    f: &Filters,
+    event: Option<&str>,
+    limit: usize,
+) -> Result<Vec<EventRow>> {
+    let mut w = f.clause(30)?;
+    if let Some(e) = event {
+        w.push_str(&format!(" AND event = {}", lit(e)?));
+    }
+    let sql = format!(
+        "SELECT CAST(timestamp AS VARCHAR) AS ts, event, distinct_id, role, path, feature, release \
+         FROM events WHERE {w} ORDER BY timestamp DESC LIMIT {}",
+        limit.min(200)
+    );
+    let r = q.sql(project, &sql).await?;
+    Ok(r.rows
+        .iter()
+        .map(|r| EventRow {
+            timestamp: text(r, "ts").unwrap_or_default(),
+            event: text(r, "event").unwrap_or_default(),
+            distinct_id: text(r, "distinct_id").unwrap_or_default(),
+            role: text(r, "role"),
+            path: text(r, "path"),
+            feature: text(r, "feature"),
+            release: text(r, "release"),
+        })
+        .collect())
+}

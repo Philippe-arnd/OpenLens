@@ -8,5 +8,9 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[dependencies]
+openlens-engine = { path = "../engine" }
+maud.workspace = true
+
 [lints]
 workspace = true

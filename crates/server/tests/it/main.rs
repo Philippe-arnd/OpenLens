@@ -28,6 +28,7 @@ fn harness() -> Harness {
     let state = AppState {
         meta: Arc::new(meta),
         writer: Arc::new(Mutex::new(writer)),
+        query: openlens_query::QueryEngine::new(dir.path(), openlens_query::Limits::default()),
         data_dir: dir.path().to_path_buf(),
         admin_token: "adm_test".into(),
     };
@@ -151,4 +152,175 @@ async fn sdk_is_served_as_cacheable_javascript() {
         .await
         .unwrap();
     assert!(body.len() > 1000);
+}
+
+async fn get(
+    h: &Harness,
+    uri: &str,
+    cookie: Option<&str>,
+    bearer: bool,
+) -> axum::response::Response {
+    let mut req = Request::get(uri);
+    if let Some(c) = cookie {
+        req = req.header("cookie", c);
+    }
+    if bearer {
+        req = req.header("authorization", "Bearer adm_test");
+    }
+    router(h.state.clone())
+        .oneshot(req.body(Body::empty()).unwrap())
+        .await
+        .unwrap()
+}
+
+async fn login_cookie(h: &Harness) -> String {
+    let resp = router(h.state.clone())
+        .oneshot(
+            Request::post("/login")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("token=adm_test"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(resp.status().is_redirection());
+    let set = resp.headers()["set-cookie"].to_str().unwrap().to_owned();
+    assert!(set.contains("HttpOnly") && set.contains("SameSite=Lax"));
+    set.split(';').next().unwrap().to_owned()
+}
+
+#[tokio::test]
+async fn dashboard_requires_a_session_and_pages_are_locked_down() {
+    let h = harness();
+    let anon = get(&h, "/p/default", None, false).await;
+    assert!(anon.status().is_redirection());
+    let forged = get(
+        &h,
+        "/p/default",
+        Some("ol_session=9999999999.deadbeef"),
+        false,
+    )
+    .await;
+    assert!(
+        forged.status().is_redirection(),
+        "forged cookie must not pass"
+    );
+
+    let cookie = login_cookie(&h).await;
+    let page = get(&h, "/p/default", Some(&cookie), false).await;
+    assert_eq!(page.status(), StatusCode::OK);
+    let csp = page.headers()["content-security-policy"].to_str().unwrap();
+    assert!(csp.contains("default-src 'none'") && csp.contains("frame-ancestors 'none'"));
+    let body = axum::body::to_bytes(page.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let html = String::from_utf8_lossy(&body);
+    assert!(
+        html.contains("warming up"),
+        "empty project shows the onboarding state"
+    );
+    assert!(html.contains(&h.key), "and the capture key to wire the app");
+}
+
+#[tokio::test]
+async fn wrong_token_login_fails() {
+    let h = harness();
+    let resp = router(h.state.clone())
+        .oneshot(
+            Request::post("/login")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("token=nope"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    assert!(resp.headers().get("set-cookie").is_none());
+}
+
+#[tokio::test]
+async fn login_links_open_the_board_exactly_once() {
+    let h = harness();
+    let resp = router(h.state.clone())
+        .oneshot(
+            Request::post("/api/login-links")
+                .header("authorization", "Bearer adm_test")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let url = body["url"].as_str().unwrap();
+    let path = &url[url.find("/l/").unwrap()..];
+    let first = get(&h, path, None, false).await;
+    assert!(first.status().is_redirection());
+    assert!(first.headers().get("set-cookie").is_some());
+    let second = get(&h, path, None, false).await;
+    assert_eq!(second.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn api_needs_the_bearer_token_and_runs_sql() {
+    let h = harness();
+    assert_eq!(
+        get(&h, "/api/projects", None, false).await.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let cookie = login_cookie(&h).await;
+    assert_eq!(
+        get(&h, "/api/projects", Some(&cookie), false)
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED,
+        "a browser session is not an API credential"
+    );
+    assert_eq!(
+        get(&h, "/api/projects", None, true).await.status(),
+        StatusCode::OK
+    );
+
+    post(&h, "/capture", batch(&h.key), false).await;
+    openlens_server::flush_now(&h.state).unwrap();
+    let resp = router(h.state.clone())
+        .oneshot(
+            Request::post("/api/projects/default/sql")
+                .header("authorization", "Bearer adm_test")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"sql":"SELECT count(*) AS n FROM events"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(body["rows"][0]["n"], 2);
+}
+
+#[tokio::test]
+async fn board_renders_numbers_once_data_exists() {
+    let h = harness();
+    post(&h, "/capture", batch(&h.key), false).await;
+    openlens_server::flush_now(&h.state).unwrap();
+    let cookie = login_cookie(&h).await;
+    let page = get(&h, "/p/default", Some(&cookie), false).await;
+    let body = axum::body::to_bytes(page.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let html = String::from_utf8_lossy(&body);
+    assert!(html.contains("Daily active users"));
+    assert!(html.contains("owner"), "the role shows up");
+    let events = get(&h, "/p/default/events", Some(&cookie), false).await;
+    assert_eq!(events.status(), StatusCode::OK);
 }

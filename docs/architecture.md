@@ -26,8 +26,9 @@ A crate depends only on crates in strictly lower layers. `cargo xtask layers` en
 | L1 | `storage`, `meta` | WAL, Parquet segments, compaction, object store; SQLite metadata |
 | L2 | `query`, `flags`, `replay`, `errors`, `heatmaps`, `featuremap` | Feature logic, each independent of the others |
 | L3 | `engine` | Command registry; the only API the upper layer uses |
-| L4 | `server`, `mcp`, `ui` | Front ends of the engine: HTTP, agents, browser |
-| L5 | `apps/openlens`, `apps/openlens-cli` | Binaries |
+| L4 | `ui`, `mcp` | Rendering (HTML) and the agent protocol |
+| L5 | `server` | HTTP: capture, API, dashboard |
+| L6 | `apps/openlens`, `apps/openlens-cli` | Binaries |
 
 ## Data model (first cut)
 

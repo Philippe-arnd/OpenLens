@@ -86,3 +86,14 @@ fn slugs_are_safe_partition_names() {
     }
     assert!(slug("!!!").is_empty());
 }
+
+#[test]
+fn login_links_work_once_and_expire() {
+    let m = Meta::in_memory().unwrap();
+    let t = m.create_login_link(600).unwrap();
+    assert!(m.consume_login_link(&t).unwrap());
+    assert!(!m.consume_login_link(&t).unwrap(), "second use must fail");
+    let expired = m.create_login_link(-1).unwrap();
+    assert!(!m.consume_login_link(&expired).unwrap());
+    assert!(!m.consume_login_link("ll_made_up").unwrap());
+}

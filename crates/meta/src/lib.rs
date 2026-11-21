@@ -85,6 +85,10 @@ CREATE TABLE IF NOT EXISTS role_history (
 );
 CREATE INDEX IF NOT EXISTS role_history_person ON role_history (project, distinct_id, since);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS login_links (
+  hash TEXT PRIMARY KEY,
+  expires_at INTEGER NOT NULL
+);
 ";
 
 /// Random lowercase alphanumeric string.
@@ -94,6 +98,11 @@ fn token(len: usize) -> String {
     (0..len)
         .map(|_| CHARS[rng.random_range(0..CHARS.len())] as char)
         .collect()
+}
+
+fn sha256_hex(s: &str) -> String {
+    use sha2::Digest;
+    hex::encode(sha2::Sha256::digest(s.as_bytes()))
 }
 
 /// Turn a display name into a project id: lowercase `[a-z0-9-]`, ≤ 40 chars.
@@ -303,6 +312,38 @@ impl Meta {
             )?;
             let rows = st.query_map(params![project, distinct_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
             Ok(rows.collect::<rusqlite::Result<_>>()?)
+        })
+    }
+
+    /// Create a one-time login link token valid for `ttl_secs`. Only its
+    /// SHA-256 is stored, so a leaked database does not leak live links.
+    pub fn create_login_link(&self, ttl_secs: i64) -> Result<String> {
+        let token = format!("ll_{}", token(40));
+        let expires = Utc::now().timestamp() + ttl_secs;
+        self.with(|c| {
+            c.execute(
+                "DELETE FROM login_links WHERE expires_at < ?1",
+                [Utc::now().timestamp()],
+            )?;
+            c.execute(
+                "INSERT INTO login_links (hash, expires_at) VALUES (?1, ?2)",
+                params![sha256_hex(&token), expires],
+            )?;
+            Ok(token)
+        })
+    }
+
+    /// Use a login link: true once, if it exists and has not expired.
+    pub fn consume_login_link(&self, token: &str) -> Result<bool> {
+        if token.len() > 100 {
+            return Ok(false);
+        }
+        self.with(|c| {
+            let n = c.execute(
+                "DELETE FROM login_links WHERE hash = ?1 AND expires_at >= ?2",
+                params![sha256_hex(token), Utc::now().timestamp()],
+            )?;
+            Ok(n == 1)
         })
     }
 

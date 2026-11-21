@@ -32,6 +32,10 @@ flate2 = "1"
 maud = { version = "0.27", features = ["axum"] }
 rand = "0.9"
 subtle = "2"
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+serde_urlencoded = "0.7"
 tempfile = "3"
 
 [workspace.lints.rust]
@@ -51,3 +55,11 @@ dbg_macro = "deny"
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# DataFusion makes full debug info huge (tens of GB of target/). Line tables
+# keep backtraces useful at a fraction of the size and link time.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

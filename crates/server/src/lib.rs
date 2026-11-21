@@ -3,7 +3,10 @@
 //!
 //! Layer: L4 (see `docs/architecture.md`).
 
+mod api;
+mod auth;
 mod capture;
+mod web;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -32,6 +35,8 @@ pub struct AppState {
     pub data_dir: PathBuf,
     /// Admin token for the dashboard and API.
     pub admin_token: Arc<str>,
+    /// Query engine over the data root.
+    pub query: openlens_query::QueryEngine,
 }
 
 /// Build the application router.
@@ -44,7 +49,10 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/c.js", get(sdk))
+        .route("/agents.md", get(agents_guide))
         .merge(capture)
+        .merge(api::routes())
+        .merge(web::routes())
         .with_state(state)
 }
 
@@ -62,6 +70,20 @@ async fn sdk() -> impl axum::response::IntoResponse {
             ("x-content-type-options", "nosniff"),
         ],
         SDK_JS,
+    )
+}
+
+/// The agent wiring guide, served so an agent can fetch it from the server
+/// it is wiring an app to.
+const AGENTS_MD: &str = include_str!("../../../docs/agents/wire.md");
+
+async fn agents_guide() -> impl axum::response::IntoResponse {
+    (
+        [
+            ("content-type", "text/markdown; charset=utf-8"),
+            ("x-content-type-options", "nosniff"),
+        ],
+        AGENTS_MD,
     )
 }
 
@@ -115,4 +137,32 @@ fn flush_and_compact(
 pub fn flush_now(state: &AppState) -> Result<usize, String> {
     let mut w = state.writer.lock().map_err(|_| "writer lock poisoned")?;
     w.flush().map_err(|e| e.to_string())
+}
+
+/// Constant-time string comparison.
+pub(crate) fn token_matches(given: &str, expected: &str) -> bool {
+    use subtle::ConstantTimeEq;
+    given.len() == expected.len() && bool::from(given.as_bytes().ct_eq(expected.as_bytes()))
+}
+
+/// Public base URL of this server as the client sees it.
+pub(crate) fn base_url(headers: &axum::http::HeaderMap) -> String {
+    let host = headers
+        .get("x-forwarded-host")
+        .or_else(|| headers.get("host"))
+        .and_then(|v| v.to_str().ok())
+        .filter(|h| {
+            h.len() < 256
+                && h.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || ".-:[]".contains(c))
+        })
+        .unwrap_or("localhost:8686");
+    let proto = match headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+    {
+        Some("https") => "https",
+        _ => "http",
+    };
+    format!("{proto}://{host}")
 }
