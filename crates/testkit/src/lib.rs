@@ -100,6 +100,7 @@ fn event(
         plan: None,
         environment: "production".into(),
         release: Some(release.into()),
+        flags: None,
         properties: props.into(),
     }
 }

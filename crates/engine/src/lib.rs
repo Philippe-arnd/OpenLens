@@ -13,7 +13,7 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 
 mod insights;
-pub use insights::{Insight, Journey, Readiness};
+pub use insights::{CohortStats, FlagCohort, Insight, Journey, Readiness};
 
 /// Engine errors.
 #[derive(Debug, thiserror::Error)]
@@ -200,6 +200,8 @@ pub struct Board {
     pub readiness: Readiness,
     /// Frequent paths into each feature's success event.
     pub journeys: Vec<Journey>,
+    /// Each recent flag's sessions against everyone else.
+    pub flag_cohorts: Vec<FlagCohort>,
 }
 
 fn int(row: &Map<String, Value>, k: &str) -> i64 {
@@ -239,7 +241,7 @@ fn source(map: Option<&FeatureMap>) -> String {
         None => "events".into(),
         Some(m) => format!(
             "(SELECT uuid, event, distinct_id, session_id, timestamp, received_at, url, path, \
-             account, plan, environment, release, properties, date, \
+             account, plan, environment, release, flags, properties, date, \
              {} AS role, {} AS feature FROM events) AS events",
             m.role_sql(),
             m.feature_sql()
@@ -476,11 +478,14 @@ pub async fn board(
                 .collect()
         })
         .unwrap_or_default();
-    let ((mut cards, readiness), journeys) = futures::try_join!(
+    let ((mut cards, readiness), journeys, cohorts) = futures::try_join!(
         insights::compute(q, project, &src, f, churn, &successes),
         insights::journeys(q, project, &src, f, &successes),
+        insights::flag_cohorts(q, project, &src, f),
     )?;
     b.journeys = journeys;
+    cards.extend(insights::flag_cards(&cohorts));
+    b.flag_cohorts = cohorts;
     if let Some(c) = insights::slow_pages(&b.vitals) {
         cards.push(c);
         cards.sort_by(|a, b| b.score.total_cmp(&a.score));

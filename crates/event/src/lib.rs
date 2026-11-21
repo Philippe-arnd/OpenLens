@@ -123,6 +123,9 @@ pub struct Event {
     /// Release (`$release`): version or commit of the app that sent it.
     #[serde(default)]
     pub release: Option<String>,
+    /// Feature flags on for the user, comma-separated and sorted (`$flags`).
+    #[serde(default)]
+    pub flags: Option<String>,
     /// Remaining properties, serialized JSON object.
     pub properties: String,
 }
@@ -255,6 +258,7 @@ fn normalize_event(
     let environment = take_dim(&mut props, "$environment")?
         .map_or_else(default_environment, |e| normalize_environment(&e));
     let release = take_dim(&mut props, "$release")?;
+    let flags = take_dim(&mut props, "$flags")?;
 
     let properties = Value::Object(props).to_string();
     if properties.len() > limits::MAX_PROPERTIES_BYTES {
@@ -277,6 +281,7 @@ fn normalize_event(
         plan,
         environment,
         release,
+        flags,
         properties,
     })
 }

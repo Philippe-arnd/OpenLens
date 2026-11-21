@@ -26,6 +26,7 @@ fn ev(project: &str, role: &str, days_ago: i64) -> Event {
         plan: None,
         environment: "production".into(),
         release: None,
+        flags: None,
         properties: "{}".into(),
     }
 }
