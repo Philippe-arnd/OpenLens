@@ -175,13 +175,13 @@ pub fn validate(m: &FeatureMap) -> Vec<Issue> {
     if m.version != 1 {
         v.push(err("version", "only version 1 exists; set `version: 1`"));
     }
-    if let Some(d) = m.churn_after_days {
-        if !(1..=365).contains(&d) {
-            v.push(err(
-                "churn_after_days",
-                "must be between 1 and 365 (default 14)",
-            ));
-        }
+    if let Some(d) = m.churn_after_days
+        && !(1..=365).contains(&d)
+    {
+        v.push(err(
+            "churn_after_days",
+            "must be between 1 and 365 (default 14)",
+        ));
     }
     if m.roles.len() > MAX_ROLES {
         v.push(err(
