@@ -50,6 +50,16 @@ enum Command {
         #[arg(long, default_value = "default")]
         project: String,
     },
+    /// Backfill history from the app's own data (JSONL: persons and past events).
+    Import {
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+        /// JSONL file. Person lines: {"type":"person","id","role","account","plan","created_at","last_seen_at"}.
+        /// Event lines: {"event","distinct_id","timestamp","properties"}.
+        #[arg(long)]
+        file: PathBuf,
+    },
     /// Create a one-time login link for the PM (valid 7 days).
     LoginLink,
     /// Run read-only SQL on a project's `events` table.
@@ -149,6 +159,11 @@ impl Client {
                 .put(&url)
                 .header("authorization", &auth)
                 .send(t.as_bytes()),
+            (_, Some(Body::Raw(t))) => self
+                .agent
+                .post(&url)
+                .header("authorization", &auth)
+                .send(t.as_bytes()),
             _ => self
                 .agent
                 .post(&url)
@@ -183,6 +198,7 @@ impl Client {
 pub(crate) enum Body {
     Json(Value),
     Text(String),
+    Raw(String),
 }
 
 fn out(v: &Value) {
@@ -225,6 +241,42 @@ fn run(cli: Cli) -> Result<bool, String> {
             Ok(status == 200)
         }
         Command::Verify { project } => verify(&client()?, project),
+        Command::Import { project, file } => {
+            let text = std::fs::read_to_string(file)
+                .map_err(|e| format!("cannot read {}: {e}", file.display()))?;
+            let c = client()?;
+            let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+            let (mut events, mut persons, mut skipped, mut rejected) =
+                (0i64, 0i64, 0usize, Vec::new());
+            for chunk in lines.chunks(5_000) {
+                let (status, v) = c.call(
+                    "POST",
+                    &format!("/api/projects/{project}/import"),
+                    Some(Body::Raw(chunk.join("\n"))),
+                )?;
+                match status {
+                    200 => {
+                        events += v["accepted_events"].as_i64().unwrap_or(0);
+                        persons += v["persons"].as_i64().unwrap_or(0);
+                        rejected.extend(
+                            v["rejected"]
+                                .as_array()
+                                .cloned()
+                                .unwrap_or_default()
+                                .into_iter()
+                                .take(20),
+                        );
+                    }
+                    409 => skipped += 1,
+                    _ => return Err(format!("import failed ({status}): {v}")),
+                }
+            }
+            out(
+                &json!({ "events": events, "persons": persons, "chunks_already_imported": skipped,
+                "rejected_sample": rejected }),
+            );
+            Ok(true)
+        }
         Command::LoginLink => {
             let (status, v) = client()?.call("POST", "/api/login-links", None)?;
             out(&v);

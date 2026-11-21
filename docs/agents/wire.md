@@ -2,7 +2,7 @@
 
 You are the agent that maintains a web app. Your goal is that the product manager's **first login shows a populated Focus board**, with no manual setup on their side.
 
-**Available today:** `openlens-cli` (`init`, `features lint|push`, `verify`, `login-link`, `sql`, `guide`), the HTTP API below, the SDK and the dashboard. Steps marked *(M2)* (backfill) are not released yet: skip them and say so in your hand-over note.
+**Available today:** `openlens-cli` (`init`, `features lint|push`, `import`, `verify`, `login-link`, `sql`, `guide`, `mcp`), the HTTP API below, the SDK and the dashboard. Everything below is available.
 
 **MCP:** `openlens-cli mcp --automation-read-root <app repo> --automation-write-root <scratch dir>` speaks MCP over stdio. Its tools are `guide`, `projects`, `init`, `feature_map_lint`, `feature_map_push`, `verify`, `board`, `sql` and `login_link`, and it reads files only inside the read root.
 
@@ -30,11 +30,13 @@ API quick reference (send `Authorization: Bearer <admin token>` on every call):
    - `features`: list the main user-facing features from the routes and actions. Give each one its entry points and a **success event**: the moment the user got value, for example `entry_saved` or `invoice_sent`. Add `openlens.track("<success event>")` where that moment happens, if the app does not emit it already.
    - Add `data-feature="<key>"` to each feature's main controls.
    - Run `openlens-cli features lint --src .` (offline: validates the map and checks that each feature's `data-feature`, route and success event exist in the code), then `openlens-cli features push --project <id>`. Commit the file: it is the source of truth.
-5. **Backfill** *(M2)*. Export from the app's database:
-   - users with `id, role, account, plan, created_at, last_seen_at`
-   - past success events, as one row per domain record (for example every saved entry, with `user_id` and `created_at`)
+5. **Backfill.** So the first login shows history, not an empty week, export from the app's database to one JSONL file:
+   - **one line per user:**
+     `{"type":"person","id":"42","role":"owner","account":"acme","plan":"pro","created_at":"2026-03-02T10:00:00Z","last_seen_at":"2026-11-20T08:12:00Z"}`
+   - **one line per past success**, i.e. a domain row that proves the user got value (an entry saved, an invoice sent):
+     `{"event":"entry_saved","distinct_id":"42","timestamp":"2026-10-02T09:00:00Z"}`
 
-   Write them as JSONL and run `openlens-cli import`.
+   Use the same event names as the feature map's `success` fields. Then run `openlens-cli import --project <id> --file backfill.jsonl`. Re-running it is safe, because chunks that were already imported are skipped. Export only ids, roles, plans and timestamps: no names, emails or content.
 6. **Verify.** Load a page of the app and click through the main features, then run `openlens-cli verify --project <id>`. It must say `"ok": true`: events arrive, users are identified with a role, a release is tagged, and the map is pushed. It also lists each feature's events, so a feature at 0 has not fired yet.
 7. **Keep it current.** Add this rule to the app's own `AGENTS.md` (or `CLAUDE.md`):
    > When you add, rename or remove a user-facing feature, update `openlens.features.yaml` (entry points, success event) in the same change and run `openlens-cli features lint`.

@@ -92,6 +92,13 @@ CREATE TABLE IF NOT EXISTS feature_maps (
   created_at TEXT NOT NULL,
   PRIMARY KEY (project, version)
 );
+CREATE TABLE IF NOT EXISTS imports (
+  project TEXT NOT NULL,
+  sha TEXT NOT NULL,
+  rows INTEGER NOT NULL,
+  imported_at TEXT NOT NULL,
+  PRIMARY KEY (project, sha)
+);
 CREATE TABLE IF NOT EXISTS login_links (
   hash TEXT PRIMARY KEY,
   expires_at INTEGER NOT NULL
@@ -388,6 +395,18 @@ impl Meta {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?)
+        })
+    }
+
+    /// Record an import chunk by content hash. Returns false when the same
+    /// chunk was already imported (so re-running a backfill is a no-op).
+    pub fn record_import(&self, project: &str, sha: &str, rows: i64) -> Result<bool> {
+        self.with(|c| {
+            let n = c.execute(
+                "INSERT OR IGNORE INTO imports (project, sha, rows, imported_at) VALUES (?1, ?2, ?3, ?4)",
+                params![project, sha, rows, Utc::now().to_rfc3339()],
+            )?;
+            Ok(n == 1)
         })
     }
 

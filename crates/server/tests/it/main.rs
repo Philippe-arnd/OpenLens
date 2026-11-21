@@ -378,3 +378,62 @@ async fn feature_map_put_refuses_errors_and_stores_valid_maps() {
     assert!(html.contains("Never used"), "search is declared but unused");
     assert!(html.contains(">admin<"), "owner resolves to admin");
 }
+
+#[tokio::test]
+async fn backfill_imports_persons_and_past_events_once() {
+    let h = harness();
+    let body = concat!(
+        r#"{"type":"person","id":"old1","role":"owner","created_at":"2026-09-01T10:00:00Z","last_seen_at":"2026-11-10T10:00:00Z"}"#,
+        "\n",
+        r#"{"event":"entry_saved","distinct_id":"old1","timestamp":"2026-10-02T09:00:00Z"}"#,
+        "\n",
+        "not json\n",
+    );
+    let send = || {
+        let st = h.state.clone();
+        async move {
+            router(st)
+                .oneshot(
+                    Request::post("/api/projects/default/import")
+                        .header("authorization", "Bearer adm_test")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+        }
+    };
+    let first = send().await;
+    assert_eq!(first.status(), StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(first.into_body(), 1 << 20)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(v["persons"], 1);
+    assert_eq!(v["accepted_events"], 3, "identify + seen + entry_saved");
+    assert_eq!(v["rejected"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        send().await.status(),
+        StatusCode::CONFLICT,
+        "same chunk twice is refused"
+    );
+
+    let person = h.state.meta.person("default", "old1").unwrap().unwrap();
+    assert_eq!(person.role.as_deref(), Some("owner"));
+    let r = h
+        .state
+        .query
+        .sql(
+            "default",
+            "SELECT min(date) AS d, count(*) AS n FROM events",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        r.rows[0]["d"], "2026-09-01",
+        "history lands in its own past partitions"
+    );
+    assert_eq!(r.rows[0]["n"], 3);
+}
