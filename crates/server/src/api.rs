@@ -26,6 +26,7 @@ pub(crate) fn routes() -> Router<AppState> {
             "/api/projects/{project}/import",
             post(import).layer(axum::extract::DefaultBodyLimit::max(IMPORT_MAX)),
         )
+        .route("/api/projects/{project}/export", get(export))
         .route("/api/login-links", post(login_link))
 }
 
@@ -437,5 +438,78 @@ async fn import(
         }
         Ok(Err(e)) => err(StatusCode::SERVICE_UNAVAILABLE, &e),
         Err(_) => err(StatusCode::INTERNAL_SERVER_ERROR, "import task failed"),
+    }
+}
+
+#[derive(Deserialize)]
+struct ExportQuery {
+    date: String,
+}
+
+/// Most rows one export request returns (one day of one project).
+const EXPORT_MAX_ROWS: usize = 500_000;
+
+/// `GET /api/projects/{id}/export?date=YYYY-MM-DD`: one day of raw events
+/// as JSONL, for agents doing deep analysis. The CLI walks a date range day
+/// by day, so memory stays bounded. `x-openlens-truncated: true` when the
+/// day had more than 500k events.
+async fn export(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(project): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<ExportQuery>,
+) -> Response {
+    if let Some(r) = guard(&state, &headers) {
+        return r;
+    }
+    let p = match known_project(&state, &project).await {
+        Ok(p) => p,
+        Err(r) => return *r,
+    };
+    let d = q.date.as_bytes();
+    let valid = d.len() == 10
+        && d.iter().enumerate().all(|(i, c)| {
+            if i == 4 || i == 7 {
+                *c == b'-'
+            } else {
+                c.is_ascii_digit()
+            }
+        });
+    if !valid {
+        return err(StatusCode::BAD_REQUEST, "date must be YYYY-MM-DD");
+    }
+    let engine = openlens_query::QueryEngine::new(
+        &state.data_dir,
+        openlens_query::Limits {
+            max_rows: EXPORT_MAX_ROWS,
+            timeout: std::time::Duration::from_secs(120),
+            ..openlens_query::Limits::default()
+        },
+    );
+    let sql = format!(
+        "SELECT uuid, event, distinct_id, session_id, CAST(timestamp AS VARCHAR) AS timestamp, url, path, feature, \
+         role, account, plan, environment, release, properties FROM events WHERE date = '{}' ORDER BY timestamp",
+        q.date
+    );
+    match engine.sql(&p.id, &sql).await {
+        Ok(res) => {
+            let mut body = String::new();
+            for row in &res.rows {
+                body.push_str(&Value::Object(row.clone()).to_string());
+                body.push('\n');
+            }
+            (
+                [
+                    ("content-type", "application/x-ndjson"),
+                    (
+                        "x-openlens-truncated",
+                        if res.truncated { "true" } else { "false" },
+                    ),
+                ],
+                body,
+            )
+                .into_response()
+        }
+        Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()),
     }
 }

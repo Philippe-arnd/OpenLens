@@ -60,6 +60,24 @@ enum Command {
         #[arg(long)]
         file: PathBuf,
     },
+    /// Export raw events as JSONL, day by day, for deep analysis.
+    Export {
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+        /// First day, YYYY-MM-DD.
+        #[arg(long)]
+        from: String,
+        /// Last day, YYYY-MM-DD (inclusive).
+        #[arg(long)]
+        to: String,
+        /// Output file (JSONL).
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Print the rule to add to the app's AGENTS.md / CLAUDE.md so its agents
+    /// keep the feature map current.
+    Rules,
     /// Create a one-time login link for the PM (valid 7 days).
     LoginLink,
     /// Run read-only SQL on a project's `events` table.
@@ -277,6 +295,55 @@ fn run(cli: Cli) -> Result<bool, String> {
             );
             Ok(true)
         }
+        Command::Export {
+            project,
+            from,
+            to,
+            out: path,
+        } => {
+            use std::io::Write;
+            let parse = |d: &str| {
+                let p: Vec<u32> = d.split('-').filter_map(|x| x.parse().ok()).collect();
+                match p.as_slice() {
+                    [y, m, dd] if (1..=12).contains(m) && (1..=31).contains(dd) => {
+                        Ok((*y as i32, *m, *dd))
+                    }
+                    _ => Err(format!("{d} is not YYYY-MM-DD")),
+                }
+            };
+            let (from, to) = (parse(from)?, parse(to)?);
+            let days = days_between(from, to)?;
+            let c = client()?;
+            let mut file = std::fs::File::create(path).map_err(|e| e.to_string())?;
+            let (mut rows, mut truncated) = (0usize, Vec::new());
+            for day in days {
+                let (status, v) = c.call(
+                    "GET",
+                    &format!("/api/projects/{project}/export?date={day}"),
+                    None,
+                )?;
+                if status != 200 {
+                    return Err(format!("export of {day} failed ({status}): {v}"));
+                }
+                let text = match &v {
+                    Value::String(s) => s.clone(),
+                    other => format!("{other}\n"),
+                };
+                if text.lines().count() >= 500_000 {
+                    truncated.push(day.clone());
+                }
+                rows += text.lines().filter(|l| !l.is_empty()).count();
+                file.write_all(text.as_bytes()).map_err(|e| e.to_string())?;
+            }
+            out(
+                &json!({ "rows": rows, "file": path.display().to_string(), "days_truncated": truncated }),
+            );
+            Ok(true)
+        }
+        Command::Rules => {
+            println!("{}", RULES_SNIPPET);
+            Ok(true)
+        }
         Command::LoginLink => {
             let (status, v) = client()?.call("POST", "/api/login-links", None)?;
             out(&v);
@@ -381,6 +448,53 @@ pub(crate) fn verify_report(c: &Client, project: &str) -> Result<Value, String> 
         && map_status == 200;
     Ok(json!({ "ok": ok, "checks": checks, "features": features,
         "note": "features with 0 events have not been exercised yet; click through them once to confirm they fire" }))
+}
+
+/// The rule an app's own agents follow to keep the feature map current.
+const RULES_SNIPPET: &str = "## Product analytics (OpenLens)
+
+- The app's features, success events and roles are declared in `openlens.features.yaml`.
+- When you add, rename or remove a user-facing feature, update that file in the same change:
+  its `entry` (routes, `data-feature` attribute) and its `success` event, and add
+  `data-feature=\"<key>\"` to the feature's main control.
+- When you add or rename a user role, map its raw value under `roles:`.
+- Run `openlens-cli features lint --src .` before committing, then `openlens-cli features push` on deploy.
+- Never send names, emails or content to OpenLens: ids, roles, plans and event names only.";
+
+/// Every date from `from` to `to`, inclusive, as YYYY-MM-DD (at most 366).
+fn days_between(from: (i32, u32, u32), to: (i32, u32, u32)) -> Result<Vec<String>, String> {
+    fn days_in(y: i32, m: u32) -> u32 {
+        match m {
+            2 if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 => 29,
+            2 => 28,
+            4 | 6 | 9 | 11 => 30,
+            _ => 31,
+        }
+    }
+    let (mut y, mut m, mut d) = from;
+    let mut out = Vec::new();
+    loop {
+        if d > days_in(y, m) {
+            return Err(format!("{y:04}-{m:02}-{d:02} does not exist"));
+        }
+        out.push(format!("{y:04}-{m:02}-{d:02}"));
+        if (y, m, d) >= to {
+            break;
+        }
+        if out.len() >= 366 {
+            return Err("export at most 366 days at a time".into());
+        }
+        d += 1;
+        if d > days_in(y, m) {
+            d = 1;
+            m += 1;
+            if m > 12 {
+                m = 1;
+                y += 1;
+            }
+        }
+    }
+    Ok(out)
 }
 
 fn main() -> ExitCode {
