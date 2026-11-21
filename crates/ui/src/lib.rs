@@ -210,6 +210,55 @@ fn bars(rows: &[(String, i64, String)]) -> Markup {
     }
 }
 
+/// One compared metric: label, new value, old value, whether higher is
+/// better, and how to format it.
+type Compared = (&'static str, f64, f64, bool, fn(f64) -> String);
+
+/// "Latest vs previous release" chips: arrow, change, and whether the change
+/// is good (green) or bad (red) for that metric — never colour alone.
+fn release_compare(rel: &[openlens_engine::ReleaseRow]) -> Markup {
+    let [new, old, ..] = rel else { return html! {} };
+    if new.sessions < 8 || old.sessions < 8 {
+        return html! { p.muted.small { "Comparison appears once both of the latest releases have at least 8 sessions." } };
+    }
+    // (label, new, old, higher_is_better, formatter)
+    let rows: [Compared; 4] = [
+        ("Avg session", new.avg_secs, old.avg_secs, true, duration),
+        (
+            "Tasks / session",
+            new.tasks_per_session,
+            old.tasks_per_session,
+            true,
+            |v| format!("{v:.2}"),
+        ),
+        ("Bounce", new.bounce_rate, old.bounce_rate, false, pct),
+        (
+            "Sessions with errors",
+            new.error_rate,
+            old.error_rate,
+            false,
+            pct,
+        ),
+    ];
+    html! {
+        p.small { strong { (new.release) } " compared with " strong { (old.release) } ":" }
+        ul.deltas {
+            @for (label, n, o, up_good, fmt) in rows {
+                @let change = if o.abs() > f64::EPSILON { (n - o) / o } else { 0.0 };
+                @let flat = change.abs() < 0.05;
+                @let good = (n > o) == up_good;
+                @let (cls, arrow, word) = if flat { ("flat", "→", "about the same") } else if good { ("up", if n > o { "▲" } else { "▼" }, "better") } else { ("down", if n > o { "▲" } else { "▼" }, "worse") };
+                li class=(cls) {
+                    span.label { (label) }
+                    " " strong { (fmt(n)) } " "
+                    span.change { (arrow) " " (format!("{:+.0}%", change * 100.0)) " · " (word) }
+                    span.muted { " (was " (fmt(o)) ")" }
+                }
+            }
+        }
+    }
+}
+
 fn insight_cards(b: &Board) -> Markup {
     let accent = |kind: &str| match kind {
         "stick_driver" | "value_moment" => ("mint", "★"),
@@ -386,13 +435,17 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
                     h2 { span.dot.coral {} "Releases" }
                     @if b.releases.is_empty() { p.muted { "No release tagged yet. Pass " code { "release" } " to the SDK to compare releases." } }
                     @else {
+                        (release_compare(&b.releases))
                         table.plain {
-                            thead { tr { th { "Release" } th.num { "Users" } th.num { "Sessions" } th.num { "Sessions with errors" } th { "First seen" } } }
+                            thead { tr { th { "Release" } th.num { "Users" } th.num { "Sessions" } th.num { "Avg session" } th.num { "Bounce" } th.num { "Tasks / session" } th.num { "Sessions with errors" } th { "First seen" } } }
                             tbody { @for (i, r) in b.releases.iter().enumerate() {
                                 tr {
                                     th scope="row" { (r.release) @if i == 0 { " " span.badge { "latest" } } }
                                     td.num { (compact(r.users)) }
                                     td.num { (compact(r.sessions)) }
+                                    td.num { (duration(r.avg_secs)) }
+                                    td.num { (pct(r.bounce_rate)) }
+                                    td.num { (format!("{:.2}", r.tasks_per_session)) }
                                     td.num { (pct(r.error_rate)) }
                                     td.muted { (r.first_seen.get(..16).unwrap_or(&r.first_seen)) }
                                 }

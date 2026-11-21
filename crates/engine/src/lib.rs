@@ -159,6 +159,12 @@ pub struct ReleaseRow {
     pub sessions: i64,
     /// Share of sessions with an error.
     pub error_rate: f64,
+    /// Mean duration of non-bounce sessions, seconds.
+    pub avg_secs: f64,
+    /// Share of single-event sessions.
+    pub bounce_rate: f64,
+    /// Feature uses per session.
+    pub tasks_per_session: f64,
 }
 
 /// Everything the Focus board shows (M1 subset; insight cards come in M3).
@@ -298,11 +304,18 @@ pub async fn board(
         .clause(30)?
     );
     let releases_sql = format!(
-        "SELECT release, CAST(min(timestamp) AS VARCHAR) AS first_seen, count(DISTINCT distinct_id) AS users, \
-         count(DISTINCT session_id) AS sessions, \
-         count(DISTINCT CASE WHEN event = '$error' THEN session_id END) AS error_sessions \
-         FROM {src} WHERE {all_releases} AND release IS NOT NULL \
-         GROUP BY release ORDER BY min(timestamp) DESC LIMIT 5"
+        "SELECT release, CAST(min(first) AS VARCHAR) AS first_seen, count(DISTINCT uid) AS users, \
+         count(*) AS sessions, avg(CASE WHEN n > 1 THEN secs END) AS avg_secs, \
+         avg(CASE WHEN n = 1 THEN 1.0 ELSE 0.0 END) AS bounce_rate, \
+         avg(CASE WHEN errors > 0 THEN 1.0 ELSE 0.0 END) AS error_rate, \
+         avg(CAST(tasks AS DOUBLE)) AS tasks_per_session \
+         FROM (SELECT release, session_id, min(distinct_id) AS uid, min(timestamp) AS first, count(*) AS n, \
+               date_part('epoch', max(timestamp)) - date_part('epoch', min(timestamp)) AS secs, \
+               sum(CASE WHEN event = '$error' THEN 1 ELSE 0 END) AS errors, \
+               sum(CASE WHEN feature IS NOT NULL THEN 1 ELSE 0 END) AS tasks \
+               FROM {src} WHERE {all_releases} AND release IS NOT NULL AND session_id IS NOT NULL \
+               GROUP BY release, session_id) s \
+         GROUP BY release ORDER BY min(first) DESC LIMIT 5"
     );
     let env_sql = "SELECT DISTINCT environment FROM events ORDER BY environment".to_owned();
     let total_sql = "SELECT count(*) AS n FROM events".to_owned();
@@ -436,19 +449,15 @@ pub async fn board(
     b.releases = releases?
         .rows
         .iter()
-        .map(|r| {
-            let sessions = int(r, "sessions");
-            ReleaseRow {
-                release: text(r, "release").unwrap_or_default(),
-                first_seen: text(r, "first_seen").unwrap_or_default(),
-                users: int(r, "users"),
-                sessions,
-                error_rate: if sessions > 0 {
-                    int(r, "error_sessions") as f64 / sessions as f64
-                } else {
-                    0.0
-                },
-            }
+        .map(|r| ReleaseRow {
+            release: text(r, "release").unwrap_or_default(),
+            first_seen: text(r, "first_seen").unwrap_or_default(),
+            users: int(r, "users"),
+            sessions: int(r, "sessions"),
+            error_rate: float(r, "error_rate"),
+            avg_secs: float(r, "avg_secs"),
+            bounce_rate: float(r, "bounce_rate"),
+            tasks_per_session: float(r, "tasks_per_session"),
         })
         .collect();
     b.environments = envs?
