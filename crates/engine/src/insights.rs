@@ -619,3 +619,140 @@ pub(crate) fn flag_cards(cohorts: &[FlagCohort]) -> Vec<Insight> {
     }
     cards
 }
+
+/// One step of a funnel.
+#[derive(Debug, Clone, Serialize)]
+pub struct FunnelStep {
+    /// Event name.
+    pub event: String,
+    /// Users who reached this step in order.
+    pub users: i64,
+    /// Share of the first step's users.
+    pub conversion: f64,
+    /// Median seconds from the previous step (0 for the first).
+    pub median_secs: f64,
+}
+
+/// A feature's declared steps as a funnel (last 30 days, each step within
+/// a day of the first, in order).
+#[derive(Debug, Clone, Serialize)]
+pub struct Funnel {
+    /// Feature key.
+    pub feature: String,
+    /// The steps.
+    pub steps: Vec<FunnelStep>,
+}
+
+/// Funnels for up to 4 features that declare 2–8 steps (success appended
+/// when it is not the last step already).
+pub(crate) async fn funnels(
+    q: &QueryEngine,
+    project: &str,
+    src: &str,
+    f: &Filters,
+    defs: &[(String, Vec<String>)],
+) -> Result<Vec<Funnel>> {
+    let w = f.clause(30)?;
+    let runs = defs.iter().take(4).filter(|(_, s)| (2..=8).contains(&s.len())).map(|(feature, steps)| {
+        let lit = |e: &str| format!("'{}'", e.replace('\'', "''"));
+        // Each step carries the first step's time (t0) so every later step
+        // must happen within a day of starting.
+        let mut ctes = vec![format!(
+            "ev AS (SELECT distinct_id, timestamp, event FROM {src} WHERE {w}), \
+             s0 AS (SELECT distinct_id, min(timestamp) AS t, min(timestamp) AS t0 FROM ev WHERE event = {} GROUP BY distinct_id)",
+            lit(&steps[0])
+        )];
+        for (i, step) in steps.iter().enumerate().skip(1) {
+            ctes.push(format!(
+                "s{i} AS (SELECT e.distinct_id, min(e.timestamp) AS t, min(p.t0) AS t0 FROM ev e \
+                 JOIN s{p} p ON e.distinct_id = p.distinct_id \
+                 WHERE e.event = {} AND e.timestamp >= p.t AND e.timestamp <= p.t0 + INTERVAL '1 day' \
+                 GROUP BY e.distinct_id)",
+                lit(step),
+                p = i - 1
+            ));
+        }
+        let selects: Vec<String> = (0..steps.len())
+            .map(|i| {
+                if i == 0 {
+                    "SELECT 0 AS step, count(*) AS users, CAST(0.0 AS DOUBLE) AS med FROM s0".to_owned()
+                } else {
+                    format!(
+                        "SELECT {i} AS step, count(*) AS users, \
+                         approx_median(date_part('epoch', s{i}.t) - date_part('epoch', s{p}.t)) AS med \
+                         FROM s{i} JOIN s{p} ON s{i}.distinct_id = s{p}.distinct_id",
+                        p = i - 1
+                    )
+                }
+            })
+            .collect();
+        let sql = format!("WITH {} {} ORDER BY step", ctes.join(", "), selects.join(" UNION ALL "));
+        async move { (feature.clone(), steps.clone(), q.sql(project, &sql).await) }
+    });
+    let mut out = Vec::new();
+    for (feature, steps, res) in futures::future::join_all(runs).await {
+        let rows = res?.rows;
+        let first = rows.first().map_or(0, |r| int(r, "users")).max(1);
+        let steps = steps
+            .iter()
+            .enumerate()
+            .map(|(i, ev)| {
+                let r = rows.iter().find(|r| int(r, "step") == i as i64);
+                let users = r.map_or(0, |r| int(r, "users"));
+                FunnelStep {
+                    event: ev.clone(),
+                    users,
+                    conversion: users as f64 / first as f64,
+                    median_secs: r
+                        .and_then(|r| r.get("med"))
+                        .and_then(Value::as_f64)
+                        .unwrap_or(0.0),
+                }
+            })
+            .collect();
+        out.push(Funnel { feature, steps });
+    }
+    Ok(out)
+}
+
+/// A card for the biggest drop-off in a funnel with enough users.
+pub(crate) fn funnel_cards(funnels: &[Funnel]) -> Vec<Insight> {
+    let mut cards = Vec::new();
+    for fun in funnels {
+        let Some(first) = fun.steps.first() else {
+            continue;
+        };
+        if first.users < MIN_GROUP {
+            continue;
+        }
+        let worst = fun
+            .steps
+            .windows(2)
+            .map(|w| {
+                (
+                    w[1].event.clone(),
+                    w[0].event.clone(),
+                    if w[0].users > 0 {
+                        1.0 - w[1].users as f64 / w[0].users as f64
+                    } else {
+                        0.0
+                    },
+                    w[0].users,
+                )
+            })
+            .max_by(|a, b| a.2.total_cmp(&b.2));
+        if let Some((to, from, drop, base)) = worst
+            && drop >= 0.4
+        {
+            cards.push(Insight {
+                kind: "funnel_drop",
+                title: format!("{}: {} of users stop between {from} and {to}", fun.feature, pct(drop)),
+                evidence: format!("{base} reached {from}; {} of the {} who started finished", pct(fun.steps.last().map_or(0.0, |s| s.conversion)), first.users),
+                next_step: format!("Look at the {from} → {to} step of {}: what is missing, slow or confusing there?", fun.feature),
+                score: drop * (base as f64).sqrt() * 1.4,
+                subject: format!("{}:{to}", fun.feature),
+            });
+        }
+    }
+    cards
+}

@@ -377,3 +377,62 @@ async fn a_flag_with_more_errors_shows_up_as_its_own_cohort() {
             .any(|i| i.kind == "flag_regression" && i.subject == "new-editor")
     );
 }
+
+#[tokio::test]
+async fn funnels_follow_declared_steps_in_order_and_flag_the_big_drop() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let mut evs = Vec::new();
+    // 20 users open the editor, 16 fill a section, 4 save. Plus 5 users who
+    // save without opening (out of order: must not count).
+    for u in 0..25 {
+        let user = format!("fu{u}");
+        let steps: Vec<&str> = if u >= 20 {
+            vec!["entry_saved"]
+        } else if u < 4 {
+            vec!["open_editor", "fill_section", "entry_saved"]
+        } else if u < 16 {
+            vec!["open_editor", "fill_section"]
+        } else {
+            vec!["open_editor"]
+        };
+        for (i, name) in steps.iter().enumerate() {
+            let e = E {
+                user: &user,
+                role: "member",
+                session: "s",
+                event: name,
+                mins_ago: 40 - (i as i64) * 5,
+                feature: None,
+                release: "v1",
+                props: "{}",
+            };
+            evs.push(mk(&e, u * 10 + i));
+        }
+    }
+    w.append(&evs).unwrap();
+    w.flush().unwrap();
+    let q = QueryEngine::new(dir.path(), Limits::default());
+    let map = parse("features:\n  - key: write\n    name: Write\n    steps: [open_editor, fill_section]\n    success: entry_saved\n").map.unwrap();
+    let b = board(&q, "p", &Filters::default(), Some((&map, 1)))
+        .await
+        .unwrap();
+    let f = &b.funnels[0];
+    let users: Vec<i64> = f.steps.iter().map(|s| s.users).collect();
+    assert_eq!(
+        users,
+        [20, 16, 4],
+        "success appended; out-of-order saves excluded"
+    );
+    assert!(f.steps[1].median_secs > 200.0, "~5 minutes between steps");
+    let card = b
+        .insights
+        .iter()
+        .find(|i| i.kind == "funnel_drop")
+        .expect("drop card");
+    assert!(
+        card.title.contains("fill_section") && card.title.contains("entry_saved"),
+        "{}",
+        card.title
+    );
+}

@@ -13,7 +13,7 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 
 mod insights;
-pub use insights::{CohortStats, FlagCohort, Insight, Journey, Readiness};
+pub use insights::{CohortStats, FlagCohort, Funnel, FunnelStep, Insight, Journey, Readiness};
 
 /// Engine errors.
 #[derive(Debug, thiserror::Error)]
@@ -202,6 +202,8 @@ pub struct Board {
     pub journeys: Vec<Journey>,
     /// Each recent flag's sessions against everyone else.
     pub flag_cohorts: Vec<FlagCohort>,
+    /// Funnels from the feature map's declared steps.
+    pub funnels: Vec<Funnel>,
 }
 
 fn int(row: &Map<String, Value>, k: &str) -> i64 {
@@ -478,11 +480,31 @@ pub async fn board(
                 .collect()
         })
         .unwrap_or_default();
-    let ((mut cards, readiness), journeys, cohorts) = futures::try_join!(
+    let funnel_defs: Vec<(String, Vec<String>)> = map
+        .map(|(m, _)| {
+            m.features
+                .iter()
+                .filter(|x| !x.steps.is_empty())
+                .map(|x| {
+                    let mut steps = x.steps.clone();
+                    if let Some(s) = &x.success
+                        && steps.last() != Some(s)
+                    {
+                        steps.push(s.clone());
+                    }
+                    (x.key.clone(), steps)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let ((mut cards, readiness), journeys, cohorts, funnels) = futures::try_join!(
         insights::compute(q, project, &src, f, churn, &successes),
         insights::journeys(q, project, &src, f, &successes),
         insights::flag_cohorts(q, project, &src, f),
+        insights::funnels(q, project, &src, f, &funnel_defs),
     )?;
+    cards.extend(insights::funnel_cards(&funnels));
+    b.funnels = funnels;
     b.journeys = journeys;
     cards.extend(insights::flag_cards(&cohorts));
     b.flag_cohorts = cohorts;
