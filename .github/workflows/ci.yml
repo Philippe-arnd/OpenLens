@@ -31,11 +31,49 @@ jobs:
       - run: cargo xtask ci
 
   docker:
-    name: docker build + healthcheck
+    name: docker build + end-to-end smoke
+    runs-on: ubuntu-latest
+    env:
+      OPENLENS_ADMIN_TOKEN: adm_ci_smoke
+      OPENLENS_PROJECT_KEY: pk_ci_smoke
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      - name: build image (layer cache in GitHub Actions)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: openlens-openlens:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - run: docker compose up -d --wait --wait-timeout 60
+      - run: scripts/smoke.sh http://localhost:8686
+      - if: failure()
+        run: docker compose logs
+      - if: always()
+        run: docker compose down -v
+
+  browser:
+    name: browser e2e (one script tag, real server)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - run: docker compose up -d --build --wait --wait-timeout 120
-      - run: curl -fsS localhost:8686/healthz
-      - if: always()
-        run: docker compose down -v
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: cargo build -p openlens
+      - name: install Playwright + Chromium
+        run: |
+          npm install -g playwright@1
+          npx -y playwright@1 install --with-deps chromium
+      - name: run
+        run: |
+          OPENLENS_DATA_DIR=$RUNNER_TEMP/ol OPENLENS_ADMIN_TOKEN=adm_ci OPENLENS_PROJECT_KEY=pk_ci \
+            ./target/debug/openlens > $RUNNER_TEMP/ol.log 2>&1 &
+          for i in $(seq 1 30); do curl -fs localhost:8686/healthz && break; sleep 1; done
+          NODE_PATH=$(npm root -g) node scripts/e2e/browser.mjs http://localhost:8686 pk_ci
+      - if: failure()
+        run: cat $RUNNER_TEMP/ol.log
