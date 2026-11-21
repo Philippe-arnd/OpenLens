@@ -1,0 +1,12 @@
+[package]
+name = "openlens-mcp"
+description = "MCP server exposing engine commands to agents, confined to explicit read and write roots."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

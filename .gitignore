@@ -1,0 +1,7 @@
+/target
+/data
+# Local notebooks: never committed (docs/clean-room.md, "Captures")
+/plan
+/log
+.claude/
+.env

@@ -1,0 +1,31 @@
+# openlens.features.yaml: the feature map an app's agents maintain (draft, M2).
+version: 1
+churn_after_days: 14
+session_gap_minutes: 30
+task_timeout_minutes: 30
+
+# Canonical roles, and the raw identify() values that map to them (first match wins).
+roles:
+  - key: admin
+    match: ["owner", "superadmin", "admin"]
+  - key: coach
+    match: ["coach", "therapist"]
+  - key: member
+    match: ["user", "member", "team_*"]
+features:
+  - key: write-entry
+    name: Write a journal entry
+    purpose: The core loop; users capture their day in four sections.
+    owner: product
+    entry:
+      routes: ["/entries/new", "/entries/:id/edit"]
+      selectors: ['[data-feature="write-entry"]']
+    steps: [open_editor, fill_section, save_entry]
+    success: entry_saved
+  - key: ai-insights
+    name: AI insights
+    purpose: Weekly reflection generated from past entries.
+    entry:
+      routes: ["/insights"]
+      calls: ["openlens.feature('ai-insights')"]
+    success: insight_viewed

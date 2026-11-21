@@ -1,0 +1,20 @@
+services:
+  openlens:
+    build: .
+    environment:
+      OPENLENS_ADDR: 0.0.0.0:8686
+    ports:
+      - "8686:8686"
+    volumes:
+      - openlens-data:/data
+    # Healthcheck lives here, not in the Dockerfile, so Coolify honours it.
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/openlens", "healthcheck"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  openlens-data:

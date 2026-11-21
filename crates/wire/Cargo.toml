@@ -1,0 +1,12 @@
+[package]
+name = "openlens-wire"
+description = "Project detection and install plans: finds a web app's stack and lists the edits that plug OpenLens in."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,12 @@
+[package]
+name = "openlens-storage"
+description = "Write-ahead log, Parquet segments partitioned by project/date/hour, compaction and object-store backends."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
