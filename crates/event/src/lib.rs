@@ -117,8 +117,35 @@ pub struct Event {
     pub account: Option<String>,
     /// Plan (`$plan`).
     pub plan: Option<String>,
+    /// Deployment environment (`$environment`): `production` when unset.
+    #[serde(default = "default_environment")]
+    pub environment: String,
+    /// Release (`$release`): version or commit of the app that sent it.
+    #[serde(default)]
+    pub release: Option<String>,
     /// Remaining properties, serialized JSON object.
     pub properties: String,
+}
+
+/// Environment assumed when the SDK sends none.
+pub const DEFAULT_ENVIRONMENT: &str = "production";
+
+fn default_environment() -> String {
+    DEFAULT_ENVIRONMENT.to_owned()
+}
+
+/// Normalize an environment name: lowercase, common aliases folded
+/// (`prod` → `production`, `dev`/`local` → `development`, `stage` →
+/// `staging`), anything else kept as sent.
+pub fn normalize_environment(raw: &str) -> String {
+    let e = raw.trim().to_ascii_lowercase();
+    match e.as_str() {
+        "" | "prod" | "live" => DEFAULT_ENVIRONMENT.to_owned(),
+        "dev" | "local" | "localhost" => "development".to_owned(),
+        "stage" | "stg" => "staging".to_owned(),
+        "preview" | "review" => "preview".to_owned(),
+        _ => e,
+    }
 }
 
 /// Why an event or batch was rejected.
@@ -225,6 +252,9 @@ fn normalize_event(
     let role = take_dim(&mut props, "$role")?;
     let account = take_dim(&mut props, "$account")?;
     let plan = take_dim(&mut props, "$plan")?;
+    let environment = take_dim(&mut props, "$environment")?
+        .map_or_else(default_environment, |e| normalize_environment(&e));
+    let release = take_dim(&mut props, "$release")?;
 
     let properties = Value::Object(props).to_string();
     if properties.len() > limits::MAX_PROPERTIES_BYTES {
@@ -245,6 +275,8 @@ fn normalize_event(
         role,
         account,
         plan,
+        environment,
+        release,
         properties,
     })
 }

@@ -76,6 +76,8 @@ pub fn event_schema() -> SchemaRef {
         Field::new("role", DataType::Utf8, true),
         Field::new("account", DataType::Utf8, true),
         Field::new("plan", DataType::Utf8, true),
+        Field::new("environment", DataType::Utf8, false),
+        Field::new("release", DataType::Utf8, true),
         Field::new("properties", DataType::Utf8, false),
     ]))
 }
@@ -310,6 +312,8 @@ fn to_batch(events: &[&Event]) -> Result<RecordBatch> {
     let role = s(&|e| e.role.as_deref());
     let account = s(&|e| e.account.as_deref());
     let plan = s(&|e| e.plan.as_deref());
+    let environment = s(&|e| Some(&e.environment));
+    let release = s(&|e| e.release.as_deref());
     let props = s(&|e| Some(&e.properties));
     let ts = |f: &dyn Fn(&Event) -> DateTime<Utc>| -> ArrayRef {
         let mut b = TimestampMicrosecondBuilder::with_capacity(n).with_timezone("UTC");
@@ -323,8 +327,21 @@ fn to_batch(events: &[&Event]) -> Result<RecordBatch> {
     Ok(RecordBatch::try_new(
         event_schema(),
         vec![
-            uuid, event, distinct, session, timestamp, received, url, path, feature, role, account,
-            plan, props,
+            uuid,
+            event,
+            distinct,
+            session,
+            timestamp,
+            received,
+            url,
+            path,
+            feature,
+            role,
+            account,
+            plan,
+            environment,
+            release,
+            props,
         ],
     )?)
 }
