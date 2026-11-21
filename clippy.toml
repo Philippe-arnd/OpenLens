@@ -1,0 +1,4 @@
+# Tests may unwrap; production code may not (see AGENTS.md, "Changing code").
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

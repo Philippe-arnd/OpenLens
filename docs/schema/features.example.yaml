@@ -1,0 +1,20 @@
+# openlens.features.yaml: the feature map an app's agents maintain (draft, M2).
+version: 1
+churn_after_days: 14
+features:
+  - key: write-entry
+    name: Write a journal entry
+    purpose: The core loop; users capture their day in four sections.
+    owner: product
+    entry:
+      routes: ["/entries/new", "/entries/:id/edit"]
+      selectors: ['[data-feature="write-entry"]']
+    steps: [open_editor, fill_section, save_entry]
+    success: entry_saved
+  - key: ai-insights
+    name: AI insights
+    purpose: Weekly reflection generated from past entries.
+    entry:
+      routes: ["/insights"]
+      calls: ["openlens.feature('ai-insights')"]
+    success: insight_viewed
