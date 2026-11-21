@@ -65,8 +65,9 @@ Layers (checked by `cargo xtask layers`; register every new crate in `xtask/src/
 - L1 `storage`, `meta`
 - L2 `query`, `flags`, `replay`, `errors`, `heatmaps`, `featuremap`
 - L3 `engine`
-- L4 `server`, `mcp`, `ui`
-- L5 `apps/openlens`, `apps/openlens-cli`
+- L4 `ui` (HTML rendering), `mcp`
+- L5 `server`
+- L6 `apps/openlens`, `apps/openlens-cli`
 - Test helpers: `testkit` (dev-dependencies only)
 
 Checks:
