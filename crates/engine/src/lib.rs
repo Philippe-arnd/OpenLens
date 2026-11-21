@@ -224,7 +224,7 @@ fn source(map: Option<&FeatureMap>) -> String {
         None => "events".into(),
         Some(m) => format!(
             "(SELECT uuid, event, distinct_id, session_id, timestamp, received_at, url, path, \
-             account, plan, environment, release, properties, date, hour, \
+             account, plan, environment, release, properties, date, \
              {} AS role, {} AS feature FROM events) AS events",
             m.role_sql(),
             m.feature_sql()

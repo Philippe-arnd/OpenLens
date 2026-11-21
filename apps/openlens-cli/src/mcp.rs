@@ -114,7 +114,7 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "sql",
-                description: "Read-only SQL (DataFusion) on table `events`: uuid, event, distinct_id, session_id, timestamp, url, path, feature, role, account, plan, environment, release, properties (JSON text), date, hour. Prune with `date >= 'YYYY-MM-DD'`. Max 10k rows.",
+                description: "Read-only SQL (DataFusion) on table `events`: uuid, event, distinct_id, session_id, timestamp, url, path, feature, role, account, plan, environment, release, properties (JSON text), date. Prune with `date >= 'YYYY-MM-DD'`. Max 10k rows.",
                 input_schema: json!({"type":"object","properties":with(json!({"query":{"type":"string"}})),"required":["query"]}),
             },
             ToolSpec {

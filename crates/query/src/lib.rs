@@ -1,8 +1,8 @@
 //! Query layer on DataFusion: read-only SQL per project.
 //!
 //! Every query runs in a fresh session that only knows one project's
-//! partition tree, registered as the table `events` (with `date` and `hour`
-//! partition columns, so `WHERE date >= '…'` prunes directories). A query
+//! partition tree, registered as the table `events` (with a `date`
+//! partition column, so `WHERE date >= '…'` prunes directories). A query
 //! therefore cannot see another project's data by construction.
 //!
 //! Guards: no DDL, DML or statements (so no `CREATE EXTERNAL TABLE` to read
@@ -105,10 +105,7 @@ impl QueryEngine {
             .map_err(|e| QueryError::Storage(e.to_string()))?;
         let options = ListingOptions::new(Arc::new(ParquetFormat::default()))
             .with_file_extension(".parquet")
-            .with_table_partition_cols(vec![
-                ("date".to_owned(), DataType::Utf8),
-                ("hour".to_owned(), DataType::Utf8),
-            ]);
+            .with_table_partition_cols(vec![("date".to_owned(), DataType::Utf8)]);
         let table_config = ListingTableConfig::new(url)
             .with_listing_options(options)
             .with_schema(openlens_storage::event_schema());

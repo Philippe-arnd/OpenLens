@@ -1,15 +1,17 @@
-//! Write-ahead log, Parquet segments partitioned by project/date/hour,
+//! Write-ahead log, Parquet segments partitioned by project/date,
 //! compaction and (later) object-store backends.
 //!
 //! Layout under the data root:
 //!
 //! ```text
 //! wal/<seq>.jsonl                                        appended + fsynced per batch
-//! events/project=<p>/date=<YYYY-MM-DD>/hour=<HH>/<id>.parquet
+//! events/project=<p>/date=<YYYY-MM-DD>/<id>.parquet
 //! ```
 //!
 //! The Hive-style directory names let the query layer prune partitions by
-//! project, date and hour without opening files.
+//! project and date without opening files. Partitions are daily: hourly
+//! ones multiplied small files (24/day) and made every query slower; the
+//! current day is compacted as it grows.
 //!
 //! Layer: L1 (see `docs/architecture.md`).
 
@@ -22,7 +24,7 @@ use std::time::Instant;
 
 use arrow::array::{ArrayRef, RecordBatch, StringBuilder, TimestampMicrosecondBuilder};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef, TimeUnit};
-use chrono::{DateTime, Timelike, Utc};
+use chrono::{DateTime, Utc};
 use openlens_event::Event;
 use parquet::arrow::ArrowWriter;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -59,7 +61,7 @@ pub fn valid_project(id: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
-/// Arrow schema of the Parquet files. `project`, `date` and `hour` are not
+/// Arrow schema of the Parquet files. `project` and `date` are not
 /// in the files: they are the partition directories.
 pub fn event_schema() -> SchemaRef {
     let ts = || DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into()));
@@ -242,21 +244,21 @@ fn read_wal(path: &Path) -> Result<Vec<Event>> {
     Ok(out)
 }
 
-type PartitionKey = (String, String, String);
+type PartitionKey = (String, String);
 
 fn partition_of(ev: &Event) -> PartitionKey {
     (
         ev.project.clone(),
         ev.timestamp.format("%Y-%m-%d").to_string(),
-        format!("{:02}", ev.timestamp.hour()),
     )
 }
 
 fn partition_dir(root: &Path, key: &PartitionKey) -> Result<PathBuf> {
-    Ok(project_dir(root, &key.0)?
-        .join(format!("date={}", key.1))
-        .join(format!("hour={}", key.2)))
+    Ok(project_dir(root, &key.0)?.join(format!("date={}", key.1)))
 }
+
+/// The current day is compacted once it holds more segments than this.
+pub const TODAY_MAX_SEGMENTS: usize = 24;
 
 /// Group events by partition and write one segment per partition.
 fn write_segments(root: &Path, events: &[Event]) -> Result<()> {
@@ -346,42 +348,39 @@ fn to_batch(events: &[&Event]) -> Result<RecordBatch> {
     )?)
 }
 
-/// Merge the segments of every partition of `project` that is older than
-/// the current hour into one file per partition. Returns the number of
-/// partitions compacted.
+/// Merge each day's segments into one file: closed days as soon as they
+/// have more than one segment, the current day once it has more than
+/// [`TODAY_MAX_SEGMENTS`]. Returns the number of days compacted.
 pub fn compact(root: &Path, project: &str, now: DateTime<Utc>) -> Result<usize> {
     let pdir = project_dir(root, project)?;
     if !pdir.is_dir() {
         return Ok(0);
     }
-    let current = (
-        format!("date={}", now.format("%Y-%m-%d")),
-        format!("hour={:02}", now.hour()),
-    );
+    let today = format!("date={}", now.format("%Y-%m-%d"));
     let mut compacted = 0;
     for date in fs::read_dir(&pdir)? {
         let date = date?.path();
-        for hour in fs::read_dir(&date)? {
-            let hour = hour?.path();
-            let is_current = date.file_name().and_then(|s| s.to_str()) == Some(&current.0)
-                && hour.file_name().and_then(|s| s.to_str()) == Some(&current.1);
-            if is_current || !hour.is_dir() {
-                continue;
-            }
-            if compact_dir(&hour)? {
-                compacted += 1;
-            }
+        if !date.is_dir() {
+            continue;
+        }
+        let min = if date.file_name().and_then(|s| s.to_str()) == Some(today.as_str()) {
+            TODAY_MAX_SEGMENTS + 1
+        } else {
+            2
+        };
+        if compact_dir(&date, min)? {
+            compacted += 1;
         }
     }
     Ok(compacted)
 }
 
-fn compact_dir(dir: &Path) -> Result<bool> {
+fn compact_dir(dir: &Path, min_files: usize) -> Result<bool> {
     let files: Vec<PathBuf> = fs::read_dir(dir)?
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|x| x == "parquet"))
         .collect();
-    if files.len() < 2 {
+    if files.len() < min_files {
         return Ok(false);
     }
     let mut batches = Vec::new();
