@@ -1,14 +1,13 @@
 # Analysing an app with OpenLens (agent guide)
 
-Draft, tools arrive in M3. Start from summaries and drill down only where something stands out.
+Start from the summaries and drill down only where something stands out. Every tool is available as an MCP tool (`openlens-cli mcp`) and over the HTTP API.
 
 | PM question | Tool | Drill down with |
 | --- | --- | --- |
-| Headline KPIs by role | `kpi_report --by role` | `cohort_compare` |
-| What makes users stick? | `stickiness_drivers` | `cohort_compare`, `journeys` |
-| Where do users churn? | `churn_points` | `user_timeline` on sample ids |
-| Which journeys lead to value? | `journeys --to <success event>` | `cohort_compare` retained vs churned |
-| How is feature X used, by whom? | `feature_report X` | `sql` |
-| Anything else | `sql` (read-only DataFusion) or `openlens-cli export` | schema in `docs/schema/` |
+| What should we focus on? | `insights`: ranked cards with evidence and next steps, plus paths to value | `sql` |
+| Headline KPIs by role, environment or release | `kpi_report` (optional `role`, `env`, `release`) | `board` (everything) |
+| Did the last release move the numbers? | `kpi_report`: `releases` holds the latest two | `kpi_report --release <name>` |
+| Is the wiring complete? | `verify` | `feature_map_lint` |
+| Anything else | `sql` (read-only DataFusion on `events`) | prune with `date >= 'YYYY-MM-DD'` |
 
-Every result has a summary of 2 kB or less, plus ids for drilling down. Report findings with the numbers and the cohort sizes behind them, and say when a sample is too small to conclude.
+Report findings with the numbers and the cohort sizes behind them, and say when a sample is too small to conclude: cards are hidden below 8 users per group for that reason. Backfilled events carry `"$backfill": true` in `properties`.
