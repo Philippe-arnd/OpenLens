@@ -1,6 +1,6 @@
 # Key KPIs
 
-These are the metrics OpenLens computes with no setup. **Every KPI can be split by role** (and by account, plan, page and feature). Definitions here are the contract: the UI, the MCP tools and the exports all use them, and a change to a definition is recorded in `docs/decisions.md`.
+These are the metrics OpenLens computes with no setup. **Every KPI can be split by role**, and also by **environment** and **release** (D-012), account, plan, page and feature. The default view is production, current release compared with the previous one. Definitions here are the contract: the UI, the MCP tools and the exports all use them, and a change to a definition is recorded in `docs/decisions.md`.
 
 ## Roles: defined, matched, tracked
 
@@ -16,10 +16,10 @@ Roles are the main way to slice every number, so they are declared explicitly, n
 
 | KPI | Definition |
 | --- | --- |
-| **DAU / WAU / MAU** | Distinct identified users with at least one event on the day, in the last 7 days or in the last 30 days (UTC days by default; the project time zone is configurable). Anonymous visitors are counted separately. |
+| **DAU / WAU / MAU** | Distinct identified users with at least one event on the day, in the last 7 days or in the last 30 days (UTC days). Anonymous visitors are counted separately. |
 | **Stickiness** | DAU / MAU, as a ratio. |
-| **Churn** | A user is *churned* after `churn_after_days` (14 by default, set in the feature map) without an event. **Churn rate** for a period is the number of users active at the start of the period who churned during it, divided by the number of users active at the start. **Resurrected** users (churned, then active again) are reported separately. |
-| **Session** | A run of a user's events with gaps of less than 30 minutes (configurable). A session also ends at midnight in the project time zone. |
+| **Churn** | A user is *churned* after `churn_after_days` without an event (14 by default; the one optional setting, in the feature map). **Churn rate** for a period is the number of users active at the start of the period who churned during it, divided by the number of users active at the start. **Resurrected** users (churned, then active again) are reported separately. |
+| **Session** | A run of a user's events with gaps of less than 30 minutes. A session also ends at midnight UTC. |
 | **Average session duration** | Mean and median of the time from the first to the last event of each session. Sessions with a single event count as 0 s and are flagged separately as "bounces". |
 | **Tasks performed** | The number of *completed tasks* (see Features), in total, per active user per day, and per session. |
 
@@ -34,7 +34,7 @@ Roles are the main way to slice every number, so they are declared explicitly, n
 
 ## Features
 
-A **feature** is declared in the feature map. A **task** is one use of a feature, from its entry (route, `data-feature` element, or an `openlens.feature()` call) to its `success` event. A task with no success within the timeout (30 minutes by default) is *abandoned*.
+A **feature** is declared in the feature map. A **task** is one use of a feature, from its entry (route, `data-feature` element, or an `openlens.feature()` call) to its `success` event. A task with no success within 30 minutes is *abandoned*.
 
 | KPI | Definition |
 | --- | --- |

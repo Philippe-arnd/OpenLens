@@ -1,6 +1,8 @@
 # OpenLens
 
-**Product analytics you plug in with one dependency.** Self-hosted, open source (AGPL-3.0), one Rust binary.
+**A method, and a lean tool, for product managers to monitor and improve their web app.** Agents do all the setup. Self-hosted, open source (AGPL-3.0), one Rust binary.
+
+**Map → measure → focus → act → compare** ([the method](docs/method.md)).
 
 On first login you land on the **Focus board**: ranked insights on where the value is in your app and what to work on next. Underneath, OpenLens answers the questions product managers actually ask, with almost nothing to configure:
 
@@ -27,7 +29,7 @@ openlens.identify(user.id, { role: user.role, account: user.orgId });
 
 That is all most apps need. Page views, clicks, forms, errors and features (named from routes and `data-feature` attributes) are captured automatically.
 
-**Or let your coding agent do it.** `openlens-cli wire` (also available as an MCP tool) detects the stack, finds where users log in and what their role is, and proposes one reviewable patch.
+**In practice, your coding agent does it.** `openlens-cli init` creates the project. The agent adds the snippet and `identify()` with the user's role, drafts the feature map, backfills history from the app's data, and runs `verify`. Then it sends you a one-time login link, and your first login lands on a populated Focus board. Every event also carries its **environment** and **release**, so you can see whether the last release moved the numbers.
 
 ## Why another one
 
@@ -41,7 +43,7 @@ That is all most apps need. Page views, clicks, forms, errors and features (name
 | Path | What |
 | --- | --- |
 | `apps/openlens` | The server binary (API, ingestion, UI) |
-| `apps/openlens-cli` | Headless CLI: `wire`, `query`, `import`, `mcp` |
+| `apps/openlens-cli` | Agent toolkit: `init`, `features`, `import`, `verify`, `login-link`, `mcp` |
 | `crates/*` | Engine crates, layered (see [docs/architecture.md](docs/architecture.md)) |
 | `sdk/js` | Browser SDK `@openlens/web` |
 | `docs/` | Architecture, decisions, clean-room log, parity, gaps |

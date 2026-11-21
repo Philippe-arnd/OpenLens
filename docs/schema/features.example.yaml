@@ -1,8 +1,6 @@
 # openlens.features.yaml: the feature map an app's agents maintain (draft, M2).
 version: 1
-churn_after_days: 14
-session_gap_minutes: 30
-task_timeout_minutes: 30
+churn_after_days: 14   # optional; the only tunable. Everything else has fixed definitions (docs/kpis.md).
 
 # Canonical roles, and the raw identify() values that map to them (first match wins).
 roles:

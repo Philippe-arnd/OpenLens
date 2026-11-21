@@ -1,19 +1,25 @@
-# Wiring OpenLens into an app (agent guide)
+# Connecting an app to OpenLens (agent guide)
 
-A step-by-step guide that a coding agent follows to plug OpenLens into a web app with as little human work as possible. Status: draft, the tooling arrives in M2.
+You are the agent that maintains a web app. Your goal is that the product manager's **first login shows a populated Focus board**, with no manual setup on their side. Draft: the commands arrive in M2 (`ROADMAP.md`).
 
-1. Run `openlens-cli wire --dry-run` at the app root. It detects the stack and prints an install plan: dependency or script tag, the init call, the `identify()` insertion point and feature naming hints.
-2. Show the plan to the user and confirm the **role source**: which field on the logged-in user holds the role (for example `user.role`, `membership.kind`). Also confirm the canonical `roles:` mapping drafted from the values found in the code. If none is found, ask; do not guess.
-3. Run `openlens-cli wire` to apply the plan as a single commit on a branch.
-4. Run `openlens-cli verify`. It sends a test event and confirms it arrived with a role.
-5. Open a PR that lists the edits, what was verified and what was not.
+1. **Project.** `openlens-cli init --server <url> --name <app>` creates the project and prints its capture key. Put the key and the server URL in the app's existing config mechanism (env file, settings module). Never hard-code the key anywhere else.
+2. **SDK.** Pick one:
+   - Server-rendered app: add `<script src="<url>/c.js" data-key="<key>" defer></script>` to the main layout.
+   - SPA: `npm install @openlens/web`, then call `openlens.init({ host, key })` at startup.
 
-Never put the project API key anywhere other than the app's existing configuration or env mechanism.
+   The environment is detected automatically. Pass `release` from the build (git SHA or version).
+3. **Identify.** Where the logged-in user becomes known, call `openlens.identify(user.id, { role, account, plan })`. Find the real role field (for example `user.role`, `membership.kind`). If none exists, ask the operator; do not invent one.
+4. **Feature map.** Create `openlens.features.yaml` (format: `docs/schema/features.example.yaml`):
+   - `roles`: list every raw role value found in the code and map it to a canonical role.
+   - `features`: list the main user-facing features from the routes and actions. Give each one its entry points and a **success event**: the moment the user got value, for example `entry_saved` or `invoice_sent`. Add `openlens.track("<success event>")` where that moment happens, if the app does not emit it already.
+   - Add `data-feature="<key>"` to each feature's main controls.
+   - Then run `openlens-cli features push` and `openlens-cli features lint`.
+5. **Backfill.** Export from the app's database:
+   - users with `id, role, account, plan, created_at, last_seen_at`
+   - past success events, as one row per domain record (for example every saved entry, with `user_id` and `created_at`)
 
-## Keeping the feature map current
-
-`wire` drafts `openlens.features.yaml` from the app's routes and main actions, and adds this rule to the app's own `AGENTS.md` (or `CLAUDE.md`):
-
-> When you add, rename or remove a user-facing feature, update `openlens.features.yaml` (key, entry points, success event) in the same change, and run `openlens-cli features lint`.
-
-For each feature, the most important field is its **success event**: the moment the user got value from it. Stick drivers and churn points are computed from it. See `docs/schema/features.example.yaml`.
+   Write them as JSONL and run `openlens-cli import`.
+6. **Verify.** `openlens-cli verify` must pass: events arrive, roles resolve, and every feature entry point fires.
+7. **Keep it current.** Add this rule to the app's own `AGENTS.md` (or `CLAUDE.md`):
+   > When you add, rename or remove a user-facing feature, update `openlens.features.yaml` (entry points, success event) in the same change and run `openlens-cli features lint`.
+8. **Hand over.** `openlens-cli login-link` prints a one-time link. Send it to the PM, together with a short note on what was wired and anything you could not do.

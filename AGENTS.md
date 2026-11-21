@@ -28,30 +28,32 @@ These rules apply to every human and every coding agent working in this reposito
 14. CI changes go in their own PR. A feature or fix PR does not touch `.github/workflows/`.
 15. The MCP entry point (`openlens-cli mcp`) refuses to start without `--automation-read-root` and `--automation-write-root`, and it refuses any file access outside them.
 16. Keep secrets and personal data out of code, logs, fixtures and requests. Report vulnerabilities through the private security advisory (see `SECURITY.md`).
-17. User-visible feature names are our own words, never another company's product or feature names. Record new names in `docs/feature-names.md`.
+17. **No new configuration.** OpenLens is a methodology carried out by a tool, not a toolbox (D-014). Pick a sound fixed default. A new setting, env var or option needs a decision entry in `docs/decisions.md`.
+18. **Security and performance before features.** Every endpoint authenticates, bounds its input and its work, and fails closed. Prefer the simpler and faster design over the deeper one.
+19. User-visible feature names are our own words, never another company's product or feature names. Record new names in `docs/feature-names.md`.
 
 ## Clean room and licences
 
-18. **Never read PostHog source code, or any GPL, LGPL or AGPL source code** (this includes OpenObserve). Learn only from public documentation, published screenshots, talks and blog posts, papers, open specifications (for example the rrweb event format, W3C specs, MCP), and behaviour you observe with your own test inputs. Log every source in `docs/clean-room.md`.
-19. Copy ideas and behaviour only. Never copy code, UI text, help text, icons or artwork.
-20. Do not rely on remembered knowledge of a product's internals. If no public source shows a fact, leave it out.
-21. A new dependency's licence must be on the allowlist in `deny.toml`. If it is not, record a decision in `docs/decisions.md` first. MPL-2.0 is allowed only for unmodified third-party crates.
-22. Every asset and fixture is our own work or under an allowlisted licence, and its provenance is recorded in `ATTRIBUTION.md` in the same change.
+20. **Never read PostHog source code, or any GPL, LGPL or AGPL source code** (this includes OpenObserve). Learn only from public documentation, published screenshots, talks and blog posts, papers, open specifications (for example the rrweb event format, W3C specs, MCP), and behaviour you observe with your own test inputs. Log every source in `docs/clean-room.md`.
+21. Copy ideas and behaviour only. Never copy code, UI text, help text, icons or artwork.
+22. Do not rely on remembered knowledge of a product's internals. If no public source shows a fact, leave it out.
+23. A new dependency's licence must be on the allowlist in `deny.toml`. If it is not, record a decision in `docs/decisions.md` first. MPL-2.0 is allowed only for unmodified third-party crates.
+24. Every asset and fixture is our own work or under an allowlisted licence, and its provenance is recorded in `ATTRIBUTION.md` in the same change.
 
 ## Tests
 
-23. A test earns its place by guarding behaviour that a plausible change could break and that no other test catches. Do not test wiring, constants or library behaviour.
-24. Assert relations ("larger than", "contains", "changed"), not values we picked or timings.
-25. A bug fix adds a test that fails without the fix. A crash fix also adds its input to the crate's hostile-input corpus (`crates/testkit`).
-26. Integration tests are one binary per crate, at `tests/it/main.rs`.
-27. Never delete, weaken, `#[ignore]` or skip a test to make a check pass.
+25. A test earns its place by guarding behaviour that a plausible change could break and that no other test catches. Do not test wiring, constants or library behaviour.
+26. Assert relations ("larger than", "contains", "changed"), not values we picked or timings.
+27. A bug fix adds a test that fails without the fix. A crash fix also adds its input to the crate's hostile-input corpus (`crates/testkit`).
+28. Integration tests are one binary per crate, at `tests/it/main.rs`.
+29. Never delete, weaken, `#[ignore]` or skip a test to make a check pass.
 
 ## Pull requests
 
-28. `main` changes only through pull requests.
-29. Run the checks below for the crates you changed. In the PR, say exactly what ran and what did not, and never report a check that did not run as passed.
-30. Do not commit scratch files or your agent tool's own files (`.claude/`, `.cursor/`), and do not pass `--no-verify`.
-31. If two different fixes for the same failing check have not worked, leave the PR as a draft, describe what fails and what you tried, and stop.
+30. `main` changes only through pull requests.
+31. Run the checks below for the crates you changed. In the PR, say exactly what ran and what did not, and never report a check that did not run as passed.
+32. Do not commit scratch files or your agent tool's own files (`.claude/`, `.cursor/`), and do not pass `--no-verify`.
+33. If two different fixes for the same failing check have not worked, leave the PR as a draft, describe what fails and what you tried, and stop.
 
 ## This repository
 
@@ -61,7 +63,7 @@ Layers (checked by `cargo xtask layers`; register every new crate in `xtask/src/
 
 - L0 `event`
 - L1 `storage`, `meta`
-- L2 `query`, `flags`, `replay`, `errors`, `heatmaps`, `wire`
+- L2 `query`, `flags`, `replay`, `errors`, `heatmaps`, `featuremap`
 - L3 `engine`
 - L4 `server`, `mcp`, `ui`
 - L5 `apps/openlens`, `apps/openlens-cli`
