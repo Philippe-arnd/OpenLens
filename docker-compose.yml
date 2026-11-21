@@ -3,6 +3,7 @@ services:
     build: .
     environment:
       OPENLENS_ADDR: 0.0.0.0:8686
+      OPENLENS_DATA_DIR: /data
     ports:
       - "8686:8686"
     volumes:

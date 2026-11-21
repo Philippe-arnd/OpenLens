@@ -1,5 +1,9 @@
 //! Integration tests for `openlens-event`.
 
+// Test helpers may unwrap: a failure here is a test failure (clippy.toml
+// already allows it inside #[test] functions; this extends it to helpers).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use chrono::{Duration, TimeZone, Utc};
 use openlens_event::{CaptureBatch, EventError, RawEvent, limits, normalize_batch};
 use serde_json::json;
