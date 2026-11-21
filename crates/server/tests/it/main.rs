@@ -437,3 +437,56 @@ async fn backfill_imports_persons_and_past_events_once() {
     );
     assert_eq!(r.rows[0]["n"], 3);
 }
+
+#[tokio::test]
+async fn export_returns_one_day_as_jsonl_and_validates_the_date() {
+    let h = harness();
+    post(&h, "/capture", batch(&h.key), false).await;
+    openlens_server::flush_now(&h.state).unwrap();
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let resp = get(
+        &h,
+        &format!("/api/projects/default/export?date={today}"),
+        None,
+        true,
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.headers()["x-openlens-truncated"], "false");
+    let body = String::from_utf8(
+        axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert_eq!(body.lines().count(), 2);
+    assert!(
+        body.lines()
+            .all(|l| serde_json::from_str::<serde_json::Value>(l).is_ok())
+    );
+    for bad in ["2026-1-01", "2026-01-01' OR '1'='1", "yesterday"] {
+        let resp = get(
+            &h,
+            &format!(
+                "/api/projects/default/export?date={}",
+                bad.replace(' ', "%20").replace('\'', "%27")
+            ),
+            None,
+            true,
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{bad}");
+    }
+    assert_eq!(
+        get(
+            &h,
+            &format!("/api/projects/default/export?date={today}"),
+            None,
+            false
+        )
+        .await
+        .status(),
+        StatusCode::UNAUTHORIZED
+    );
+}
