@@ -35,6 +35,7 @@ subtle = "2"
 hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
+serde_norway = "0.9"
 serde_urlencoded = "0.7"
 tempfile = "3"
 
