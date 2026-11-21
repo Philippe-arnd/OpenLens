@@ -2,6 +2,9 @@
 //!
 //! - `cargo xtask ci`: everything CI runs (fmt, clippy, tests, layers, deny).
 //! - `cargo xtask layers`: check crate layering against `src/layers.rs`.
+//! - `cargo xtask demo <data-dir>`: write a realistic synthetic app (300
+//!   users, planted patterns) into the `default` project of a data dir, to
+//!   look at the board: `OPENLENS_DATA_DIR=<data-dir> cargo run -p openlens`.
 
 mod layers;
 
@@ -12,7 +15,8 @@ fn main() -> ExitCode {
     let result = match task.as_str() {
         "ci" => ci(),
         "layers" => check_layers(),
-        _ => Err("usage: cargo xtask <ci|layers>".to_owned()),
+        "demo" => demo(std::env::args().nth(2)),
+        _ => Err("usage: cargo xtask <ci|layers|demo DIR>".to_owned()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -94,6 +98,8 @@ fn check_layers() -> Result<(), String> {
             let is_dev = dep["kind"].as_str() == Some("dev");
             match (layer, dep_layer) {
                 (_, None) if is_dev => {}
+                // Tooling (xtask, testkit) may use other tooling.
+                (None, None) => {}
                 (_, None) => errors.push(format!(
                     "{name} depends on test helper {dep_name} outside dev-dependencies"
                 )),
@@ -110,4 +116,18 @@ fn check_layers() -> Result<(), String> {
     } else {
         Err(errors.join("\n"))
     }
+}
+
+fn demo(dir: Option<String>) -> Result<(), String> {
+    let dir = dir.ok_or("usage: cargo xtask demo <data-dir>")?;
+    let (mut w, _) = openlens_storage::Writer::open(&dir, openlens_storage::FlushPolicy::default())
+        .map_err(|e| e.to_string())?;
+    let events = openlens_testkit::planted_dataset("default");
+    w.append(&events).map_err(|e| e.to_string())?;
+    w.flush().map_err(|e| e.to_string())?;
+    eprintln!(
+        "xtask: wrote {} demo events to {dir} (project default)",
+        events.len()
+    );
+    Ok(())
 }

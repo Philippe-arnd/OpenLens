@@ -2297,6 +2297,7 @@ dependencies = [
  "openlens-featuremap",
  "openlens-query",
  "openlens-storage",
+ "openlens-testkit",
  "serde",
  "serde_json",
  "tempfile",
@@ -2425,6 +2426,10 @@ dependencies = [
 [[package]]
 name = "openlens-testkit"
 version = "0.0.1"
+dependencies = [
+ "chrono",
+ "openlens-event",
+]
 
 [[package]]
 name = "openlens-ui"
@@ -3741,6 +3746,8 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 name = "xtask"
 version = "0.0.1"
 dependencies = [
+ "openlens-storage",
+ "openlens-testkit",
  "serde_json",
 ]
 

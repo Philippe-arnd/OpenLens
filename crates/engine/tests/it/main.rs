@@ -195,3 +195,72 @@ async fn feature_map_gives_canonical_roles_gaps_and_unused_features() {
         "filter by canonical role"
     );
 }
+
+#[tokio::test]
+async fn insights_find_every_planted_pattern() {
+    use openlens_testkit::planted;
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    w.append(&openlens_testkit::planted_dataset("p")).unwrap();
+    w.flush().unwrap();
+    let q = QueryEngine::new(dir.path(), Limits::default());
+    let b = board(&q, "p", &Filters::default(), None).await.unwrap();
+    let kinds: Vec<_> = b
+        .insights
+        .iter()
+        .map(|i| (i.kind, i.subject.as_str()))
+        .collect();
+    let find = |k: &str| b.insights.iter().find(|i| i.kind == k);
+
+    let driver = find("stick_driver").unwrap_or_else(|| panic!("no stick driver in {kinds:?}"));
+    assert_eq!(driver.subject, planted::DRIVER, "{kinds:?}");
+    assert!(
+        b.insights
+            .iter()
+            .filter(|i| i.kind == "stick_driver")
+            .all(|i| i.subject == planted::DRIVER),
+        "search has no effect on retention and must not be a driver: {kinds:?}"
+    );
+    assert_eq!(
+        find("churn_point").unwrap().subject,
+        planted::CHURN_POINT,
+        "{kinds:?}"
+    );
+    assert_eq!(
+        find("role_blind_spot").unwrap().subject,
+        format!("{}:{}", planted::BLIND_ROLE, planted::BLIND_FEATURE),
+        "{kinds:?}"
+    );
+    assert_eq!(
+        find("release_regression").unwrap().subject,
+        planted::BAD_RELEASE,
+        "{kinds:?}"
+    );
+    assert!(find("slow_pages").is_some(), "{kinds:?}");
+    assert!(b.insights.len() <= 7);
+    let mut subjects: Vec<_> = b
+        .insights
+        .iter()
+        .map(|i| (i.kind, i.subject.clone()))
+        .collect();
+    subjects.sort();
+    subjects.dedup();
+    assert_eq!(
+        subjects.len(),
+        b.insights.len(),
+        "no duplicate cards: {kinds:?}"
+    );
+    assert!(b.readiness.judged_users > 100);
+}
+
+#[tokio::test]
+async fn no_insights_without_enough_users() {
+    let (_d, q) = dataset();
+    let b = board(&q, "p", &Filters::default(), None).await.unwrap();
+    assert!(
+        b.insights
+            .iter()
+            .all(|i| i.kind == "slow_pages" || i.kind == "release_regression")
+    );
+    assert!(b.readiness.judged_users < b.readiness.needed);
+}

@@ -1,0 +1,405 @@
+//! Insight cards for the Focus board (docs/method.md, step 3).
+//!
+//! Each card is computed by one SQL pass over the (map-resolved) events,
+//! carries the cohort sizes behind its numbers, a suggested next step, and
+//! a score used to rank the board. Cards below the minimum cohort sizes are
+//! not shown: no insight is better than a misleading one.
+
+use serde::Serialize;
+use serde_json::{Map, Value};
+
+use crate::{Filters, Result, int, text};
+use openlens_query::QueryEngine;
+
+/// Smallest group size an insight may rest on.
+pub const MIN_GROUP: i64 = 8;
+
+/// One insight card.
+#[derive(Debug, Clone, Serialize)]
+pub struct Insight {
+    /// Kind: stick_driver, value_moment, churn_point, friction, role_blind_spot, release_regression, slow_pages.
+    pub kind: &'static str,
+    /// Headline in plain language.
+    pub title: String,
+    /// The numbers behind it.
+    pub evidence: String,
+    /// What to do about it.
+    pub next_step: String,
+    /// Ranking score (higher first).
+    pub score: f64,
+    /// Feature, role or release the card is about.
+    pub subject: String,
+}
+
+/// Why the board has no (or few) insights yet.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct Readiness {
+    /// Users old enough to judge retention (first seen before the churn window).
+    pub judged_users: i64,
+    /// Needed for retention insights.
+    pub needed: i64,
+}
+
+fn pct(r: f64) -> String {
+    format!("{:.0}%", r * 100.0)
+}
+
+fn rows(
+    r: std::result::Result<openlens_query::QueryResult, openlens_query::QueryError>,
+) -> Result<Vec<Map<String, Value>>> {
+    Ok(r?.rows)
+}
+
+/// Compute all insights. `src` is the event source (raw or map-resolved),
+/// `w90` the filter clause over the analysis window, `churn` the window in days.
+pub(crate) async fn compute(
+    q: &QueryEngine,
+    project: &str,
+    src: &str,
+    f: &Filters,
+    churn: i64,
+    successes: &[(String, String)],
+) -> Result<(Vec<Insight>, Readiness)> {
+    let w = f.clause(90)?;
+    let base = format!(
+        "WITH ev AS (SELECT distinct_id, timestamp, feature, event, path, release, session_id FROM {src} WHERE {w}), \
+         users AS (SELECT distinct_id, min(timestamp) AS first_seen, max(timestamp) AS last_seen FROM ev GROUP BY distinct_id), \
+         cohort AS (SELECT distinct_id, first_seen, last_seen, \
+                    CASE WHEN last_seen >= now() - INTERVAL '{churn} days' THEN 1 ELSE 0 END AS retained \
+                    FROM users WHERE first_seen <= now() - INTERVAL '{churn} days')"
+    );
+    let totals_sql = format!("{base} SELECT count(*) AS n, sum(retained) AS kept FROM cohort");
+    let early_sql = format!(
+        "{base}, early AS (SELECT e.distinct_id, e.feature, count(*) AS uses FROM ev e JOIN cohort c ON e.distinct_id = c.distinct_id \
+           WHERE e.feature IS NOT NULL AND e.timestamp <= c.first_seen + INTERVAL '7 days' GROUP BY e.distinct_id, e.feature) \
+         SELECT early.feature AS feature, least(early.uses, 10) AS bucket, count(*) AS users, sum(c.retained) AS kept \
+         FROM early JOIN cohort c ON early.distinct_id = c.distinct_id GROUP BY early.feature, least(early.uses, 10)"
+    );
+    let churn_sql = format!(
+        "{base}, churned AS (SELECT distinct_id, last_seen FROM cohort WHERE retained = 0) \
+         SELECT coalesce(e.feature, e.path) AS place, count(DISTINCT e.distinct_id) AS users \
+         FROM ev e JOIN churned ch ON e.distinct_id = ch.distinct_id AND e.timestamp = ch.last_seen \
+         GROUP BY coalesce(e.feature, e.path) ORDER BY users DESC LIMIT 5"
+    );
+    let reach_sql = format!(
+        "{base} SELECT coalesce(feature, path) AS place, count(DISTINCT distinct_id) AS users FROM ev GROUP BY coalesce(feature, path)"
+    );
+    let w_roles = Filters {
+        role: None,
+        ..f.clone()
+    }
+    .clause(30)?;
+    let roles_sql = format!(
+        "SELECT role, feature, count(DISTINCT distinct_id) AS users FROM {src} WHERE {w_roles} \
+         AND role IS NOT NULL AND feature IS NOT NULL GROUP BY role, feature"
+    );
+    let role_totals_sql = format!(
+        "SELECT role, count(DISTINCT distinct_id) AS users FROM {src} WHERE {w_roles} \
+         AND role IS NOT NULL GROUP BY role"
+    );
+    let release_sql = format!(
+        "SELECT release, count(DISTINCT session_id) AS sessions, \
+         count(DISTINCT CASE WHEN event = '$error' THEN session_id END) AS bad, min(timestamp) AS first \
+         FROM {src} WHERE {} AND release IS NOT NULL GROUP BY release ORDER BY first DESC LIMIT 2",
+        Filters {
+            release: None,
+            ..f.clone()
+        }
+        .clause(90)?
+    );
+    let friction_sql = if successes.is_empty() {
+        None
+    } else {
+        let cond = successes
+            .iter()
+            .map(|(k, e)| {
+                format!(
+                    "(feature = '{}' AND event = '{}')",
+                    k.replace('\'', "''"),
+                    e.replace('\'', "''")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        Some(format!(
+            "SELECT feature, count(DISTINCT distinct_id) AS started, \
+             count(DISTINCT CASE WHEN {cond} THEN distinct_id END) AS succeeded \
+             FROM {src} WHERE {} AND feature IS NOT NULL GROUP BY feature",
+            f.clause(30)?
+        ))
+    };
+
+    let friction_fut = async {
+        match &friction_sql {
+            Some(s) => Some(q.sql(project, s).await),
+            None => None,
+        }
+    };
+    let (totals, early, churned, reach, roles, role_totals, releases, friction) = futures::join!(
+        q.sql(project, &totals_sql),
+        q.sql(project, &early_sql),
+        q.sql(project, &churn_sql),
+        q.sql(project, &reach_sql),
+        q.sql(project, &roles_sql),
+        q.sql(project, &role_totals_sql),
+        q.sql(project, &release_sql),
+        friction_fut,
+    );
+
+    let mut cards = Vec::new();
+    let t = rows(totals)?;
+    let n_all = t.first().map_or(0, |r| int(r, "n"));
+    let kept_all = t.first().map_or(0, |r| int(r, "kept"));
+    let readiness = Readiness {
+        judged_users: n_all,
+        needed: 2 * MIN_GROUP,
+    };
+
+    // Stick drivers and the value moment.
+    if n_all >= 2 * MIN_GROUP {
+        let early = rows(early)?;
+        let mut features: Vec<String> = early.iter().filter_map(|r| text(r, "feature")).collect();
+        features.sort();
+        features.dedup();
+        for feat in features {
+            let at_least = |k: i64| -> (i64, i64) {
+                early
+                    .iter()
+                    .filter(|r| {
+                        text(r, "feature").as_deref() == Some(feat.as_str())
+                            && int(r, "bucket") >= k
+                    })
+                    .fold((0, 0), |(u, kept), r| {
+                        (u + int(r, "users"), kept + int(r, "kept"))
+                    })
+            };
+            let (with, kept_with) = at_least(1);
+            let (without, kept_without) = (n_all - with, kept_all - kept_with);
+            if with < MIN_GROUP || without < MIN_GROUP {
+                continue;
+            }
+            let (ra, rb) = (
+                kept_with as f64 / with as f64,
+                kept_without as f64 / without as f64,
+            );
+            if ra > rb + 0.1 {
+                let lift = if rb > 0.0 {
+                    format!("{:.1}×", ra / rb)
+                } else {
+                    "far".into()
+                };
+                cards.push(Insight {
+                    kind: "stick_driver",
+                    title: format!("Users who use {feat} in their first week stay {lift} more"),
+                    evidence: format!(
+                        "{} stay with it ({with} users) vs {} without ({without} users)",
+                        pct(ra),
+                        pct(rb)
+                    ),
+                    next_step: format!(
+                        "Bring new users to {feat} during onboarding, and make it easy to find."
+                    ),
+                    score: (ra - rb) * (with.min(without) as f64).sqrt() * 2.0,
+                    subject: feat.clone(),
+                });
+                // Value moment: the repetition threshold with the best gap.
+                let mut best: Option<(i64, f64, f64, i64)> = None;
+                for k in [2, 3, 5] {
+                    let (wk, kk) = at_least(k);
+                    let (ok, okk) = (n_all - wk, kept_all - kk);
+                    if wk < MIN_GROUP || ok < MIN_GROUP {
+                        continue;
+                    }
+                    let (a, b) = (kk as f64 / wk as f64, okk as f64 / ok as f64);
+                    if best.is_none_or(|(_, ba, bb, _)| a - b > ba - bb) {
+                        best = Some((k, a, b, wk));
+                    }
+                }
+                if let Some((k, a, b, wk)) = best
+                    && a - b > ra - rb
+                {
+                    cards.push(Insight {
+                        kind: "value_moment",
+                        title: format!("Value moment: {feat} {k}+ times in week 1"),
+                        evidence: format!(
+                            "{} of those {wk} users stay, vs {} of everyone else",
+                            pct(a),
+                            pct(b)
+                        ),
+                        next_step: format!(
+                            "Design the first week so new users reach {feat} {k} times."
+                        ),
+                        score: (a - b) * (wk as f64).sqrt() * 2.2,
+                        subject: feat.clone(),
+                    });
+                }
+            }
+        }
+    }
+
+    // Churn points: where churned users were last seen, against how many users visit it at all.
+    let churned = rows(churned)?;
+    let reach = rows(reach)?;
+    let n_churned = n_all - kept_all;
+    let n_users: i64 = reach
+        .iter()
+        .map(|r| int(r, "users"))
+        .max()
+        .unwrap_or(0)
+        .max(1);
+    if n_churned >= MIN_GROUP
+        && let Some(top) = churned.first()
+    {
+        let place = text(top, "place").unwrap_or_default();
+        let share = int(top, "users") as f64 / n_churned as f64;
+        let visits = reach
+            .iter()
+            .find(|r| text(r, "place").as_deref() == Some(place.as_str()))
+            .map_or(0, |r| int(r, "users"));
+        let base_share = visits as f64 / n_users as f64;
+        if share >= 0.25 && share > base_share * 1.2 && int(top, "users") >= MIN_GROUP {
+            cards.push(Insight {
+                kind: "churn_point",
+                title: format!("{} of churned users were last seen in {place}", pct(share)),
+                evidence: format!(
+                    "{} of {n_churned} churned users; only {} of all users ever go there",
+                    int(top, "users"),
+                    pct(base_share)
+                ),
+                next_step: format!(
+                    "Look at what happens in {place}: errors, confusing steps, or a pricing wall."
+                ),
+                score: share * (n_churned as f64).sqrt() * 1.8,
+                subject: place,
+            });
+        }
+    }
+
+    // Role blind spots: a feature most roles adopt, one role never touches.
+    let roles = rows(roles)?;
+    let role_users: Vec<(String, i64)> = rows(role_totals)?
+        .iter()
+        .filter_map(|r| Some((text(r, "role")?, int(r, "users"))))
+        .collect();
+    let total_role_users: i64 = role_users.iter().map(|(_, n)| n).sum();
+    let mut feats: Vec<String> = roles.iter().filter_map(|r| text(r, "feature")).collect();
+    feats.sort();
+    feats.dedup();
+    for feat in &feats {
+        let used = |role: &str| {
+            roles
+                .iter()
+                .find(|r| {
+                    text(r, "role").as_deref() == Some(role)
+                        && text(r, "feature").as_deref() == Some(feat.as_str())
+                })
+                .map_or(0, |r| int(r, "users"))
+        };
+        let overall: i64 = role_users.iter().map(|(r, _)| used(r)).sum();
+        for (role, n) in &role_users {
+            if *n < MIN_GROUP || role.starts_with("unmatched:") {
+                continue;
+            }
+            let others = total_role_users - n;
+            let others_used = overall - used(role);
+            if others < MIN_GROUP {
+                continue;
+            }
+            let (mine, theirs) = (
+                used(role) as f64 / *n as f64,
+                others_used as f64 / others as f64,
+            );
+            if theirs >= 0.3 && mine <= theirs * 0.2 {
+                cards.push(Insight {
+                    kind: "role_blind_spot",
+                    title: format!("{role}s almost never use {feat}"),
+                    evidence: format!("{} of {n} {role}s vs {} of other users", pct(mine), pct(theirs)),
+                    next_step: format!("Do {role}s need {feat}? If yes, surface it in their screens; if no, hide it for them."),
+                    score: (theirs - mine) * (*n as f64).sqrt() * 1.2,
+                    subject: format!("{role}:{feat}"),
+                });
+            }
+        }
+    }
+
+    // Release regression.
+    let rel = rows(releases)?;
+    if let [new, old] = rel.as_slice() {
+        let rate = |r: &Map<String, Value>| int(r, "bad") as f64 / int(r, "sessions").max(1) as f64;
+        let (rn, ro) = (rate(new), rate(old));
+        if int(new, "sessions") >= 2 * MIN_GROUP && rn > ro * 1.5 && rn - ro > 0.03 {
+            let name = text(new, "release").unwrap_or_default();
+            cards.push(Insight {
+                kind: "release_regression",
+                title: format!(
+                    "Release {name}: sessions with errors went from {} to {}",
+                    pct(ro),
+                    pct(rn)
+                ),
+                evidence: format!(
+                    "{} sessions on {name}, {} on {}",
+                    int(new, "sessions"),
+                    int(old, "sessions"),
+                    text(old, "release").unwrap_or_default()
+                ),
+                next_step: format!(
+                    "Check the errors introduced by {name} (Events page, filter by release)."
+                ),
+                score: (rn - ro) * (int(new, "sessions") as f64).sqrt() * 2.5,
+                subject: name,
+            });
+        }
+    }
+
+    // Friction: started a feature, rarely reached its success event.
+    if let Some(fr) = friction {
+        for r in fr?.rows {
+            let (feat, started, done) = (
+                text(&r, "feature").unwrap_or_default(),
+                int(&r, "started"),
+                int(&r, "succeeded"),
+            );
+            if !successes.iter().any(|(k, _)| *k == feat) || started < MIN_GROUP {
+                continue;
+            }
+            let rate = done as f64 / started as f64;
+            if rate < 0.5 {
+                cards.push(Insight {
+                    kind: "friction",
+                    title: format!("Only {} of people who start {feat} finish it", pct(rate)),
+                    evidence: format!(
+                        "{done} of {started} users reached its success event in 30 days"
+                    ),
+                    next_step: format!(
+                        "Walk through {feat} as a new user: find the step where people give up."
+                    ),
+                    score: (1.0 - rate) * (started as f64).sqrt(),
+                    subject: feat,
+                });
+            }
+        }
+    }
+
+    cards.sort_by(|a, b| b.score.total_cmp(&a.score));
+    Ok((cards, readiness))
+}
+
+/// Slow pages, from the vitals already on the board.
+pub(crate) fn slow_pages(vitals: &[crate::Vital]) -> Option<Insight> {
+    let v = vitals
+        .iter()
+        .find(|v| v.rating == "poor" && v.samples >= MIN_GROUP)?;
+    let shown = if v.name == "CLS" {
+        format!("{:.2}", v.p75)
+    } else {
+        format!("{:.1} s", v.p75 / 1000.0)
+    };
+    Some(Insight {
+        kind: "slow_pages",
+        title: format!("Pages feel slow: {} p75 is {shown}", v.name),
+        evidence: format!("{} measurements in the last 7 days, rated poor", v.samples),
+        next_step: "Find the heaviest pages (Events, $vital) and trim images, scripts and blocking requests.".into(),
+        score: (v.samples as f64).sqrt() * 0.5,
+        subject: v.name.clone(),
+    })
+}

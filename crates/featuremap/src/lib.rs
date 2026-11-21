@@ -348,9 +348,19 @@ impl FeatureMap {
     }
 
     /// SQL expression giving the feature of an event: its `feature` column,
-    /// else the first feature whose route matches `path`.
+    /// else the feature whose success event it is, else the first feature
+    /// whose route matches `path`.
     pub fn feature_sql(&self) -> String {
         let mut s = String::from("CASE WHEN feature IS NOT NULL THEN feature");
+        for f in &self.features {
+            if let Some(ev) = &f.success {
+                s.push_str(&format!(
+                    " WHEN event = '{}' THEN '{}'",
+                    sql_escape(ev),
+                    sql_escape(&f.key)
+                ));
+            }
+        }
         for f in &self.features {
             for r in &f.entry.routes {
                 s.push_str(&format!(

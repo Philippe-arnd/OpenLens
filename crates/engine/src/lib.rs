@@ -12,6 +12,9 @@ use openlens_query::{QueryEngine, QueryError};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
+mod insights;
+pub use insights::{Insight, Readiness};
+
 /// Engine errors.
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
@@ -185,6 +188,10 @@ pub struct Board {
     pub role_gaps: Vec<(String, i64)>,
     /// Version of the feature map in use, if any.
     pub map_version: Option<i64>,
+    /// Ranked insight cards (at most 7).
+    pub insights: Vec<Insight>,
+    /// How close the project is to retention insights.
+    pub readiness: Readiness,
 }
 
 fn int(row: &Map<String, Value>, k: &str) -> i64 {
@@ -449,6 +456,23 @@ pub async fn board(
         .iter()
         .filter_map(|r| text(r, "environment"))
         .collect();
+    let churn = map.map_or(14, |(m, _)| i64::from(m.churn_days()));
+    let successes: Vec<(String, String)> = map
+        .map(|(m, _)| {
+            m.features
+                .iter()
+                .filter_map(|x| Some((x.key.clone(), x.success.clone()?)))
+                .collect()
+        })
+        .unwrap_or_default();
+    let (mut cards, readiness) = insights::compute(q, project, &src, f, churn, &successes).await?;
+    if let Some(c) = insights::slow_pages(&b.vitals) {
+        cards.push(c);
+        cards.sort_by(|a, b| b.score.total_cmp(&a.score));
+    }
+    cards.truncate(7);
+    b.insights = cards;
+    b.readiness = readiness;
     b.total_events = total?.rows.first().map_or(0, |r| int(r, "n"));
     Ok(b)
 }

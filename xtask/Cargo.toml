@@ -9,6 +9,8 @@ publish = false
 
 [dependencies]
 serde_json = "1"
+openlens-testkit = { path = "../crates/testkit" }
+openlens-storage = { path = "../crates/storage" }
 
 [lints]
 workspace = true
