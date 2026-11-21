@@ -3,11 +3,19 @@ name: CI
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
+  pull_request:        # every PR, whatever its base (stacked PRs included)
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
 
 jobs:
   gate:
@@ -18,24 +26,39 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-      - uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny
       - run: cargo xtask ci
 
-  docker:
-    name: docker build + healthcheck
+  sdk:
+    name: sdk (build, size budget, committed bundle up to date)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - run: docker compose up -d --build --wait --wait-timeout 120
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: build and check
+        working-directory: sdk/js
+        run: |
+          if [ ! -f package-lock.json ]; then echo "SDK not built yet, skipping"; exit 0; fi
+          npm ci
+          npm run build
+          npm run check
+          git diff --exit-code -- dist || (echo "::error::sdk/js/dist is stale: run npm run build and commit"; exit 1)
+
+  docker:
+    name: docker build + end-to-end smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: docker compose up -d --build --wait --wait-timeout 180
       - run: curl -fsS localhost:8686/healthz
+      - name: end-to-end smoke (when present)
+        run: if [ -x scripts/smoke.sh ]; then scripts/smoke.sh http://localhost:8686; fi
+      - if: failure()
+        run: docker compose logs
       - if: always()
         run: docker compose down -v
