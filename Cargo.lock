@@ -2280,6 +2280,7 @@ version = "0.0.1"
 dependencies = [
  "clap",
  "openlens-featuremap",
+ "openlens-mcp",
  "serde",
  "serde_json",
  "tempfile",
@@ -2339,6 +2340,9 @@ version = "0.0.1"
 [[package]]
 name = "openlens-mcp"
 version = "0.0.1"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "openlens-meta"

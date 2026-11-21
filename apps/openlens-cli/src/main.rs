@@ -6,6 +6,7 @@
 //! `OPENLENS_TOKEN` (no config file, D-014).
 
 mod lint;
+mod mcp;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -95,7 +96,7 @@ enum FeaturesCmd {
     },
 }
 
-struct Client {
+pub(crate) struct Client {
     server: String,
     token: String,
     agent: ureq::Agent,
@@ -128,7 +129,12 @@ impl Client {
         })
     }
 
-    fn call(&self, method: &str, path: &str, body: Option<Body>) -> Result<(u16, Value), String> {
+    pub(crate) fn call(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<Body>,
+    ) -> Result<(u16, Value), String> {
         let url = format!("{}{path}", self.server);
         let auth = format!("Bearer {}", self.token);
         let resp = match (method, body) {
@@ -161,7 +167,7 @@ impl Client {
         Ok((status, value))
     }
 
-    fn sql(&self, project: &str, query: &str) -> Result<Vec<Value>, String> {
+    pub(crate) fn sql(&self, project: &str, query: &str) -> Result<Vec<Value>, String> {
         let (status, v) = self.call(
             "POST",
             &format!("/api/projects/{project}/sql"),
@@ -174,7 +180,7 @@ impl Client {
     }
 }
 
-enum Body {
+pub(crate) enum Body {
     Json(Value),
     Text(String),
 }
@@ -239,18 +245,25 @@ fn run(cli: Cli) -> Result<bool, String> {
             automation_read_root,
             automation_write_root,
         } => {
-            for root in [automation_read_root, automation_write_root] {
-                if !root.is_dir() {
-                    return Err(format!("{} is not a directory", root.display()));
-                }
-            }
-            Err("the MCP server is not implemented yet (ROADMAP.md, M2)".into())
+            let tools =
+                mcp::OpenLensTools::new(client()?, automation_read_root, automation_write_root)?;
+            openlens_mcp::serve(&tools, "openlens", env!("CARGO_PKG_VERSION"))
+                .map_err(|e| e.to_string())?;
+            Ok(true)
         }
     }
 }
 
 /// The wiring checklist an agent must get to all-green before handing over.
 fn verify(c: &Client, project: &str) -> Result<bool, String> {
+    let report = verify_report(c, project)?;
+    let ok = report["ok"] == true;
+    out(&report);
+    Ok(ok)
+}
+
+/// The verify checklist as JSON (shared with the MCP tool).
+pub(crate) fn verify_report(c: &Client, project: &str) -> Result<Value, String> {
     let n = |rows: Vec<Value>| rows.first().and_then(|r| r["n"].as_i64()).unwrap_or(0);
     let recent = "timestamp >= now() - INTERVAL '1 day'";
     let events = n(c.sql(
@@ -314,9 +327,8 @@ fn verify(c: &Client, project: &str) -> Result<bool, String> {
         .as_array()
         .is_some_and(|a| a.iter().take(3).all(|c| c["ok"] == true))
         && map_status == 200;
-    out(&json!({ "ok": ok, "checks": checks, "features": features,
-        "note": "features with 0 events have not been exercised yet; click through them once to confirm they fire" }));
-    Ok(ok)
+    Ok(json!({ "ok": ok, "checks": checks, "features": features,
+        "note": "features with 0 events have not been exercised yet; click through them once to confirm they fire" }))
 }
 
 fn main() -> ExitCode {

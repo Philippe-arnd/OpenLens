@@ -10,6 +10,7 @@ publish.workspace = true
 
 [dependencies]
 openlens-featuremap = { path = "../../crates/featuremap" }
+openlens-mcp = { path = "../../crates/mcp" }
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true

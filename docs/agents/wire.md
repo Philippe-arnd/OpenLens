@@ -2,7 +2,9 @@
 
 You are the agent that maintains a web app. Your goal is that the product manager's **first login shows a populated Focus board**, with no manual setup on their side.
 
-**Available today:** `openlens-cli` (`init`, `features lint|push`, `verify`, `login-link`, `sql`, `guide`), the HTTP API below, the SDK and the dashboard. Steps marked *(M2)* (backfill, MCP) are not released yet: skip them and say so in your hand-over note.
+**Available today:** `openlens-cli` (`init`, `features lint|push`, `verify`, `login-link`, `sql`, `guide`), the HTTP API below, the SDK and the dashboard. Steps marked *(M2)* (backfill) are not released yet: skip them and say so in your hand-over note.
+
+**MCP:** `openlens-cli mcp --automation-read-root <app repo> --automation-write-root <scratch dir>` speaks MCP over stdio. Its tools are `guide`, `projects`, `init`, `feature_map_lint`, `feature_map_push`, `verify`, `board`, `sql` and `login_link`, and it reads files only inside the read root.
 
 `openlens-cli` reads `OPENLENS_SERVER` and `OPENLENS_TOKEN` (or `--server`/`--token`), prints JSON, and exits non-zero when something needs fixing. It is in the server image (`docker exec <container> openlens-cli …`), or `cargo install --git <repo> openlens-cli`.
 
