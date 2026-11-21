@@ -23,6 +23,8 @@ fn ev(project: &str, ts: chrono::DateTime<Utc>) -> Event {
         role: Some("admin".into()),
         account: None,
         plan: None,
+        environment: "production".into(),
+        release: Some("v1".into()),
         properties: "{}".into(),
     }
 }

@@ -122,3 +122,21 @@ fn hostile_bodies_never_panic() {
         }
     }
 }
+
+#[test]
+fn environment_defaults_to_production_and_aliases_fold() {
+    let batch = CaptureBatch {
+        batch: vec![
+            raw("x", json!({})),
+            raw("x", json!({"$environment": "PROD"})),
+            raw("x", json!({"$environment": "local", "$release": "v1.2.0"})),
+            raw("x", json!({"$environment": "qa-eu"})),
+        ],
+        ..Default::default()
+    };
+    let out = normalize_batch("p", batch, Utc::now()).unwrap();
+    let envs: Vec<_> = out.events.iter().map(|e| e.environment.as_str()).collect();
+    assert_eq!(envs, ["production", "production", "development", "qa-eu"]);
+    assert_eq!(out.events[2].release.as_deref(), Some("v1.2.0"));
+    assert!(!out.events[2].properties.contains("$release"));
+}
