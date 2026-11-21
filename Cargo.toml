@@ -65,3 +65,9 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# Optimised build without LTO: fast enough to compile locally for perf checks.
+[profile.perf]
+inherits = "release"
+lto = false
+codegen-units = 16
