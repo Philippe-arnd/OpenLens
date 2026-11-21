@@ -46,3 +46,10 @@ Append-only. Each entry: id, date, decision, why, consequences.
 - **History is backfilled** from the app's own data (`openlens-cli import`), so the first login has insights.
 - The M2 exit uses 3 reference apps, not 8. Fun names are cut back to the method's own concepts.
 - Deferred to "Later": weekly digest, LLM rewording, micro-surveys, experiment significance, server SDKs.
+
+## D-014 (2026-11-21) Almost no configuration: a methodology, not a toolbox
+**Why:** OpenLens is a method carried out by a tool. Every knob is a decision pushed onto the user, and a way for two projects to stop being comparable. **Consequences:**
+- The server needs **no** environment variables. The few it reads (`OPENLENS_DATA_DIR`, `OPENLENS_ADMIN_TOKEN`, `OPENLENS_PROJECT_KEY`, `OPENLENS_ADDR`) are optional overrides for deploy templates.
+- The **feature map is the only project configuration**, and agents write it. Its one tunable is `churn_after_days`.
+- Sessions (30-minute gap), the task timeout (30 minutes), UTC days and KPI definitions are fixed (docs/kpis.md).
+- There is no dashboard builder or chart configurator. A request for a new knob needs a decision entry explaining why a fixed default cannot work.
