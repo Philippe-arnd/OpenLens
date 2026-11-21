@@ -43,8 +43,26 @@ pub fn router(state: AppState) -> Router {
         .layer(CorsLayer::permissive());
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/c.js", get(sdk))
         .merge(capture)
         .with_state(state)
+}
+
+/// The browser SDK, embedded at build time (`sdk/js/dist`, committed).
+const SDK_JS: &str = include_str!("../../../sdk/js/dist/openlens.min.js");
+
+/// `GET /c.js`: the SDK for script-tag installs. Cached for an hour so that
+/// SDK updates roll out quickly without hammering the server.
+async fn sdk() -> impl axum::response::IntoResponse {
+    (
+        [
+            ("content-type", "application/javascript; charset=utf-8"),
+            ("cache-control", "public, max-age=3600"),
+            ("access-control-allow-origin", "*"),
+            ("x-content-type-options", "nosniff"),
+        ],
+        SDK_JS,
+    )
 }
 
 /// Liveness probe used by the container healthcheck.
