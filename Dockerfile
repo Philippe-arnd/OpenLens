@@ -5,7 +5,7 @@ COPY . .
 RUN cargo build --release --locked -p openlens
 
 FROM gcr.io/distroless/cc-debian12:nonroot
-COPY --from=build /src/target/release/openlens /usr/local/bin/openlens
+COPY --from=build /src/target/release/openlens /src/target/release/openlens-cli /usr/local/bin/
 ENV OPENLENS_ADDR=0.0.0.0:8686
 EXPOSE 8686
 VOLUME ["/data"]
