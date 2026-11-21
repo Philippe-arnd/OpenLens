@@ -14,7 +14,19 @@ On first login you land on the **Focus board**: ranked insights on where the val
 - **What they saw:** session replay, heatmaps, and errors linked to the session that hit them.
 - **What to ship to whom:** feature flags and experiments.
 
-> Status: **pre-alpha, nothing works yet but `/healthz`.** See [ROADMAP.md](ROADMAP.md).
+> Status: **working prototype** (2026-11-22). Capture, SDK, dashboard with insight cards, feature map, agent CLI + MCP, backfill and a one-click Coolify template all work. See [ROADMAP.md](ROADMAP.md) and [docs/gaps.md](docs/gaps.md).
+
+## Try it in two minutes
+
+```sh
+cargo xtask demo ./data                                        # 300 synthetic users with planted patterns
+OPENLENS_DATA_DIR=./data OPENLENS_ADMIN_TOKEN=demo cargo run -p openlens
+# open http://localhost:8686 and log in with "demo"
+```
+
+The Focus board opens with ranked insights such as "Users who use export in their first week stay 5.2× more", "72% of churned users were last seen in billing", "admins almost never use reports" and "Release v2: sessions with errors went from 3% to 33%". KPIs by role, release and environment sit underneath.
+
+Deploying: [docs/deploy/coolify.md](docs/deploy/coolify.md) (one click, nothing to configure). Wiring an app: give your agent `https://<your-openlens>/agents.md`.
 
 ## Plugging it in (target experience)
 
@@ -29,7 +41,7 @@ openlens.identify(user.id, { role: user.role, account: user.orgId });
 
 That is all most apps need. Page views, clicks, forms, errors and features (named from routes and `data-feature` attributes) are captured automatically.
 
-**In practice, your coding agent does it.** `openlens-cli init` creates the project. The agent adds the snippet and `identify()` with the user's role, drafts the feature map, backfills history from the app's data, and runs `verify`. Then it sends you a one-time login link, and your first login lands on a populated Focus board. Every event also carries its **environment** and **release**, so you can see whether the last release moved the numbers.
+**In practice, your coding agent does it** (`openlens-cli` or MCP). `openlens-cli init` creates the project. The agent adds the snippet and `identify()` with the user's role, drafts the feature map, backfills history from the app's data, and runs `verify`. Then it sends you a one-time login link, and your first login lands on a populated Focus board. Every event also carries its **environment** and **release**, so you can see whether the last release moved the numbers.
 
 ## Why another one
 

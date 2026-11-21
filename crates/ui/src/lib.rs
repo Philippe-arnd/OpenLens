@@ -431,6 +431,21 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
                     (bars(&roles))
                     p.muted.small { "Distinct users per role, last 30 days." }
                 }
+                @if !b.journeys.is_empty() {
+                    section.card.wide {
+                        h2 { span.dot.mint {} "Paths to value" }
+                        p.muted.small { "What users did just before reaching each success for the first time (last 30 days)." }
+                        ul.journeys {
+                            @for j in &b.journeys {
+                                li {
+                                    @for step in &j.path { span.step { (step) } span.arrow aria-hidden="true" { "→" } }
+                                    span.step.done { "✓ " (j.success) }
+                                    span.muted { " " (compact(j.users)) " users · " (pct(j.share)) " of those who got there" }
+                                }
+                            }
+                        }
+                    }
+                }
                 section.card.wide {
                     h2 { span.dot.coral {} "Releases" }
                     @if b.releases.is_empty() { p.muted { "No release tagged yet. Pass " code { "release" } " to the SDK to compare releases." } }
