@@ -165,7 +165,7 @@ impl Tools for OpenLensTools {
                 ok_or(st, v)
             }
             "verify" => crate::verify_report(c, &project(args)),
-            "board" => {
+            "insights" | "kpi_report" | "board" => {
                 let mut q = Vec::new();
                 for k in ["env", "role", "release"] {
                     if let Some(v) = s(args, k) {
@@ -174,7 +174,38 @@ impl Tools for OpenLensTools {
                 }
                 let path = format!("/api/projects/{}/board?{}", project(args), q.join("&"));
                 let (st, v) = c.call("GET", &path, None)?;
-                ok_or(st, v)
+                let v = ok_or(st, v)?;
+                Ok(match name {
+                    "insights" => json!({
+                        "insights": v["insights"],
+                        "paths_to_value": v["journeys"],
+                        "readiness": v["readiness"],
+                        "role_gaps": v["role_gaps"],
+                        "feature_map_version": v["map_version"],
+                    }),
+                    "kpi_report" => {
+                        let top = |k: &str, n: usize| {
+                            json!(
+                                v[k].as_array().map(|a| a
+                                    .iter()
+                                    .take(n)
+                                    .cloned()
+                                    .collect::<Vec<_>>())
+                            )
+                        };
+                        json!({
+                            "filters": v["filters"],
+                            "users": v["users"],
+                            "sessions": v["sessions"],
+                            "vitals": v["vitals"],
+                            "features": top("features", 8),
+                            "roles": top("roles", 8),
+                            "releases": top("releases", 2),
+                            "total_events": v["total_events"],
+                        })
+                    }
+                    _ => v,
+                })
             }
             "sql" => {
                 let query = s(args, "query").ok_or("query is required")?;
