@@ -13,7 +13,7 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 
 mod insights;
-pub use insights::{Insight, Readiness};
+pub use insights::{Insight, Journey, Readiness};
 
 /// Engine errors.
 #[derive(Debug, thiserror::Error)]
@@ -198,6 +198,8 @@ pub struct Board {
     pub insights: Vec<Insight>,
     /// How close the project is to retention insights.
     pub readiness: Readiness,
+    /// Frequent paths into each feature's success event.
+    pub journeys: Vec<Journey>,
 }
 
 fn int(row: &Map<String, Value>, k: &str) -> i64 {
@@ -474,7 +476,11 @@ pub async fn board(
                 .collect()
         })
         .unwrap_or_default();
-    let (mut cards, readiness) = insights::compute(q, project, &src, f, churn, &successes).await?;
+    let ((mut cards, readiness), journeys) = futures::try_join!(
+        insights::compute(q, project, &src, f, churn, &successes),
+        insights::journeys(q, project, &src, f, &successes),
+    )?;
+    b.journeys = journeys;
     if let Some(c) = insights::slow_pages(&b.vitals) {
         cards.push(c);
         cards.sort_by(|a, b| b.score.total_cmp(&a.score));

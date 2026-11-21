@@ -403,3 +403,72 @@ pub(crate) fn slow_pages(vitals: &[crate::Vital]) -> Option<Insight> {
         subject: v.name.clone(),
     })
 }
+
+/// A frequent path into a success event.
+#[derive(Debug, Clone, Serialize)]
+pub struct Journey {
+    /// The success event the path leads to.
+    pub success: String,
+    /// The feature this success belongs to.
+    pub feature: String,
+    /// Up to 3 places (feature, else page path) before the first success, oldest first.
+    pub path: Vec<String>,
+    /// Users who took this path.
+    pub users: i64,
+    /// Share of the users who reached the success.
+    pub share: f64,
+}
+
+/// Top 3 paths into the first success of each feature (at most 4 features):
+/// the last three distinct places a user visited in the day before reaching
+/// it for the first time.
+pub(crate) async fn journeys(
+    q: &QueryEngine,
+    project: &str,
+    src: &str,
+    f: &Filters,
+    successes: &[(String, String)],
+) -> Result<Vec<Journey>> {
+    let w = f.clause(30)?;
+    let mut out = Vec::new();
+    let runs = successes.iter().take(4).map(|(feature, ev)| {
+        let ev_lit = ev.replace('\'', "''");
+        let sql = format!(
+            "WITH ev AS (SELECT distinct_id, timestamp, event, coalesce(feature, path) AS place FROM {src} WHERE {w}), \
+             firsts AS (SELECT distinct_id, min(timestamp) AS t FROM ev WHERE event = '{ev_lit}' GROUP BY distinct_id), \
+             before AS (SELECT e.distinct_id, e.timestamp, e.place FROM ev e JOIN firsts f ON e.distinct_id = f.distinct_id \
+                        WHERE e.timestamp < f.t AND e.timestamp >= f.t - INTERVAL '1 day' AND e.place IS NOT NULL \
+                        AND e.event <> '{ev_lit}'), \
+             dedup AS (SELECT distinct_id, timestamp, place, \
+                       lag(place) OVER (PARTITION BY distinct_id ORDER BY timestamp) AS prev FROM before), \
+             ranked AS (SELECT distinct_id, place, \
+                        row_number() OVER (PARTITION BY distinct_id ORDER BY timestamp DESC) AS rn \
+                        FROM dedup WHERE prev IS NULL OR prev <> place) \
+             SELECT p3.place AS a, p2.place AS b, p1.place AS c, count(*) AS users, \
+                    (SELECT count(*) FROM firsts) AS reached \
+             FROM ranked p1 \
+             LEFT JOIN ranked p2 ON p1.distinct_id = p2.distinct_id AND p2.rn = 2 \
+             LEFT JOIN ranked p3 ON p1.distinct_id = p3.distinct_id AND p3.rn = 3 \
+             WHERE p1.rn = 1 GROUP BY p3.place, p2.place, p1.place ORDER BY users DESC LIMIT 3"
+        );
+        async move { (feature.clone(), ev.clone(), q.sql(project, &sql).await) }
+    });
+    for (feature, ev, res) in futures::future::join_all(runs).await {
+        for r in res?.rows {
+            let users = int(&r, "users");
+            let reached = int(&r, "reached").max(1);
+            if users < 3 {
+                continue;
+            }
+            let path: Vec<String> = ["a", "b", "c"].iter().filter_map(|k| text(&r, k)).collect();
+            out.push(Journey {
+                success: ev.clone(),
+                feature: feature.clone(),
+                path,
+                users,
+                share: users as f64 / reached as f64,
+            });
+        }
+    }
+    Ok(out)
+}
