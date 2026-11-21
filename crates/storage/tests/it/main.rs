@@ -25,6 +25,7 @@ fn ev(project: &str, ts: chrono::DateTime<Utc>) -> Event {
         plan: None,
         environment: "production".into(),
         release: Some("v1".into()),
+        flags: None,
         properties: "{}".into(),
     }
 }

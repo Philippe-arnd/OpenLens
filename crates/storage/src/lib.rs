@@ -80,6 +80,7 @@ pub fn event_schema() -> SchemaRef {
         Field::new("plan", DataType::Utf8, true),
         Field::new("environment", DataType::Utf8, false),
         Field::new("release", DataType::Utf8, true),
+        Field::new("flags", DataType::Utf8, true),
         Field::new("properties", DataType::Utf8, false),
     ]))
 }
@@ -316,6 +317,7 @@ fn to_batch(events: &[&Event]) -> Result<RecordBatch> {
     let plan = s(&|e| e.plan.as_deref());
     let environment = s(&|e| Some(&e.environment));
     let release = s(&|e| e.release.as_deref());
+    let flags = s(&|e| e.flags.as_deref());
     let props = s(&|e| Some(&e.properties));
     let ts = |f: &dyn Fn(&Event) -> DateTime<Utc>| -> ArrayRef {
         let mut b = TimestampMicrosecondBuilder::with_capacity(n).with_timezone("UTC");
@@ -343,6 +345,7 @@ fn to_batch(events: &[&Event]) -> Result<RecordBatch> {
             plan,
             environment,
             release,
+            flags,
             props,
         ],
     )?)

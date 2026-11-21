@@ -472,3 +472,150 @@ pub(crate) async fn journeys(
     }
     Ok(out)
 }
+
+/// Session KPIs of one side of a flag.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct CohortStats {
+    /// Distinct users.
+    pub users: i64,
+    /// Sessions.
+    pub sessions: i64,
+    /// Mean duration of non-bounce sessions, seconds.
+    pub avg_secs: f64,
+    /// Feature uses per session.
+    pub tasks_per_session: f64,
+    /// Share of sessions with an error.
+    pub error_rate: f64,
+}
+
+/// Users with a flag on, against everyone else (last 30 days).
+#[derive(Debug, Clone, Serialize)]
+pub struct FlagCohort {
+    /// Flag key.
+    pub flag: String,
+    /// Sessions where the flag was on.
+    pub with: CohortStats,
+    /// All other sessions.
+    pub without: CohortStats,
+}
+
+fn valid_flag(k: &str) -> bool {
+    !k.is_empty()
+        && k.len() <= 64
+        && k.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
+}
+
+/// Compare the sessions of each flag seen lately (at most 5) with the rest.
+pub(crate) async fn flag_cohorts(
+    q: &QueryEngine,
+    project: &str,
+    src: &str,
+    f: &Filters,
+) -> Result<Vec<FlagCohort>> {
+    let w = f.clause(30)?;
+    let seen = q
+        .sql(
+            project,
+            &format!("SELECT DISTINCT flags FROM {src} WHERE {w} AND flags IS NOT NULL LIMIT 200"),
+        )
+        .await?;
+    let mut keys: Vec<String> = seen
+        .rows
+        .iter()
+        .filter_map(|r| text(r, "flags"))
+        .flat_map(|s| s.split(',').map(str::to_owned).collect::<Vec<_>>())
+        .filter(|k| valid_flag(k))
+        .collect();
+    keys.sort();
+    keys.dedup();
+    keys.truncate(5);
+    let runs = keys.iter().map(|key| {
+        // `key` is restricted to [a-z0-9_-], so it is safe inside the literal.
+        let sql = format!(
+            "SELECT has, count(DISTINCT uid) AS users, count(*) AS sessions, \
+             avg(CASE WHEN n > 1 THEN secs END) AS avg_secs, avg(CAST(tasks AS DOUBLE)) AS tps, \
+             avg(CASE WHEN errors > 0 THEN 1.0 ELSE 0.0 END) AS err \
+             FROM (SELECT session_id, min(distinct_id) AS uid, \
+                   max(CASE WHEN strpos(concat(',', coalesce(flags, ''), ','), ',{key},') > 0 THEN 1 ELSE 0 END) AS has, \
+                   count(*) AS n, date_part('epoch', max(timestamp)) - date_part('epoch', min(timestamp)) AS secs, \
+                   sum(CASE WHEN event = '$error' THEN 1 ELSE 0 END) AS errors, \
+                   sum(CASE WHEN feature IS NOT NULL THEN 1 ELSE 0 END) AS tasks \
+                   FROM {src} WHERE {w} AND session_id IS NOT NULL GROUP BY session_id) s GROUP BY has"
+        );
+        async move { (key.clone(), q.sql(project, &sql).await) }
+    });
+    let mut out = Vec::new();
+    for (key, res) in futures::future::join_all(runs).await {
+        let mut c = FlagCohort {
+            flag: key,
+            with: CohortStats::default(),
+            without: CohortStats::default(),
+        };
+        for r in res?.rows {
+            let stats = CohortStats {
+                users: int(&r, "users"),
+                sessions: int(&r, "sessions"),
+                avg_secs: r.get("avg_secs").and_then(Value::as_f64).unwrap_or(0.0),
+                tasks_per_session: r.get("tps").and_then(Value::as_f64).unwrap_or(0.0),
+                error_rate: r.get("err").and_then(Value::as_f64).unwrap_or(0.0),
+            };
+            if int(&r, "has") == 1 {
+                c.with = stats
+            } else {
+                c.without = stats
+            }
+        }
+        out.push(c);
+    }
+    Ok(out)
+}
+
+/// Cards for flags whose cohort clearly differs from everyone else.
+pub(crate) fn flag_cards(cohorts: &[FlagCohort]) -> Vec<Insight> {
+    let mut cards = Vec::new();
+    for c in cohorts {
+        let (w, o) = (&c.with, &c.without);
+        if w.users < MIN_GROUP || o.users < MIN_GROUP {
+            continue;
+        }
+        if w.error_rate > o.error_rate * 1.5 && w.error_rate - o.error_rate > 0.03 {
+            cards.push(Insight {
+                kind: "flag_regression",
+                title: format!(
+                    "Flag {}: sessions with errors {} vs {} without it",
+                    c.flag,
+                    pct(w.error_rate),
+                    pct(o.error_rate)
+                ),
+                evidence: format!(
+                    "{} users / {} sessions with the flag, {} / {} without",
+                    w.users, w.sessions, o.users, o.sessions
+                ),
+                next_step: format!(
+                    "Hold the {} rollout and check its errors (Events, filter $error).",
+                    c.flag
+                ),
+                score: (w.error_rate - o.error_rate) * (w.sessions as f64).sqrt() * 2.5,
+                subject: c.flag.clone(),
+            });
+        } else if o.tasks_per_session > 0.0 && w.tasks_per_session > o.tasks_per_session * 1.2 {
+            cards.push(Insight {
+                kind: "flag_win",
+                title: format!(
+                    "Flag {}: {:.0}% more tasks per session",
+                    c.flag,
+                    (w.tasks_per_session / o.tasks_per_session - 1.0) * 100.0
+                ),
+                evidence: format!(
+                    "{:.2} vs {:.2} tasks per session ({} vs {} users)",
+                    w.tasks_per_session, o.tasks_per_session, w.users, o.users
+                ),
+                next_step: format!("Widen the {} rollout and keep watching errors.", c.flag),
+                score: (w.tasks_per_session / o.tasks_per_session - 1.0) * (w.users as f64).sqrt(),
+                subject: c.flag.clone(),
+            });
+        }
+    }
+    cards
+}

@@ -265,7 +265,8 @@ fn insight_cards(b: &Board) -> Markup {
         "stick_driver" | "value_moment" => ("mint", "★"),
         "churn_point" | "friction" => ("coral", "↘"),
         "role_blind_spot" => ("violet", "◐"),
-        "release_regression" => ("sun", "!"),
+        "release_regression" | "flag_regression" => ("sun", "!"),
+        "flag_win" => ("mint", "▲"),
         _ => ("sky", "⏱"),
     };
     html! {
@@ -431,6 +432,24 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
                     h2 { span.dot.mint {} "Who uses the app" }
                     (bars(&roles))
                     p.muted.small { "Distinct users per role, last 30 days." }
+                }
+                @if !b.flag_cohorts.is_empty() {
+                    section.card.wide {
+                        h2 { span.dot.violet {} "Flags: with vs without" }
+                        table.plain {
+                            thead { tr { th { "Flag" } th.num { "Users with / without" } th.num { "Avg session" } th.num { "Tasks / session" } th.num { "Sessions with errors" } } }
+                            tbody { @for c in &b.flag_cohorts {
+                                tr {
+                                    th scope="row" { code { (c.flag) } }
+                                    td.num { (compact(c.with.users)) " / " (compact(c.without.users)) }
+                                    td.num { (duration(c.with.avg_secs)) " / " (duration(c.without.avg_secs)) }
+                                    td.num { (format!("{:.2}", c.with.tasks_per_session)) " / " (format!("{:.2}", c.without.tasks_per_session)) }
+                                    td.num { (pct(c.with.error_rate)) " / " (pct(c.without.error_rate)) }
+                                }
+                            } }
+                        }
+                        p.muted.small { "Sessions where the flag was on, against all other sessions, last 30 days." }
+                    }
                 }
                 @if !b.journeys.is_empty() {
                     section.card.wide {
