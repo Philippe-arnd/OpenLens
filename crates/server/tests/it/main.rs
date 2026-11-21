@@ -324,3 +324,57 @@ async fn board_renders_numbers_once_data_exists() {
     let events = get(&h, "/p/default/events", Some(&cookie), false).await;
     assert_eq!(events.status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn feature_map_put_refuses_errors_and_stores_valid_maps() {
+    let h = harness();
+    let put = |body: &'static str| {
+        let st = h.state.clone();
+        async move {
+            let resp = router(st)
+                .oneshot(
+                    Request::put("/api/projects/default/feature-map")
+                        .header("authorization", "Bearer adm_test")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = resp.status();
+            let v: serde_json::Value = serde_json::from_slice(
+                &axum::body::to_bytes(resp.into_body(), 1 << 20)
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            (status, v)
+        }
+    };
+    let (status, v) = put("features:\n  - key: Bad\n    name: x\n").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(v["stored"], false);
+    let issues = v["issues"].as_array().unwrap();
+    assert!(
+        issues.iter().any(
+            |i| i["level"] == "error" && i["path"].as_str().unwrap().starts_with("features[0]")
+        )
+    );
+
+    let (status, v) = put("roles:\n  - key: admin\n    match: [owner]\nfeatures:\n  - key: search\n    name: Search\n    entry: { routes: ['/search'] }\n").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(v["version"], 1);
+
+    post(&h, "/capture", batch(&h.key), false).await;
+    openlens_server::flush_now(&h.state).unwrap();
+    let cookie = login_cookie(&h).await;
+    let page = get(&h, "/p/default", Some(&cookie), false).await;
+    let html = String::from_utf8_lossy(
+        &axum::body::to_bytes(page.into_body(), 1 << 20)
+            .await
+            .unwrap(),
+    )
+    .to_string();
+    assert!(html.contains("Feature map v1"));
+    assert!(html.contains("Never used"), "search is declared but unused");
+    assert!(html.contains(">admin<"), "owner resolves to admin");
+}

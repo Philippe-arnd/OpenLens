@@ -242,7 +242,24 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
     let feats: Vec<_> = b
         .features
         .iter()
-        .map(|x| (x.key.clone(), x.users, format!("{} uses", compact(x.uses))))
+        .filter(|x| x.users > 0)
+        .map(|x| {
+            let extra = if x.declared && x.completed > 0 {
+                format!("{} uses · {} done", compact(x.uses), compact(x.completed))
+            } else {
+                format!("{} uses", compact(x.uses))
+            };
+            (
+                x.name.clone().unwrap_or_else(|| x.key.clone()),
+                x.users,
+                extra,
+            )
+        })
+        .collect();
+    let unused: Vec<_> = b
+        .features
+        .iter()
+        .filter(|x| x.declared && x.users == 0)
         .collect();
     let roles: Vec<_> = b
         .roles
@@ -304,6 +321,21 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
                     @if feats.is_empty() { p.muted { "No feature has been used yet. Features come from " code { "data-feature" } " attributes and the feature map." } }
                     @else { (bars(&feats)) p.muted.small { "By distinct users, last 30 days." } }
                 }
+                @if !unused.is_empty() {
+                    section.card {
+                        h2 { span.dot.coral {} "Never used (last 30 days)" }
+                        ul.tags { @for x in &unused { li { (x.name.as_deref().unwrap_or(&x.key)) } } }
+                        p.muted.small { "Declared in the feature map, but nobody reached them. Hidden, broken, or not needed?" }
+                    }
+                }
+                @if !b.role_gaps.is_empty() {
+                    section.card {
+                        h2 { span.dot.sun {} "Role gaps" }
+                        p.small { "These raw role values match no role in the feature map, so they are counted apart:" }
+                        ul.tags { @for (raw, n) in &b.role_gaps { li { code { (raw) } " · " (compact(*n)) " users" } } }
+                        p.muted.small { "Ask your agent to map them under " code { "roles:" } " in openlens.features.yaml." }
+                    }
+                }
                 section.card {
                     h2 { span.dot.mint {} "Who uses the app" }
                     (bars(&roles))
@@ -328,7 +360,12 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
                     }
                 }
             }
-            p.muted.small.center { "Insight cards (what makes users stick, where they churn) arrive with the feature map — see the roadmap." }
+            p.muted.small.center {
+                @match b.map_version {
+                    Some(v) => { "Feature map v" (v) " in use. Insight cards (what makes users stick, where they churn) are next on the roadmap." }
+                    None => { "No feature map yet: roles are shown raw and features only from data-feature. Ask your agent to push openlens.features.yaml." }
+                }
+            }
         },
     )
 }

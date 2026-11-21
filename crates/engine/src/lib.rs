@@ -7,6 +7,7 @@
 //! Layer: L3 (see `docs/architecture.md`).
 
 use chrono::{Duration, Utc};
+use openlens_featuremap::FeatureMap;
 use openlens_query::{QueryEngine, QueryError};
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -121,10 +122,16 @@ pub struct Vital {
 pub struct FeatureUse {
     /// Feature key.
     pub key: String,
+    /// Display name from the feature map.
+    pub name: Option<String>,
     /// Uses (events carrying the feature).
     pub uses: i64,
     /// Distinct users.
     pub users: i64,
+    /// Completed tasks: success events of this feature.
+    pub completed: i64,
+    /// Declared in the feature map.
+    pub declared: bool,
 }
 
 /// Users per role.
@@ -174,6 +181,10 @@ pub struct Board {
     pub releases: Vec<ReleaseRow>,
     /// Environments seen.
     pub environments: Vec<String>,
+    /// Raw role values no rule of the feature map matches, with user counts.
+    pub role_gaps: Vec<(String, i64)>,
+    /// Version of the feature map in use, if any.
+    pub map_version: Option<i64>,
 }
 
 fn int(row: &Map<String, Value>, k: &str) -> i64 {
@@ -204,8 +215,32 @@ fn rating(name: &str, v: f64) -> &'static str {
     }
 }
 
-/// Compute the board for a project. Queries run concurrently.
-pub async fn board(q: &QueryEngine, project: &str, f: &Filters) -> Result<Board> {
+/// The event source: the raw `events` table, or, with a feature map, a
+/// projection where `role` is the canonical role and `feature` includes
+/// route-matched features. Every query reads from this, so the map applies
+/// everywhere without rewriting stored data.
+fn source(map: Option<&FeatureMap>) -> String {
+    match map {
+        None => "events".into(),
+        Some(m) => format!(
+            "(SELECT uuid, event, distinct_id, session_id, timestamp, received_at, url, path, \
+             account, plan, environment, release, properties, date, hour, \
+             {} AS role, {} AS feature FROM events) AS events",
+            m.role_sql(),
+            m.feature_sql()
+        ),
+    }
+}
+
+/// Compute the board for a project, with its feature map when it has one.
+/// Queries run concurrently.
+pub async fn board(
+    q: &QueryEngine,
+    project: &str,
+    f: &Filters,
+    map: Option<(&FeatureMap, i64)>,
+) -> Result<Board> {
+    let src = source(map.map(|(m, _)| m));
     let w30 = f.clause(30)?;
     let w14 = f.clause(14)?;
     let w7 = f.clause(7)?;
@@ -218,7 +253,7 @@ pub async fn board(q: &QueryEngine, project: &str, f: &Filters) -> Result<Board>
     let users_sql = format!(
         "SELECT count(DISTINCT CASE WHEN timestamp >= now() - INTERVAL '1 day' THEN distinct_id END) AS dau, \
          count(DISTINCT CASE WHEN timestamp >= now() - INTERVAL '7 days' THEN distinct_id END) AS wau, \
-         count(DISTINCT distinct_id) AS mau FROM events WHERE {w30}"
+         count(DISTINCT distinct_id) AS mau FROM {src} WHERE {w30}"
     );
     let sessions_sql = format!(
         "SELECT count(*) AS sessions, \
@@ -230,24 +265,24 @@ pub async fn board(q: &QueryEngine, project: &str, f: &Filters) -> Result<Board>
                date_part('epoch', max(timestamp)) - date_part('epoch', min(timestamp)) AS secs, \
                sum(CASE WHEN event = '$error' THEN 1 ELSE 0 END) AS errors, \
                sum(CASE WHEN feature IS NOT NULL THEN 1 ELSE 0 END) AS tasks \
-               FROM events WHERE {w7} AND session_id IS NOT NULL GROUP BY session_id) s"
+               FROM {src} WHERE {w7} AND session_id IS NOT NULL GROUP BY session_id) s"
     );
     let dau_sql = format!(
-        "SELECT date, count(DISTINCT distinct_id) AS n FROM events WHERE {w14} GROUP BY date ORDER BY date"
+        "SELECT date, count(DISTINCT distinct_id) AS n FROM {src} WHERE {w14} GROUP BY date ORDER BY date"
     );
     let vitals_sql = format!(
         "SELECT name, approx_percentile_cont(v, 0.75) AS p75, count(*) AS samples FROM ( \
            SELECT regexp_match(properties, '\"\\$name\":\"([A-Z]+)\"')[1] AS name, \
                   CAST(regexp_match(properties, '\"\\$value\":([0-9.eE+-]+)')[1] AS DOUBLE) AS v \
-           FROM events WHERE {w7} AND event = '$vital') x \
+           FROM {src} WHERE {w7} AND event = '$vital') x \
          WHERE name IS NOT NULL AND v IS NOT NULL GROUP BY name ORDER BY name"
     );
     let features_sql = format!(
         "SELECT feature AS key, count(*) AS uses, count(DISTINCT distinct_id) AS users \
-         FROM events WHERE {w30} AND feature IS NOT NULL GROUP BY feature ORDER BY users DESC, uses DESC LIMIT 12"
+         FROM {src} WHERE {w30} AND feature IS NOT NULL GROUP BY feature ORDER BY users DESC, uses DESC LIMIT 12"
     );
     let roles_sql = format!(
-        "SELECT role, count(DISTINCT distinct_id) AS users FROM events WHERE {} \
+        "SELECT role, count(DISTINCT distinct_id) AS users FROM {src} WHERE {} \
          GROUP BY role ORDER BY users DESC LIMIT 12",
         Filters {
             role: None,
@@ -259,13 +294,33 @@ pub async fn board(q: &QueryEngine, project: &str, f: &Filters) -> Result<Board>
         "SELECT release, CAST(min(timestamp) AS VARCHAR) AS first_seen, count(DISTINCT distinct_id) AS users, \
          count(DISTINCT session_id) AS sessions, \
          count(DISTINCT CASE WHEN event = '$error' THEN session_id END) AS error_sessions \
-         FROM events WHERE {all_releases} AND release IS NOT NULL \
+         FROM {src} WHERE {all_releases} AND release IS NOT NULL \
          GROUP BY release ORDER BY min(timestamp) DESC LIMIT 5"
     );
     let env_sql = "SELECT DISTINCT environment FROM events ORDER BY environment".to_owned();
     let total_sql = "SELECT count(*) AS n FROM events".to_owned();
 
-    let (users, sessions, dau, vitals, features, roles, releases, envs, total) = futures::join!(
+    let successes: Vec<&str> = map
+        .map(|(m, _)| {
+            m.features
+                .iter()
+                .filter_map(|x| x.success.as_deref())
+                .collect()
+        })
+        .unwrap_or_default();
+    let success_sql = if successes.is_empty() {
+        "SELECT CAST(NULL AS VARCHAR) AS event, 0 AS n WHERE false".to_owned()
+    } else {
+        let list = successes
+            .iter()
+            .map(|e| lit(e))
+            .collect::<Result<Vec<_>>>()?
+            .join(", ");
+        format!(
+            "SELECT event, count(*) AS n FROM {src} WHERE {w30} AND event IN ({list}) GROUP BY event"
+        )
+    };
+    let (users, sessions, dau, vitals, features, roles, releases, envs, total, success) = futures::join!(
         q.sql(project, &users_sql),
         q.sql(project, &sessions_sql),
         q.sql(project, &dau_sql),
@@ -275,6 +330,7 @@ pub async fn board(q: &QueryEngine, project: &str, f: &Filters) -> Result<Board>
         q.sql(project, &releases_sql),
         q.sql(project, &env_sql),
         q.sql(project, &total_sql),
+        q.sql(project, &success_sql),
     );
 
     let mut b = Board {
@@ -327,18 +383,49 @@ pub async fn board(q: &QueryEngine, project: &str, f: &Filters) -> Result<Board>
         .iter()
         .map(|r| FeatureUse {
             key: text(r, "key").unwrap_or_default(),
+            name: None,
             uses: int(r, "uses"),
             users: int(r, "users"),
+            completed: 0,
+            declared: false,
         })
         .collect();
-    b.roles = roles?
-        .rows
-        .iter()
-        .map(|r| RoleUsers {
-            role: text(r, "role"),
-            users: int(r, "users"),
-        })
-        .collect();
+    let success_rows = success?.rows;
+    if let Some((m, version)) = map {
+        b.map_version = Some(version);
+        for decl in &m.features {
+            let completed = decl.success.as_deref().map_or(0, |ev| {
+                success_rows
+                    .iter()
+                    .filter(|r| text(r, "event").as_deref() == Some(ev))
+                    .map(|r| int(r, "n"))
+                    .sum()
+            });
+            match b.features.iter_mut().find(|x| x.key == decl.key) {
+                Some(x) => {
+                    x.name = Some(decl.name.clone());
+                    x.completed = completed;
+                    x.declared = true;
+                }
+                None => b.features.push(FeatureUse {
+                    key: decl.key.clone(),
+                    name: Some(decl.name.clone()),
+                    uses: 0,
+                    users: 0,
+                    completed,
+                    declared: true,
+                }),
+            }
+        }
+    }
+    for r in roles?.rows.iter() {
+        let role = text(r, "role");
+        let users = int(r, "users");
+        match role.as_deref().and_then(|v| v.strip_prefix("unmatched:")) {
+            Some(raw) => b.role_gaps.push((raw.to_owned(), users)),
+            None => b.roles.push(RoleUsers { role, users }),
+        }
+    }
     b.releases = releases?
         .rows
         .iter()
@@ -390,16 +477,18 @@ pub async fn recent_events(
     q: &QueryEngine,
     project: &str,
     f: &Filters,
+    map: Option<&FeatureMap>,
     event: Option<&str>,
     limit: usize,
 ) -> Result<Vec<EventRow>> {
+    let src = source(map);
     let mut w = f.clause(30)?;
     if let Some(e) = event {
         w.push_str(&format!(" AND event = {}", lit(e)?));
     }
     let sql = format!(
         "SELECT CAST(timestamp AS VARCHAR) AS ts, event, distinct_id, role, path, feature, release \
-         FROM events WHERE {w} ORDER BY timestamp DESC LIMIT {}",
+         FROM {src} WHERE {w} ORDER BY timestamp DESC LIMIT {}",
         limit.min(200)
     );
     let r = q.sql(project, &sql).await?;

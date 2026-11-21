@@ -166,3 +166,17 @@ pub(crate) fn base_url(headers: &axum::http::HeaderMap) -> String {
     };
     format!("{proto}://{host}")
 }
+
+/// The project's latest valid feature map, if it has one.
+pub(crate) async fn load_map(
+    state: &AppState,
+    project: &str,
+) -> Option<(openlens_featuremap::FeatureMap, i64)> {
+    let meta = state.meta.clone();
+    let p = project.to_owned();
+    let (version, yaml) = tokio::task::spawn_blocking(move || meta.feature_map(&p))
+        .await
+        .ok()?
+        .ok()??;
+    openlens_featuremap::parse(&yaml).map.map(|m| (m, version))
+}

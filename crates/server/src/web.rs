@@ -170,7 +170,9 @@ async fn board(
         name: &p.name,
         key: &p.api_key,
     };
-    match openlens_engine::board(&state.query, &p.id, &f).await {
+    let map = crate::load_map(&state, &p.id).await;
+    match openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))).await
+    {
         Ok(b) => html(
             StatusCode::OK,
             openlens_ui::board(&info, &b, &f, &crate::base_url(&headers)),
@@ -203,7 +205,15 @@ async fn events(
         name: &p.name,
         key: &p.api_key,
     };
-    let (b, rows) = futures_join(&state, &p.id, &f, q.event.as_deref()).await;
+    let map = crate::load_map(&state, &p.id).await;
+    let (b, rows) = futures_join(
+        &state,
+        &p.id,
+        &f,
+        map.as_ref().map(|(m, v)| (m, *v)),
+        q.event.as_deref(),
+    )
+    .await;
     match (b, rows) {
         (Ok(b), Ok(rows)) => html(StatusCode::OK, openlens_ui::events(&info, &b, &rows, &f)),
         (Err(e), _) | (_, Err(e)) => html(
@@ -217,13 +227,14 @@ async fn futures_join(
     state: &AppState,
     project: &str,
     f: &openlens_engine::Filters,
+    map: Option<(&openlens_featuremap::FeatureMap, i64)>,
     event: Option<&str>,
 ) -> (
     openlens_engine::Result<openlens_engine::Board>,
     openlens_engine::Result<Vec<openlens_engine::EventRow>>,
 ) {
     tokio::join!(
-        openlens_engine::board(&state.query, project, f),
-        openlens_engine::recent_events(&state.query, project, f, event, 100)
+        openlens_engine::board(&state.query, project, f, map),
+        openlens_engine::recent_events(&state.query, project, f, map.map(|(m, _)| m), event, 100)
     )
 }

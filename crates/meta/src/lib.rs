@@ -85,6 +85,13 @@ CREATE TABLE IF NOT EXISTS role_history (
 );
 CREATE INDEX IF NOT EXISTS role_history_person ON role_history (project, distinct_id, since);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS feature_maps (
+  project TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  yaml TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (project, version)
+);
 CREATE TABLE IF NOT EXISTS login_links (
   hash TEXT PRIMARY KEY,
   expires_at INTEGER NOT NULL
@@ -344,6 +351,43 @@ impl Meta {
                 params![sha256_hex(token), Utc::now().timestamp()],
             )?;
             Ok(n == 1)
+        })
+    }
+
+    /// Store a new version of a project's feature map; returns the version.
+    /// An identical map is not stored again (same version returned).
+    pub fn save_feature_map(&self, project: &str, yaml: &str) -> Result<i64> {
+        self.with(|c| {
+            let latest: Option<(i64, String)> = c
+                .query_row(
+                    "SELECT version, yaml FROM feature_maps WHERE project = ?1 ORDER BY version DESC LIMIT 1",
+                    [project],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            if let Some((v, y)) = &latest
+                && y == yaml
+            {
+                return Ok(*v);
+            }
+            let version = latest.map_or(1, |(v, _)| v + 1);
+            c.execute(
+                "INSERT INTO feature_maps (project, version, yaml, created_at) VALUES (?1, ?2, ?3, ?4)",
+                params![project, version, yaml, Utc::now().to_rfc3339()],
+            )?;
+            Ok(version)
+        })
+    }
+
+    /// Latest feature map of a project: `(version, yaml)`.
+    pub fn feature_map(&self, project: &str) -> Result<Option<(i64, String)>> {
+        self.with(|c| {
+            Ok(c.query_row(
+                "SELECT version, yaml FROM feature_maps WHERE project = ?1 ORDER BY version DESC LIMIT 1",
+                [project],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?)
         })
     }
 

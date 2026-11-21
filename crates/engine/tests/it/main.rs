@@ -6,6 +6,7 @@
 use chrono::{Duration, Utc};
 use openlens_engine::{Filters, board, recent_events};
 use openlens_event::Event;
+use openlens_featuremap::parse;
 use openlens_query::{Limits, QueryEngine};
 use openlens_storage::{FlushPolicy, Writer};
 
@@ -84,7 +85,7 @@ fn dataset() -> (tempfile::TempDir, QueryEngine) {
 #[tokio::test]
 async fn board_numbers_follow_the_kpi_definitions() {
     let (_d, q) = dataset();
-    let b = board(&q, "p", &Filters::default()).await.unwrap();
+    let b = board(&q, "p", &Filters::default(), None).await.unwrap();
     assert_eq!(b.users.mau, 3);
     assert!(b.users.dau <= b.users.wau && b.users.wau <= b.users.mau);
     assert!(b.sessions.count >= 3);
@@ -105,7 +106,7 @@ async fn board_numbers_follow_the_kpi_definitions() {
 #[tokio::test]
 async fn role_filter_narrows_every_number() {
     let (_d, q) = dataset();
-    let all = board(&q, "p", &Filters::default()).await.unwrap();
+    let all = board(&q, "p", &Filters::default(), None).await.unwrap();
     let admins = board(
         &q,
         "p",
@@ -113,6 +114,7 @@ async fn role_filter_narrows_every_number() {
             role: Some("admin".into()),
             ..Filters::default()
         },
+        None,
     )
     .await
     .unwrap();
@@ -127,21 +129,69 @@ async fn hostile_filter_values_cannot_break_out_of_the_literal() {
         role: Some("x' OR '1'='1".into()),
         ..Filters::default()
     };
-    let b = board(&q, "p", &f).await.unwrap();
+    let b = board(&q, "p", &f, None).await.unwrap();
     assert_eq!(b.users.mau, 0);
     let bad = Filters {
         role: Some("a\nb".into()),
         ..Filters::default()
     };
-    assert!(board(&q, "p", &bad).await.is_err());
+    assert!(board(&q, "p", &bad, None).await.is_err());
 }
 
 #[tokio::test]
 async fn recent_events_are_newest_first() {
     let (_d, q) = dataset();
-    let rows = recent_events(&q, "p", &Filters::default(), None, 5)
+    let rows = recent_events(&q, "p", &Filters::default(), None, None, 5)
         .await
         .unwrap();
     assert_eq!(rows.len(), 5);
     assert!(rows[0].timestamp >= rows[4].timestamp);
+}
+
+#[tokio::test]
+async fn feature_map_gives_canonical_roles_gaps_and_unused_features() {
+    let (_d, q) = dataset();
+    let map = parse(
+        "roles:\n  - key: staff\n    match: [admin]\nfeatures:\n  - key: search\n    name: Search\n    success: $click\n    entry: { routes: ['/search'] }\n  - key: billing\n    name: Billing\n    entry: { routes: ['/billing'] }\n",
+    )
+    .map
+    .unwrap();
+    let b = board(&q, "p", &Filters::default(), Some((&map, 3)))
+        .await
+        .unwrap();
+    assert_eq!(b.map_version, Some(3));
+    assert!(
+        b.roles.iter().any(|r| r.role.as_deref() == Some("staff")),
+        "admin maps to staff"
+    );
+    assert!(
+        b.role_gaps.iter().any(|(raw, _)| raw == "member"),
+        "member is not mapped: a gap; roles={:?} gaps={:?}",
+        b.roles,
+        b.role_gaps
+    );
+    let billing = b.features.iter().find(|f| f.key == "billing").unwrap();
+    assert!(
+        billing.declared && billing.users == 0,
+        "declared but never used is listed"
+    );
+    let search = b.features.iter().find(|f| f.key == "search").unwrap();
+    assert_eq!(search.name.as_deref(), Some("Search"));
+    assert!(search.completed > 0);
+
+    let staff = board(
+        &q,
+        "p",
+        &Filters {
+            role: Some("staff".into()),
+            ..Filters::default()
+        },
+        Some((&map, 3)),
+    )
+    .await
+    .unwrap();
+    assert!(
+        staff.users.mau >= 1 && staff.users.mau < b.users.mau,
+        "filter by canonical role"
+    );
 }

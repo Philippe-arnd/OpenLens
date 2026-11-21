@@ -17,6 +17,11 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/api/projects", get(list_projects).post(create_project))
         .route("/api/projects/{project}/sql", post(sql))
         .route("/api/projects/{project}/board", get(board))
+        .route(
+            "/api/projects/{project}/feature-map",
+            get(get_map).put(put_map),
+        )
+        .route("/api/feature-map/validate", post(validate_map))
         .route("/api/login-links", post(login_link))
 }
 
@@ -156,7 +161,15 @@ async fn board(
         Ok(p) => p,
         Err(r) => return *r,
     };
-    match openlens_engine::board(&state.query, &p.id, &q.filters()).await {
+    let map = crate::load_map(&state, &p.id).await;
+    match openlens_engine::board(
+        &state.query,
+        &p.id,
+        &q.filters(),
+        map.as_ref().map(|(m, v)| (m, *v)),
+    )
+    .await
+    {
         Ok(b) => Json(b).into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()),
     }
@@ -177,4 +190,78 @@ async fn login_link(State(state): State<AppState>, headers: HeaderMap) -> Respon
             "metadata store unavailable",
         ),
     }
+}
+
+async fn get_map(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(project): Path<String>,
+) -> Response {
+    if let Some(r) = guard(&state, &headers) {
+        return r;
+    }
+    let p = match known_project(&state, &project).await {
+        Ok(p) => p,
+        Err(r) => return *r,
+    };
+    let meta = state.meta.clone();
+    match tokio::task::spawn_blocking(move || meta.feature_map(&p.id)).await {
+        Ok(Ok(Some((version, yaml)))) => {
+            Json(json!({ "version": version, "yaml": yaml })).into_response()
+        }
+        Ok(Ok(None)) => err(
+            StatusCode::NOT_FOUND,
+            "no feature map yet: PUT one (see /agents.md)",
+        ),
+        _ => err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "metadata store unavailable",
+        ),
+    }
+}
+
+/// `PUT /api/projects/{id}/feature-map` with the YAML as the raw body.
+/// 422 with the issues when the map has errors; otherwise stored, and the
+/// warnings are returned so the agent can improve it.
+async fn put_map(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(project): Path<String>,
+    body: String,
+) -> Response {
+    if let Some(r) = guard(&state, &headers) {
+        return r;
+    }
+    let p = match known_project(&state, &project).await {
+        Ok(p) => p,
+        Err(r) => return *r,
+    };
+    let parsed = openlens_featuremap::parse(&body);
+    if parsed.map.is_none() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "stored": false, "issues": parsed.issues })),
+        )
+            .into_response();
+    }
+    let meta = state.meta.clone();
+    match tokio::task::spawn_blocking(move || meta.save_feature_map(&p.id, &body)).await {
+        Ok(Ok(version)) => {
+            Json(json!({ "stored": true, "version": version, "issues": parsed.issues }))
+                .into_response()
+        }
+        _ => err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "metadata store unavailable",
+        ),
+    }
+}
+
+/// Validate a map without storing it (lint).
+async fn validate_map(State(state): State<AppState>, headers: HeaderMap, body: String) -> Response {
+    if let Some(r) = guard(&state, &headers) {
+        return r;
+    }
+    let parsed = openlens_featuremap::parse(&body);
+    Json(json!({ "valid": parsed.map.is_some(), "issues": parsed.issues })).into_response()
 }
