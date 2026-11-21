@@ -1,13 +1,26 @@
 name: CI
 
+# PR gate = the fast checks (target: ~5 min with a warm cache).
+# The slow end-to-end checks (Docker image + smoke, real browser) run on
+# every push to main, nightly and on demand; a failure there opens an issue.
 on:
+  pull_request:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
 
 jobs:
   gate:
@@ -18,20 +31,33 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-      - uses: actions/cache@v5
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          shared-key: gate
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny
       - run: cargo xtask ci
 
+  sdk:
+    name: sdk (build, size budget, committed bundle up to date)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - working-directory: sdk/js
+        run: |
+          npm ci
+          npm run build
+          npm run check
+          git diff --exit-code -- dist || (echo "::error::sdk/js/dist is stale: run npm run build and commit"; exit 1)
+
   docker:
-    name: docker build + end-to-end smoke
+    name: docker image + end-to-end smoke
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     env:
       OPENLENS_ADMIN_TOKEN: adm_ci_smoke
@@ -39,8 +65,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: docker/setup-buildx-action@v3
-      - name: build image (layer cache in GitHub Actions)
-        uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v6
         with:
           context: .
           load: true
@@ -56,24 +81,45 @@ jobs:
 
   browser:
     name: browser e2e (one script tag, real server)
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: gate
+          save-if: false
       - uses: actions/setup-node@v6
         with:
           node-version: 24
       - run: cargo build -p openlens
-      - name: install Playwright + Chromium
+      - name: install Playwright + Chromium (next to the script, for ESM resolution)
+        working-directory: scripts/e2e
         run: |
-          npm install -g playwright@1
-          npx -y playwright@1 install --with-deps chromium
+          npm init -y > /dev/null
+          npm install --no-audit --no-fund playwright@1
+          npx playwright install --with-deps chromium
       - name: run
         run: |
           OPENLENS_DATA_DIR=$RUNNER_TEMP/ol OPENLENS_ADMIN_TOKEN=adm_ci OPENLENS_PROJECT_KEY=pk_ci \
             ./target/debug/openlens > $RUNNER_TEMP/ol.log 2>&1 &
           for i in $(seq 1 30); do curl -fs localhost:8686/healthz && break; sleep 1; done
-          NODE_PATH=$(npm root -g) node scripts/e2e/browser.mjs http://localhost:8686 pk_ci
+          node scripts/e2e/browser.mjs http://localhost:8686 pk_ci
       - if: failure()
         run: cat $RUNNER_TEMP/ol.log
+
+  report:
+    name: open an issue when main breaks
+    needs: [gate, sdk, docker, browser]
+    if: failure() && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue create -R "$GITHUB_REPOSITORY" --title "main is broken: CI failed on ${GITHUB_SHA::7}" \
+            --body "The end-to-end CI failed on main ($GITHUB_EVENT_NAME). Run: $RUN. Fix before merging new work."

@@ -1,6 +1,7 @@
 // Browser end-to-end check: a page with one script tag reports to a real
 // OpenLens server. Usage: node scripts/e2e/browser.mjs <server-url> <capture-key> <admin-token>
-// Requires Playwright with Chromium (CI installs it; see .github/workflows/ci.yml).
+// Requires Playwright with Chromium installed next to this script (CI does
+// `npm install playwright@1` in scripts/e2e; ESM ignores NODE_PATH).
 import { chromium } from "playwright";
 import http from "node:http";
 

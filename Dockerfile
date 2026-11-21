@@ -1,6 +1,16 @@
 # syntax=docker/dockerfile:1
-FROM rust:1-slim-bookworm AS build
+# Dependencies are built in their own layer (cargo-chef), so a code-only
+# change rebuilds in minutes, not the whole DataFusion tree.
+FROM lukemathwalker/cargo-chef:latest-rust-1-slim-bookworm AS chef
 WORKDIR /src
+
+FROM chef AS plan
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS build
+COPY --from=plan /src/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
 RUN cargo build --release --locked -p openlens -p openlens-cli \
  && mkdir -p /out/data
