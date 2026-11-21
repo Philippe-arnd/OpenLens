@@ -1,0 +1,250 @@
+//! Feature flags over HTTP.
+//!
+//! - `GET /flags?key=pk_…&distinct_id=…&role=…&account=…` (public, capture
+//!   key): the keys of the flags that are on for that user. The raw role is
+//!   resolved to its canonical role with the feature map before targeting.
+//! - Admin (bearer): `GET /api/projects/{id}/flags`,
+//!   `PUT|DELETE /api/projects/{id}/flags/{key}`.
+//! - Dashboard: `POST /p/{id}/flags/{key}` (session, same-origin) to switch
+//!   a flag or change its rollout.
+
+use std::collections::HashMap;
+
+use axum::extract::{Form, Path, Query, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Redirect, Response};
+use axum::routing::{get, post, put};
+use axum::{Json, Router};
+use openlens_flags::{Flag, Subject};
+use serde::Deserialize;
+use serde_json::json;
+
+use crate::{AppState, auth};
+
+pub(crate) fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/projects/{project}/flags", get(admin_list))
+        .route(
+            "/api/projects/{project}/flags/{key}",
+            put(admin_put).delete(admin_delete),
+        )
+        .route("/p/{project}/flags", get(page))
+        .route("/p/{project}/flags/{key}", post(page_update))
+}
+
+fn err(status: StatusCode, msg: &str) -> Response {
+    (status, Json(json!({ "error": msg }))).into_response()
+}
+
+/// All flags of a project (invalid stored rows are skipped).
+pub(crate) async fn load(state: &AppState, project: &str) -> Vec<Flag> {
+    let meta = state.meta.clone();
+    let p = project.to_owned();
+    match tokio::task::spawn_blocking(move || meta.flags(&p)).await {
+        Ok(Ok(rows)) => rows
+            .iter()
+            .filter_map(|j| serde_json::from_str(j).ok())
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+async fn save(state: &AppState, project: &str, f: &Flag) -> Result<(), String> {
+    f.validate()?;
+    let json = serde_json::to_string(f).map_err(|e| e.to_string())?;
+    let meta = state.meta.clone();
+    let (p, k) = (project.to_owned(), f.key.clone());
+    tokio::task::spawn_blocking(move || meta.save_flag(&p, &k, &json))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+pub(crate) async fn public(
+    State(state): State<AppState>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
+    let cors = [
+        ("access-control-allow-origin", "*"),
+        ("cache-control", "no-store"),
+    ];
+    let (Some(key), Some(id)) = (q.get("key"), q.get("distinct_id")) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            cors,
+            Json(json!({ "error": "key and distinct_id are required" })),
+        )
+            .into_response();
+    };
+    if id.is_empty() || id.len() > 200 {
+        return (
+            StatusCode::BAD_REQUEST,
+            cors,
+            Json(json!({ "error": "invalid distinct_id" })),
+        )
+            .into_response();
+    }
+    let meta = state.meta.clone();
+    let k = key.clone();
+    let project = match tokio::task::spawn_blocking(move || meta.project_by_key(&k)).await {
+        Ok(Ok(Some(p))) => p,
+        _ => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                cors,
+                Json(json!({ "error": "unknown project key" })),
+            )
+                .into_response();
+        }
+    };
+    let map = crate::load_map(&state, &project.id).await;
+    let raw_role = q.get("role").map(String::as_str).filter(|r| !r.is_empty());
+    let role = match (&map, raw_role) {
+        (Some((m, _)), Some(r)) => m.resolve_role(r).or(Some(r)),
+        (None, r) => r,
+        (_, None) => None,
+    };
+    let flags = load(&state, &project.id).await;
+    let on = openlens_flags::evaluate(
+        &flags,
+        &Subject {
+            distinct_id: id,
+            role,
+            account: q.get("account").map(String::as_str),
+        },
+    );
+    (StatusCode::OK, cors, Json(json!({ "flags": on }))).into_response()
+}
+
+fn guard(state: &AppState, headers: &HeaderMap) -> Option<Response> {
+    (!auth::has_bearer(state, headers))
+        .then(|| err(StatusCode::UNAUTHORIZED, "admin bearer token required"))
+}
+
+async fn admin_list(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(project): Path<String>,
+) -> Response {
+    if let Some(r) = guard(&state, &headers) {
+        return r;
+    }
+    Json(json!({ "flags": load(&state, &project).await })).into_response()
+}
+
+async fn admin_put(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((project, key)): Path<(String, String)>,
+    Json(mut f): Json<Flag>,
+) -> Response {
+    if let Some(r) = guard(&state, &headers) {
+        return r;
+    }
+    if project_exists(&state, &project).await.is_none() {
+        return err(StatusCode::NOT_FOUND, "unknown project");
+    }
+    f.key = key;
+    match save(&state, &project, &f).await {
+        Ok(()) => Json(json!({ "flag": f })).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, &e),
+    }
+}
+
+async fn admin_delete(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((project, key)): Path<(String, String)>,
+) -> Response {
+    if let Some(r) = guard(&state, &headers) {
+        return r;
+    }
+    let meta = state.meta.clone();
+    match tokio::task::spawn_blocking(move || meta.delete_flag(&project, &key)).await {
+        Ok(Ok(true)) => Json(json!({ "deleted": true })).into_response(),
+        Ok(Ok(false)) => err(StatusCode::NOT_FOUND, "no such flag"),
+        _ => err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "metadata store unavailable",
+        ),
+    }
+}
+
+async fn project_exists(state: &AppState, id: &str) -> Option<openlens_meta::Project> {
+    let meta = state.meta.clone();
+    let id = id.to_owned();
+    tokio::task::spawn_blocking(move || meta.project(&id))
+        .await
+        .ok()?
+        .ok()?
+}
+
+/// Same-origin check for dashboard form posts (on top of SameSite=Lax).
+fn same_origin(headers: &HeaderMap) -> bool {
+    let base = crate::base_url(headers);
+    match headers.get("origin").and_then(|v| v.to_str().ok()) {
+        Some(o) => {
+            o == base || o.replace("http://", "https://") == base.replace("http://", "https://")
+        }
+        None => headers
+            .get("referer")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|r| r.starts_with(&base)),
+    }
+}
+
+async fn page(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    if !auth::has_session(&state, &headers) {
+        return Redirect::to("/login").into_response();
+    }
+    let Some(p) = project_exists(&state, &id).await else {
+        return crate::web::html_page(
+            StatusCode::NOT_FOUND,
+            openlens_ui::message("Not found", "No such project."),
+        );
+    };
+    let flags = load(&state, &p.id).await;
+    let info = openlens_ui::ProjectInfo {
+        id: &p.id,
+        name: &p.name,
+        key: &p.api_key,
+    };
+    crate::web::html_page(StatusCode::OK, openlens_ui::flags(&info, &flags))
+}
+
+#[derive(Deserialize)]
+struct FlagForm {
+    enabled: Option<String>,
+    rollout: Option<u8>,
+}
+
+async fn page_update(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((id, key)): Path<(String, String)>,
+    Form(form): Form<FlagForm>,
+) -> Response {
+    if !auth::has_session(&state, &headers) {
+        return Redirect::to("/login").into_response();
+    }
+    if !same_origin(&headers) {
+        return err(StatusCode::FORBIDDEN, "cross-site request refused");
+    }
+    let mut flags = load(&state, &id).await;
+    let Some(f) = flags.iter_mut().find(|f| f.key == key) else {
+        return err(StatusCode::NOT_FOUND, "no such flag");
+    };
+    f.enabled = form.enabled.as_deref() == Some("on");
+    if let Some(r) = form.rollout {
+        f.rollout = r.min(100);
+    }
+    let f = f.clone();
+    match save(&state, &id, &f).await {
+        Ok(()) => Redirect::to(&format!("/p/{id}/flags")).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, &e),
+    }
+}

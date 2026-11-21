@@ -99,6 +99,13 @@ CREATE TABLE IF NOT EXISTS imports (
   imported_at TEXT NOT NULL,
   PRIMARY KEY (project, sha)
 );
+CREATE TABLE IF NOT EXISTS flags (
+  project TEXT NOT NULL,
+  key TEXT NOT NULL,
+  json TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (project, key)
+);
 CREATE TABLE IF NOT EXISTS login_links (
   hash TEXT PRIMARY KEY,
   expires_at INTEGER NOT NULL
@@ -407,6 +414,37 @@ impl Meta {
                 params![project, sha, rows, Utc::now().to_rfc3339()],
             )?;
             Ok(n == 1)
+        })
+    }
+
+    /// Create or replace a flag definition (stored as JSON).
+    pub fn save_flag(&self, project: &str, key: &str, json: &str) -> Result<()> {
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO flags (project, key, json, updated_at) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT (project, key) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at",
+                params![project, key, json, Utc::now().to_rfc3339()],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// All flag definitions of a project (JSON), by key.
+    pub fn flags(&self, project: &str) -> Result<Vec<String>> {
+        self.with(|c| {
+            let mut st = c.prepare("SELECT json FROM flags WHERE project = ?1 ORDER BY key")?;
+            let rows = st.query_map([project], |r| r.get(0))?;
+            Ok(rows.collect::<rusqlite::Result<_>>()?)
+        })
+    }
+
+    /// Delete a flag; true when it existed.
+    pub fn delete_flag(&self, project: &str, key: &str) -> Result<bool> {
+        self.with(|c| {
+            Ok(c.execute(
+                "DELETE FROM flags WHERE project = ?1 AND key = ?2",
+                params![project, key],
+            )? == 1)
         })
     }
 

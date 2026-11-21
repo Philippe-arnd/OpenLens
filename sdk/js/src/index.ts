@@ -51,6 +51,7 @@ let queue: Props[] = [];
 let consent: Config["consent"] = "granted";
 let timer: ReturnType<typeof setInterval> | undefined;
 let lastPath = "";
+let activeFlags: string[] = [];
 
 function uuid(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
@@ -101,6 +102,7 @@ function base(): Props {
   if (state.dims.role) p.$role = state.dims.role;
   if (state.dims.account) p.$account = state.dims.account;
   if (state.dims.plan) p.$plan = state.dims.plan;
+  if (activeFlags.length) p.$flags = activeFlags.join(",");
   return p;
 }
 
@@ -127,6 +129,32 @@ export function feature(key: string, props?: Props): void {
   track("$feature", { ...props, $feature: key });
 }
 
+/** Fetch the flags that are on for the current user. */
+function loadFlags(): void {
+  if (!cfg || !origFetch) return;
+  const q = new URLSearchParams({ key: cfg.key, distinct_id: state.uid ?? state.anon });
+  if (state.dims.role) q.set("role", state.dims.role);
+  if (state.dims.account) q.set("account", state.dims.account);
+  origFetch(`${cfg.host.replace(/\/$/, "")}/flags?${q}`)
+    .then((r) => (r.ok ? r.json() : null))
+    .then((j: { flags?: string[] } | null) => {
+      if (j?.flags) {
+        activeFlags = j.flags;
+        try {
+          localStorage.setItem(`${storageKey()}_flags`, JSON.stringify(activeFlags));
+        } catch {
+          // memory only
+        }
+      }
+    })
+    .catch(() => undefined);
+}
+
+/** Is a feature flag on for this user? Uses the last known answer (cached across page loads). */
+export function isEnabled(key: string): boolean {
+  return activeFlags.includes(key);
+}
+
 /** Identify the logged-in user and the dimensions OpenLens slices by. */
 export function identify(id: string, dims: Dimensions = {}): void {
   if (!cfg || !id) return;
@@ -135,6 +163,7 @@ export function identify(id: string, dims: Dimensions = {}): void {
   state.dims = { ...state.dims, ...dims };
   save();
   track("$identify", anon ? { $anon_distinct_id: anon } : {});
+  loadFlags();
 }
 
 /** Forget the user (call on logout). */
@@ -294,7 +323,13 @@ export function init(config: Config): void {
   cfg = config;
   origFetch = window.fetch?.bind(window);
   state = load();
+  try {
+    activeFlags = JSON.parse(localStorage.getItem(`${storageKey()}_flags`) || "[]") as string[];
+  } catch {
+    activeFlags = [];
+  }
   if (consent === "denied") return;
+  loadFlags();
   if (config.autocapture !== false) autocapture();
   timer = setInterval(() => flush(), 5000);
   addEventListener("visibilitychange", () => document.visibilityState === "hidden" && flush(true));
@@ -307,4 +342,4 @@ export function shutdown(): void {
   flush(true);
 }
 
-export default { init, identify, track, feature, reset, flush, setConsent, shutdown };
+export default { init, identify, track, feature, isEnabled, reset, flush, setConsent, shutdown };

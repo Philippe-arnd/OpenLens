@@ -84,6 +84,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                         nav aria-label="Project" {
                             a href={ "/p/" (p.id) } { "Focus board" }
                             a href={ "/p/" (p.id) "/events" } { "Events" }
+                            a href={ "/p/" (p.id) "/flags" } { "Flags" }
                         }
                         span.project { (p.name) }
                         form method="post" action="/logout" { button.ghost type="submit" { "Log out" } }
@@ -501,6 +502,50 @@ pub fn events(p: &ProjectInfo<'_>, b: &Board, rows: &[EventRow], f: &Filters) ->
                                 td.mono { (r.path.as_deref().unwrap_or("—")) }
                                 td { (r.feature.as_deref().unwrap_or("—")) }
                                 td { (r.release.as_deref().unwrap_or("—")) }
+                            }
+                        } }
+                    }
+                }
+            }
+        },
+    )
+}
+
+/// Feature flags: switch on/off and change the rollout. Creating flags is
+/// done by agents (API/CLI/MCP) with the code that uses them.
+pub fn flags(p: &ProjectInfo<'_>, flags: &[openlens_flags::Flag]) -> Markup {
+    layout(
+        "Flags",
+        Some(p),
+        html! {
+            div.heading {
+                h1 { "Flags" }
+                p.muted { "Ship a change to some users first, then compare. Each flag's users show up as their own cohort." }
+            }
+            @if flags.is_empty() {
+                section.card { p { "No flags yet. Your agent creates them together with the code that checks them: "
+                    code { "openlens-cli flags set new-editor --rollout 10" } "." } }
+            } @else {
+                section.card.wide {
+                    table.plain {
+                        thead { tr { th { "Flag" } th { "Who" } th { "Rollout" } th { "On" } th {} } }
+                        tbody { @for f in flags {
+                            tr {
+                                th scope="row" { code { (f.key) } @if !f.description.is_empty() { br; span.muted.small { (f.description) } } }
+                                td.small { @if f.roles.is_empty() { "every role" } @else { (f.roles.join(", ")) }
+                                    @if !f.accounts.is_empty() { br; span.muted { "+ " (f.accounts.len()) " accounts" } } }
+                                td { form.inline method="post" action={ "/p/" (p.id) "/flags/" (f.key) } {
+                                    @if f.enabled { input type="hidden" name="enabled" value="on"; }
+                                    input type="number" name="rollout" min="0" max="100" value=(f.rollout) aria-label={ "Rollout percentage of " (f.key) };
+                                    " % " button.ghost type="submit" { "Save" }
+                                } }
+                                td { span class=(if f.enabled { "status good" } else { "status muted" }) {
+                                    span aria-hidden="true" { (if f.enabled { "●" } else { "○" }) } " " (if f.enabled { "on" } else { "off" }) } }
+                                td { form.inline method="post" action={ "/p/" (p.id) "/flags/" (f.key) } {
+                                    @if !f.enabled { input type="hidden" name="enabled" value="on"; }
+                                    input type="hidden" name="rollout" value=(f.rollout);
+                                    button type="submit" { (if f.enabled { "Switch off" } else { "Switch on" }) }
+                                } }
                             }
                         } }
                     }

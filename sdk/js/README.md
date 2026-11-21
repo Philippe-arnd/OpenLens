@@ -35,7 +35,9 @@ openlens.identify(user.id, { role: user.role, account: user.orgId, plan: user.pl
 
 ## API
 
-`init`, `identify(id, {role, account, plan})`, `track(event, props)`, `feature(key)`, `reset()` (on logout), `setConsent(bool)`, `flush()`.
+`init`, `identify(id, {role, account, plan})`, `track(event, props)`, `feature(key)`, `isEnabled(flagKey)`, `reset()` (on logout), `setConsent(bool)`, `flush()`.
+
+Flags are fetched at init and after `identify`. The last answer is cached, so `isEnabled` is synchronous. Active flags are sent with every event as `$flags`.
 
 Privacy: Do-Not-Track is respected, and `consent: "pending"` holds events until `setConsent(true)` is called. Add `data-openlens-ignore` to any element whose subtree should never be captured.
 
