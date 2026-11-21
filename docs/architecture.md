@@ -10,7 +10,7 @@ browser SDK / server SDKs
 │ server (axum) ──► engine (commands) ──► query (DataFusion) ──► storage        │
 │    │                 │                    funnel/retention/paths   WAL        │
 │    │                 ├─ flags  ├─ replay  ├─ errors ├─ heatmaps    Parquet    │
-│    │                 └─ wire (install plans)                      object_store │
+│    │                 └─ featuremap (map, roles, lint)             object_store │
 │    └─ ui (server-rendered)     mcp ◄── openlens-cli mcp         (fs / S3)   │
 │                                   meta (SQLite)                               │
 └───────────────────────────────────────────────────────────────────────────────┘
@@ -24,16 +24,16 @@ A crate depends only on crates in strictly lower layers. `cargo xtask layers` en
 | --- | --- | --- |
 | L0 | `event` | Event schema, ids, validation of hostile input |
 | L1 | `storage`, `meta` | WAL, Parquet segments, compaction, object store; SQLite metadata |
-| L2 | `query`, `flags`, `replay`, `errors`, `heatmaps`, `wire` | Feature logic, each independent of the others |
+| L2 | `query`, `flags`, `replay`, `errors`, `heatmaps`, `featuremap` | Feature logic, each independent of the others |
 | L3 | `engine` | Command registry; the only API the upper layer uses |
 | L4 | `server`, `mcp`, `ui` | Front ends of the engine: HTTP, agents, browser |
 | L5 | `apps/openlens`, `apps/openlens-cli` | Binaries |
 
 ## Data model (first cut)
 
-- **Event**: `project_id`, `event` (name), `timestamp`, `distinct_id`, `session_id`, `properties` (JSON, with promoted columns for `$url`, `$feature`, `$role`, `$account`), and `received_at`.
+- **Event**: `uuid`, `event` (name), `timestamp`, `received_at`, `distinct_id`, `session_id`. Promoted columns: `url`, `path`, `feature`, `role` (raw), `account`, `plan`, `environment`, `release`. Everything else stays in `properties` (JSON). The `project`, `date` and `hour` columns come from the partition directories.
 - **Person**: `distinct_id` → properties, including `role`, `account` and `plan`, stored in SQLite and joined at query time. Person properties are also copied onto each event at capture time, so role breakdowns need no join.
-- **Feature**: catalog row (`key`, `display_name`, matchers on route patterns or `data-feature`), stored in SQLite. Events carry `$feature` once it is resolved.
+- **Feature map**: pushed from the app repo (`openlens.features.yaml`) and stored, versioned, in SQLite. Features and canonical roles are resolved at query time, so editing the map re-labels history without rewriting any files.
 
 ## Storage
 

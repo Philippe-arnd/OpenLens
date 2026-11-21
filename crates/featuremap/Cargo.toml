@@ -1,6 +1,6 @@
 [package]
-name = "openlens-wire"
-description = "Project detection and install plans: finds a web app's stack and lists the edits that plug OpenLens in."
+name = "openlens-featuremap"
+description = "The feature map (openlens.features.yaml): parsing, validation, role matching and lint."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

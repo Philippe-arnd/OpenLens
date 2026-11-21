@@ -8,13 +8,13 @@ Append-only. Each entry: id, date, decision, why, consequences.
 ## D-002 (2026-11-21) Licence AGPL-3.0-only; dependencies limited to a permissive allowlist
 **Why:** self-hosters are free; anyone hosting a modified version must publish it. Dependencies stay permissive so that combining them is never in doubt. **Consequences:** `deny.toml` enforces the allowlist, and MPL-2.0 is allowed only per crate and unmodified.
 
-## D-003 (2026-11-21) Rust everywhere except the browser SDK
+## D-003 (2026-11-21) Rust everywhere except the browser SDK (UI part superseded by D-011)
 **Why:** the SDK runs inside the customer's own pages. It must be tiny, needs no WebAssembly, and session recording relies on the rrweb recorder (MIT). **Consequences:** `sdk/js` is TypeScript, kept under 10 kB gzipped without replay. All other code, including the UI, is Rust (see D-011).
 
 ## D-004 (2026-11-21) Roles and features are first-class concepts
 **Why:** the main users are PMs who ask "which roles use which features". **Consequences:** `identify()` takes `role`/`account`/`plan`. These are promoted to columns and copied onto events at capture time. The feature catalog lives in `meta`, and the default dashboard is the roles × features matrix (M3).
 
-## D-005 (2026-11-21) Agent wiring returns plans, not free-form edits
+## D-005 (2026-11-21) Agent wiring returns plans, not free-form edits (superseded by D-013)
 **Why:** "add one dependency and let an agent wire it" only scales if every edit can be reviewed and verified. **Consequences:** `crates/wire` outputs a typed install plan, applied by `openlens-cli wire` or returned through MCP. `openlens-cli verify` closes the loop.
 
 ## D-006 (2026-11-21) The feature map is an explicit file that agents maintain in the app repo
@@ -34,3 +34,15 @@ Append-only. Each entry: id, date, decision, why, consequences.
 
 ## D-011 (2026-11-21) UI is server-rendered HTML (maud), not Leptos/WASM
 **Why:** it is leaner still: there is no wasm toolchain, no client bundle, the binary is smaller, it works without JS, and it is trivially accessible. The dashboard is read-mostly (KPI strips, ranked cards, tables), which server rendering handles well. Charts are SVG generated in Rust. **Consequences:** `crates/ui` renders HTML with `maud` (MIT/Apache). Interactivity uses links and forms, and live tail uses periodic refresh. The only JS shown in the dashboard will be the vendored rrweb player on the replay page (M6), plus OpenLens's own SDK for dogfooding. This supersedes the Leptos part of D-003.
+
+## D-012 (2026-11-21) Environment and release are first-class dimensions
+**Why:** PMs compare releases to know whether a change moved a KPI, and they keep staging and preview traffic away from production numbers. **Consequences:** every event carries `environment` and `release` columns. The SDK detects them automatically (`localhost`/`127.*`/preview hosts → `development`, hosts starting with `staging.` → `staging`, otherwise `production`; release from `init({release})`, `<meta name="openlens-release">` or the script tag's `data-release`). The dashboard defaults to production and compares the current release with the previous one. Environments are a column, not separate projects, so one key serves all of them.
+
+## D-013 (2026-11-21) Coherence pass: the method first, less machinery
+**Why:** the vision grew message by message, and some parts contradicted others or were over-built. **Changes:**
+- `docs/method.md` (map → measure → focus → act → compare, day zero with no human setup) is the reference. ROADMAP is reorganised around it: 7 milestones instead of 10.
+- The MCP server arrives in M2, not M9, because agent tools depend on it. Login (admin token plus a one-time link) arrives in M1, not M9, because the dashboard exists from M1.
+- **The codemod engine is dropped** (supersedes D-005): agents already edit code well. OpenLens provides `init`, `features lint`, `verify`, `import` and a guide, and the agent makes the edits. `crates/wire` becomes `crates/featuremap`.
+- **History is backfilled** from the app's own data (`openlens-cli import`), so the first login has insights.
+- The M2 exit uses 3 reference apps, not 8. Fun names are cut back to the method's own concepts.
+- Deferred to "Later": weekly digest, LLM rewording, micro-surveys, experiment significance, server SDKs.

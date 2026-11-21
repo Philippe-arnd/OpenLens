@@ -61,7 +61,7 @@ Layers (checked by `cargo xtask layers`; register every new crate in `xtask/src/
 
 - L0 `event`
 - L1 `storage`, `meta`
-- L2 `query`, `flags`, `replay`, `errors`, `heatmaps`, `wire`
+- L2 `query`, `flags`, `replay`, `errors`, `heatmaps`, `featuremap`
 - L3 `engine`
 - L4 `server`, `mcp`, `ui`
 - L5 `apps/openlens`, `apps/openlens-cli`

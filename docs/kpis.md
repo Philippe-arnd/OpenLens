@@ -1,6 +1,6 @@
 # Key KPIs
 
-These are the metrics OpenLens computes with no setup. **Every KPI can be split by role** (and by account, plan, page and feature). Definitions here are the contract: the UI, the MCP tools and the exports all use them, and a change to a definition is recorded in `docs/decisions.md`.
+These are the metrics OpenLens computes with no setup. **Every KPI can be split by role**, and also by **environment** and **release** (D-012), account, plan, page and feature. The default view is production, current release compared with the previous one. Definitions here are the contract: the UI, the MCP tools and the exports all use them, and a change to a definition is recorded in `docs/decisions.md`.
 
 ## Roles: defined, matched, tracked
 
