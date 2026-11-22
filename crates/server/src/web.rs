@@ -40,6 +40,8 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/assets/player.js", get(player_js))
         .route("/assets/player.css", get(player_css))
         .route("/assets/app.css", get(css))
+        .route("/assets/favicon.svg", get(favicon))
+        .route("/favicon.ico", get(favicon))
         .route("/theme/{mode}", get(set_theme))
 }
 
@@ -79,6 +81,17 @@ fn with_cookie(mut r: Response, cookie: &str) -> Response {
         r.headers_mut().append(header::SET_COOKIE, v);
     }
     r
+}
+
+async fn favicon() -> Response {
+    (
+        [
+            (header::CONTENT_TYPE, "image/svg+xml"),
+            (header::CACHE_CONTROL, "public, max-age=86400"),
+        ],
+        openlens_ui::FAVICON,
+    )
+        .into_response()
 }
 
 async fn css() -> Response {

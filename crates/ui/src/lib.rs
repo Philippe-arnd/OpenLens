@@ -2,7 +2,7 @@
 //! JavaScript (D-011).
 //!
 //! Minimal, colourful and efficient, with a playful touch: stat tiles that
-//! tilt a little on hover, a lens logo that blinks, friendly copy. Motion
+//! tilt a little on hover, a colour-blob logo that slowly changes shape, friendly copy. Motion
 //! respects `prefers-reduced-motion`; dark mode follows the system.
 //!
 //! Layer: L4 (see `docs/architecture.md`).
@@ -15,6 +15,9 @@ use openlens_engine::{Board, EventRow, Filters};
 
 /// Stylesheet, served at `/assets/app.css`.
 pub const CSS: &str = include_str!("../assets/app.css");
+
+/// The favicon: the logo blob, still.
+pub const FAVICON: &str = include_str!("../assets/favicon.svg");
 
 /// Project summary used in the header and empty states.
 pub struct ProjectInfo<'a> {
@@ -88,12 +91,13 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                 meta name="color-scheme" content="light dark";
                 title { (title) " · OpenLens" }
                 link rel="stylesheet" href="/assets/app.css";
+                link rel="icon" type="image/svg+xml" href="/assets/favicon.svg";
             }
             body {
                 (icons::sprite())
                 header.top {
                     a.brand href="/" aria-label="OpenLens home" {
-                        span.lens aria-hidden="true" { span.pupil {} }
+                        span.blob aria-hidden="true" {}
                         span { "OpenLens" }
                     }
                     @if let Some(p) = project {
