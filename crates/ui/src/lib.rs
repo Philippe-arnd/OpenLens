@@ -124,7 +124,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
 }
 
 /// Login page.
-pub fn login(failed: bool) -> Markup {
+pub fn login(failed: bool, sso: bool) -> Markup {
     layout(
         "Log in",
         None,
@@ -137,6 +137,10 @@ pub fn login(failed: bool) -> Markup {
                     label for="token" { "Admin token" }
                     input #token name="token" type="password" autocomplete="current-password" required autofocus;
                     button type="submit" { "Open my board" }
+                }
+                @if sso {
+                    p.muted.small { "or" }
+                    p { a.button href="/oidc/start" { (icon("shield")) "Sign in with your company account" } }
                 }
             }
         },

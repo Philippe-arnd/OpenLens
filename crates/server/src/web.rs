@@ -122,7 +122,10 @@ async fn home(State(state): State<AppState>, headers: HeaderMap) -> Response {
 }
 
 async fn login_page() -> Response {
-    html(StatusCode::OK, openlens_ui::login(false))
+    html(
+        StatusCode::OK,
+        openlens_ui::login(false, crate::oidc::enabled()),
+    )
 }
 
 #[derive(Deserialize)]
@@ -145,7 +148,10 @@ async fn login(
     }
     // Slow down guessing.
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    html(StatusCode::UNAUTHORIZED, openlens_ui::login(true))
+    html(
+        StatusCode::UNAUTHORIZED,
+        openlens_ui::login(true, crate::oidc::enabled()),
+    )
 }
 
 async fn logout(headers: HeaderMap) -> Response {

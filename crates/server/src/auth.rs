@@ -20,7 +20,7 @@ pub(crate) const COOKIE: &str = "ol_session";
 /// Session lifetime: 30 days.
 pub(crate) const SESSION_SECS: i64 = 30 * 24 * 3600;
 
-fn sign(key: &str, msg: &str) -> String {
+pub(crate) fn sign(key: &str, msg: &str) -> String {
     // HMAC accepts keys of any length, so this cannot fail.
     match Hmac::<Sha256>::new_from_slice(key.as_bytes()) {
         Ok(mut mac) => {
@@ -99,7 +99,7 @@ pub(crate) fn viewer(state: &AppState, headers: &HeaderMap) -> Option<Viewer> {
     })
 }
 
-fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {
+pub(crate) fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {
     headers
         .get_all("cookie")
         .iter()

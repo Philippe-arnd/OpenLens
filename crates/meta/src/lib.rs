@@ -516,6 +516,19 @@ impl Meta {
         })
     }
 
+    /// One user by email (case-insensitive).
+    pub fn user_by_email(&self, email: &str) -> Result<Option<User>> {
+        let email = email.trim().to_lowercase();
+        self.with(|c| {
+            Ok(c.query_row(
+                "SELECT id, email, role, projects, created_at FROM users WHERE email = ?1",
+                [&email],
+                user_from_row,
+            )
+            .optional()?)
+        })
+    }
+
     /// Every user, by email.
     pub fn users(&self) -> Result<Vec<User>> {
         self.with(|c| {

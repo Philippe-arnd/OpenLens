@@ -33,6 +33,8 @@ chrono.workspace = true
 flate2.workspace = true
 tracing.workspace = true
 lettre.workspace = true
+ureq.workspace = true
+rand.workspace = true
 
 [dev-dependencies]
 openlens-query = { path = "../query" }
