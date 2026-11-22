@@ -867,7 +867,7 @@ pub fn player(p: &ProjectInfo<'_>, session: &str, who: Option<&str>, at: Option<
             }
             link rel="stylesheet" href="/assets/player.css";
             section.card.wide {
-                div #ol-player data-src={ "/p/" (p.id) "/replays/" (session) "/events.json" } data-at=[at] {
+                div #ol-player data-src={ "/p/" (p.id) "/replays/" (session) "/events.json" } data-timeline={ "/p/" (p.id) "/replays/" (session) "/timeline.json" } data-at=[at] {
                     p.muted { "Loading the recording…" }
                 }
             }

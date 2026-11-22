@@ -98,6 +98,52 @@ if (!chunk || chunk.status() !== 200) {
   process.exit(1);
 }
 console.log("replay chunk stored");
+
+// The replay player (#170): markers for the session's events, the event
+// list, keyboard control, on a desktop and on a phone.
+if (admin) {
+  const sid = sent.flatMap((b) => JSON.parse(b).batch).find((e) => e.session_id)?.session_id;
+  const b = await chromium.launch();
+  for (const [name, opts] of [["desktop", { viewport: { width: 1280, height: 900 } }], ["phone", { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }]]) {
+    const ctx = await b.newContext(opts);
+    const p = await ctx.newPage();
+    await p.goto(`${server}/login`);
+    await p.fill("input[name=token]", admin);
+    await Promise.all([p.waitForNavigation(), p.click("button[type=submit]")]);
+    // Events become queryable after the server's flush (~10 s).
+    let marks = 0;
+    for (let i = 0; i < 8 && marks === 0; i++) {
+      await p.goto(`${server}/p/default/replays/${sid}`);
+      await p.waitForSelector("#ol-player .ol-controls", { timeout: 15000 });
+      await p.waitForTimeout(800);
+      marks = await p.locator("#ol-player .ol-mark").count();
+      if (marks === 0) await p.waitForTimeout(2000);
+    }
+    const rows = await p.locator("#ol-player .ol-log li").count();
+    const legend = await p.locator("#ol-player .ol-legend li").count();
+    if (!marks || !rows || !legend) {
+      console.error(`player (${name}): markers ${marks}, events ${rows}, legend ${legend}`);
+      process.exit(1);
+    }
+    const overflow = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    if (overflow > 1) {
+      console.error(`player (${name}): the page scrolls sideways by ${overflow}px`);
+      process.exit(1);
+    }
+    if (name === "desktop") {
+      await p.keyboard.press("l");
+      const t = await p.locator("#ol-player input[type=range]").inputValue();
+      if (Number(t) <= 0) {
+        console.error("player: L did not jump forward");
+        process.exit(1);
+      }
+    }
+    await p.screenshot({ path: `${process.env.RUNNER_TEMP ?? "/tmp"}/player-${name}.png`, fullPage: true });
+    await ctx.close();
+    console.log(`player (${name}): ${marks} markers, ${rows} events, ${legend} legend entries`);
+  }
+  await b.close();
+}
 // Through the proxy: the SDK posts to /_l/capture on the site itself.
 {
   const b = await chromium.launch();
