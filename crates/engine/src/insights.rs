@@ -492,6 +492,8 @@ pub struct CohortStats {
     pub tasks_per_session: f64,
     /// Share of sessions with an error.
     pub error_rate: f64,
+    /// Standard deviation of feature uses per session.
+    pub tasks_sd: f64,
 }
 
 /// Users with a flag on, against everyone else (last 30 days).
@@ -503,6 +505,10 @@ pub struct FlagCohort {
     pub with: CohortStats,
     /// All other sessions.
     pub without: CohortStats,
+    /// p-value of the difference in sessions with errors (`None`: too few sessions).
+    pub p_errors: Option<f64>,
+    /// p-value of the difference in tasks per session.
+    pub p_tasks: Option<f64>,
 }
 
 fn valid_flag(k: &str) -> bool {
@@ -540,7 +546,7 @@ pub(crate) async fn flag_cohorts(
         // `key` is restricted to [a-z0-9_-], so it is safe inside the literal.
         let sql = format!(
             "SELECT has, count(DISTINCT uid) AS users, count(*) AS sessions, \
-             avg(CASE WHEN n > 1 THEN secs END) AS avg_secs, avg(CAST(tasks AS DOUBLE)) AS tps, \
+             avg(CASE WHEN n > 1 THEN secs END) AS avg_secs, avg(CAST(tasks AS DOUBLE)) AS tps, stddev(CAST(tasks AS DOUBLE)) AS tps_sd, \
              avg(CASE WHEN errors > 0 THEN 1.0 ELSE 0.0 END) AS err \
              FROM (SELECT session_id, min(distinct_id) AS uid, \
                    max(CASE WHEN strpos(concat(',', coalesce(flags, ''), ','), ',{key},') > 0 THEN 1 ELSE 0 END) AS has, \
@@ -557,6 +563,8 @@ pub(crate) async fn flag_cohorts(
             flag: key,
             with: CohortStats::default(),
             without: CohortStats::default(),
+            p_errors: None,
+            p_tasks: None,
         };
         for r in res?.rows {
             let stats = CohortStats {
@@ -565,6 +573,7 @@ pub(crate) async fn flag_cohorts(
                 avg_secs: r.get("avg_secs").and_then(Value::as_f64).unwrap_or(0.0),
                 tasks_per_session: r.get("tps").and_then(Value::as_f64).unwrap_or(0.0),
                 error_rate: r.get("err").and_then(Value::as_f64).unwrap_or(0.0),
+                tasks_sd: r.get("tps_sd").and_then(Value::as_f64).unwrap_or(0.0),
             };
             if int(&r, "has") == 1 {
                 c.with = stats
@@ -572,6 +581,17 @@ pub(crate) async fn flag_cohorts(
                 c.without = stats
             }
         }
+        let (w, o) = (&c.with, &c.without);
+        c.p_errors =
+            crate::stats::two_proportions(w.error_rate, w.sessions, o.error_rate, o.sessions);
+        c.p_tasks = crate::stats::two_means(
+            w.tasks_per_session,
+            w.tasks_sd,
+            w.sessions,
+            o.tasks_per_session,
+            o.tasks_sd,
+            o.sessions,
+        );
         out.push(c);
     }
     Ok(out)
@@ -585,7 +605,11 @@ pub(crate) fn flag_cards(cohorts: &[FlagCohort]) -> Vec<Insight> {
         if w.users < MIN_GROUP || o.users < MIN_GROUP {
             continue;
         }
-        if w.error_rate > o.error_rate * 1.5 && w.error_rate - o.error_rate > 0.03 {
+        let sig = |p: Option<f64>| p.is_some_and(|p| p < crate::stats::ALPHA);
+        if w.error_rate > o.error_rate * 1.5
+            && w.error_rate - o.error_rate > 0.03
+            && sig(c.p_errors)
+        {
             cards.push(Insight {
                 kind: "flag_regression",
                 title: format!(
@@ -595,8 +619,12 @@ pub(crate) fn flag_cards(cohorts: &[FlagCohort]) -> Vec<Insight> {
                     pct(o.error_rate)
                 ),
                 evidence: format!(
-                    "{} users / {} sessions with the flag, {} / {} without",
-                    w.users, w.sessions, o.users, o.sessions
+                    "{} users / {} sessions with the flag, {} / {} without (p = {:.3})",
+                    w.users,
+                    w.sessions,
+                    o.users,
+                    o.sessions,
+                    c.p_errors.unwrap_or(1.0)
                 ),
                 next_step: format!(
                     "Hold the {} rollout and check its errors (Events, filter $error).",
@@ -605,7 +633,10 @@ pub(crate) fn flag_cards(cohorts: &[FlagCohort]) -> Vec<Insight> {
                 score: (w.error_rate - o.error_rate) * (w.sessions as f64).sqrt() * 2.5,
                 subject: c.flag.clone(),
             });
-        } else if o.tasks_per_session > 0.0 && w.tasks_per_session > o.tasks_per_session * 1.2 {
+        } else if o.tasks_per_session > 0.0
+            && w.tasks_per_session > o.tasks_per_session * 1.2
+            && sig(c.p_tasks)
+        {
             cards.push(Insight {
                 kind: "flag_win",
                 title: format!(
@@ -614,8 +645,12 @@ pub(crate) fn flag_cards(cohorts: &[FlagCohort]) -> Vec<Insight> {
                     (w.tasks_per_session / o.tasks_per_session - 1.0) * 100.0
                 ),
                 evidence: format!(
-                    "{:.2} vs {:.2} tasks per session ({} vs {} users)",
-                    w.tasks_per_session, o.tasks_per_session, w.users, o.users
+                    "{:.2} vs {:.2} tasks per session ({} vs {} users, p = {:.3})",
+                    w.tasks_per_session,
+                    o.tasks_per_session,
+                    w.users,
+                    o.users,
+                    c.p_tasks.unwrap_or(1.0)
                 ),
                 next_step: format!("Widen the {} rollout and keep watching errors.", c.flag),
                 score: (w.tasks_per_session / o.tasks_per_session - 1.0) * (w.users as f64).sqrt(),
