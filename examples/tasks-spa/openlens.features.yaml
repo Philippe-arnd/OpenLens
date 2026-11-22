@@ -1,0 +1,20 @@
+# Feature map of the Tasks example (kept by the app's agents; wire.md step 4).
+version: 1
+roles:
+  - key: manager
+    match: ["manager"]
+  - key: member
+    match: ["member"]
+features:
+  - key: create-task
+    name: Create a task
+    entry:
+      routes: ["/tasks/new"]
+      selectors: ['[data-feature="create-task"]']
+    success: task_created
+  - key: reports
+    name: Weekly reports
+    entry:
+      routes: ["/reports"]
+      calls: ["openlens.feature('reports')"]
+    success: report_viewed

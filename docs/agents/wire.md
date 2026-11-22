@@ -2,9 +2,9 @@
 
 You are the agent that maintains a web app. Your goal is that the product manager's **first login shows a populated Focus board**, with no manual setup on their side.
 
-**Available today:** `openlens-cli` (`init`, `features lint|push`, `import`, `verify`, `login-link`, `sql`, `guide`, `mcp`), the HTTP API below, the SDK and the dashboard. Everything below is available.
+**Available today:** `openlens-cli` (`init`, `features lint|push`, `import`, `verify`, `sourcemaps`, `flags`, `login-link`, `sql`, `guide`, `mcp`), the HTTP API below, the SDK and the dashboard. Everything below is available. Two small reference apps wired this way live in `examples/` (`notes-ssr`: script tag; `tasks-spa`: npm package).
 
-**MCP:** `openlens-cli mcp --automation-read-root <app repo> --automation-write-root <scratch dir>` speaks MCP over stdio. Its tools are `guide`, `projects`, `init`, `feature_map_lint`, `feature_map_push`, `verify`, `board`, `sql` and `login_link`, and it reads files only inside the read root.
+**MCP:** `openlens-cli mcp --automation-read-root <app repo> --automation-write-root <scratch dir>` speaks MCP over stdio. Its tools are `guide`, `projects`, `init`, `feature_map_lint`, `feature_map_push`, `verify`, `insights`, `kpi_report`, `board`, `errors`, `sql`, `flags`, `flag_set` and `login_link`, and it reads files only inside the read root.
 
 `openlens-cli` reads `OPENLENS_SERVER` and `OPENLENS_TOKEN` (or `--server`/`--token`), prints JSON, and exits non-zero when something needs fixing. It is in the server image (`docker exec <container> openlens-cli …`), or `cargo install --git <repo> openlens-cli`.
 

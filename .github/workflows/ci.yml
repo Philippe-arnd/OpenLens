@@ -117,6 +117,14 @@ jobs:
             ./target/debug/openlens > $RUNNER_TEMP/demo.log 2>&1 &
           for i in $(seq 1 30); do curl -fs localhost:8687/healthz && break; sleep 1; done
           node scripts/e2e/screens.mjs http://localhost:8687 adm_ci $RUNNER_TEMP/screens
+      - name: reference apps wired by the agent guide reach a green verify (M2 exit; nightly / on demand)
+        if: github.event_name != 'pull_request'
+        env:
+          OPENLENS_SERVER: http://localhost:8686
+          OPENLENS_TOKEN: adm_ci
+        run: |
+          cargo build -p openlens-cli
+          scripts/e2e/reference.sh
       - if: always() && github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
@@ -125,7 +133,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
       - if: failure()
-        run: cat $RUNNER_TEMP/ol.log $RUNNER_TEMP/demo.log 2>/dev/null || true
+        run: cat $RUNNER_TEMP/ol.log $RUNNER_TEMP/demo.log $RUNNER_TEMP/notes-ssr.log $RUNNER_TEMP/tasks-spa.log 2>/dev/null || true
 
   report:
     name: open an issue when main breaks
