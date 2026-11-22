@@ -8,6 +8,7 @@ import http from "node:http";
 const [server, key] = process.argv.slice(2);
 const page = `<!doctype html><html><head><meta name="openlens-release" content="e2e-1"></head><body>
 <button data-feature="export">Export</button>
+<div data-openlens-mask><button id="secret">Dear diary, private words</button></div>
 <script src="${server}/c.js" data-key="${key}"></script>
 <script>openlens.identify("e2e-user", { role: "owner" });</script>
 </body></html>`;
@@ -19,7 +20,8 @@ const tab = await browser.newPage();
 const sent = [];
 tab.on("request", (r) => r.url().includes("/capture") && sent.push(r.postData()));
 await tab.goto(`http://localhost:${port}/`);
-await tab.click("button");
+await tab.click("button[data-feature=export]");
+await tab.click("#secret");
 await tab.evaluate(() => { setTimeout(() => { throw new Error("e2e boom"); }, 0); });
 await tab.waitForTimeout(200);
 await tab.evaluate(() => openlens.flush());
@@ -37,6 +39,10 @@ console.log("replay chunk stored");
 site.close();
 
 const events = sent.flatMap((b) => JSON.parse(b).batch.map((e) => e.event));
+if (sent.some((b) => b.includes("private words"))) {
+  console.error("masked text was sent");
+  process.exit(1);
+}
 const need = ["$pageview", "$identify", "$click", "$error"];
 const missing = need.filter((n) => !events.includes(n));
 console.log("sent:", events.join(", "));
