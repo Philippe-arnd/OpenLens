@@ -16,12 +16,13 @@ Roles are the main way to slice every number, so they are declared explicitly, n
 
 | KPI | Definition |
 | --- | --- |
-| **DAU / WAU / MAU** | Distinct identified users with at least one event on the day, in the last 7 days or in the last 30 days (UTC days). Anonymous visitors are counted separately. Events sent before login belong to the user once `identify` links the anonymous id, so a visit that starts logged out is not counted twice. |
+| **DAU / WAU / MAU** | Distinct identified users with at least one event on the day, in the last 7 days or in the last 30 days (UTC days). Anonymous visitors are counted separately ("not logged in"); a project that never calls `identify` counts every visitor. Events sent before login belong to the user once `identify` links the anonymous id, so a visit that starts logged out is not counted twice. |
 | **Stickiness** | DAU / MAU, as a ratio. |
 | **Churn** | A user is *churned* after `churn_after_days` without an event (14 by default; the one optional setting, in the feature map). **Churn rate** for a period is the number of users active at the start of the period who churned during it, divided by the number of users active at the start. **Resurrected** users (churned, then active again) are reported separately: these are users active in the last 30 days whose previous active day was more than `churn_after_days` earlier. |
+| **Weekly retention** | Users grouped by the week (UTC, Monday) of their first visit ever, which is their first `identify` (not their first event in the window, so a returning user is not a new cohort). Each cell is the share of the cohort active *k* weeks later. The last column of each row is the current week, still in progress. |
 | **Session** | A run of a user's events with gaps of less than 30 minutes. A session also ends at midnight UTC. |
-| **Average session duration** | Mean and median of the time from the first to the last event of each session. Sessions with a single event count as 0 s and are flagged separately as "bounces". |
-| **Tasks performed** | The number of *completed tasks* (see Features), in total, per active user per day, and per session. |
+| **Average session duration** | Mean and median of the time from the first to the last event of each session. A session with at most one *interaction* (a page view, click, submit, feature use, survey answer or custom event; `$scroll`, `$vital`, `$identify` and `$error` don't count) is a **bounce**; bounces are left out of the mean and counted on their own. |
+| **Tasks performed** | The number of *completed tasks* (see Features): success events of the features in the map, or feature uses when there is no map. Given in total, per active user-day (a user active on 3 days counts 3), and per session. |
 
 ## Performance
 

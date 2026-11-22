@@ -64,7 +64,39 @@ fn events_view_sql() -> String {
     )
 }
 
-type AliasCache = Arc<std::sync::Mutex<HashMap<String, (Instant, Option<Arc<MemTable>>)>>>;
+/// `persons(person, first_seen)`: every identified user and their first
+/// `$identify`, over all time (not just a query's window), so "first seen"
+/// is the real first visit of a returning user.
+const PERSONS_SQL: &str = "SELECT distinct_id AS person, min(timestamp) AS first_seen \
+     FROM raw_events WHERE event = '$identify' GROUP BY distinct_id";
+
+/// The identity tables of one project, read together.
+#[derive(Debug, Clone)]
+struct Identity {
+    /// `person_aliases`; `None` when no anonymous id was linked.
+    aliases: Option<Arc<MemTable>>,
+    /// `persons`; may be empty.
+    persons: Arc<MemTable>,
+}
+
+type AliasCache = Arc<std::sync::Mutex<HashMap<String, (Instant, Identity)>>>;
+
+/// Run `sql` and keep its result as an in-memory table, with its row count.
+async fn collect(ctx: &SessionContext, sql: &str) -> Result<(Arc<MemTable>, usize), QueryError> {
+    let df = ctx
+        .sql(sql)
+        .await
+        .map_err(|e| QueryError::Storage(e.to_string()))?;
+    let schema = Arc::new(df.schema().as_arrow().clone());
+    let batches = df
+        .collect()
+        .await
+        .map_err(|e| QueryError::Storage(e.to_string()))?;
+    let rows = batches.iter().map(|b| b.num_rows()).sum();
+    let table =
+        MemTable::try_new(schema, vec![batches]).map_err(|e| QueryError::Storage(e.to_string()))?;
+    Ok((Arc::new(table), rows))
+}
 
 /// Query errors. Messages are safe to show to the caller.
 #[derive(Debug, thiserror::Error)]
@@ -123,7 +155,7 @@ pub struct QueryEngine {
     runtime: Option<Arc<datafusion::execution::runtime_env::RuntimeEnv>>,
     /// In-memory tables added by [`QueryEngine::snapshot`], for one project.
     snapshots: Arc<Vec<(String, String, Arc<MemTable>)>>,
-    /// Per project: the `person_aliases` table and when it was read.
+    /// Per project: the identity tables and when they were read.
     aliases: AliasCache,
 }
 
@@ -238,7 +270,10 @@ impl QueryEngine {
         let table: Arc<ListingTable> = Arc::new(table);
         ctx.register_table("raw_events", table.clone())
             .map_err(|e| QueryError::Storage(e.to_string()))?;
-        match self.aliases(project, &ctx).await? {
+        let identity = self.identity(project, &ctx).await?;
+        ctx.register_table("persons", identity.persons)
+            .map_err(|e| QueryError::Storage(e.to_string()))?;
+        match identity.aliases {
             // Nobody to merge: `events` is the stored table, at no cost.
             None => {
                 ctx.register_table("events", table)
@@ -265,41 +300,25 @@ impl QueryEngine {
         Ok(ctx)
     }
 
-    /// The `person_aliases` table of `project`, read at most every
-    /// [`ALIAS_TTL`]; `None` when no anonymous id was identified.
-    async fn aliases(
-        &self,
-        project: &str,
-        ctx: &SessionContext,
-    ) -> Result<Option<Arc<MemTable>>, QueryError> {
+    /// The `person_aliases` and `persons` tables of `project`, read at most
+    /// every [`ALIAS_TTL`].
+    async fn identity(&self, project: &str, ctx: &SessionContext) -> Result<Identity, QueryError> {
         if let Ok(cache) = self.aliases.lock()
             && let Some((at, t)) = cache.get(project)
             && at.elapsed() < ALIAS_TTL
         {
             return Ok(t.clone());
         }
-        let df = ctx
-            .sql(ALIAS_SQL)
-            .await
-            .map_err(|e| QueryError::Storage(e.to_string()))?;
-        let schema = Arc::new(df.schema().as_arrow().clone());
-        let batches = df
-            .collect()
-            .await
-            .map_err(|e| QueryError::Storage(e.to_string()))?;
-        let rows: usize = batches.iter().map(|b| b.num_rows()).sum();
-        let table = if rows == 0 {
-            None
-        } else {
-            Some(Arc::new(
-                MemTable::try_new(schema, vec![batches])
-                    .map_err(|e| QueryError::Storage(e.to_string()))?,
-            ))
+        let (aliases, alias_rows) = collect(ctx, ALIAS_SQL).await?;
+        let (persons, _) = collect(ctx, PERSONS_SQL).await?;
+        let identity = Identity {
+            aliases: (alias_rows > 0).then_some(aliases),
+            persons,
         };
         if let Ok(mut cache) = self.aliases.lock() {
-            cache.insert(project.to_owned(), (Instant::now(), table.clone()));
+            cache.insert(project.to_owned(), (Instant::now(), identity.clone()));
         }
-        Ok(table)
+        Ok(identity)
     }
 
     /// Run one read-only SQL query on `project`'s events.

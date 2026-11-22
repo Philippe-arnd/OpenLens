@@ -684,3 +684,56 @@ async fn weekly_retention_cohorts_count_returning_users() {
     );
     assert_eq!(c.weeks[2], 0.0);
 }
+
+/// Users are identified people, a bounce is a session with one interaction
+/// at most, and a returning user is not a new cohort (docs/kpis.md).
+#[tokio::test]
+async fn users_bounces_and_cohorts_are_counted_as_documented() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let e = |user, session, event, mins_ago| E {
+        user,
+        role: "member",
+        session,
+        event,
+        mins_ago,
+        feature: None,
+        release: "v1",
+        props: "{}",
+    };
+    let rows = [
+        // alice first logged in 120 days ago and is back today
+        e("alice", "old", "$identify", 120 * 24 * 60),
+        e("alice", "old", "$pageview", 120 * 24 * 60),
+        e("alice", "s1", "$identify", 30),
+        e("alice", "s1", "$pageview", 30),
+        e("alice", "s1", "$click", 25),
+        // bob is new: one page, then only scroll and vitals: a bounce
+        e("bob", "s2", "$identify", 20),
+        e("bob", "s2", "$pageview", 20),
+        e("bob", "s2", "$scroll", 15),
+        e("bob", "s2", "$vital", 14),
+        // a visitor who never logged in
+        e("anon-1", "s3", "$pageview", 10),
+    ];
+    let evs: Vec<_> = rows.iter().enumerate().map(|(i, e)| mk(e, i)).collect();
+    w.append(&evs).unwrap();
+    w.flush().unwrap();
+    let q = QueryEngine::new(dir.path(), Limits::default());
+    let b = board(&q, "p", &Filters::default(), None).await.unwrap();
+
+    assert_eq!(
+        (b.users.dau, b.users.mau),
+        (2, 2),
+        "anonymous visitors are not users"
+    );
+    assert_eq!(b.users.anonymous, 1);
+    assert_eq!(b.sessions.count, 3);
+    assert!(
+        (b.sessions.bounce_rate - 2.0 / 3.0).abs() < 1e-9,
+        "bob's and the visitor's sessions bounce: {}",
+        b.sessions.bounce_rate
+    );
+    let newest = b.retention.last().unwrap();
+    assert_eq!(newest.users, 1, "only bob is new this week, not alice");
+}
