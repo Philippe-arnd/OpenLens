@@ -390,9 +390,13 @@ impl QueryEngine {
                 truncated,
             })
         };
-        match tokio::time::timeout(limits.timeout, run).await {
+        let started = Instant::now();
+        let out = match tokio::time::timeout(limits.timeout, run).await {
             Ok(r) => r,
             Err(_) => Err(QueryError::Timeout(limits.timeout)),
-        }
+        };
+        // `RUST_LOG=openlens_query=debug` shows what each query costs.
+        tracing::debug!(ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX), sql = %sql.chars().take(160).collect::<String>(), "query");
+        out
     }
 }

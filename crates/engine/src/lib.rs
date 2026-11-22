@@ -293,8 +293,11 @@ pub fn source(map: Option<&FeatureMap>) -> String {
 /// anyone, in which case every visitor counts. User KPIs (DAU/WAU/MAU,
 /// retention, cohorts) use it, so a visitor who never logged in is not a
 /// user (docs/kpis.md); anonymous visitors are counted on their own.
+///
+/// Written with a scalar count rather than `NOT EXISTS`: DataFusion cannot
+/// turn `IN … OR NOT EXISTS …` into a semi-join and runs it 20× slower (#159).
 pub(crate) const IDENTIFIED: &str =
-    "(distinct_id IN (SELECT person FROM persons) OR NOT EXISTS (SELECT 1 FROM persons))";
+    "(distinct_id IN (SELECT person FROM persons) OR (SELECT count(*) FROM persons) = 0)";
 
 /// Events a person does on purpose. A session with one of them at most is a
 /// bounce; `$scroll`, `$vital`, `$identify` or `$error` alone are not activity.
@@ -433,8 +436,10 @@ pub async fn board(
                GROUP BY release, session_id) s \
          GROUP BY release ORDER BY min(first) DESC LIMIT 5"
     );
-    let env_sql = "SELECT DISTINCT environment FROM events ORDER BY environment".to_owned();
-    let total_sql = "SELECT count(*) AS n FROM events".to_owned();
+    // Neither depends on who did what: read the stored rows, without the
+    // identity join.
+    let env_sql = "SELECT DISTINCT environment FROM raw_events ORDER BY environment".to_owned();
+    let total_sql = "SELECT count(*) AS n FROM raw_events".to_owned();
 
     let success_sql = if successes.is_empty() {
         "SELECT CAST(NULL AS VARCHAR) AS event, 0 AS n, 0 AS users WHERE false".to_owned()

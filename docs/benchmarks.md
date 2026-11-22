@@ -21,9 +21,14 @@ Numbers to keep OpenLens honest about "lean". Re-run them when ingestion, storag
 | Data | Board (API, one vCPU) |
 | --- | --- |
 | 21 k events (demo app, planted patterns) | about 0.4 s (slowest query 41 ms) |
-| 515 k events | about 1.0–1.1 s |
+| 368 k events, with identities (2026-11-22) | about **0.8 s** (1.7 s before #159) |
+| 2.1 M events, with identities (above the in-memory cap) | about 6–7 s |
 
-The board takes one in-memory snapshot of the 90-day projection, then filters it for every query (#75). Above 2 M rows in the window it reads the files instead, so memory stays bounded.
+**With identities:** `xtask bench` sends realistic visits since #159. A third of the users browse anonymously before logging in, `$identify` links that visit, and one event in seven comes from a visitor who never logs in. So the board pays for the `persons` and `person_aliases` joins like a real app does.
+
+The board takes one in-memory snapshot of the 90-day projection, then filters it for every query (#75). Above 2 M rows in the window it reads the files instead, so memory stays bounded, at the cost of reading them once per query.
+
+**Watch out for subqueries in `OR`.** DataFusion turns `x IN (SELECT …)` into a semi-join, but not when it sits in an `OR` with `NOT EXISTS (…)`: the "identified users" filter written that way cost 20× more (0.7 s instead of 35 ms per query). Use `OR (SELECT count(*) …) = 0`. To see what each query costs, run with `RUST_LOG=openlens_query=debug`.
 
 ## How to run
 
