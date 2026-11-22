@@ -95,6 +95,30 @@ function load(): State {
   return { anon: uuid(), dims: {}, sid: uuid(), last: 0 };
 }
 
+/** Pick up what another tab of the same app saved (login, logout, the
+ * current session), so tabs share one visitor and one session. */
+function refresh(): void {
+  try {
+    const raw = localStorage.getItem(storageKey());
+    if (raw) state = { ...state, ...(JSON.parse(raw) as State) };
+  } catch {
+    // Storage blocked: this tab keeps its own state.
+  }
+}
+
+/** The page's route. Hash routers (`#/notes`, `#!/notes`) count as paths. */
+function route(): string {
+  const h = location.hash;
+  const hashRoute = h.startsWith("#/") ? h.slice(1) : h.startsWith("#!/") ? h.slice(2) : "";
+  if (!hashRoute) return location.pathname;
+  return location.pathname.replace(/\/$/, "") + (hashRoute.split("?")[0] ?? "");
+}
+
+/** Crawlers and monitoring robots that run JavaScript are not visitors. */
+function isBot(): boolean {
+  return /bot\b|crawler|spider|slurp|facebookexternalhit|lighthouse|pingdom|uptime|prerender/i.test(navigator.userAgent || "");
+}
+
 function save(): void {
   try {
     localStorage.setItem(storageKey(), JSON.stringify(state));
@@ -113,7 +137,7 @@ function touchSession(now: number): void {
 function base(): Props {
   const p: Props = {
     $current_url: location.href.split("#")[0],
-    $pathname: location.pathname,
+    $pathname: route(),
     $environment: cfg?.environment || detectEnvironment(location.hostname),
     $lib: "web",
     $lib_version: VERSION,
@@ -130,6 +154,7 @@ function base(): Props {
 export function track(event: string, props?: Props): void {
   if (!cfg || consent === "denied") return;
   const now = Date.now();
+  refresh();
   touchSession(now);
   save();
   queue.push({
@@ -250,16 +275,20 @@ export function setConsent(granted: boolean): void {
 /** Send queued events now. */
 export function flush(beacon = false): void {
   if (!cfg || consent !== "granted" || queue.length === 0) return;
-  const body = JSON.stringify({ sent_at: new Date().toISOString(), batch: queue });
+  const batch = queue;
+  const body = JSON.stringify({ sent_at: new Date().toISOString(), batch });
   queue = [];
   const url = `${cfg.host.replace(/\/$/, "")}/capture?key=${encodeURIComponent(cfg.key)}`;
   // text/plain keeps this a "simple" request: no CORS preflight.
-  if (beacon && navigator.sendBeacon) {
-    navigator.sendBeacon(url, new Blob([body], { type: "text/plain" }));
-    return;
-  }
-  origFetch?.(url, { method: "POST", body, keepalive: true, headers: { "content-type": "text/plain" } }).catch(
-    () => undefined,
+  if (beacon && navigator.sendBeacon && navigator.sendBeacon(url, new Blob([body], { type: "text/plain" }))) return;
+  // Offline or server unavailable: keep the events for the next flush (same
+  // uuids), so a network blip loses nothing.
+  const retry = () => {
+    queue = batch.concat(queue).slice(-MAX_QUEUE);
+  };
+  origFetch?.(url, { method: "POST", body, keepalive: body.length < 60000, headers: { "content-type": "text/plain" } }).then(
+    (r) => (r.status >= 500 || r.status === 429) && retry(),
+    retry,
   );
 }
 
@@ -278,10 +307,11 @@ function reportScroll(): void {
 }
 
 function pageview(): void {
-  if (location.pathname === lastPath) return;
+  const path = route();
+  if (path === lastPath) return;
   if (lastPath) reportScroll();
   const first = lastPath === "";
-  lastPath = location.pathname;
+  lastPath = path;
   track("$pageview", first && document.referrer ? { $referrer: document.referrer } : {});
 }
 
@@ -316,6 +346,14 @@ function autocapture(): void {
     };
   }
   addEventListener("popstate", pageview);
+  addEventListener("hashchange", pageview);
+  // Back/forward cache: the page is shown again without loading.
+  addEventListener("pageshow", (e) => {
+    if (e.persisted) {
+      lastPath = "";
+      pageview();
+    }
+  });
   addEventListener("scroll", measureScroll, { passive: true });
   addEventListener("visibilitychange", () => document.visibilityState === "hidden" && reportScroll(), true);
 
@@ -416,9 +454,15 @@ export function init(config: Config): void {
   } catch {
     activeFlags = [];
   }
+  if (isBot()) consent = "denied";
   if (consent === "denied") return;
   loadFlags();
-  if (config.autocapture !== false) autocapture();
+  // A prerendered page (speculation rules) is not a visit until it is shown.
+  const doc = document as Document & { prerendering?: boolean };
+  if (config.autocapture !== false) {
+    if (doc.prerendering) document.addEventListener("prerenderingchange", autocapture, { once: true });
+    else autocapture();
+  }
   if (config.replay !== false && consent === "granted") startReplay();
   timer = setInterval(() => flush(), 5000);
   addEventListener("visibilitychange", () => document.visibilityState === "hidden" && flush(true));
