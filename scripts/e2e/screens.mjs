@@ -59,7 +59,21 @@ await Promise.all([pt.waitForNavigation(), pt.click("button[type=submit]")]);
 for (const p of [...pages.map((x) => `/p/default${x}`), ...global]) {
   await pt.goto(`${server}${p}`);
   const over = await pt.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-  if (over > 1) problems.push(`${p} (phone): the page scrolls sideways by ${over}px`);
+  if (over > 1) {
+    // Name the outermost elements that stick out, to fix them quickly.
+    const culprits = await pt.evaluate(() => {
+      const w = document.documentElement.clientWidth;
+      const out = [];
+      for (const el of document.querySelectorAll("body *")) {
+        const r = el.getBoundingClientRect();
+        if (r.right > w + 1 && !(el.parentElement && el.parentElement.getBoundingClientRect().right > w + 1)) {
+          out.push(`${el.tagName.toLowerCase()}${el.className && typeof el.className === "string" ? "." + el.className.trim().replace(/\s+/g, ".") : ""} (${Math.round(r.right - w)}px)`);
+        }
+      }
+      return out.slice(0, 4).join(", ");
+    });
+    problems.push(`${p} (phone): the page scrolls sideways by ${over}px: ${culprits}`);
+  }
   await pt.screenshot({ path: `${out}/phone${p.replace("/p/default", "").replace(/\//g, "-") || "-board"}.png`, fullPage: true });
 }
 await phone.close();
