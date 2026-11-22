@@ -1,0 +1,50 @@
+name: npm
+
+# Publishes @openlens/web to npm on v* tags (and on demand, as a dry run).
+# Publishing uses npm trusted publishing (OIDC, with provenance): configure
+# it once on npmjs.com for this repository and this workflow. Without it, an
+# NPM_TOKEN repository secret works too. Skipped while the repository is
+# private, since provenance needs a public source.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Pack and check only, publish nothing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: build, check, publish @openlens/web
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/js
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npm run build && npm run check
+      - name: committed bundle is up to date
+        run: git diff --exit-code -- dist
+      - name: tag matches package version
+        if: github.ref_type == 'tag'
+        run: |
+          v=$(node -p 'require("./package.json").version')
+          test "v$v" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != package v$v"; exit 1; }
+      - run: npm pack --dry-run
+      - name: publish
+        if: github.ref_type == 'tag' || !inputs.dry_run
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

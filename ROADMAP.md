@@ -30,7 +30,7 @@ A layered workspace, `cargo xtask ci`, AGENTS.md, Docker and compose with the he
 - **Query engine:** DataFusion over the partitions, with read-only SQL per project.
 - **Dashboard:** login with the admin token or a one-time link.
 - **Deployment:** the Coolify one-click template and the GHCR image, with no required environment variables.
-- 📦 To do once the repo is public: publish `@openlens/web` on npm. Until then, use the script tag or a `file:` dependency.
+- 📦 `@openlens/web` on npm: the package and `.github/workflows/npm.yml` are ready, and it publishes on `v*` tags once the repo is public and npm trusted publishing is configured. Until then, use the script tag or a `file:` dependency.
 
 **Exit:** `docker compose up`, then a page with one script tag. Its events, sessions, errors and vitals show on the dashboard within ~10 s, and `scripts/smoke.sh` passes in CI.
 
