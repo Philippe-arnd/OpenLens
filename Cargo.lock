@@ -2420,6 +2420,7 @@ dependencies = [
  "hex",
  "rand",
  "rusqlite",
+ "serde",
  "sha2",
  "tempfile",
  "thiserror",
@@ -2519,6 +2520,7 @@ dependencies = [
  "openlens-engine",
  "openlens-errors",
  "openlens-flags",
+ "openlens-meta",
  "openlens-replay",
 ]
 

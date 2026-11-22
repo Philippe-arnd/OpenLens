@@ -62,6 +62,10 @@ pub fn router(state: AppState) -> Router {
         .merge(flags::routes())
         .merge(replay::routes())
         .merge(web::routes())
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            web::access_layer,
+        ))
         .layer(axum::middleware::from_fn(web::theme_layer))
         .with_state(state)
 }

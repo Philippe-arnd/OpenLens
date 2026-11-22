@@ -91,11 +91,44 @@ fn slugs_are_safe_partition_names() {
 fn login_links_work_once_and_expire() {
     let m = Meta::in_memory().unwrap();
     let t = m.create_login_link(600).unwrap();
-    assert!(m.consume_login_link(&t).unwrap());
-    assert!(!m.consume_login_link(&t).unwrap(), "second use must fail");
+    assert_eq!(m.consume_login_link(&t).unwrap(), Some(None), "owner link");
+    assert_eq!(
+        m.consume_login_link(&t).unwrap(),
+        None,
+        "second use must fail"
+    );
     let expired = m.create_login_link(-1).unwrap();
-    assert!(!m.consume_login_link(&expired).unwrap());
-    assert!(!m.consume_login_link("ll_made_up").unwrap());
+    assert_eq!(m.consume_login_link(&expired).unwrap(), None);
+    assert_eq!(m.consume_login_link("ll_made_up").unwrap(), None);
+}
+
+#[test]
+fn users_are_validated_updated_and_bound_to_their_links() {
+    let m = Meta::in_memory().unwrap();
+    let u = m
+        .upsert_user(
+            " Ana@Example.com ",
+            "viewer",
+            Some(&["a".into(), " b ".into()]),
+        )
+        .unwrap();
+    assert_eq!(u.email, "ana@example.com");
+    assert_eq!(u.projects, Some(vec!["a".to_owned(), "b".to_owned()]));
+    let again = m.upsert_user("ana@example.com", "admin", None).unwrap();
+    assert_eq!(
+        (
+            again.id.as_str(),
+            again.role.as_str(),
+            again.projects.clone()
+        ),
+        (u.id.as_str(), "admin", None)
+    );
+    assert!(m.upsert_user("not-an-email", "viewer", None).is_err());
+    assert!(m.upsert_user("x@y.z", "root", None).is_err());
+    let t = m.create_login_link_for(Some(&u.id), 600).unwrap();
+    assert_eq!(m.consume_login_link(&t).unwrap(), Some(Some(u.id.clone())));
+    assert!(m.delete_user(&u.id).unwrap());
+    assert!(m.user(&u.id).unwrap().is_none());
 }
 
 #[test]

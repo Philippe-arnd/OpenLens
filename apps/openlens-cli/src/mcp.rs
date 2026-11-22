@@ -161,8 +161,8 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "login_link",
-                description: "A one-time login link (7 days) to send to the PM.",
-                input_schema: json!({"type":"object","properties":{}}),
+                description: "A one-time login link (7 days). Without email: an owner link for the PM. With email (+ role viewer|admin, optional projects): invites that person with that access.",
+                input_schema: json!({"type":"object","properties":{"email":{"type":"string"},"role":{"type":"string","enum":["viewer","admin"]},"projects":{"type":"array","items":{"type":"string"}}}}),
             },
         ]
     }
@@ -330,7 +330,14 @@ impl Tools for OpenLensTools {
                 ok_or(st, v)
             }
             "login_link" => {
-                let (st, v) = c.call("POST", "/api/login-links", None)?;
+                let body = s(args, "email").map(|e| {
+                    Body::Json(json!({
+                        "email": e,
+                        "role": s(args, "role").unwrap_or_else(|| "viewer".into()),
+                        "projects": args.get("projects").cloned(),
+                    }))
+                });
+                let (st, v) = c.call("POST", "/api/login-links", body)?;
                 ok_or(st, v)
             }
             _ => Err(format!("unknown tool {name}")),

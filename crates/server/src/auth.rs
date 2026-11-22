@@ -1,9 +1,12 @@
 //! Dashboard and API authentication.
 //!
 //! - API: `Authorization: Bearer <admin token>`.
-//! - Dashboard: a session cookie `<expiry>.<hmac>` signed with the admin
-//!   token (HMAC-SHA256). Stateless, survives restarts, and rotating the
-//!   admin token logs everyone out.
+//! - Dashboard: a session cookie `<expiry>.<user>.<hmac>` signed with the
+//!   admin token (HMAC-SHA256). `user` is `owner` (admin token, owner links)
+//!   or a user id (D-016); a removed user's sessions stop working at once.
+//!   Stateless otherwise, survives restarts, and rotating the admin token
+//!   logs everyone out. Cookies from before users existed (`<expiry>.<hmac>`)
+//!   still count as the owner.
 //! - One-time login links (`/l/<token>`) for handing the board to a PM.
 
 use axum::http::HeaderMap;
@@ -28,24 +31,72 @@ fn sign(key: &str, msg: &str) -> String {
     }
 }
 
-/// A fresh session cookie value.
-pub(crate) fn new_session(state: &AppState) -> String {
+/// The owner: whoever holds the admin token.
+pub(crate) const OWNER: &str = "owner";
+
+/// Who is looking at the dashboard.
+#[derive(Debug, Clone)]
+pub(crate) struct Viewer {
+    /// Can change things (flags, users).
+    pub admin: bool,
+    /// Projects they may see (`None`: all).
+    pub projects: Option<Vec<String>>,
+}
+
+impl Viewer {
+    /// May this viewer see `project`?
+    pub(crate) fn can_see(&self, project: &str) -> bool {
+        self.projects
+            .as_ref()
+            .is_none_or(|p| p.iter().any(|x| x == project))
+    }
+}
+
+/// A fresh session cookie value for `user` (`OWNER` or a user id).
+pub(crate) fn new_session(state: &AppState, user: &str) -> String {
     let exp = chrono::Utc::now().timestamp() + SESSION_SECS;
     format!(
-        "{exp}.{}",
-        sign(&state.admin_token, &format!("session:{exp}"))
+        "{exp}.{user}.{}",
+        sign(&state.admin_token, &format!("session:{exp}:{user}"))
     )
 }
 
-fn valid_session(state: &AppState, value: &str) -> bool {
-    let Some((exp, sig)) = value.split_once('.') else {
-        return false;
-    };
-    let Ok(exp_n) = exp.parse::<i64>() else {
-        return false;
-    };
-    exp_n > chrono::Utc::now().timestamp()
-        && token_matches(sig, &sign(&state.admin_token, &format!("session:{exp}")))
+/// The user a session cookie belongs to, if it is valid.
+fn session_user(state: &AppState, value: &str) -> Option<String> {
+    let (exp, rest) = value.split_once('.')?;
+    let exp_n = exp.parse::<i64>().ok()?;
+    if exp_n <= chrono::Utc::now().timestamp() {
+        return None;
+    }
+    match rest.split_once('.') {
+        Some((user, sig)) => {
+            let ok = user.len() <= 120
+                && token_matches(
+                    sig,
+                    &sign(&state.admin_token, &format!("session:{exp}:{user}")),
+                );
+            ok.then(|| user.to_owned())
+        }
+        // Legacy owner cookie.
+        None => token_matches(rest, &sign(&state.admin_token, &format!("session:{exp}")))
+            .then(|| OWNER.to_owned()),
+    }
+}
+
+/// The logged-in dashboard viewer, if any.
+pub(crate) fn viewer(state: &AppState, headers: &HeaderMap) -> Option<Viewer> {
+    let id = session_user(state, &cookie(headers, COOKIE)?)?;
+    if id == OWNER {
+        return Some(Viewer {
+            admin: true,
+            projects: None,
+        });
+    }
+    let u = state.meta.user(&id).ok()??;
+    Some(Viewer {
+        admin: u.role == "admin",
+        projects: u.projects,
+    })
 }
 
 fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {
@@ -61,7 +112,7 @@ fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {
 
 /// Is the request from a logged-in dashboard user?
 pub(crate) fn has_session(state: &AppState, headers: &HeaderMap) -> bool {
-    cookie(headers, COOKIE).is_some_and(|v| valid_session(state, &v))
+    viewer(state, headers).is_some()
 }
 
 /// Does the request carry the admin bearer token?

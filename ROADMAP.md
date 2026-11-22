@@ -75,4 +75,5 @@ A layered workspace, `cargo xtask ci`, AGENTS.md, Docker and compose with the he
 - ✅ Server SDKs: Node and Python, no dependencies ([sdk/SERVER.md](sdk/SERVER.md))
 - ✅ Visual heatmaps: click density per page (SVG) and over a recorded visit of the real page
 - ✅ Weekly digest: dashboard page, MCP `digest`, Monday email when SMTP is set
-- ⏳ in-app micro-surveys, LLM rewording of cards (optional), users and roles, OIDC (optional), S3 copy (optional)
+- ✅ Users and roles: admin / viewer, optional per-project access, invites by login link (`/users`, CLI, MCP)
+- ⏳ in-app micro-surveys, LLM rewording of cards (optional), OIDC (optional), S3 copy (optional)
