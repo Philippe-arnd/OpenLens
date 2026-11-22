@@ -12,7 +12,6 @@ pub const LAYERS: &[(&str, Option<u8>)] = &[
     ("openlens-flags", Some(2)),
     ("openlens-replay", Some(2)),
     ("openlens-errors", Some(2)),
-    ("openlens-heatmaps", Some(2)),
     ("openlens-featuremap", Some(2)),
     ("openlens-engine", Some(3)),
     ("openlens-server", Some(5)),

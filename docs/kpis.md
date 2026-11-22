@@ -45,6 +45,7 @@ A **feature** is declared in the feature map. A **task** is one use of a feature
 | **Frequency** | Completed tasks per adopting user per week. |
 
 ## Where they show up
-- **Focus board** (home screen): a KPI strip across the top (DAU/MAU, churn, average session, tasks per user per day, error rate, CWV grade), with a role selector. Ranked insight cards sit underneath.
-- **MCP:** `kpi_report { period, by: role | account | plan | page | feature }` returns all of the above in one compact payload.
-- **Export:** the same metrics, pre-aggregated per day and role, sit next to the raw events.
+- **Focus board** (home screen): ranked insight cards, then a KPI strip (DAU/WAU/MAU and users who came back, stickiness, average session, tasks per user per day, sessions with errors) and Web Vitals at p75. A filter bar sets role, release and environment.
+- **Focus board sections:** feature pulse (adoption, uses per user, active days, completion, task time), *Who uses what* (roles × features), weekly retention cohorts, journeys, funnels, flag cohorts and release comparison.
+- **MCP:** `kpi_report { env, role, release, by: role | account | plan | page | feature }` returns the headline KPIs plus a 30-day breakdown in one compact payload. `insights` returns the cards, and `user_timeline` returns one person's story.
+- **Export:** `openlens-cli export` writes the raw events as JSONL, day by day, for analysis elsewhere.

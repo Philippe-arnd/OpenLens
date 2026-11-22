@@ -1,78 +1,74 @@
 # Roadmap
 
-Status: **working prototype** (2026-11-22). Progress: M0 ✓, M1 ✓, M2 ✓ (exit check: the npm SPA and script-tag reference apps in `examples/` reach a green `verify` nightly; Journal waits for a deployed instance), M3 mostly done (KPIs, insight cards, release comparison, paths to value; MCP analysis tools and export remain), M4 flags, cohorts and funnels ✓, M5 ✓ (replay with masking, linked from events, errors and churn-point cards; error groups; page scroll depth and click hotspots; source maps). OpenLens is a method plus the tool that carries it out ([docs/method.md](docs/method.md)): **map → measure → focus → act → compare**, with every setup step done by agents. The milestones follow that loop. Each one has an exit check, and GitHub milestones mirror this file (this file wins if they disagree).
+OpenLens is a method plus the tool that carries it out ([docs/method.md](docs/method.md)): **map → measure → focus → act → compare**, with every setup step done by agents. The milestones follow that loop. Each one has an exit check, and GitHub milestones mirror this file (this file wins if they disagree).
 
 **North star.** A PM's first login shows a populated **Focus board**: KPIs by role and release, what makes users stick, where they churn, which journeys lead to value. Nobody configured anything by hand. We target the 80% of apps that are a web front end with logged-in users who have a role.
 
+## Status (2026-11-22)
+
+| Milestone | Status | Exit check |
+| --- | --- | --- |
+| M0 Foundations | ✅ | ✅ |
+| M1 Measure | ✅ | ✅ smoke test in CI; events show within ~10 s (the flush interval) |
+| M2 Map | ✅ | 🟡 2 of 3 apps (`examples/`, green `verify` nightly); Journal waits for the first deployment |
+| M3 Focus | ✅ | ✅ planted patterns found (testkit); 🟡 "Journal's board makes sense to Phil" waits for the deployment |
+| M4 Act | ✅ | ✅ a flagged cohort shows on the board |
+| M5 See it | ✅ | ✅ churn card → replay of a session that churned there |
+| M6 Production + dogfooding | 🚧 | ⏳ two of Phil's apps on OpenLens for 30 days without data loss |
+
 ---
 
-## M0: Foundations ✓
-Layered workspace, `cargo xtask ci`, AGENTS.md, Docker + compose with the healthcheck, CI on every PR.
+## M0: Foundations ✅
+A layered workspace, `cargo xtask ci`, AGENTS.md, Docker and compose with the healthcheck, and CI on every PR (fast gate). Browser, image and smoke tests run on `main` and nightly.
 
-## M1: Measure, the one-dependency pipeline ✓
-- `POST /capture`: batched, gzip, keys per project, hostile-input safe. Events go to the WAL, then to Parquet segments partitioned by project/date/hour, with compaction.
-- Metadata: projects, persons, role history (D-009).
-- Every event carries **`environment`** and **`release`** (D-012).
-- `@openlens/web` SDK, served at `/c.js` (script tag) and published as an npm package. Under 10 kB gzipped. It covers:
-  - autocapture of page views, clicks, form submits and SPA routes
-  - `identify(id, { role, account, plan })`
-  - sessions
-  - errors
-  - Core Web Vitals
-  - failed requests
-  - environment and release, detected automatically
-  - consent switch
-- Query engine: DataFusion over the partitions, with read-only SQL per project.
-- Dashboard v0, server-rendered: login with the admin token or a one-time link, project overview, recent events.
-- **Coolify one-click template** and a published image (GHCR), with no required env vars.
+## M1: Measure, the one-dependency pipeline ✅
+- **`POST /capture`:** batched and gzip-compressed, with a key per project, and safe against hostile input. Events go to the WAL, then to **daily** Parquet partitions (`project=/date=`), with compaction.
+- **Metadata:** projects, persons, role history (D-009).
+- **`environment` and `release`** on every event (D-012).
+- **`@openlens/web` SDK** (3.8 kB gz), served at `/c.js`. It covers autocapture (page views, SPA routes, clicks, submits, rage clicks, scroll depth), `identify(id, { role, account, plan })`, sessions, errors, Web Vitals, failed requests, environment and release detection, consent and DNT.
+- **Query engine:** DataFusion over the partitions, with read-only SQL per project.
+- **Dashboard:** login with the admin token or a one-time link.
+- **Deployment:** the Coolify one-click template and the GHCR image, with no required environment variables.
+- 📦 To do once the repo is public: publish `@openlens/web` on npm. Until then, use the script tag or a `file:` dependency.
 
-**Exit:** `docker compose up`, then a page with one script tag. Its events, sessions, errors and vitals show on the dashboard within 5 s, and `scripts/smoke.sh` passes in CI.
+**Exit:** `docker compose up`, then a page with one script tag. Its events, sessions, errors and vitals show on the dashboard within ~10 s, and `scripts/smoke.sh` passes in CI.
 
-## M2: Map, the agent toolkit ✓ (exit check pending)
-- `openlens.features.yaml`: features (entry points, success event, optional steps), roles with match rules, churn window. JSON Schema in `docs/schema/`. Parsing and linting live in `crates/featuremap`.
-- `openlens-cli`, which talks to a server over HTTP with the admin token:
-  - `init`: create the project and print the capture key and snippet
-  - `features push` / `features lint`
-  - `import`: backfill persons and past success events from JSONL/CSV that the agent extracts from the app DB
-  - `verify`
-  - `login-link`
-- **MCP server** (`openlens-cli mcp`) exposing the same commands, plus `sql`. From here on, MCP is the main interface for agents.
-- Agent guides: `docs/agents/wire.md` (connect an app) and the rules snippet for the app's own AGENTS.md.
+## M2: Map, the agent toolkit ✅
+- **`openlens.features.yaml`:** features (entry points, success event, optional steps), roles with match rules, the churn window, and a JSON Schema.
+- **`openlens-cli`:** `init`, `features lint|push`, `import` (backfill), `verify`, `sourcemaps`, `flags`, `export`, `sql`, `login-link`, `guide`.
+- **MCP server** (`openlens-cli mcp`) with every command, plus `insights`, `kpi_report`, `user_timeline`, `errors` and `board`.
+- **Agent guides:** [wire.md](docs/agents/wire.md) (served at `/agents.md`) and [analyze.md](docs/agents/analyze.md).
+- **Reference apps** in [`examples/`](examples/): `notes-ssr` (script tag) and `tasks-spa` (npm).
 
-**Exit:** an agent following `docs/agents/wire.md` connects 3 apps (an npm SPA, a server-rendered app with the script tag, and Journal) to a green `verify` and a lint-clean map, with no hand edits.
+**Exit:** an agent following `docs/agents/wire.md` connects 3 apps (an npm SPA, a server-rendered app with the script tag, and Journal) to a green `verify` and a lint-clean map, with no hand edits. The first two are checked nightly; Journal comes with the first deployment.
 
-## M3: Focus, the board (mostly done)
-- KPI engine per [docs/kpis.md](docs/kpis.md), split by role, environment and release. The MCP tool `kpi_report` returns it.
-- Insights:
-  - stick drivers and the value moment
-  - churn points
-  - journeys into each success event (retained vs churned)
-  - the roles × features matrix
-  - role gaps (unmatched role values)
-- Focus board home screen: a KPI strip plus 3–7 ranked cards, each with its evidence and a next step. The empty state is honest about missing data and wiring gaps.
-- Release comparison: the current release against the previous one, on every KPI and card.
-- MCP tools: `stickiness_drivers`, `churn_points`, `journeys`, `cohort_compare`, `user_timeline`. Export to Parquet/JSONL.
+## M3: Focus, the board ✅
+- **KPIs** per [docs/kpis.md](docs/kpis.md), split by role, environment and release. `kpi_report` also splits them by account, plan, page or feature, and states its role rule ("role at event time").
+- **Insight cards:** stick drivers, value moment, churn points, friction, role blind spots, release regressions, slow pages, funnel drops, flag wins and regressions. Each card shows its evidence, its cohort size and a next step.
+- **Board sections:** feature pulse (adoption, frequency, active days, completion, task time p50/p90), *Who uses what* (roles × features), role gaps, journeys into each success event, and release comparison on every KPI.
+- **Agents:** `insights`, `kpi_report`, `user_timeline`, read-only SQL, JSONL export.
 
-**Exit:** on a synthetic dataset with planted patterns (testkit), the planted driver ranks first, the planted churn point is found, and a planted regression in release N+1 is flagged. Journal's board makes sense to Phil.
+**Exit:** on a synthetic dataset with planted patterns (testkit), the planted driver ranks first, the planted churn point is found, and a planted regression in release N+1 is flagged ✅. Journal's board makes sense to Phil ⏳.
 
-## M4: Act, flags and deeper analysis
-- Feature flags with rollout by percentage, role or account, using deterministic hashing and `GET /flags`. The SDK exposes `isEnabled`. Each flag variant becomes a comparison dimension, like a release.
-- Funnels (from the declared steps or ad hoc), retention cohorts, paths.
+## M4: Act, flags and deeper analysis ✅
+- **Feature flags:** rollout by percentage, role or account, using deterministic hashing. The SDK has `isEnabled`, each event carries `$flags`, and every flag becomes a cohort (*with vs without*).
+- **Funnels** from the declared steps, **weekly retention cohorts**, and paths (journeys). Ad hoc funnels are left to agents (`sql`), because there is no builder by design (D-014).
 
-**Exit:** a flagged change for one role shows up as its own cohort on the board.
+**Exit:** a flagged change for one role shows up as its own cohort on the board ✅.
 
-## M5: See it, replay, errors, heatmaps
-- Session replay (rrweb format, lazy chunk, masking on by default, vendored player), linked from events, errors and insight cards.
-- Error grouping by fingerprint, source maps, and the roles and features affected.
-- Click and scroll heatmaps, built from data already captured.
+## M5: See it, replay, errors, heatmaps ✅
+- **Session replay:** rrweb recorder loaded lazily, inputs masked, zstd chunks, a player page, and links from events, errors and churn cards.
+- **Errors:** grouped by fingerprint, split by role, release and place, with **source maps** per release.
+- **Pages:** scroll depth, most-clicked elements, rage clicks.
 
-**Exit:** from a churn-point card, one click opens a replay of a session that churned there.
+**Exit:** from a churn-point card, one click opens a replay of a session that churned there ✅.
 
-## M6: Production-grade and dogfooding
-- Fixed retention (events 400 days, replays 30 days), `openlens backup`, benchmarks (docs/benchmarks.md). OIDC and the S3 backend moved to Later (D-015).
-- Move Journal and Kanban from OpenObserve RUM to OpenLens.
+## M6: Production-grade and dogfooding 🚧
+- ✅ Fixed retention (events 400 days, replays 30 days), `openlens backup` while running, benchmarks ([docs/benchmarks.md](docs/benchmarks.md)): about 80k events/s on one vCPU.
+- ✅ A nightly check of every dashboard page in a real browser, under the real CSP, with screenshots.
+- ⏳ Deploy OpenLens, then move Journal and Kanban from OpenObserve RUM to OpenLens (#42).
 
 **Exit:** two of Phil's prod apps run on OpenLens for 30 days without data loss.
 
 ## Later (not planned until a real need shows)
-Weekly digest, LLM rewording of cards, in-app micro-surveys, experiment significance, server SDKs (thin HTTP clients), multi-user permissions, OIDC login, S3 storage backend (D-015).
+Weekly digest, LLM rewording of cards, in-app micro-surveys, experiment significance, server SDKs (thin HTTP clients), multi-user permissions, OIDC login and an S3 storage backend (D-015, accepted), visual heatmap overlays.
