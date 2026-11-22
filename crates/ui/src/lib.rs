@@ -47,6 +47,18 @@ pub fn compact(n: i64) -> String {
     }
 }
 
+/// Percent-encode a query parameter value.
+pub fn url_enc(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
 /// Format a ratio as a percentage.
 pub fn pct(r: f64) -> String {
     if r > 0.0 && r < 0.001 {
@@ -90,6 +102,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                             a href={ "/p/" (p.id) "/events" } { (icon("events")) "Events" }
                             a href={ "/p/" (p.id) "/pages" } { (icon("layers")) "Pages" }
                             a href={ "/p/" (p.id) "/errors" } { (icon("alert")) "Errors" }
+                            a href={ "/p/" (p.id) "/replays" } { (icon("play")) "Replays" }
                             a href={ "/p/" (p.id) "/flags" } { (icon("flag")) "Flags" }
                         }
                         span.project { (p.name) }
@@ -273,7 +286,7 @@ fn release_compare(rel: &[openlens_engine::ReleaseRow]) -> Markup {
     }
 }
 
-fn insight_cards(b: &Board) -> Markup {
+fn insight_cards(pid: &str, b: &Board) -> Markup {
     let accent = |kind: &str| match kind {
         "stick_driver" => ("mint", "star"),
         "value_moment" => ("mint", "spark"),
@@ -308,6 +321,9 @@ fn insight_cards(b: &Board) -> Markup {
                                 h3 { span.sr-only { "Insight " (i + 1) ": " } (c.title) }
                                 p.evidence { (c.evidence) }
                                 p.next { span.label { "Next step" } " " (c.next_step) }
+                                @if c.kind == "churn_point" {
+                                    p { a.button href={ "/p/" (pid) "/watch?churned_at=" (url_enc(&c.subject)) } { (icon("play")) "Watch a session that churned here" } }
+                                }
                             }
                         }
                     }
@@ -394,7 +410,7 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
                 p.muted { "What " (scope) " did lately in " strong { (f.environment) } "." }
             }
             (filter_bar(p.id, b, f, ""))
-            (insight_cards(b))
+            (insight_cards(p.id, b))
             section.tiles aria-label="Key numbers" {
                 (tile("violet", "users", "Daily active users", &compact(b.users.dau), &format!("{} weekly · {} monthly", compact(b.users.wau), compact(b.users.mau))))
                 (tile("mint", "spark", "Stickiness", &pct(b.users.stickiness), "DAU ÷ MAU"))
@@ -546,7 +562,7 @@ pub fn events(p: &ProjectInfo<'_>, b: &Board, rows: &[EventRow], f: &Filters) ->
                 @if rows.is_empty() { p.muted { "Nothing here yet." } }
                 @else {
                     table.plain.events {
-                        thead { tr { th { "When (UTC)" } th { "Event" } th { "User" } th { "Role" } th { "Page" } th { "Feature" } th { "Release" } } }
+                        thead { tr { th { "When (UTC)" } th { "Event" } th { "User" } th { "Role" } th { "Page" } th { "Feature" } th { "Release" } th { span.sr-only { "Replay" } } } }
                         tbody { @for r in rows {
                             tr {
                                 td.muted.mono { (r.timestamp.get(..19).unwrap_or(&r.timestamp)) }
@@ -556,6 +572,9 @@ pub fn events(p: &ProjectInfo<'_>, b: &Board, rows: &[EventRow], f: &Filters) ->
                                 td.mono { (r.path.as_deref().unwrap_or("—")) }
                                 td { (r.feature.as_deref().unwrap_or("—")) }
                                 td { (r.release.as_deref().unwrap_or("—")) }
+                                td { @if let Some(s) = &r.session_id {
+                                    a.icon-link href={ "/p/" (p.id) "/replays/" (s) "?at=" (r.timestamp) } title="Replay this moment" aria-label="Replay this moment" { (icon("play")) }
+                                } }
                             }
                         } }
                     }
@@ -677,7 +696,7 @@ pub fn errors(
             } @else {
                 section.card.wide {
                     table.plain {
-                        thead { tr { th { "Error" } th.num { "Users" } th.num { "Sessions" } th.num { "Times" } th { "Roles" } th { "Releases" } th { "Where" } th { "Last seen" } } }
+                        thead { tr { th { "Error" } th.num { "Users" } th.num { "Sessions" } th.num { "Times" } th { "Roles" } th { "Releases" } th { "Where" } th { "Last seen" } th { span.sr-only { "Replay" } } } }
                         tbody { @for g in groups {
                             tr {
                                 th scope="row" {
@@ -691,11 +710,84 @@ pub fn errors(
                                 td.small { (list(&g.releases)) }
                                 td.small { (list(&g.places)) }
                                 td.small.muted { (g.last_seen.get(..16).unwrap_or(&g.last_seen)) }
+                                td { @if let Some(s) = &g.last_session {
+                                    a.icon-link href={ "/p/" (p.id) "/replays/" (s) "?at=" (g.last_seen) } title="Replay the latest occurrence" aria-label="Replay the latest occurrence" { (icon("play")) }
+                                } }
                             }
                         } }
                     }
                 }
             }
+        },
+    )
+}
+
+/// Recorded sessions, most recent first.
+pub fn replays(
+    p: &ProjectInfo<'_>,
+    list: &[openlens_replay::Summary],
+    who: Option<&str>,
+) -> Markup {
+    layout(
+        "Replays",
+        Some(p),
+        html! {
+            div.heading {
+                div {
+                    h1 { "Replays" }
+                    p.muted {
+                        "Recorded sessions, most recent first. Inputs are always masked."
+                        @if let Some(w) = who { " Only " span.mono { (w) } ". " a href={ "/p/" (p.id) "/replays" } { "Show everyone" } }
+                    }
+                }
+            }
+            @if list.is_empty() {
+                section.card { p { (icon("play")) " No recordings yet. The SDK records sessions once a page has loaded; they show up here within a few seconds." } }
+            } @else {
+                section.card.wide {
+                    table.plain {
+                        thead { tr { th { "Started (UTC)" } th { "User" } th.num { "Length" } th.num { "Size" } th { span.sr-only { "Play" } } } }
+                        tbody { @for r in list {
+                            @let started = r.started.format("%Y-%m-%d %H:%M").to_string();
+                            @let secs = (r.updated - r.started).num_seconds().max(0) as f64;
+                            tr {
+                                td.mono { (started) }
+                                td.mono { a href={ "/p/" (p.id) "/replays?u=" (r.distinct_id) } { (r.distinct_id) } }
+                                td.num { (duration(secs)) }
+                                td.num.muted { (compact((r.bytes / 1024) as i64)) " kB" }
+                                td { a.button href={ "/p/" (p.id) "/replays/" (r.session_id) } { (icon("play")) "Play" } }
+                            }
+                        } }
+                    }
+                }
+            }
+        },
+    )
+}
+
+/// The replay player page. The player script (rrweb Replayer, MIT) is the
+/// only script the dashboard serves (D-011).
+pub fn player(p: &ProjectInfo<'_>, session: &str, who: Option<&str>, at: Option<&str>) -> Markup {
+    layout(
+        "Replay",
+        Some(p),
+        html! {
+            div.heading {
+                div {
+                    h1 { "Replay" }
+                    p.muted {
+                        "Session " span.mono { (session) }
+                        @if let Some(w) = who { " · " a href={ "/p/" (p.id) "/replays?u=" (w) } { (w) } }
+                    }
+                }
+            }
+            link rel="stylesheet" href="/assets/player.css";
+            section.card.wide {
+                div #ol-player data-src={ "/p/" (p.id) "/replays/" (session) "/events.json" } data-at=[at] {
+                    p.muted { "Loading the recording…" }
+                }
+            }
+            script src="/assets/player.js" defer {}
         },
     )
 }

@@ -30,6 +30,8 @@ pub struct ErrorGroup {
     pub releases: Vec<(String, i64)>,
     /// Places.
     pub places: Vec<(String, i64)>,
+    /// The session of the latest occurrence (links to its replay).
+    pub last_session: Option<String>,
 }
 
 /// The top 20 error groups of the last 30 days, most users first.
@@ -53,7 +55,8 @@ pub async fn error_groups(
     let groups_sql = format!(
         "{base} SELECT fp, min(msg) AS sample, count(*) AS n, count(DISTINCT distinct_id) AS users, \
          count(DISTINCT session_id) AS sessions, CAST(min(timestamp) AS VARCHAR) AS first_seen, \
-         CAST(max(timestamp) AS VARCHAR) AS last_seen FROM g GROUP BY fp ORDER BY users DESC, n DESC LIMIT 20"
+         CAST(max(timestamp) AS VARCHAR) AS last_seen, \
+         last_value(session_id ORDER BY timestamp) AS last_session FROM g GROUP BY fp ORDER BY users DESC, n DESC LIMIT 20"
     );
     let dims_sql = format!(
         "{base} SELECT fp, 'role' AS dim, coalesce(role, 'not identified') AS v, count(DISTINCT distinct_id) AS users FROM g GROUP BY fp, role \
@@ -89,6 +92,7 @@ pub async fn error_groups(
                 sessions: int(r, "sessions"),
                 first_seen: text(r, "first_seen").unwrap_or_default(),
                 last_seen: text(r, "last_seen").unwrap_or_default(),
+                last_session: text(r, "last_session"),
                 fingerprint: fp,
             }
         })

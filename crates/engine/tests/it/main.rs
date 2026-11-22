@@ -238,6 +238,12 @@ async fn insights_find_every_planted_pattern() {
         "{kinds:?}"
     );
     assert!(find("slow_pages").is_some(), "{kinds:?}");
+    // The churn-point card leads to the sessions where those users left.
+    let left =
+        openlens_engine::churned_sessions(&q, "p", None, &Filters::default(), planted::CHURN_POINT)
+            .await
+            .unwrap();
+    assert!(left.len() >= 8, "{}", left.len());
     assert!(b.insights.len() <= 7);
     let mut subjects: Vec<_> = b
         .insights

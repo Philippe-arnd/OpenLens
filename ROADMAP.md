@@ -1,6 +1,6 @@
 # Roadmap
 
-Status: **working prototype** (2026-11-22). Progress: M0 ✓, M1 ✓, M2 ✓ (the reference-apps exit check is still open), M3 mostly done (KPIs, insight cards, release comparison, paths to value; MCP analysis tools and export remain). OpenLens is a method plus the tool that carries it out ([docs/method.md](docs/method.md)): **map → measure → focus → act → compare**, with every setup step done by agents. The milestones follow that loop. Each one has an exit check, and GitHub milestones mirror this file (this file wins if they disagree).
+Status: **working prototype** (2026-11-22). Progress: M0 ✓, M1 ✓, M2 ✓ (the reference-apps exit check is still open), M3 mostly done (KPIs, insight cards, release comparison, paths to value; MCP analysis tools and export remain), M4 flags, cohorts and funnels ✓, M5 ✓ (replay with masking, linked from events, errors and churn-point cards; error groups; page scroll depth and click hotspots; source maps remain). OpenLens is a method plus the tool that carries it out ([docs/method.md](docs/method.md)): **map → measure → focus → act → compare**, with every setup step done by agents. The milestones follow that loop. Each one has an exit check, and GitHub milestones mirror this file (this file wins if they disagree).
 
 **North star.** A PM's first login shows a populated **Focus board**: KPIs by role and release, what makes users stick, where they churn, which journeys lead to value. Nobody configured anything by hand. We target the 80% of apps that are a web front end with logged-in users who have a role.
 
