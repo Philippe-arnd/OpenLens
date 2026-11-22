@@ -19,7 +19,7 @@ const page = `<!doctype html><html><head><meta name="openlens-release" content="
 <button data-feature="export">Export</button>
 <div data-openlens-mask><button id="secret">Dear diary, private words</button></div>
 <script src="${server}/c.js" data-key="${key}"></script>
-<script>openlens.identify("e2e-user", { role: "owner" });</script>
+<script>openlens.reset(); openlens.identify("e2e-user", { role: "owner" });</script>
 </body></html>`;
 const site = http.createServer((_, res) => res.end(page)).listen(0);
 const port = site.address().port;
@@ -69,6 +69,16 @@ if (admin) {
 }
 if (sent.some((b) => b.includes("private words"))) {
   console.error("masked text was sent");
+  process.exit(1);
+}
+// identify links the anonymous visit (reset while anonymous is a no-op), so
+// the events sent before login belong to the user.
+const all = sent.flatMap((b) => JSON.parse(b).batch);
+const ident = all.find((e) => e.event === "$identify");
+const anon = ident?.properties?.$anon_distinct_id;
+const early = all.find((e) => e.distinct_id !== "e2e-user");
+if (!anon || (early && early.distinct_id !== anon)) {
+  console.error("identify does not link the anonymous visit:", anon, early?.distinct_id);
   process.exit(1);
 }
 const need = ["$pageview", "$identify", "$click", "$error"];

@@ -228,9 +228,10 @@ export function identify(id: string, dims: Dimensions = {}): void {
   loadFlags();
 }
 
-/** Forget the user (call on logout). */
+/** Forget the user (call on logout). A no-op while nobody is identified, so
+ * calling it on every logged-out page load does not mint a new visitor. */
 export function reset(): void {
-  if (!cfg) return;
+  if (!cfg || !state.uid) return;
   flush();
   state = { anon: uuid(), dims: {}, sid: uuid(), last: 0 };
   save();
