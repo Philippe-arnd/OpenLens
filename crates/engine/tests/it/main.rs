@@ -238,6 +238,20 @@ async fn insights_find_every_planted_pattern() {
         "{kinds:?}"
     );
     assert!(find("slow_pages").is_some(), "{kinds:?}");
+    // Who uses what: the blind role barely touches the blind feature.
+    let used = |role: &str, feat: &str| {
+        b.role_features
+            .iter()
+            .find(|(r, f, _)| r == role && f == feat)
+            .map_or(0, |x| x.2)
+    };
+    assert!(!b.role_features.is_empty());
+    assert!(
+        used(planted::BLIND_ROLE, planted::BLIND_FEATURE) * 5
+            < used("member", planted::BLIND_FEATURE).max(1),
+        "{:?}",
+        b.role_features
+    );
     // The churn-point card leads to the sessions where those users left.
     let left =
         openlens_engine::churned_sessions(&q, "p", None, &Filters::default(), planted::CHURN_POINT)

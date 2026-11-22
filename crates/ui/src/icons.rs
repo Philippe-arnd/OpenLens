@@ -107,7 +107,7 @@ const ICONS: &[(&str, &str)] = &[
 /// The sprite, once per page.
 pub fn sprite() -> Markup {
     let mut s = String::from(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">"#,
+        r#"<svg xmlns="http://www.w3.org/2000/svg" class="sprite" width="0" height="0" aria-hidden="true" focusable="false">"#,
     );
     for (name, body) in ICONS {
         s.push_str(&format!(

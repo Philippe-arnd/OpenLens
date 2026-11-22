@@ -138,7 +138,9 @@ tbody th { font-weight: 500; }
 tbody tr:hover { background: color-mix(in srgb, var(--line-2) 60%, transparent); }
 .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .bars .meter { width: 46%; }
-.fill { display: block; height: 6px; border-radius: 6px; background: var(--accent, var(--violet)); min-width: 3px; opacity: .85; }
+.fill { display: block; width: 100%; height: 6px; overflow: visible; }
+.fill rect { fill: var(--accent, var(--violet)); opacity: .85; }
+.theme.solo { margin-left: auto; }
 .status { display: inline-flex; align-items: center; gap: 5px; font-weight: 500; font-size: 12.5px; white-space: nowrap; }
 .status.good { color: var(--good); } .status.warn { color: var(--warn); } .status.bad { color: var(--bad); }
 .badge { font-size: 10.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--violet);
@@ -199,3 +201,14 @@ a.icon-link:hover { color: var(--violet); }
 #ol-player .ol-time { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 92px; }
 #ol-player select { font: inherit; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius-s); padding: 4px 6px; }
 #ol-player label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); }
+
+/* Roles × features grid: one hue, five steps (darker = more of the role uses it). */
+table.matrix td { border-radius: 6px; font-variant-numeric: tabular-nums; }
+table.matrix td.heat-1 { background: color-mix(in srgb, var(--violet) 8%, transparent); }
+table.matrix td.heat-2 { background: color-mix(in srgb, var(--violet) 16%, transparent); }
+table.matrix td.heat-3 { background: color-mix(in srgb, var(--violet) 26%, transparent); }
+table.matrix td.heat-4 { background: color-mix(in srgb, var(--violet) 38%, transparent); }
+table.matrix td.heat-5 { background: color-mix(in srgb, var(--violet) 52%, transparent); font-weight: 600; }
+
+/* Icon sprite: definitions only, never drawn (no inline styles under the CSP). */
+svg.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }

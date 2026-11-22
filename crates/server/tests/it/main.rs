@@ -327,6 +327,11 @@ async fn board_renders_numbers_once_data_exists() {
     let html = String::from_utf8_lossy(&body);
     assert!(html.contains("Daily active users"));
     assert!(html.contains("owner"), "the role shows up");
+    // The page CSP forbids inline styles, so the markup must not rely on them.
+    assert!(
+        !html.contains(" style="),
+        "inline style attribute in the board"
+    );
     let events = get(&h, "/p/default/events", Some(&cookie), false).await;
     assert_eq!(events.status(), StatusCode::OK);
 }

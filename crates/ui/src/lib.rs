@@ -107,7 +107,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                         }
                         span.project { (p.name) }
                     }
-                    nav.theme aria-label="Theme" style=(if project.is_none() { "margin-left:auto" } else { "" }) {
+                    nav.theme.solo[project.is_none()] aria-label="Theme" {
                         a.auto href="/theme/auto" title="Follow the system" aria-label="Theme: follow the system" { (icon("auto")) }
                         a.light href="/theme/light" title="Light" aria-label="Theme: light" { (icon("sun")) }
                         a.dark href="/theme/dark" title="Dark" aria-label="Theme: dark" { (icon("moon")) }
@@ -217,6 +217,15 @@ fn status(rating: &str) -> Markup {
     html! { span class={ "status " (cls) } { (self::icon(glyph)) (text) } }
 }
 
+/// A horizontal meter filled to `frac` (0..1). Drawn as SVG so the length
+/// is an attribute, not an inline style: the dashboard CSP forbids those.
+fn meter(frac: f64) -> Markup {
+    let w = format!("{:.1}%", (frac.clamp(0.0, 1.0) * 100.0).max(1.5));
+    html! {
+        svg.fill aria-hidden="true" focusable="false" { rect width=(w) height="6" rx="3" {} }
+    }
+}
+
 fn bars(rows: &[(String, i64, String)]) -> Markup {
     let max = rows.iter().map(|r| r.1).max().unwrap_or(0).max(1) as f64;
     html! {
@@ -226,7 +235,7 @@ fn bars(rows: &[(String, i64, String)]) -> Markup {
                     tr {
                         th scope="row" { (name) }
                         td.meter {
-                            span.fill style={ "width:" (format!("{:.1}", (*v as f64) / max * 100.0)) "%" } {}
+                            (meter((*v as f64) / max))
                         }
                         td.num { (compact(*v)) }
                         td.num.muted { (extra) }
@@ -465,6 +474,7 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
                     (bars(&roles))
                     p.muted.small { "Distinct users per role, last 30 days." }
                 }
+                (role_matrix(b))
                 @if !b.funnels.is_empty() {
                     section.card.wide {
                         h2.sky { (icon("funnel")) "Funnels" }
@@ -474,7 +484,7 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
                                 tbody { @for (i, st) in fun.steps.iter().enumerate() {
                                     tr {
                                         th scope="row" { span.muted { (i + 1) ". " } (st.event) }
-                                        td.meter { span.fill style={ "width:" (format!("{:.1}", st.conversion * 100.0)) "%" } {} }
+                                        td.meter { (meter(st.conversion)) }
                                         td.num { (compact(st.users)) }
                                         td.num.muted { (pct(st.conversion)) @if i > 0 { " · " (duration(st.median_secs)) } }
                                     }
@@ -649,8 +659,8 @@ pub fn pages(
                         p.small.muted { (compact(pg.views)) " views · " (compact(pg.users)) " users" }
                         @if pg.median_scroll >= 0.0 {
                             table.bars { tbody {
-                                tr { th scope="row" { "Reach half the page" } td.meter { span.fill style={ "width:" (format!("{:.0}", pg.reach_half * 100.0)) "%" } {} } td.num { (pct(pg.reach_half)) } }
-                                tr { th scope="row" { "Reach the end" } td.meter { span.fill style={ "width:" (format!("{:.0}", pg.reach_end * 100.0)) "%" } {} } td.num { (pct(pg.reach_end)) } }
+                                tr { th scope="row" { "Reach half the page" } td.meter { (meter(pg.reach_half)) } td.num { (pct(pg.reach_half)) } }
+                                tr { th scope="row" { "Reach the end" } td.meter { (meter(pg.reach_end)) } td.num { (pct(pg.reach_end)) } }
                             } }
                         }
                         @if !pg.hotspots.is_empty() {
@@ -790,6 +800,51 @@ pub fn player(p: &ProjectInfo<'_>, session: &str, who: Option<&str>, at: Option<
             script src="/assets/player.js" defer {}
         },
     )
+}
+
+/// Roles × features: the share of each role's users who used each
+/// feature in the last 30 days. One hue, darker = more adoption; the number
+/// is always printed, so colour is never the only cue.
+fn role_matrix(b: &Board) -> Markup {
+    let roles: Vec<(&str, i64)> = b
+        .roles
+        .iter()
+        .filter_map(|r| Some((r.role.as_deref()?, r.users)))
+        .filter(|(_, n)| *n > 0)
+        .take(6)
+        .collect();
+    let feats: Vec<&openlens_engine::FeatureUse> =
+        b.features.iter().filter(|f| f.users > 0).take(10).collect();
+    if roles.len() < 2 || feats.is_empty() {
+        return html! {};
+    }
+    let cell = |role: &str, feat: &str| {
+        b.role_features
+            .iter()
+            .find(|(r, f, _)| r == role && f == feat)
+            .map_or(0, |x| x.2)
+    };
+    html! {
+        section.card.wide {
+            h2.violet { (icon("users")) "Who uses what" }
+            table.plain.matrix {
+                thead { tr { th { "Feature" } @for (r, n) in &roles { th.num scope="col" { (r) br; span.muted.small { (compact(*n)) " users" } } } } }
+                tbody { @for f in &feats {
+                    tr {
+                        th scope="row" { (f.name.as_deref().unwrap_or(&f.key)) }
+                        @for (r, n) in &roles {
+                            @let share = cell(r, &f.key) as f64 / (*n).max(1) as f64;
+                            @let level = if share <= 0.0 { 0 } else { ((share * 5.0).ceil() as u8).clamp(1, 5) };
+                            td.num class={ "heat-" (level) } title={ (pct(share)) " of " (r) " users used " (f.name.as_deref().unwrap_or(&f.key)) } {
+                                @if share > 0.0 { (pct(share)) } @else { span.muted { "—" } }
+                            }
+                        }
+                    }
+                } }
+            }
+            p.muted.small { "Share of each role's users who used the feature, last 30 days. Empty cells are features a role never touches." }
+        }
+    }
 }
 
 /// Generic message page (errors, not found).
