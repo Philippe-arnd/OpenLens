@@ -34,7 +34,7 @@ These rules apply to every human and every coding agent working in this reposito
 
 ## Clean room and licences
 
-20. **Never read PostHog source code, or any GPL, LGPL or AGPL source code** (this includes OpenObserve). Learn only from public documentation, published screenshots, talks and blog posts, papers, open specifications (for example the rrweb event format, W3C specs, MCP), and behaviour you observe with your own test inputs. Log every source in `docs/clean-room.md`.
+20. **Never read the source code of any commercial analytics tool, or any GPL, LGPL or AGPL source code** (this includes OpenObserve). Learn only from public documentation, published screenshots, talks and blog posts, papers, open specifications (for example the rrweb event format, W3C specs, MCP), and behaviour you observe with your own test inputs. Log every source in `docs/clean-room.md`.
 21. Copy ideas and behaviour only. Never copy code, UI text, help text, icons or artwork.
 22. Do not rely on remembered knowledge of a product's internals. If no public source shows a fact, leave it out.
 23. A new dependency's licence must be on the allowlist in `deny.toml`. If it is not, record a decision in `docs/decisions.md` first. MPL-2.0 is allowed only for unmodified third-party crates.

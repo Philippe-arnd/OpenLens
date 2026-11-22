@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security issue
+    url: https://github.com/Philippe-arnd/OpenLens/security/advisories/new
+    about: Report a vulnerability privately (see SECURITY.md).
+  - name: Known limits
+    url: https://github.com/Philippe-arnd/OpenLens/blob/main/docs/gaps.md
+    about: Check whether it is a known gap first.
