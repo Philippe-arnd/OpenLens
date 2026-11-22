@@ -49,6 +49,8 @@ OpenLens follows [SemVer](https://semver.org) and keeps a [CHANGELOG](../CHANGEL
 
 **Upgrades are checked** before any image is published: `scripts/upgrade-check.sh <last release image> <new image>` (run by `release.yml`) writes data with the last release and reads it back with the new image. A change that has to rewrite stored data needs its own migration and a CHANGELOG *Changed* entry.
 
+**Right after a release**, set the `Cargo.toml` workspace version to the next one being developed (after `v0.1.0`: `0.2.0`), so build releases are named after it (`v0.2.0-…` sorts after `v0.1.0`).
+
 **Build releases.** Every push to `main` that changes code publishes a build release named **`vX.Y.Z-YYMMDD-sha`**: `X.Y.Z` is the version being developed (`Cargo.toml`), `YYMMDD` the UTC date, `sha` the commit (for example `v0.2.0-261122-a1b2c3d`). It is a valid SemVer pre-release of `X.Y.Z`, so npm, Helm and image tags accept it.
 - It is marked *pre-release* until `vX.Y.Z` itself is tagged, and it is not published to npm.
 - It has the same assets as a release, with the `Unreleased` notes and a *Full changelog* link to the previous build.
