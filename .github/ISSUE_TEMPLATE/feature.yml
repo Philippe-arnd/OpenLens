@@ -1,0 +1,20 @@
+name: Feature idea
+description: Something OpenLens should answer or do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: What question should the board answer, or what should it do?
+      description: Describe the need, not a copy of another tool's feature.
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: What do you do today instead?
+  - type: textarea
+    id: config
+    attributes:
+      label: Could it work with no configuration?
+      description: OpenLens prefers a sensible automatic default plus at most one optional setting.

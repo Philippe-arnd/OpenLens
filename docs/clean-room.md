@@ -9,7 +9,7 @@ OpenLens is a clean-room implementation of product analytics. The rules are in `
 - Behaviour observed with **our own** test inputs on a product we are entitled to use. The person observing writes a behaviour spec only, and does not also write the code for it in the same session.
 
 ## Forbidden
-- Reading the source of PostHog, OpenObserve, or any GPL/LGPL/AGPL project, including "just to check".
+- Reading the source of any commercial analytics tool, of OpenObserve, or of any GPL/LGPL/AGPL project, including "just to check".
 - Copying UI text, help text, icons, colours sampled from screenshots, or naming of features (see `feature-names.md`).
 - Relying on remembered internals (class names, table layouts, wire field names) that no public source shows.
 
@@ -42,7 +42,7 @@ Screenshots and observation notes stay in the gitignored `plan/` folder. They ar
 ## Review (2026-11-22, v0.1.0)
 
 A pass over every mention of another product in the repository:
-- **PostHog** is named only in the rules that forbid reading its source (`AGENTS.md`, this page). Feature names are our own (`feature-names.md`), and the parity page describes the category's capabilities in our own words, without naming a vendor.
+- **No analytics product is named** in this repository: the rules say *any commercial analytics tool*. Feature names are our own (`feature-names.md`), and the parity page describes the category's capabilities in our own words, without naming a vendor.
 - **OpenObserve** is credited for its public architecture (README, release notes), and named in M6 as the RUM product running in parallel on Phil's apps. No source was read.
 - **ArtCraft / storytold/craft-contrib** is credited for the structure of the agent rules. Its text is not copied (it has no licence); `AGENTS.md` is written in our own words.
 - **Third-party code shipped:** rrweb (MIT) in the recorder (`/r.js`) and the player (`/assets/player.js`, `/assets/player.css`). Both are recorded in `ATTRIBUTION.md`.
