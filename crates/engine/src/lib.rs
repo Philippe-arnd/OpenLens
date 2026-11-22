@@ -190,6 +190,9 @@ pub struct Board {
     pub features: Vec<FeatureUse>,
     /// Users per role, last 30 days.
     pub roles: Vec<RoleUsers>,
+    /// Who uses what: distinct users per (role, feature), last 30 days,
+    /// ignoring the role filter (the roles × features grid).
+    pub role_features: Vec<(String, String, i64)>,
     /// Latest releases, newest first.
     pub releases: Vec<ReleaseRow>,
     /// Environments seen.
@@ -338,6 +341,15 @@ pub async fn board(
         }
         .clause(30)?
     );
+    let role_features_sql = format!(
+        "SELECT role, feature, count(DISTINCT distinct_id) AS users FROM {src} WHERE {} \
+         AND role IS NOT NULL AND feature IS NOT NULL GROUP BY role, feature",
+        Filters {
+            role: None,
+            ..f.clone()
+        }
+        .clause(30)?
+    );
     let releases_sql = format!(
         "SELECT release, CAST(min(first) AS VARCHAR) AS first_seen, count(DISTINCT uid) AS users, \
          count(*) AS sessions, avg(CASE WHEN n > 1 THEN secs END) AS avg_secs, \
@@ -375,7 +387,19 @@ pub async fn board(
             "SELECT event, count(*) AS n FROM {src} WHERE {w30} AND event IN ({list}) GROUP BY event"
         )
     };
-    let (users, sessions, dau, vitals, features, roles, releases, envs, total, success) = futures::join!(
+    let (
+        users,
+        sessions,
+        dau,
+        vitals,
+        features,
+        roles,
+        releases,
+        envs,
+        total,
+        success,
+        role_features,
+    ) = futures::join!(
         q.sql(project, &users_sql),
         q.sql(project, &sessions_sql),
         q.sql(project, &dau_sql),
@@ -386,6 +410,7 @@ pub async fn board(
         q.sql(project, &env_sql),
         q.sql(project, &total_sql),
         q.sql(project, &success_sql),
+        q.sql(project, &role_features_sql),
     );
 
     let mut b = Board {
@@ -444,6 +469,11 @@ pub async fn board(
             completed: 0,
             declared: false,
         })
+        .collect();
+    b.role_features = role_features?
+        .rows
+        .iter()
+        .filter_map(|r| Some((text(r, "role")?, text(r, "feature")?, int(r, "users"))))
         .collect();
     let success_rows = success?.rows;
     if let Some((m, version)) = map {
