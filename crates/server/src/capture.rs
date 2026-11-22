@@ -75,6 +75,69 @@ pub(crate) async fn project_for_key(
     }
 }
 
+/// Token buckets: `rate` tokens a second, up to `burst`.
+#[derive(Default)]
+struct Buckets {
+    map: HashMap<String, (f64, std::time::Instant)>,
+}
+
+impl Buckets {
+    /// Take `cost` tokens from `key`'s bucket; false when it is empty.
+    fn take(&mut self, key: &str, cost: f64, rate: f64, burst: f64) -> bool {
+        let now = std::time::Instant::now();
+        if self.map.len() > 50_000 {
+            // Forget idle keys (a full bucket is the same as no entry).
+            self.map.retain(|_, (tokens, at)| {
+                *tokens + now.duration_since(*at).as_secs_f64() * rate < burst
+            });
+        }
+        let (tokens, at) = self.map.entry(key.to_owned()).or_insert((burst, now));
+        *tokens = (*tokens + now.duration_since(*at).as_secs_f64() * rate).min(burst);
+        *at = now;
+        if *tokens < cost {
+            return false;
+        }
+        *tokens -= cost;
+        true
+    }
+}
+
+/// Requests a second per client address, and events a second per project
+/// key, for traffic that comes through a proxy: generous for real apps (a busy browser sends a batch every few
+/// seconds), but a runaway client or a hostile script cannot take the node.
+/// No setting (D-014). Clients get a 429 and the SDK retries later.
+pub(crate) const IP_RATE: f64 = 50.0;
+const IP_BURST: f64 = 500.0;
+pub(crate) const KEY_RATE: f64 = 20_000.0;
+const KEY_BURST: f64 = 200_000.0;
+
+fn limited(headers: &HeaderMap, key: &str, events: usize) -> bool {
+    use std::sync::{Mutex, OnceLock};
+    static IPS: OnceLock<Mutex<Buckets>> = OnceLock::new();
+    static KEYS: OnceLock<Mutex<Buckets>> = OnceLock::new();
+    // Public traffic comes through the proxy (Coolify, an Ingress), which
+    // says who the client is. Direct connections come from the host or the
+    // cluster (server SDKs, benchmarks, health checks) and are not limited.
+    let Some(ip) = headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next())
+        .or_else(|| headers.get("x-real-ip").and_then(|v| v.to_str().ok()))
+        .map(|v| v.trim().to_owned())
+    else {
+        return false;
+    };
+    let ip_ok = IPS
+        .get_or_init(Mutex::default)
+        .lock()
+        .is_ok_and(|mut b| b.take(&ip, 1.0, IP_RATE, IP_BURST));
+    let key_ok = KEYS
+        .get_or_init(Mutex::default)
+        .lock()
+        .is_ok_and(|mut b| b.take(key, events as f64, KEY_RATE, KEY_BURST));
+    !(ip_ok && key_ok)
+}
+
 /// Environment given to events sent by robots.
 pub(crate) const BOT_ENVIRONMENT: &str = "bot";
 
@@ -130,6 +193,18 @@ pub(crate) async fn capture(
         Ok(n) => n,
         Err(e) => return error(StatusCode::PAYLOAD_TOO_LARGE, &e.to_string()),
     };
+    if limited(&headers, &project.api_key, normalized.events.len()) {
+        tracing::warn!(project = %project.id, "capture rate limited");
+        let mut r = error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "too many events; retry in a few seconds",
+        );
+        r.headers_mut().insert(
+            axum::http::header::RETRY_AFTER,
+            axum::http::HeaderValue::from_static("5"),
+        );
+        return r;
+    }
     // Crawlers and monitors posting directly (the SDK already skips them in
     // browsers): kept, but in their own environment, out of every number.
     let ua = headers
@@ -190,6 +265,16 @@ pub(crate) async fn capture(
 #[cfg(test)]
 mod tests {
     use super::is_bot;
+
+    #[test]
+    fn buckets_refill_and_cap() {
+        let mut b = super::Buckets::default();
+        assert!(b.take("k", 10.0, 1.0, 10.0));
+        assert!(!b.take("k", 1.0, 1.0, 10.0), "empty after the burst");
+        assert!(b.take("other", 10.0, 1.0, 10.0), "buckets are per key");
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        assert!(b.take("k", 1.0, 1.0, 10.0), "refilled at the rate");
+    }
 
     #[test]
     fn robots_are_told_apart_from_people_and_server_sdks() {
