@@ -4,6 +4,8 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-22
+
 ### Added
 
 - **Fresh base images:** Renovate pins the Dockerfile base images by digest and updates them. Every month CI rebuilds the newest stable image from the same code on a fresh base image, so OS security fixes reach installs on `latest` or a minor channel (#201).
@@ -166,5 +168,6 @@ These changes concern instances that ran pre-release builds:
 - Every input is treated as hostile: bounded sizes, a rejection list per event, no `unwrap`/`panic` in production code, and read-only SQL scoped to one project with time, memory and row caps.
 - HMAC session cookies (`HttpOnly`, `SameSite=Lax`), and origin checks on dashboard forms.
 
-[Unreleased]: https://github.com/Philippe-arnd/OpenLens/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Philippe-arnd/OpenLens/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Philippe-arnd/OpenLens/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Philippe-arnd/OpenLens/releases/tag/v0.1.0
