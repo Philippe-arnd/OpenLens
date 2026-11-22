@@ -169,7 +169,7 @@ Measured on 2026-11-22, on one core of a 4-vCPU VPS ([docs/benchmarks.md](docs/b
 - **Web first.** There is no native mobile SDK yet.
 - **UTC days** in every daily KPI.
 - **Small samples:** insight cards wait for at least 8 users per compared group.
-- **npm:** `@openlens/web` is not on the npm registry while the repository is private. Use the script tag.
+- **npm:** `@openlens/web` is not on the npm registry yet (publishing is ready). Use the script tag meanwhile.
 
 The full list, with what is planned, is in [docs/gaps.md](docs/gaps.md) and the [backlog](https://github.com/Philippe-arnd/OpenLens/milestones).
 
@@ -177,7 +177,7 @@ The full list, with what is planned, is in [docs/gaps.md](docs/gaps.md) and the 
 
 OpenLens follows [SemVer](https://semver.org) and keeps a [CHANGELOG](CHANGELOG.md). Each [GitHub release](https://github.com/Philippe-arnd/OpenLens/releases) ships:
 - its notes;
-- Linux binaries (`openlens`, `openlens-cli`);
+- Linux binaries for x86_64 and aarch64 (`openlens`, `openlens-cli`);
 - the SDK bundles;
 - the Helm chart;
 - SHA-256 checksums.

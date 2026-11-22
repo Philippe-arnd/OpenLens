@@ -3,8 +3,9 @@ name: npm
 # Publishes @openlens/web to npm on v* tags (and on demand, as a dry run).
 # Publishing uses npm trusted publishing (OIDC, with provenance): configure
 # it once on npmjs.com for this repository and this workflow. Without it, an
-# NPM_TOKEN repository secret works too. Skipped while the repository is
-# private, since provenance needs a public source.
+# NPM_TOKEN repository secret works too (needed for the very first publish,
+# before a trusted publisher can be set on the package). Provenance needs a
+# public repository.
 on:
   push:
     tags: ["v*"]
