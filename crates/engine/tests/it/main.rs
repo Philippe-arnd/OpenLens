@@ -773,3 +773,50 @@ async fn internal_users_are_left_out_unless_included() {
     let b = board(&q, "p", &all, None).await.unwrap();
     assert_eq!(b.users.mau, 2);
 }
+
+/// Days are the project's days (D-017): an event at 00:30 UTC belongs to the
+/// day before in Los Angeles.
+#[tokio::test]
+async fn days_follow_the_project_time_zone() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let now = Utc::now();
+    let mut at = now.date_naive().and_hms_opt(0, 30, 0).unwrap().and_utc();
+    if at > now {
+        at -= Duration::days(1);
+    }
+    let e = E {
+        user: "tz",
+        role: "member",
+        session: "tz",
+        event: "$pageview",
+        mins_ago: (now - at).num_minutes(),
+        feature: None,
+        release: "v1",
+        props: "{}",
+    };
+    w.append(&[mk(&e, 0)]).unwrap();
+    w.flush().unwrap();
+    let q = QueryEngine::new(dir.path(), Limits::default());
+    let day = |tz: &str| Filters {
+        tz: tz.into(),
+        ..Filters::default()
+    };
+    let utc = board(&q, "p", &day("UTC"), None).await.unwrap();
+    let la = board(&q, "p", &day("America/Los_Angeles"), None)
+        .await
+        .unwrap();
+    let paris = board(&q, "p", &day("Europe/Paris"), None).await.unwrap();
+    let d = |b: &openlens_engine::Board| {
+        b.dau_series
+            .iter()
+            .map(|(d, _)| d.clone())
+            .collect::<Vec<_>>()
+    };
+    let utc_day = at.date_naive();
+    assert_eq!(d(&utc), vec![utc_day.to_string()]);
+    assert_eq!(d(&la), vec![(utc_day - Duration::days(1)).to_string()]);
+    assert_eq!(d(&paris), vec![utc_day.to_string()]);
+    // A name that is not a time zone is refused, not interpolated.
+    assert!(board(&q, "p", &day("x'; DROP"), None).await.is_err());
+}

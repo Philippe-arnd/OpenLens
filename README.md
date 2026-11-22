@@ -167,7 +167,7 @@ Measured on 2026-11-22, on one core of a 4-vCPU VPS ([docs/benchmarks.md](docs/b
 
 - **One node.** The WAL and SQLite have one writer, so Kubernetes runs one replica. The S3 option is a backup copy, not shared storage.
 - **Web first.** There is no native mobile SDK yet.
-- **UTC days** in every daily KPI.
+- **Sessions are cut at UTC midnight** by the SDK; KPI days follow the project's time zone.
 - **Small samples:** insight cards wait for at least 8 users per compared group.
 - **npm:** `@openlens/web` is not on the npm registry yet (publishing is ready). Use the script tag meanwhile.
 

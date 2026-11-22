@@ -1052,6 +1052,8 @@ pub struct ProjectSummary {
     pub recent_events: i64,
     /// Latest event (UTC), if any.
     pub last_event: Option<String>,
+    /// Time zone of the project's days (D-017).
+    pub timezone: String,
 }
 
 /// All projects, busiest first.
@@ -1075,6 +1077,7 @@ pub fn projects(list: &[ProjectSummary], admin: bool) -> Markup {
                                 p.muted { "No events in the last 7 days" }
                             }
                             @if let Some(t) = &p.last_event { p.muted.small { "Last event " (t.get(..16).unwrap_or(t)) " UTC" } }
+                            p.muted.small { "Days in " (p.timezone) }
                         }
                     }
                 }

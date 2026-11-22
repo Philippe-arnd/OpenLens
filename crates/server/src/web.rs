@@ -392,7 +392,7 @@ async fn board(
             openlens_ui::message("Not found", "No such project."),
         );
     };
-    let f = q.filters();
+    let f = q.filters(&p.timezone);
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
         name: &p.name,
@@ -437,7 +437,7 @@ async fn events(
             openlens_ui::message("Not found", "No such project."),
         );
     };
-    let f = q.filters();
+    let f = q.filters(&p.timezone);
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
         name: &p.name,
@@ -582,7 +582,7 @@ async fn errors_page(
             openlens_ui::message("Not found", "No such project."),
         );
     };
-    let f = q.filters();
+    let f = q.filters(&p.timezone);
     let map = crate::load_map(&state, &p.id).await;
     let src = openlens_engine::source(map.as_ref().map(|(m, _)| m));
     let info = openlens_ui::ProjectInfo {
@@ -624,7 +624,7 @@ async fn pages_page(
             openlens_ui::message("Not found", "No such project."),
         );
     };
-    let f = q.filters();
+    let f = q.filters(&p.timezone);
     let map = crate::load_map(&state, &p.id).await;
     let src = openlens_engine::source(map.as_ref().map(|(m, _)| m));
     let info = openlens_ui::ProjectInfo {
@@ -862,7 +862,10 @@ async fn watch_churned(
         );
     };
     let map = crate::load_map(&state, &p.id).await;
-    let f = openlens_engine::Filters::default();
+    let f = openlens_engine::Filters {
+        tz: p.timezone.clone(),
+        ..openlens_engine::Filters::default()
+    };
     let (sessions, recorded) = tokio::join!(
         openlens_engine::churned_sessions(
             &state.query,
@@ -938,6 +941,7 @@ async fn projects_page(State(state): State<AppState>, headers: HeaderMap) -> Res
                 .map(str::to_owned),
             id: p.id,
             name: p.name,
+            timezone: p.timezone,
         });
     }
     list.sort_by_key(|p| std::cmp::Reverse(p.recent_events));
@@ -957,7 +961,10 @@ async fn click_map_for(
 ) -> Result<(openlens_engine::ClickMap, String), openlens_engine::EngineError> {
     let map = crate::load_map(state, &p.id).await;
     let src = openlens_engine::source(map.as_ref().map(|(m, _)| m));
-    let f = openlens_engine::Filters::default();
+    let f = openlens_engine::Filters {
+        tz: p.timezone.clone(),
+        ..openlens_engine::Filters::default()
+    };
     Ok((
         openlens_engine::click_map(&state.query, &p.id, &src, &f, path).await?,
         src,
@@ -989,7 +996,10 @@ async fn heatmap_page(
         }
     };
     // A recorded visit of this page, to draw the heatmap over the real page.
-    let f = openlens_engine::Filters::default();
+    let f = openlens_engine::Filters {
+        tz: p.timezone.clone(),
+        ..openlens_engine::Filters::default()
+    };
     let sessions = openlens_engine::sessions_on_path(&state.query, &p.id, &src, &f, &q.path)
         .await
         .unwrap_or_default();

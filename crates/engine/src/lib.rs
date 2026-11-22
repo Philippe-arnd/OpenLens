@@ -53,6 +53,9 @@ pub struct Filters {
     /// Include the team's own users (identified with `internal: true`).
     /// Off by default: on a small app the team's clicks would weigh a lot.
     pub internal: bool,
+    /// The project's time zone (IANA name): where a day and a week start
+    /// (D-017). Set from the project, not from the request.
+    pub tz: String,
 }
 
 impl Default for Filters {
@@ -62,6 +65,7 @@ impl Default for Filters {
             role: None,
             release: None,
             internal: false,
+            tz: "UTC".into(),
         }
     }
 }
@@ -77,6 +81,38 @@ fn lit(v: &str) -> Result<String> {
 
 impl Filters {
     /// WHERE clause for these filters plus a time window of `days`.
+    /// `expr` (a UTC timestamp) as wall-clock time in the project's zone,
+    /// for `date_trunc` and casts to a date.
+    pub(crate) fn local(&self, expr: &str) -> Result<String> {
+        if self.tz == "UTC" {
+            return Ok(expr.to_owned());
+        }
+        if self.tz.is_empty()
+            || self.tz.len() > 64
+            || !self
+                .tz
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"/_+-".contains(&b))
+        {
+            return Err(EngineError::InvalidFilter("timezone"));
+        }
+        Ok(format!(
+            "to_local_time(arrow_cast({expr}, 'Timestamp(Microsecond, Some(\"{}\"))'))",
+            self.tz
+        ))
+    }
+
+    /// The local day of the `timestamp` column, as `YYYY-MM-DD`.
+    pub(crate) fn day(&self) -> Result<String> {
+        if self.tz == "UTC" {
+            return Ok("date".to_owned());
+        }
+        Ok(format!(
+            "CAST(CAST({} AS DATE) AS VARCHAR)",
+            self.local("timestamp")?
+        ))
+    }
+
     fn clause(&self, days: i64) -> Result<String> {
         let since = (Utc::now() - Duration::days(days))
             .format("%Y-%m-%d")
@@ -356,6 +392,8 @@ pub async fn board(
     let ident = identified(any_person(q, project).await?);
     let w30 = f.clause(30)?;
     let w14 = f.clause(14)?;
+    // Days are the project's days (D-017).
+    let day = f.day()?;
     let w7 = f.clause(7)?;
     let all_releases = Filters {
         release: None,
@@ -396,7 +434,7 @@ pub async fn board(
          avg(CASE WHEN n <= 1 THEN 1.0 ELSE 0.0 END) AS bounce_rate, \
          avg(CASE WHEN errors > 0 THEN 1.0 ELSE 0.0 END) AS error_rate, \
          sum(tasks) AS tasks, count(DISTINCT concat(uid, '|', day)) AS user_days \
-         FROM (SELECT session_id, min(distinct_id) AS uid, min(date) AS day, \
+         FROM (SELECT session_id, min(distinct_id) AS uid, min({day}) AS day, \
                sum(CASE WHEN {INTERACTION} THEN 1 ELSE 0 END) AS n, \
                date_part('epoch', max(timestamp)) - date_part('epoch', min(timestamp)) AS secs, \
                sum(CASE WHEN event = '$error' THEN 1 ELSE 0 END) AS errors, \
@@ -404,7 +442,7 @@ pub async fn board(
                FROM {src} WHERE {w7} AND session_id IS NOT NULL GROUP BY session_id) s"
     );
     let dau_sql = format!(
-        "SELECT date, count(DISTINCT distinct_id) AS n FROM {src} WHERE {w14} AND {ident} GROUP BY date ORDER BY date"
+        "SELECT {day} AS date, count(DISTINCT distinct_id) AS n FROM {src} WHERE {w14} AND {ident} GROUP BY 1 ORDER BY 1"
     );
     let vitals_sql = format!(
         "SELECT name, approx_percentile_cont(v, 0.75) AS p75, count(*) AS samples FROM ( \
@@ -415,7 +453,7 @@ pub async fn board(
     );
     let features_sql = format!(
         "SELECT feature AS key, count(*) AS uses, count(DISTINCT distinct_id) AS users, \
-         count(DISTINCT concat(distinct_id, '|', date)) AS user_days \
+         count(DISTINCT concat(distinct_id, '|', {day})) AS user_days \
          FROM {src} WHERE {w30} AND feature IS NOT NULL GROUP BY feature ORDER BY users DESC, uses DESC LIMIT 12"
     );
     let roles_sql = format!(

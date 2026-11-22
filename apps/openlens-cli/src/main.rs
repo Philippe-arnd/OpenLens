@@ -38,6 +38,17 @@ enum Command {
         /// Project name (usually the app's name).
         #[arg(long)]
         name: String,
+        /// The team's IANA time zone (`Europe/Paris`): days and weeks of
+        /// every KPI are counted in it. UTC when omitted.
+        #[arg(long)]
+        timezone: Option<String>,
+    },
+    /// Set a project's time zone (IANA name, e.g. `Europe/Paris`).
+    Timezone {
+        /// Project id.
+        project: String,
+        /// IANA time zone name.
+        timezone: String,
     },
     /// Delete a project and all its data (events, replays, people, flags,
     /// surveys, feature map). Irreversible: repeat the id with --confirm.
@@ -327,6 +338,11 @@ impl Client {
                 .delete(&url)
                 .header("authorization", &auth)
                 .call(),
+            ("PATCH", Some(Body::Json(v))) => self
+                .agent
+                .patch(&url)
+                .header("authorization", &auth)
+                .send_json(&v),
             ("PUT", Some(Body::Json(v))) => self
                 .agent
                 .put(&url)
@@ -400,14 +416,23 @@ fn run(cli: Cli) -> Result<bool, String> {
             out(&v);
             Ok(status == 200)
         }
-        Command::Init { name } => {
-            let (status, v) = client()?.call(
-                "POST",
-                "/api/projects",
-                Some(Body::Json(json!({ "name": name }))),
-            )?;
+        Command::Init { name, timezone } => {
+            let mut body = json!({ "name": name });
+            if let Some(tz) = timezone {
+                body["timezone"] = json!(tz);
+            }
+            let (status, v) = client()?.call("POST", "/api/projects", Some(Body::Json(body)))?;
             out(&v);
             Ok(status == 201)
+        }
+        Command::Timezone { project, timezone } => {
+            let (status, v) = client()?.call(
+                "PATCH",
+                &format!("/api/projects/{project}"),
+                Some(Body::Json(json!({ "timezone": timezone }))),
+            )?;
+            out(&v);
+            Ok(status == 200)
         }
         Command::Features {
             action: FeaturesCmd::Lint { file, src },

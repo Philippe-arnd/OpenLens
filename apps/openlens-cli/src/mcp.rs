@@ -89,8 +89,13 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "init",
-                description: "Create a project; returns the capture key and the snippet to add to the app.",
-                input_schema: json!({"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}),
+                description: "Create a project; returns the capture key and the snippet to add to the app. Pass the team's IANA time zone (e.g. Europe/Paris): days and weeks of every KPI are counted in it.",
+                input_schema: json!({"type":"object","properties":{"name":{"type":"string"},"timezone":{"type":"string"}},"required":["name"]}),
+            },
+            ToolSpec {
+                name: "set_timezone",
+                description: "Set a project's time zone (IANA name, e.g. Europe/Paris): where its days and weeks start.",
+                input_schema: json!({"type":"object","properties":{"project":{"type":"string"},"timezone":{"type":"string"}},"required":["project","timezone"]}),
             },
             ToolSpec {
                 name: "feature_map_lint",
@@ -199,10 +204,20 @@ impl Tools for OpenLensTools {
             }
             "init" => {
                 let name = s(args, "name").ok_or("name is required")?;
+                let mut body = json!({ "name": name });
+                if let Some(tz) = s(args, "timezone") {
+                    body["timezone"] = json!(tz);
+                }
+                let (st, v) = c.call("POST", "/api/projects", Some(Body::Json(body)))?;
+                ok_or(st, v)
+            }
+            "set_timezone" => {
+                let project = s(args, "project").ok_or("project is required")?;
+                let tz = s(args, "timezone").ok_or("timezone is required")?;
                 let (st, v) = c.call(
-                    "POST",
-                    "/api/projects",
-                    Some(Body::Json(json!({ "name": name }))),
+                    "PATCH",
+                    &format!("/api/projects/{project}"),
+                    Some(Body::Json(json!({ "timezone": tz }))),
                 )?;
                 ok_or(st, v)
             }
