@@ -41,6 +41,9 @@ spec:
                 secretKeyRef:
                   name: {{ include "openlens.tokenSecret" . }}
                   key: {{ .Values.adminToken.key }}
+                  {{- if and .Values.adminToken.existingSecret .Values.adminToken.optional }}
+                  optional: true
+                  {{- end }}
             {{- with (include "openlens.publicUrl" .) }}
             - name: OPENLENS_PUBLIC_URL
               value: {{ . | quote }}

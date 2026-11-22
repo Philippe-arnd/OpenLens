@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: openlens
+  labels:
+    app.kubernetes.io/name: openlens
+    app.kubernetes.io/instance: openlens
+  # annotations:
+  #   cert-manager.io/cluster-issuer: letsencrypt
+spec:
+  tls:
+    - hosts: [lens.example.com]
+      secretName: openlens-tls
+  rules:
+    - host: lens.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: openlens
+                port:
+                  name: http

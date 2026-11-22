@@ -38,6 +38,18 @@ jobs:
           if helm template t "$CHART" --set replicaCount=2 > /dev/null 2>&1; then
             echo "replicaCount=2 must be refused"; exit 1
           fi
+      - name: plain manifests are rendered from the chart
+        run: |
+          scripts/render-k8s.sh
+          if ! git diff --exit-code -- deploy/k8s; then
+            echo "deploy/k8s/base/openlens.yaml is stale: run scripts/render-k8s.sh (rendered file attached as an artifact)"; exit 1
+          fi
+          ! grep -q "kind: Secret" deploy/k8s/base/openlens.yaml
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: rendered-k8s
+          path: deploy/k8s/base/openlens.yaml
       - uses: helm/kind-action@v1
       - name: wait for the image (tags are built by release.yml)
         if: github.ref_type == 'tag'
@@ -75,6 +87,17 @@ jobs:
           N=$(curl -fsS -H "Authorization: Bearer $T" localhost:8687/api/projects/default/sql -H 'content-type: application/json' \
             -d '{"sql":"SELECT count(*) AS n FROM events"}' | jq '.rows[0].n')
           echo "events after upgrade: $N"; [ "$N" -ge "$(cat /tmp/n1)" ]
+      - name: plain manifests (Kustomize) run too
+        run: |
+          kubectl create namespace kz
+          kubectl kustomize deploy/k8s/example > /dev/null
+          kubectl -n kz apply -k deploy/k8s/base
+          kubectl -n kz set image statefulset/openlens openlens="ghcr.io/philippe-arnd/openlens:$TAG"
+          kubectl -n kz rollout status statefulset/openlens --timeout 5m
+          kubectl -n kz port-forward svc/openlens 8688:8686 > /dev/null 2>&1 &
+          sleep 3
+          curl -fsS localhost:8688/healthz
+          kubectl -n kz logs statefulset/openlens | grep -q "generated admin token" || { echo "no Secret given: the token must be generated and logged"; exit 1; }
       - name: logs on failure
         if: failure()
         run: kubectl describe pods; kubectl logs statefulset/lens-openlens --tail=100 || true
