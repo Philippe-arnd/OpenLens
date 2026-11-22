@@ -118,6 +118,11 @@ impl Tools for OpenLensTools {
                 input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"},"by":{"type":"string","enum":["role","account","plan","page","feature"]}}))}),
             },
             ToolSpec {
+                name: "user_timeline",
+                description: "One user's story: role, account, plan, role changes, recorded sessions (with dashboard links) and their latest 100 events (90 days). Use it to see what a churned or frustrated user did.",
+                input_schema: json!({"type":"object","properties":with(json!({"distinct_id":{"type":"string"}})),"required":["distinct_id"]}),
+            },
+            ToolSpec {
                 name: "board",
                 description: "The Focus board numbers (KPIs by role/environment/release, features, roles, role gaps, releases, vitals).",
                 input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"}}))}),
@@ -254,6 +259,25 @@ impl Tools for OpenLensTools {
                     }
                     _ => v,
                 })
+            }
+            "user_timeline" => {
+                let who = s(args, "distinct_id").ok_or("distinct_id is required")?;
+                let who: String = who
+                    .bytes()
+                    .map(|b| {
+                        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
+                            (b as char).to_string()
+                        } else {
+                            format!("%{b:02X}")
+                        }
+                    })
+                    .collect();
+                let (st, v) = c.call(
+                    "GET",
+                    &format!("/api/projects/{}/people/{who}", project(args)),
+                    None,
+                )?;
+                ok_or(st, v)
             }
             "errors" => {
                 let (st, v) = c.call(

@@ -19,6 +19,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/api/projects/{project}/board", get(board))
         .route("/api/projects/{project}/errors", get(errors))
         .route("/api/projects/{project}/breakdown", get(breakdown))
+        .route("/api/projects/{project}/people/{distinct_id}", get(person))
         .route(
             "/api/projects/{project}/sourcemaps/{release}/{bundle}",
             axum::routing::put(put_sourcemap).layer(axum::extract::DefaultBodyLimit::max(
@@ -624,4 +625,69 @@ async fn put_sourcemap(
         Ok(Err(e)) => err(StatusCode::BAD_REQUEST, &e.to_string()),
         Err(_) => err(StatusCode::INTERNAL_SERVER_ERROR, "storage task failed"),
     }
+}
+
+/// `GET /api/projects/{id}/people/{distinct_id}`: one user's timeline: who
+/// they are, their role changes, their latest events and recorded sessions.
+async fn person(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((project, distinct_id)): Path<(String, String)>,
+) -> Response {
+    if let Some(r) = guard(&state, &headers) {
+        return r;
+    }
+    let p = match known_project(&state, &project).await {
+        Ok(p) => p,
+        Err(r) => return *r,
+    };
+    let map = crate::load_map(&state, &p.id).await;
+    let (meta, root, pid, who) = (
+        state.meta.clone(),
+        state.data_dir.clone(),
+        p.id.clone(),
+        distinct_id.clone(),
+    );
+    let stored = tokio::task::spawn_blocking(move || {
+        let person = meta.person(&pid, &who).ok().flatten();
+        let roles = meta.role_history(&pid, &who).unwrap_or_default();
+        let replays = openlens_replay::list(&root, &pid, Some(&who)).unwrap_or_default();
+        (person, roles, replays)
+    })
+    .await;
+    let Ok((person, roles, replays)) = stored else {
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "metadata store unavailable",
+        );
+    };
+    let events = match openlens_engine::person_events(
+        &state.query,
+        &p.id,
+        map.as_ref().map(|(m, _)| m),
+        &distinct_id,
+        100,
+    )
+    .await
+    {
+        Ok(e) => e,
+        Err(e) => return err(StatusCode::BAD_REQUEST, &e.to_string()),
+    };
+    if person.is_none() && events.is_empty() {
+        return err(StatusCode::NOT_FOUND, "no such person in the last 90 days");
+    }
+    Json(json!({
+        "distinct_id": distinct_id,
+        "person": person.map(|p| json!({
+            "role": p.role, "account": p.account, "plan": p.plan,
+            "first_seen": p.first_seen, "last_seen": p.last_seen,
+        })),
+        "role_history": roles.iter().map(|(r, since)| json!({ "role": r, "since": since })).collect::<Vec<_>>(),
+        "recordings": replays.iter().map(|r| json!({
+            "session_id": r.session_id, "started": r.started, "chunks": r.chunks,
+            "dashboard": format!("/p/{}/replays/{}", p.id, r.session_id),
+        })).collect::<Vec<_>>(),
+        "events": events,
+    }))
+    .into_response()
 }
