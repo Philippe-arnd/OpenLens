@@ -19,6 +19,7 @@
 //! time and keeps the newest N (7 by default): for scheduled jobs.
 
 mod backup;
+mod upgrade;
 
 use std::process::ExitCode;
 
@@ -192,6 +193,14 @@ fn build_state() -> Result<openlens_server::AppState, String> {
         std::env::var("OPENLENS_DATA_DIR").unwrap_or_else(|_| "./data".to_owned()),
     );
     std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+    // Before anything opens the data: refuse data from a newer release, and
+    // back up when the version changed (#199).
+    match upgrade::prepare(&data_dir, env!("CARGO_PKG_VERSION"))? {
+        upgrade::Outcome::Upgraded { from, backup } => {
+            tracing::info!(%from, to = env!("CARGO_PKG_VERSION"), %backup, "upgraded; backup taken first");
+        }
+        upgrade::Outcome::Fresh | upgrade::Outcome::Same => {}
+    }
     let meta = openlens_meta::Meta::open(&data_dir.join("meta.db")).map_err(|e| e.to_string())?;
 
     // Projects are created by agents (`openlens-cli init --name <app>`). A

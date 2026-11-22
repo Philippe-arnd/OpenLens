@@ -108,7 +108,7 @@ helm upgrade openlens <chart> -n openlens --reuse-values \
 - **Helm:** `helm upgrade openlens <chart> -n openlens --reuse-values`, with a new chart version, or `--set image.tag=vX.Y.Z`.
 - **Kustomize:** change `images[].newTag` in your overlay and apply.
 
-The pod restarts with the same volume and token. **Check:** `rollout status`, then `sql` (`SELECT count(*) FROM events`) returns at least the count from before. CI runs this exact upgrade on a kind cluster for every chart change.
+The pod restarts with the same volume and token. When the version changes, OpenLens first copies the data to `backups/upgrade/` on the volume, keeping only the latest copy, so leave room for one copy of the data. An older image refuses to start on data written by a newer one: roll back by restoring that copy. **Check:** `rollout status`, then `sql` (`SELECT count(*) FROM events`) returns at least the count from before. CI runs this exact upgrade on a kind cluster for every chart change.
 
 Read the [CHANGELOG](../../CHANGELOG.md) section of the target version first: its **Changed** entries say what behaves differently.
 
