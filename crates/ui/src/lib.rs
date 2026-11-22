@@ -88,6 +88,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                         nav aria-label="Project" {
                             a href={ "/p/" (p.id) } { (icon("board")) "Focus board" }
                             a href={ "/p/" (p.id) "/events" } { (icon("events")) "Events" }
+                            a href={ "/p/" (p.id) "/pages" } { (icon("layers")) "Pages" }
                             a href={ "/p/" (p.id) "/errors" } { (icon("alert")) "Errors" }
                             a href={ "/p/" (p.id) "/flags" } { (icon("flag")) "Flags" }
                         }
@@ -601,6 +602,48 @@ pub fn flags(p: &ProjectInfo<'_>, flags: &[openlens_flags::Flag]) -> Markup {
                                 } }
                             }
                         } }
+                    }
+                }
+            }
+        },
+    )
+}
+
+/// Per-page hotspots: scroll depth, most clicked elements, rage clicks.
+pub fn pages(
+    p: &ProjectInfo<'_>,
+    b: &Board,
+    list: &[openlens_engine::PageStats],
+    f: &Filters,
+) -> Markup {
+    layout(
+        "Pages",
+        Some(p),
+        html! {
+            div.heading { div { h1 { "Pages" } p.muted { "How far people scroll, what they click, where they get frustrated. Last 30 days." } } }
+            (filter_bar(p.id, b, f, "/pages"))
+            @if list.is_empty() { section.card { p.muted { "No page views yet." } } }
+            div.grid {
+                @for pg in list {
+                    section.card {
+                        h2.sky { (icon("layers")) span.mono { (pg.path) } }
+                        p.small.muted { (compact(pg.views)) " views · " (compact(pg.users)) " users" }
+                        @if pg.median_scroll >= 0.0 {
+                            table.bars { tbody {
+                                tr { th scope="row" { "Reach half the page" } td.meter { span.fill style={ "width:" (format!("{:.0}", pg.reach_half * 100.0)) "%" } {} } td.num { (pct(pg.reach_half)) } }
+                                tr { th scope="row" { "Reach the end" } td.meter { span.fill style={ "width:" (format!("{:.0}", pg.reach_end * 100.0)) "%" } {} } td.num { (pct(pg.reach_end)) } }
+                            } }
+                        }
+                        @if !pg.hotspots.is_empty() {
+                            h3.small { "Most clicked" }
+                            table.plain { tbody { @for h in &pg.hotspots {
+                                tr {
+                                    th scope="row" { (h.label) }
+                                    td.num { (compact(h.clicks)) }
+                                    td.num { @if h.rage > 0 { span.status.bad { (icon("alert")) (compact(h.rage)) " rage" } } }
+                                }
+                            } } }
+                        }
                     }
                 }
             }
