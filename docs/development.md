@@ -60,7 +60,7 @@ Run it by hand from the Actions tab: `dry_run` (on by default) only reports what
    - `publish.yml`: the GitHub release, with the notes (`docs/releases/vX.Y.Z.md`, or the CHANGELOG section, plus a *Full changelog* link), the Linux binaries, the SDK bundles, the chart and `SHA256SUMS`;
    - `npm.yml`: `@openlens/web` (public repository only).
 
-**Upgrades are checked** before any image is published: `scripts/upgrade-check.sh <last release image> <new image>` (run by `release.yml`) writes data with the last release and reads it back with the new image. A change that has to rewrite stored data needs its own migration and a CHANGELOG *Changed* entry.
+**Upgrades are checked** before any image is published: `scripts/upgrade-check.sh <last release image> <new image>` (run by `release.yml`) writes data with the last release, reads it back with the new image, then goes back to the last release (a rollback) and reads it again. A change that has to rewrite stored data needs its own migration and a CHANGELOG *Changed* entry.
 
 **Right after a release**, set the `Cargo.toml` workspace version to the next one being developed (after `v0.1.0`: `0.2.0`), so build releases are named after it (`v0.2.0-…` sorts after `v0.1.0`).
 
