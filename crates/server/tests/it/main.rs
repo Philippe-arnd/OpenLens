@@ -1314,3 +1314,85 @@ async fn micro_surveys_are_targeted_served_with_flags_and_summarised() {
     let js = get(&h, "/s.js", None, false).await;
     assert_eq!(js.status(), StatusCode::OK);
 }
+
+/// First setup: the owner lands on the welcome page, creates their admin
+/// account and continues as that user; once someone has an account, the
+/// token goes straight to the board.
+#[tokio::test]
+async fn first_owner_login_creates_the_admin_account() {
+    let h = harness();
+    let login = || async {
+        router(h.state.clone())
+            .oneshot(
+                Request::post("/login")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from("token=adm_test"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    };
+    let first = login().await;
+    assert_eq!(first.headers()["location"], "/welcome");
+    let owner = first.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        get(&h, "/welcome", Some(&owner), false).await.status(),
+        StatusCode::OK
+    );
+    assert!(
+        get(&h, "/welcome", None, false)
+            .await
+            .status()
+            .is_redirection()
+    );
+
+    let created = router(h.state.clone())
+        .oneshot(
+            Request::post("/welcome")
+                .header("cookie", &owner)
+                .header("origin", "http://localhost:8686")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("email=Phil%40Example.com"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(created.headers()["location"], "/");
+    let user = created.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    assert_ne!(user, owner, "the session now belongs to the new account");
+    let users = h.state.meta.users().unwrap();
+    assert_eq!(users.len(), 1);
+    assert_eq!(
+        (users[0].email.as_str(), users[0].role.as_str()),
+        ("phil@example.com", "admin")
+    );
+    assert_eq!(
+        get(&h, "/users", Some(&user), false).await.status(),
+        StatusCode::OK
+    );
+    assert!(
+        get(&h, "/welcome", Some(&user), false)
+            .await
+            .status()
+            .is_redirection(),
+        "a user already has an account"
+    );
+
+    assert_eq!(
+        login().await.headers()["location"],
+        "/",
+        "set up: straight to the board"
+    );
+}

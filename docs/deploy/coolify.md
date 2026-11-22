@@ -7,6 +7,7 @@ OpenLens needs **no environment variables**. On Coolify, the template only maps 
 1. In Coolify: **New Resource → Docker Compose (empty)**, then paste `deploy/coolify/openlens.yaml`.
 2. Click **Deploy**. Coolify assigns a domain and generates `SERVICE_PASSWORD_64_OPENLENSADMIN`, which is the admin token.
 3. Open the domain and log in with that token. Or let your agent call `POST /api/login-links` and send you the link.
+   The first time, OpenLens asks for your email and creates your admin account, so the team list knows who you are (you can skip it). Invite others from **Team**.
 
 The image `ghcr.io/philippe-arnd/openlens` is published from `main` by the release workflow. While the repository is private, the package is private too: either give Coolify a GHCR registry credential or use option B.
 

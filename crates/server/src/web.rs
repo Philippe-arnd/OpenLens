@@ -16,6 +16,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/", get(home))
         .route("/login", get(login_page).post(login))
         .route("/projects", get(projects_page))
+        .route("/welcome", get(welcome_page).post(welcome_create))
         .route("/users", get(users_page).post(users_invite))
         .route("/users/{id}/delete", post(users_delete))
         .route("/logout", post(logout))
@@ -144,7 +145,8 @@ async fn login(
             &headers,
             auth::SESSION_SECS,
         );
-        return with_cookie(Redirect::to("/").into_response(), &c);
+        let to = after_owner_login(&state).await;
+        return with_cookie(Redirect::to(to).into_response(), &c);
     }
     // Slow down guessing.
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -186,7 +188,83 @@ async fn login_link(
         &headers,
         auth::SESSION_SECS,
     );
-    with_cookie(Redirect::to("/").into_response(), &c)
+    let to = if who == auth::OWNER {
+        after_owner_login(&state).await
+    } else {
+        "/"
+    };
+    with_cookie(Redirect::to(to).into_response(), &c)
+}
+
+/// Where the owner goes after logging in: the welcome page while nobody
+/// has an account yet (the first setup), else the board.
+async fn after_owner_login(state: &AppState) -> &'static str {
+    let meta = state.meta.clone();
+    match tokio::task::spawn_blocking(move || meta.users()).await {
+        Ok(Ok(users)) if users.is_empty() => "/welcome",
+        _ => "/",
+    }
+}
+
+/// The welcome page is for the owner session only (admin token or owner
+/// link): a user already has an account.
+fn owner_only(state: &AppState, headers: &HeaderMap) -> Option<Response> {
+    match auth::session_id(state, headers) {
+        Some(id) if id == auth::OWNER => None,
+        Some(_) => Some(Redirect::to("/").into_response()),
+        None => Some(to_login()),
+    }
+}
+
+async fn welcome_page(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Some(r) = owner_only(&state, &headers) {
+        return r;
+    }
+    html(
+        StatusCode::OK,
+        openlens_ui::welcome(crate::oidc::enabled(), None),
+    )
+}
+
+#[derive(Deserialize)]
+struct WelcomeForm {
+    email: String,
+}
+
+/// Create the owner's admin account and continue the session as that user.
+async fn welcome_create(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(f): Form<WelcomeForm>,
+) -> Response {
+    if let Some(r) = owner_only(&state, &headers) {
+        return r;
+    }
+    if !crate::flags::same_origin(&headers) {
+        return html(
+            StatusCode::FORBIDDEN,
+            openlens_ui::message("Refused", "Cross-site form."),
+        );
+    }
+    let meta = state.meta.clone();
+    match tokio::task::spawn_blocking(move || meta.upsert_user(&f.email, "admin", None)).await {
+        Ok(Ok(u)) => {
+            let c = auth::set_cookie(
+                &auth::new_session(&state, &u.id),
+                &headers,
+                auth::SESSION_SECS,
+            );
+            with_cookie(Redirect::to("/").into_response(), &c)
+        }
+        Ok(Err(e)) => html(
+            StatusCode::BAD_REQUEST,
+            openlens_ui::welcome(crate::oidc::enabled(), Some(&e.to_string())),
+        ),
+        Err(_) => html(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            openlens_ui::message("Oops", "Try again."),
+        ),
+    }
 }
 
 async fn project(state: &AppState, id: String) -> Option<openlens_meta::Project> {
