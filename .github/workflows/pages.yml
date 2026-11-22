@@ -1,0 +1,53 @@
+# Product page on GitHub Pages (site/), rebuilt for every stable release so
+# the version, the highlights and the install tag follow it. Also on changes
+# to the page itself, and by hand.
+name: Pages
+
+on:
+  release:
+    types: [published]
+  push:
+    branches: [main]
+    paths: ["site/**", "scripts/site/**", "docs/img/**", "docs/releases/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: latest stable release
+        id: rel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/${{ github.repository }}/releases/latest --jq '.tag_name, .published_at[0:10], .html_url' > rel.txt
+          { echo "tag=$(sed -n 1p rel.txt)"; echo "date=$(sed -n 2p rel.txt)"; echo "url=$(sed -n 3p rel.txt)"; } >> "$GITHUB_OUTPUT"
+          gh api repos/${{ github.repository }}/releases/latest --jq .body > release-body.md
+      - name: build
+        run: |
+          notes="docs/releases/${{ steps.rel.outputs.tag }}.md"
+          [ -f "$notes" ] || notes=release-body.md
+          python3 scripts/site/build.py "${{ steps.rel.outputs.tag }}" "${{ steps.rel.outputs.date }}" "${{ steps.rel.outputs.url }}" "$notes"
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
