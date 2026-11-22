@@ -20,6 +20,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/p/{project}", get(board))
         .route("/p/{project}/events", get(events))
         .route("/p/{project}/errors", get(errors_page))
+        .route("/p/{project}/pages", get(pages_page))
         .route("/assets/app.css", get(css))
         .route("/theme/{mode}", get(set_theme))
 }
@@ -333,6 +334,42 @@ async fn errors_page(
     );
     match (b, groups) {
         (Ok(b), Ok(g)) => html(StatusCode::OK, openlens_ui::errors(&info, &b, &g, &f)),
+        (Err(e), _) | (_, Err(e)) => html(
+            StatusCode::BAD_REQUEST,
+            openlens_ui::message("Can't show that", &e.to_string()),
+        ),
+    }
+}
+
+async fn pages_page(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(q): Query<FilterQuery>,
+) -> Response {
+    if !auth::has_session(&state, &headers) {
+        return to_login();
+    }
+    let Some(p) = project(&state, id).await else {
+        return html(
+            StatusCode::NOT_FOUND,
+            openlens_ui::message("Not found", "No such project."),
+        );
+    };
+    let f = q.filters();
+    let map = crate::load_map(&state, &p.id).await;
+    let src = openlens_engine::source(map.as_ref().map(|(m, _)| m));
+    let info = openlens_ui::ProjectInfo {
+        id: &p.id,
+        name: &p.name,
+        key: &p.api_key,
+    };
+    let (b, list) = tokio::join!(
+        openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
+        openlens_engine::pages(&state.query, &p.id, &src, &f)
+    );
+    match (b, list) {
+        (Ok(b), Ok(l)) => html(StatusCode::OK, openlens_ui::pages(&info, &b, &l, &f)),
         (Err(e), _) | (_, Err(e)) => html(
             StatusCode::BAD_REQUEST,
             openlens_ui::message("Can't show that", &e.to_string()),

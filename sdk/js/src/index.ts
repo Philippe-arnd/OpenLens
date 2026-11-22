@@ -199,8 +199,21 @@ export function flush(beacon = false): void {
 
 let origFetch: typeof fetch | undefined;
 
+// Deepest scroll on the current page, as % of the document height.
+let maxScroll = 0;
+function measureScroll(): void {
+  const doc = document.documentElement;
+  const h = Math.max(doc.scrollHeight - window.innerHeight, 1);
+  maxScroll = Math.max(maxScroll, Math.min(100, Math.round(((window.scrollY || doc.scrollTop) / h) * 100)));
+}
+function reportScroll(): void {
+  if (lastPath && maxScroll >= 0) track("$scroll", { $depth: document.documentElement.scrollHeight <= window.innerHeight ? 100 : maxScroll, $pathname: lastPath });
+  maxScroll = 0;
+}
+
 function pageview(): void {
   if (location.pathname === lastPath) return;
+  if (lastPath) reportScroll();
   const first = lastPath === "";
   lastPath = location.pathname;
   track("$pageview", first && document.referrer ? { $referrer: document.referrer } : {});
@@ -235,6 +248,8 @@ function autocapture(): void {
     };
   }
   addEventListener("popstate", pageview);
+  addEventListener("scroll", measureScroll, { passive: true });
+  addEventListener("visibilitychange", () => document.visibilityState === "hidden" && reportScroll(), true);
 
   document.addEventListener(
     "click",

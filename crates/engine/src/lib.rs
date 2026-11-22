@@ -14,8 +14,10 @@ use serde_json::{Map, Value};
 
 mod errors;
 mod insights;
+mod pages;
 pub use errors::{ErrorGroup, error_groups};
 pub use insights::{CohortStats, FlagCohort, Funnel, FunnelStep, Insight, Journey, Readiness};
+pub use pages::{Hotspot, PageStats, pages};
 
 /// Engine errors.
 #[derive(Debug, thiserror::Error)]

@@ -487,3 +487,60 @@ async fn errors_group_by_normalised_message_and_source() {
     assert!(groups[0].roles.iter().any(|(r, n)| r == "admin" && *n == 3));
     assert_eq!(groups[0].releases[0].0, "v2");
 }
+
+#[tokio::test]
+async fn pages_show_scroll_depth_hotspots_and_rage_clicks() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let mut evs = Vec::new();
+    for u in 0..10 {
+        let user = format!("p{u}");
+        let depth = if u < 3 { 95 } else { 30 };
+        let rows = [
+            ("$pageview", "{}".to_owned()),
+            (
+                "$click",
+                r#"{"$tag":"button","$text":"Save draft"}"#.to_owned(),
+            ),
+            (
+                "$click",
+                if u < 2 {
+                    r#"{"$tag":"button","$text":"Pay","$rage":true}"#.to_owned()
+                } else {
+                    r#"{"$tag":"a","$text":"Help"}"#.to_owned()
+                },
+            ),
+            ("$scroll", format!(r#"{{"$depth":{depth}}}"#)),
+        ];
+        for (i, (name, props)) in rows.iter().enumerate() {
+            let e = E {
+                user: &user,
+                role: "member",
+                session: &user,
+                event: name,
+                mins_ago: 20 - i as i64,
+                feature: None,
+                release: "v1",
+                props,
+            };
+            let mut ev = mk(&e, u * 10 + i);
+            ev.path = Some("/checkout".into());
+            evs.push(ev);
+        }
+    }
+    w.append(&evs).unwrap();
+    w.flush().unwrap();
+    let q = QueryEngine::new(dir.path(), Limits::default());
+    let pages =
+        openlens_engine::pages(&q, "p", &openlens_engine::source(None), &Filters::default())
+            .await
+            .unwrap();
+    let p = &pages[0];
+    assert_eq!((p.path.as_str(), p.views, p.users), ("/checkout", 10, 10));
+    assert_eq!(p.hotspots[0].label, "Save draft");
+    assert!(p.hotspots.iter().any(|h| h.label == "Pay" && h.rage == 2));
+    assert!(
+        (p.reach_end - 0.3).abs() < 1e-9 && p.reach_half < 0.5,
+        "3 of 10 reached the end"
+    );
+}
