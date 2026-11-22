@@ -173,8 +173,8 @@ fn email_login() -> Option<(String, String, String)> {
 fn email_allowed(email: &str) -> bool {
     use std::sync::{Mutex, OnceLock};
     use std::time::{Duration, Instant};
-    static SENT: OnceLock<Mutex<(Vec<Instant>, std::collections::HashMap<String, Instant>)>> =
-        OnceLock::new();
+    type Sent = (Vec<Instant>, std::collections::HashMap<String, Instant>);
+    static SENT: OnceLock<Mutex<Sent>> = OnceLock::new();
     let Ok(mut s) = SENT.get_or_init(Mutex::default).lock() else {
         return false;
     };
