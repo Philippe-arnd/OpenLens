@@ -49,7 +49,12 @@ OpenLens follows [SemVer](https://semver.org) and keeps a [CHANGELOG](../CHANGEL
 
 **Upgrades are checked** before any image is published: `scripts/upgrade-check.sh <last release image> <new image>` (run by `release.yml`) writes data with the last release and reads it back with the new image. A change that has to rewrite stored data needs its own migration and a CHANGELOG *Changed* entry.
 
-**A snapshot** (a pre-release of `main`, for testing before a release): run *Release* by hand with `snapshot` ticked. It tags `vX.Y.Z-YYMMDD-sha`, then publishes the same assets with the `Unreleased` notes, as a pre-release. Snapshots are not published to npm.
+**Build releases.** Every push to `main` that changes code publishes a build release named **`vX.Y.Z-YYMMDD-sha`**: `X.Y.Z` is the version being developed (`Cargo.toml`), `YYMMDD` the UTC date, `sha` the commit (for example `v0.2.0-261122-a1b2c3d`). It is a valid SemVer pre-release of `X.Y.Z`, so npm, Helm and image tags accept it.
+- It is marked *pre-release* until `vX.Y.Z` itself is tagged, and it is not published to npm.
+- It has the same assets as a release, with the `Unreleased` notes and a *Full changelog* link to the previous build.
+- The image `ghcr.io/philippe-arnd/openlens:vX.Y.Z-YYMMDD-sha` and the chart are published for it too.
+- A newer push cancels an older build that is still running. Docs-only pushes make no build.
+- *Release* → *Run workflow* with `snapshot` ticked makes one now.
 
 **Re-attach assets** to an existing tag: run *Release* by hand with `tag` set.
 
