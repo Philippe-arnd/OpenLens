@@ -26,7 +26,7 @@ API quick reference (send `Authorization: Bearer <admin token>` on every call):
    - SPA: `npm install @openlens/web`, then call `openlens.init({ host, key })` at startup.
 
    The environment is detected automatically. Pass `release` from the build (git SHA or version). For a framework, follow its recipe in [Framework recipes](#framework-recipes) below: init runs **in the browser only**, once.
-3. **Identify.** Where the logged-in user becomes known, call `openlens.identify(user.id, { role, account, plan })`. Find the real role field (for example `user.role`, `membership.kind`). If none exists, ask the operator; do not invent one.
+3. **Identify.** Where the logged-in user becomes known, call `openlens.identify(user.id, { role, account, plan })`. Find the real role field (for example `user.role`, `membership.kind`). If none exists, ask the operator; do not invent one. Mark the team's own accounts (staff, testers, the founders) with `internal: true`, for example from the email domain or an `is_staff` flag: the board leaves them out by default, so their clicks don't weigh on a small app.
 3b. **Privacy.** Session replay is on and masks every input. Also add `data-openlens-mask` to elements that *display* personal or secret data (emails, addresses, balances, tokens) and `data-openlens-block` to anything that must never be recorded (payment iframes, documents). If the operator wants no replay, use `replay: false`.
 4. **Feature map.** Create `openlens.features.yaml` (format: `docs/schema/features.example.yaml`):
    - `roles`: list every raw role value found in the code and map it to a canonical role.

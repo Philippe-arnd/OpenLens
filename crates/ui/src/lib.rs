@@ -202,6 +202,7 @@ fn filter_bar(project: &str, b: &Board, f: &Filters, action: &str) -> Markup {
                     }
                 }
             }
+            label.check { input type="checkbox" name="internal" value="1" checked[f.internal]; " Include the team" }
             button type="submit" { "Apply" }
         }
     }

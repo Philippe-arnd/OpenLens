@@ -50,6 +50,9 @@ pub struct Filters {
     pub role: Option<String>,
     /// Release, or all releases.
     pub release: Option<String>,
+    /// Include the team's own users (identified with `internal: true`).
+    /// Off by default: on a small app the team's clicks would weigh a lot.
+    pub internal: bool,
 }
 
 impl Default for Filters {
@@ -58,6 +61,7 @@ impl Default for Filters {
             environment: "production".into(),
             role: None,
             release: None,
+            internal: false,
         }
     }
 }
@@ -86,6 +90,9 @@ impl Filters {
         }
         if let Some(r) = &self.release {
             w.push_str(&format!(" AND release = {}", lit(r)?));
+        }
+        if !self.internal {
+            w.push_str(" AND distinct_id NOT IN (SELECT person FROM persons WHERE internal)");
         }
         Ok(w)
     }

@@ -156,6 +156,7 @@ function base() {
   if (state.dims.role) p.$role = state.dims.role;
   if (state.dims.account) p.$account = state.dims.account;
   if (state.dims.plan) p.$plan = state.dims.plan;
+  if (state.dims.internal) p.$internal = true;
   if (activeFlags.length) p.$flags = activeFlags.join(",");
   return p;
 }
