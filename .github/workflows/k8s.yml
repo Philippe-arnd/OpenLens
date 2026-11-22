@@ -92,7 +92,6 @@ jobs:
           kubectl create namespace kz
           kubectl kustomize deploy/k8s/example > /dev/null
           kubectl -n kz apply -k deploy/k8s/base
-          kubectl -n kz set image statefulset/openlens openlens="ghcr.io/philippe-arnd/openlens:$TAG"
           kubectl -n kz rollout status statefulset/openlens --timeout 5m
           kubectl -n kz port-forward svc/openlens 8688:8686 > /dev/null 2>&1 &
           sleep 3
