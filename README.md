@@ -135,9 +135,12 @@ docker run -p 8686:8686 -v openlens-data:/data ghcr.io/philippe-arnd/openlens:la
 
 | Where | How | Guide |
 | --- | --- | --- |
-| **Coolify** | one-click template, no variable to fill in | [docs/deploy/coolify.md](docs/deploy/coolify.md) |
+| **Docker / Compose** | one container, one volume | [docs/deploy/docker.md](docs/deploy/docker.md) |
+| **Binary + systemd** | one file, `x86_64` or `aarch64` Linux | [docs/deploy/binary.md](docs/deploy/binary.md) |
 | **Kubernetes** | `helm install openlens oci://ghcr.io/philippe-arnd/charts/openlens`, or `kubectl apply -k` | [docs/deploy/kubernetes.md](docs/deploy/kubernetes.md) |
-| **Docker / any host** | one container, one volume | [Try it](#-try-it-in-two-minutes) |
+| **Coolify** | one-click template | [docs/deploy/coolify.md](docs/deploy/coolify.md) |
+
+The [self-hosting guide](docs/deploy/README.md) covers requirements, release channels, updates, backups and settings for all of them.
 
 - The admin token generates itself.
 - Optional features stay off until their variables are set: SMTP digest, LLM rewording of cards, OpenID Connect single sign-on, S3 copy.
@@ -200,7 +203,7 @@ More in [docs/development.md](docs/development.md). Contributors and agents: rea
 | `apps/openlens-cli` | The agent toolkit and MCP server |
 | `crates/*` | Layered engine crates |
 | `sdk/js`, `sdk/node`, `sdk/python` | The browser SDK, replay and player; the server SDKs |
-| `deploy/` | Coolify template, Helm chart, Kustomize base |
+| `deploy/` | Helm chart, Kustomize base, Coolify template |
 | `examples/` | Reference apps |
 | `docs/` | Method, KPIs, decisions, architecture, agent guides, deploy, benchmarks, clean-room log |
 
