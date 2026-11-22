@@ -197,7 +197,10 @@ function reset() {
 function setConsent(granted) {
   consent = granted ? "granted" : "denied";
   if (!granted) queue = [];
-  else flush();
+  else {
+    flush();
+    if ((cfg == null ? void 0 : cfg.replay) !== false) startReplay();
+  }
 }
 function flush(beacon = false) {
   if (!cfg || consent !== "granted" || queue.length === 0) return;
@@ -350,9 +353,32 @@ function init(config) {
   if (consent === "denied") return;
   loadFlags();
   if (config.autocapture !== false) autocapture();
+  if (config.replay !== false && consent === "granted") startReplay();
   timer = setInterval(() => flush(), 5e3);
   addEventListener("visibilitychange", () => document.visibilityState === "hidden" && flush(true));
   addEventListener("pagehide", () => flush(true));
+}
+function startReplay() {
+  if (!cfg || window.__openlensReplay) return;
+  const c = cfg;
+  window.__openlensReplay = {
+    host: c.host,
+    key: c.key,
+    ids: () => {
+      var _a;
+      return { sid: state.sid, uid: (_a = state.uid) != null ? _a : state.anon };
+    },
+    allowed: () => consent === "granted"
+  };
+  const load2 = () => {
+    const s = document.createElement("script");
+    s.src = `${c.host.replace(/\/$/, "")}/r.js`;
+    s.async = true;
+    document.head.appendChild(s);
+  };
+  const idle = window.requestIdleCallback;
+  if (document.readyState === "complete") (idle != null ? idle : setTimeout)(load2);
+  else addEventListener("load", () => (idle != null ? idle : setTimeout)(load2));
 }
 function shutdown() {
   if (timer) clearInterval(timer);

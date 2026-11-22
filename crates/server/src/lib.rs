@@ -53,6 +53,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/c.js", get(sdk))
+        .route("/r.js", get(recorder))
         .route("/agents.md", get(agents_guide))
         .merge(capture)
         .merge(api::routes())
@@ -77,6 +78,22 @@ async fn sdk() -> impl axum::response::IntoResponse {
             ("x-content-type-options", "nosniff"),
         ],
         SDK_JS,
+    )
+}
+
+/// The replay recorder (rrweb, MIT), loaded lazily by the SDK.
+const RECORDER_JS: &str = include_str!("../../../sdk/js/dist/openlens-replay.min.js");
+
+/// `GET /r.js`: the replay recorder bundle.
+async fn recorder() -> impl axum::response::IntoResponse {
+    (
+        [
+            ("content-type", "application/javascript; charset=utf-8"),
+            ("cache-control", "public, max-age=3600"),
+            ("access-control-allow-origin", "*"),
+            ("x-content-type-options", "nosniff"),
+        ],
+        RECORDER_JS,
     )
 }
 

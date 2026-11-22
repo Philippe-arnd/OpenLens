@@ -152,6 +152,12 @@ async fn sdk_is_served_as_cacheable_javascript() {
         .await
         .unwrap();
     assert!(body.len() > 1000);
+    let rec = get(&h, "/r.js", None, false).await;
+    assert_eq!(rec.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(rec.into_body(), 1 << 22)
+        .await
+        .unwrap();
+    assert!(body.len() > 10_000);
 }
 
 async fn get(

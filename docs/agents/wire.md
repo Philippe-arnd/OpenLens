@@ -25,6 +25,7 @@ API quick reference (send `Authorization: Bearer <admin token>` on every call):
 
    The environment is detected automatically. Pass `release` from the build (git SHA or version).
 3. **Identify.** Where the logged-in user becomes known, call `openlens.identify(user.id, { role, account, plan })`. Find the real role field (for example `user.role`, `membership.kind`). If none exists, ask the operator; do not invent one.
+3b. **Privacy.** Session replay is on and masks every input. Also add `data-openlens-mask` to elements that *display* personal or secret data (emails, addresses, balances, tokens) and `data-openlens-block` to anything that must never be recorded (payment iframes, documents). If the operator wants no replay, use `replay: false`.
 4. **Feature map.** Create `openlens.features.yaml` (format: `docs/schema/features.example.yaml`):
    - `roles`: list every raw role value found in the code and map it to a canonical role.
    - `features`: list the main user-facing features from the routes and actions. Give each one its entry points and a **success event**: the moment the user got value, for example `entry_saved` or `invoice_sent`. Add `openlens.track("<success event>")` where that moment happens, if the app does not emit it already.

@@ -6,6 +6,12 @@
  * requests, plus environment and release. `identify` adds the user's role.
  * No cookies. Input values are never captured.
  */
+import type { Bridge } from "./replay";
+declare global {
+    interface Window {
+        __openlensReplay?: Bridge;
+    }
+}
 export type Props = Record<string, unknown>;
 export interface Config {
     /** OpenLens server URL, e.g. https://lens.example.com */
@@ -20,6 +26,8 @@ export interface Config {
     autocapture?: boolean;
     /** "pending" queues events until consent(true); "denied" captures nothing. Default "granted". */
     consent?: "granted" | "pending" | "denied";
+    /** Record sessions for replay, inputs masked (default true). Loads `/r.js` lazily. */
+    replay?: boolean;
 }
 export interface Dimensions {
     role?: string;

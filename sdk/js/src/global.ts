@@ -20,6 +20,7 @@ if (script && key) {
     key,
     release: detectRelease(script),
     environment: script.dataset.environment || undefined,
+    replay: script.dataset.replay !== "off",
     consent: (script.dataset.consent as "granted" | "pending" | "denied" | undefined) || undefined,
   });
 }

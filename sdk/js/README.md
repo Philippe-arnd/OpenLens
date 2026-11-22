@@ -41,6 +41,8 @@ Flags are fetched at init and after `identify`. The last answer is cached, so `i
 
 Privacy: Do-Not-Track is respected, and `consent: "pending"` holds events until `setConsent(true)` is called. Add `data-openlens-ignore` to any element whose subtree should never be captured.
 
+Session replay is on by default. Once the page is idle and consent is granted, the SDK loads the recorder (`/r.js`, about 60 kB gzipped, rrweb under MIT). Every input value is masked. Text inside `data-openlens-mask` is masked too, and `data-openlens-block` / `data-openlens-ignore` subtrees are not recorded at all. To turn replay off, pass `replay: false` or add `data-replay="off"` to the script tag.
+
 ## Develop
 
 ```sh
