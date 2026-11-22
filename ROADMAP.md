@@ -91,7 +91,7 @@ Same philosophy as the Coolify template: one command, no required value, and a g
 - ✅ Plain manifests and a Kustomize base rendered from the chart, plus an Ingress component and an example overlay (#146).
 - ✅ [docs/deploy/kubernetes.md](docs/deploy/kubernetes.md): install, token, reach, wire, options, upgrade, backup, sizing (#147).
 - ✅ CI on kind: lint, install, `helm test`, events in, upgrade with the events and the token kept, Kustomize base too (#148). The chart is published to `oci://ghcr.io/philippe-arnd/charts` on release tags.
-- ⏳ Scheduled backups in the cluster (#149).
+- ✅ Scheduled backups in the cluster: `openlens backup --into --keep` and a CronJob next to the server (#149).
 
 **Exit:** on a fresh kind cluster, an agent following the guide gets a running instance, a wired example app and a green `verify`, with no hand edits.
 

@@ -12,6 +12,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
   - the agent guide [docs/deploy/kubernetes.md](docs/deploy/kubernetes.md);
   - a CI job installing and upgrading both on kind;
   - the chart published to `oci://ghcr.io/philippe-arnd/charts` on release tags.
+- **Backups:** `openlens backup --into <dir> --keep N` names each copy after the UTC time and keeps the newest N. The chart's `backup.enabled` runs it nightly as a CronJob next to the server, onto the data volume or `backup.existingClaim`.
 - **CLI:** plain HTTP is accepted for cluster-internal servers (`http://<service>:8686`, `*.svc`, `*.cluster.local`, private addresses), so an agent inside the cluster can use it.
 
 ### Fixed

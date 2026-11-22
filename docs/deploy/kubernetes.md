@@ -114,16 +114,26 @@ Read the [CHANGELOG](../../CHANGELOG.md) section of the target version first: it
 
 ## 7. Back up and restore
 
-`openlens backup <dir>` writes a consistent copy while the server runs. Copy that directory off the cluster, for example with `kubectl cp` or the optional S3 copy:
+`openlens backup` writes a consistent copy while the server runs.
+
+**Scheduled (Helm, from v0.2):** `--set backup.enabled=true` adds a CronJob, every night at 03:17 UTC by default. It runs `openlens backup --into <dir> --keep 3` next to the server pod (the data volume is ReadWriteOnce). Each copy is named after the UTC time, and only the newest `keep` are kept.
+- **Default target:** `backups/` on the data volume. Each copy takes the size of the data, so leave room for it. This protects against mistakes and corruption, not against losing the volume.
+- **To keep the copies elsewhere:**
+  - `backup.existingClaim` mounts another PVC at `/backups`, on the same node;
+  - or enable the S3 copy (step 5);
+  - or use your volume snapshots.
+- **Check:** `kubectl -n openlens create job backup-now --from=cronjob/openlens-backup`, then `kubectl -n openlens logs job/backup-now` prints `"ok":true`.
+
+**By hand:**
 
 ```sh
-kubectl -n openlens exec statefulset/openlens -- openlens backup /data/backups/$(date +%F)
-kubectl -n openlens cp openlens-0:/data/backups/$(date +%F) ./openlens-backup-$(date +%F)
+kubectl -n openlens exec statefulset/openlens -- openlens backup --into /data/backups --keep 3
+kubectl -n openlens cp openlens-0:/data/backups/<copy> ./openlens-backup
 ```
 
 **Restore:**
 1. `kubectl -n openlens scale statefulset/openlens --replicas=0`.
-2. Mount the PVC in a helper pod and replace its contents with the backup.
+2. Mount the PVC in a helper pod and replace its contents with the copy: `wal/`, `events/`, `replay/` and `meta.db`.
 3. Scale back to 1.
 
 Keep the same admin token Secret.

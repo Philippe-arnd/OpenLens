@@ -60,6 +60,18 @@ resources:
   limits:
     memory: 1Gi
 
+# Scheduled `openlens backup --into <dir> --keep <keep>` (consistent while
+# the server runs). By default the copies go to `backups/` on the data volume:
+# that protects against mistakes and corruption, not against losing the
+# volume, and each copy takes the size of the data. Point existingClaim at
+# another PVC (same node: the data volume is ReadWriteOnce), or use the S3
+# copy, to keep them elsewhere.
+backup:
+  enabled: false
+  schedule: "17 3 * * *"
+  keep: 3
+  existingClaim: ""
+
 nodeSelector: {}
 tolerations: []
 affinity: {}

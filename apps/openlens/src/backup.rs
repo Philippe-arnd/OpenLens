@@ -9,6 +9,10 @@
 //!   compared before and after, and the copy starts over if they changed.
 //!
 //! Restore: stop the server, replace the data dir with the backup, start.
+//!
+//! `openlens backup --into <dir> [--keep N]` names the copy after the UTC
+//! time and keeps the newest N copies in `<dir>` (scheduled backups, e.g. a
+//! Kubernetes CronJob: the image has no shell for `date` or cleanup).
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -86,6 +90,44 @@ pub fn run(src: &Path, dest: &Path) -> Result<usize, String> {
     Err("the data kept changing during the copy; try again when ingestion is quieter".into())
 }
 
+/// Name of a rotated backup: the UTC time, sortable, safe in paths.
+fn stamp(now: chrono::DateTime<chrono::Utc>) -> String {
+    now.format("%Y-%m-%dT%H-%M-%SZ").to_string()
+}
+
+/// Is `name` one of ours (so rotation never deletes anything else)?
+fn is_stamp(name: &str) -> bool {
+    chrono::NaiveDateTime::parse_from_str(name, "%Y-%m-%dT%H-%M-%SZ").is_ok()
+}
+
+/// Back up into `<into>/<UTC time>`, then delete all but the newest `keep`
+/// copies there. Returns the new copy, its file count and the removed copies.
+pub fn rotate(
+    src: &Path,
+    into: &Path,
+    keep: usize,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<(PathBuf, usize, Vec<PathBuf>), String> {
+    if keep == 0 {
+        return Err("--keep must be at least 1".into());
+    }
+    let dest = into.join(stamp(now));
+    let n = run(src, &dest)?;
+    let mut ours: Vec<PathBuf> = fs::read_dir(into)
+        .map_err(|e| e.to_string())?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir() && p.file_name().and_then(|n| n.to_str()).is_some_and(is_stamp))
+        .collect();
+    ours.sort();
+    let extra = ours.len().saturating_sub(keep);
+    let removed: Vec<PathBuf> = ours.into_iter().take(extra).collect();
+    for old in &removed {
+        fs::remove_dir_all(old).map_err(|e| format!("{}: {e}", old.display()))?;
+    }
+    Ok((dest, n, removed))
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -125,5 +167,31 @@ mod tests {
             run(&data, &data.join("events/x")).is_err(),
             "inside the data"
         );
+    }
+
+    #[test]
+    fn rotation_keeps_the_newest_copies_and_nothing_else_is_touched() {
+        let src = tempfile::tempdir().unwrap();
+        openlens_meta::Meta::open(&src.path().join("meta.db")).unwrap();
+        let into = tempfile::tempdir().unwrap();
+        fs::create_dir(into.path().join("keep-me")).unwrap();
+        let t0 = chrono::DateTime::parse_from_rfc3339("2026-11-20T03:17:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        for d in 0..4 {
+            rotate(src.path(), into.path(), 2, t0 + chrono::Duration::days(d)).unwrap();
+        }
+        let mut names: Vec<String> = fs::read_dir(into.path())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            ["2026-11-22T03-17-00Z", "2026-11-23T03-17-00Z", "keep-me"]
+        );
+        assert!(into.path().join("2026-11-23T03-17-00Z/meta.db").exists());
+        assert!(rotate(src.path(), into.path(), 0, t0).is_err());
     }
 }

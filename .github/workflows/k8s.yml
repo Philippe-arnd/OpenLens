@@ -35,6 +35,7 @@ jobs:
           helm lint "$CHART"
           helm template t "$CHART" > /dev/null
           helm template t "$CHART" --set ingress.enabled=true,ingress.host=lens.example.com,ingress.tls=true > /dev/null
+          helm template t "$CHART" --set backup.enabled=true | grep -q "kind: CronJob"
           if helm template t "$CHART" --set replicaCount=2 > /dev/null 2>&1; then
             echo "replicaCount=2 must be refused"; exit 1
           fi
@@ -87,6 +88,14 @@ jobs:
           N=$(curl -fsS -H "Authorization: Bearer $T" localhost:8687/api/projects/default/sql -H 'content-type: application/json' \
             -d '{"sql":"SELECT count(*) AS n FROM events"}' | jq '.rows[0].n')
           echo "events after upgrade: $N"; [ "$N" -ge "$(cat /tmp/n1)" ]
+      - name: scheduled backup runs next to the server
+        # Needs an image with `backup --into` (v0.2+): nightly, tags, on demand.
+        if: github.event_name != 'pull_request' && github.event_name != 'push' || github.ref_type == 'tag'
+        run: |
+          helm upgrade lens "$CHART" --reuse-values --set backup.enabled=true --wait --timeout 5m
+          kubectl create job lens-backup-now --from=cronjob/lens-openlens-backup
+          kubectl wait --for=condition=complete job/lens-backup-now --timeout=3m
+          kubectl logs job/lens-backup-now | tee /dev/stderr | grep -q '"ok":true'
       - name: plain manifests (Kustomize) run too
         run: |
           kubectl create namespace kz

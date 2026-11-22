@@ -14,6 +14,8 @@
 //! `openlens backup <dest>` writes a consistent copy of the data dir to
 //! `dest` (empty or new), safe while the server runs. In the container:
 //! `docker exec <c> openlens backup /data/backups/2026-11-22`.
+//! `openlens backup --into <dir> [--keep N]` names the copy after the UTC
+//! time and keeps the newest N (7 by default): for scheduled jobs.
 
 mod backup;
 
@@ -25,11 +27,17 @@ fn main() -> ExitCode {
     match std::env::args().nth(1).as_deref() {
         Some("healthcheck") => return healthcheck(),
         Some("backup") => {
-            let Some(dest) = std::env::args().nth(2) else {
-                eprintln!("usage: openlens backup <dest-dir>");
+            let args: Vec<String> = std::env::args().skip(2).collect();
+            let data = std::env::var("OPENLENS_DATA_DIR").unwrap_or_else(|_| "./data".into());
+            if args.first().map(String::as_str) == Some("--into") {
+                return backup_rotate(&data, &args[1..]);
+            }
+            let Some(dest) = args.first().cloned() else {
+                eprintln!(
+                    "usage: openlens backup <dest-dir> | openlens backup --into <dir> [--keep N]"
+                );
                 return ExitCode::FAILURE;
             };
-            let data = std::env::var("OPENLENS_DATA_DIR").unwrap_or_else(|_| "./data".into());
             return match backup::run(std::path::Path::new(&data), std::path::Path::new(&dest)) {
                 Ok(n) => {
                     println!("{{\"ok\":true,\"files\":{n},\"dest\":{dest:?}}}");
@@ -47,6 +55,41 @@ fn main() -> ExitCode {
         Ok(rt) => rt.block_on(serve()),
         Err(err) => {
             eprintln!("cannot start runtime: {err}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `openlens backup --into <dir> [--keep N]` (N defaults to 7).
+fn backup_rotate(data: &str, args: &[String]) -> ExitCode {
+    let (into, keep) = match args {
+        [into] => (into, Ok(7)),
+        [into, flag, n] if flag == "--keep" => (into, n.parse::<usize>()),
+        _ => {
+            eprintln!("usage: openlens backup --into <dir> [--keep N]");
+            return ExitCode::FAILURE;
+        }
+    };
+    let Ok(keep) = keep else {
+        eprintln!("--keep needs a number");
+        return ExitCode::FAILURE;
+    };
+    let into = std::path::Path::new(into);
+    if let Err(e) = std::fs::create_dir_all(into) {
+        eprintln!("backup failed: {}: {e}", into.display());
+        return ExitCode::FAILURE;
+    }
+    match backup::rotate(std::path::Path::new(data), into, keep, chrono::Utc::now()) {
+        Ok((dest, n, removed)) => {
+            println!(
+                "{{\"ok\":true,\"files\":{n},\"dest\":{:?},\"removed\":{}}}",
+                dest.display().to_string(),
+                removed.len()
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("backup failed: {e}");
             ExitCode::FAILURE
         }
     }
