@@ -135,17 +135,47 @@ pub(crate) async fn maybe_send(state: &AppState) {
 }
 
 async fn send(mail: &Mail, subject: &str, body: &str) -> Result<(), String> {
+    send_mail(&mail.url, &mail.from, &mail.to, subject, body).await
+}
+
+/// SMTP URL and sender for sign-in emails, when email is configured: the
+/// sender is `OPENLENS_DIGEST_FROM`, or the first digest recipient.
+pub(crate) fn login_mail() -> Option<(String, String)> {
+    let url = std::env::var("OPENLENS_SMTP_URL")
+        .ok()
+        .filter(|s| !s.is_empty())?;
+    let from = std::env::var("OPENLENS_DIGEST_FROM")
+        .ok()
+        .filter(|s| s.contains('@'))
+        .or_else(|| {
+            std::env::var("OPENLENS_DIGEST_TO")
+                .ok()?
+                .split(',')
+                .map(|s| s.trim().to_owned())
+                .find(|s| s.contains('@'))
+        })?;
+    Some((url, from))
+}
+
+/// Send a plain-text email.
+pub(crate) async fn send_mail(
+    url: &str,
+    from: &str,
+    to: &[String],
+    subject: &str,
+    body: &str,
+) -> Result<(), String> {
     use lettre::message::header::ContentType;
     use lettre::{Message, SmtpTransport, Transport};
     let mut b = Message::builder()
-        .from(mail.from.parse().map_err(|e| format!("from: {e}"))?)
+        .from(from.parse().map_err(|e| format!("from: {e}"))?)
         .subject(subject)
         .header(ContentType::TEXT_PLAIN);
-    for to in &mail.to {
-        b = b.to(to.parse().map_err(|e| format!("to: {e}"))?);
+    for t in to {
+        b = b.to(t.parse().map_err(|e| format!("to: {e}"))?);
     }
     let msg = b.body(body.to_owned()).map_err(|e| e.to_string())?;
-    let url = mail.url.clone();
+    let url = url.to_owned();
     tokio::task::spawn_blocking(move || {
         let transport = SmtpTransport::from_url(&url)
             .map_err(|e| e.to_string())?

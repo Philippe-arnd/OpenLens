@@ -125,7 +125,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
 }
 
 /// Login page.
-pub fn login(failed: bool, sso: bool) -> Markup {
+pub fn login(failed: bool, sso: bool, email: bool) -> Markup {
     layout(
         "Log in",
         None,
@@ -142,6 +142,14 @@ pub fn login(failed: bool, sso: bool) -> Markup {
                 @if sso {
                     p.muted.small { "or" }
                     p { a.button href="/oidc/start" { (icon("shield")) "Sign in with your company account" } }
+                }
+                @if email {
+                    p.muted.small { "or, if you were invited" }
+                    form method="post" action="/login/email" {
+                        label for="login-email" { "Your email" }
+                        input #login-email name="email" type="email" autocomplete="email" required;
+                        button type="submit" { "Email me a login link" }
+                    }
                 }
             }
         },
