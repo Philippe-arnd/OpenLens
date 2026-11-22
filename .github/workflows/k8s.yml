@@ -67,11 +67,11 @@ jobs:
           kubectl port-forward svc/lens-openlens 8686:8686 > /dev/null 2>&1 &
           sleep 3
           T=$(token); echo "$T" > /tmp/token1
-          KEY=$(curl -fsS -H "Authorization: Bearer $T" localhost:8686/api/projects | jq -r '.projects[0].key')
+          KEY=$(curl -fsS -H "Authorization: Bearer $T" localhost:8686/api/projects -H 'content-type: application/json' -d '{"name":"k8s"}' | jq -r '.key')
           curl -fsS -XPOST "localhost:8686/capture?key=$KEY" -H 'content-type: text/plain' \
             -d '{"batch":[{"event":"$pageview","distinct_id":"k8s-1","properties":{"$pathname":"/"}},{"event":"k8s_ok","distinct_id":"k8s-1"}]}'
           for i in $(seq 1 20); do
-            N=$(curl -fsS -H "Authorization: Bearer $T" localhost:8686/api/projects/default/sql -H 'content-type: application/json' \
+            N=$(curl -fsS -H "Authorization: Bearer $T" localhost:8686/api/projects/k8s/sql -H 'content-type: application/json' \
               -d '{"sql":"SELECT count(*) AS n FROM events"}' | jq '.rows[0].n')
             [ "$N" -ge 2 ] && break; sleep 2
           done
@@ -85,7 +85,7 @@ jobs:
           [ "$T" = "$(cat /tmp/token1)" ] || { echo "admin token changed on upgrade"; exit 1; }
           kubectl port-forward svc/lens-openlens 8687:8686 > /dev/null 2>&1 &
           sleep 3
-          N=$(curl -fsS -H "Authorization: Bearer $T" localhost:8687/api/projects/default/sql -H 'content-type: application/json' \
+          N=$(curl -fsS -H "Authorization: Bearer $T" localhost:8687/api/projects/k8s/sql -H 'content-type: application/json' \
             -d '{"sql":"SELECT count(*) AS n FROM events"}' | jq '.rows[0].n')
           echo "events after upgrade: $N"; [ "$N" -ge "$(cat /tmp/n1)" ]
       - name: scheduled backup runs next to the server

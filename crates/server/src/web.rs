@@ -126,7 +126,10 @@ async fn home(State(state): State<AppState>, headers: HeaderMap) -> Response {
             Some(p) => Redirect::to(&format!("/p/{}", p.id)).into_response(),
             None => html(
                 StatusCode::OK,
-                openlens_ui::message("No project", "Ask your agent to create one."),
+                openlens_ui::message(
+                    "No project yet",
+                    "Your coding agent creates one for each app and wires it in: give it this server's guide, /agents.md (it starts with openlens-cli init --name <your app>).",
+                ),
             ),
         },
         _ => html(

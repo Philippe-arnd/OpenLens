@@ -1464,3 +1464,38 @@ async fn capture_is_rate_limited_per_client_behind_a_proxy() {
         .unwrap();
     assert_eq!(other.status(), StatusCode::OK);
 }
+
+/// Deleting a project needs its id twice, then removes its metadata and
+/// files; its key stops working.
+#[tokio::test]
+async fn deleting_a_project_needs_confirmation_and_removes_everything() {
+    let h = harness();
+    post(&h, "/capture", batch(&h.key), false).await;
+    openlens_server::flush_now(&h.state).unwrap();
+    let del = |q: &'static str| {
+        router(h.state.clone()).oneshot(
+            Request::delete(format!("/api/projects/default{q}"))
+                .header("authorization", "Bearer adm_test")
+                .body(Body::empty())
+                .unwrap(),
+        )
+    };
+    assert_eq!(del("").await.unwrap().status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        del("?confirm=other").await.unwrap().status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert!(h.state.data_dir.join("events/project=default").exists());
+    assert_eq!(
+        del("?confirm=default").await.unwrap().status(),
+        StatusCode::OK
+    );
+    assert!(h.state.meta.projects().unwrap().is_empty());
+    assert!(!h.state.data_dir.join("events/project=default").exists());
+    let after = post(&h, "/capture", batch(&h.key), false).await;
+    assert_eq!(after.0, StatusCode::UNAUTHORIZED, "the key is gone");
+    assert_eq!(
+        del("?confirm=default").await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
+}

@@ -15,6 +15,10 @@ use crate::{AppState, auth};
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/projects", get(list_projects).post(create_project))
+        .route(
+            "/api/projects/{project}",
+            axum::routing::delete(delete_project),
+        )
         .route("/api/projects/{project}/sql", post(sql))
         .route("/api/projects/{project}/board", get(board))
         .route("/api/projects/{project}/errors", get(errors))
@@ -91,6 +95,67 @@ async fn list_projects(State(state): State<AppState>, headers: HeaderMap) -> Res
 #[derive(Deserialize)]
 struct NewProject {
     name: String,
+}
+
+#[derive(Deserialize)]
+struct ConfirmQuery {
+    confirm: Option<String>,
+}
+
+/// `DELETE /api/projects/{id}?confirm={id}`: delete a project and all its
+/// data (events, replays, source maps, people, flags, surveys, feature
+/// map). Irreversible, so the id must be repeated in `confirm`.
+async fn delete_project(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(project): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<ConfirmQuery>,
+) -> Response {
+    if let Some(r) = guard(&state, &headers) {
+        return r;
+    }
+    if q.confirm.as_deref() != Some(project.as_str()) {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "deleting a project removes all its data: repeat its id in ?confirm=<id>",
+        );
+    }
+    let st = state.clone();
+    let res = tokio::task::spawn_blocking(move || -> Result<bool, String> {
+        // Events still in the write-ahead log go to their files first, so
+        // nothing of this project is written back after the delete.
+        crate::flush_now(&st)?;
+        let existed = st
+            .meta
+            .delete_project(&project)
+            .map_err(|e| e.to_string())?;
+        if existed {
+            let mut dirs = vec![
+                st.data_dir
+                    .join("replay")
+                    .join(format!("project={project}")),
+                st.data_dir
+                    .join("sourcemaps")
+                    .join(format!("project={project}")),
+            ];
+            if let Ok(d) = openlens_storage::project_dir(&st.data_dir, &project) {
+                dirs.push(d);
+            }
+            for d in dirs {
+                if d.exists() {
+                    std::fs::remove_dir_all(&d).map_err(|e| e.to_string())?;
+                }
+            }
+        }
+        Ok(existed)
+    })
+    .await;
+    match res {
+        Ok(Ok(true)) => Json(json!({ "deleted": true })).into_response(),
+        Ok(Ok(false)) => err(StatusCode::NOT_FOUND, "no such project"),
+        Ok(Err(e)) => err(StatusCode::INTERNAL_SERVER_ERROR, &e),
+        Err(_) => err(StatusCode::INTERNAL_SERVER_ERROR, "delete failed"),
+    }
 }
 
 async fn create_project(

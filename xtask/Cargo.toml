@@ -11,6 +11,7 @@ publish = false
 serde_json = "1"
 openlens-testkit = { path = "../crates/testkit" }
 openlens-storage = { path = "../crates/storage" }
+openlens-meta = { path = "../crates/meta" }
 
 [lints]
 workspace = true

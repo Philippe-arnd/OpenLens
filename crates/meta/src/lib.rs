@@ -350,6 +350,29 @@ impl Meta {
         }
     }
 
+    /// Delete a project's metadata: the project, its key, people and role
+    /// history, feature maps, imports, flags and surveys. Returns false when
+    /// it did not exist. (Its event, replay and source-map files are the
+    /// caller's to remove.)
+    pub fn delete_project(&self, id: &str) -> Result<bool> {
+        self.with(|c| {
+            let tx = c.unchecked_transaction()?;
+            for table in [
+                "persons",
+                "role_history",
+                "feature_maps",
+                "imports",
+                "flags",
+                "surveys",
+            ] {
+                tx.execute(&format!("DELETE FROM {table} WHERE project = ?1"), [id])?;
+            }
+            let n = tx.execute("DELETE FROM projects WHERE id = ?1", [id])?;
+            tx.commit()?;
+            Ok(n > 0)
+        })
+    }
+
     /// Record an identify: upsert the person and, when the role changed,
     /// append to the role history (D-009).
     pub fn identify(

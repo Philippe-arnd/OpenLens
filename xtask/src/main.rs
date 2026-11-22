@@ -128,6 +128,10 @@ fn demo(dir: Option<String>) -> Result<(), String> {
     let events = openlens_testkit::planted_dataset("default");
     w.append(&events).map_err(|e| e.to_string())?;
     w.flush().map_err(|e| e.to_string())?;
+    let meta = openlens_meta::Meta::open(&std::path::Path::new(&dir).join("meta.db"))
+        .map_err(|e| e.to_string())?;
+    meta.ensure_default_project(None)
+        .map_err(|e| e.to_string())?;
     eprintln!(
         "xtask: wrote {} demo events to {dir} (project default)",
         events.len()
