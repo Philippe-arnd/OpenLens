@@ -148,6 +148,32 @@ pub fn login(failed: bool, sso: bool) -> Markup {
     )
 }
 
+/// First login with the admin token or the agent's link: create your own
+/// admin account (named in the team list, and the one SSO signs in to).
+pub fn welcome(sso: bool, error: Option<&str>) -> Markup {
+    layout(
+        "Welcome",
+        None,
+        html! {
+            section.login {
+                h1 { "Welcome to OpenLens " span.wave aria-hidden="true" { "🔭" } }
+                p.muted { "You are in with the admin token. Create your own admin account, so the team list knows who you are and you can invite others." }
+                @if let Some(e) = error { p.alert role="alert" { (e) } }
+                form method="post" action="/welcome" {
+                    label for="email" { "Your email" }
+                    input #email name="email" type="email" autocomplete="email" required autofocus;
+                    button type="submit" { "Create my admin account" }
+                }
+                p.muted.small {
+                    @if sso { "Next time, sign in with your company account. " }
+                    @else { "Next time, use a login link from your agent (" code { "openlens-cli login-link --email you@… --role admin" } ") or the admin token. " }
+                    a href="/" { "Skip for now" }
+                }
+            }
+        },
+    )
+}
+
 fn filter_bar(project: &str, b: &Board, f: &Filters, action: &str) -> Markup {
     let mut envs = b.environments.clone();
     if !envs.iter().any(|e| e == "production") {

@@ -83,6 +83,11 @@ fn session_user(state: &AppState, value: &str) -> Option<String> {
     }
 }
 
+/// Who the session cookie belongs to (`OWNER` or a user id), if valid.
+pub(crate) fn session_id(state: &AppState, headers: &HeaderMap) -> Option<String> {
+    session_user(state, &cookie(headers, COOKIE)?)
+}
+
 /// The logged-in dashboard viewer, if any.
 pub(crate) fn viewer(state: &AppState, headers: &HeaderMap) -> Option<Viewer> {
     let id = session_user(state, &cookie(headers, COOKIE)?)?;

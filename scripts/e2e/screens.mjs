@@ -10,7 +10,7 @@ const [server, token, out] = process.argv.slice(2);
 mkdirSync(out, { recursive: true });
 const pages = ["", "/events", "/pages", "/errors", "/replays", "/flags", "/surveys", "/digest"];
 // Pages outside a project (the owner is an admin, so /users is allowed).
-const global = ["/projects", "/users"];
+const global = ["/projects", "/users", "/welcome"];
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 }, deviceScaleFactor: 2, reducedMotion: "reduce" });
