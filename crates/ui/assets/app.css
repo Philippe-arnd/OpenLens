@@ -48,8 +48,6 @@ code, .mono, pre { font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", 
 .muted { color: var(--muted); } .small { font-size: 12.5px; } .center { text-align: center; }
 .icon { width: 16px; height: 16px; flex: none; vertical-align: -3px; }
 
-/* Header */
-  background: color-mix(in srgb, var(--bg) 85%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
 /* Layout: a sidebar on the left, collapsible to icons (#170). The choice is
    a cookie set by /nav/{collapsed|expanded} (no script); phones always get
    the icon rail. */
