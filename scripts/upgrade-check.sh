@@ -4,7 +4,10 @@
 # of facts (events, a flag, a feature map), records them, then starts NEW on
 # the same volume and compares. Board numbers are not compared: their
 # definitions may change between releases (see the CHANGELOG); the board
-# must still load.
+# must still load. Then starts OLD again on the data NEW opened: going back
+# to the previous image must keep working (same data format) and read the
+# same facts. A newer data format is refused by the binary itself (#199,
+# unit-tested in apps/openlens/src/upgrade.rs).
 # Usage: scripts/upgrade-check.sh <old-image> <new-image>   (needs docker, curl, python3)
 set -euo pipefail
 OLD=$1 NEW=$2
@@ -65,4 +68,10 @@ facts > /tmp/upgrade-after.txt
 diff -u /tmp/upgrade-before.txt /tmp/upgrade-after.txt || fail "the data reads differently after the upgrade"
 CODE=$(api -o /dev/null -w '%{http_code}' "$B/api/projects/default/board")
 [ "$CODE" = 200 ] || fail "board gave $CODE"
-echo "upgrade check passed: $OLD -> $NEW"
+docker stop -t 20 "$NAME" > /dev/null && docker rm "$NAME" > /dev/null
+
+echo "3. $OLD again (rollback)"
+start "$OLD"
+facts > /tmp/upgrade-rollback.txt
+diff -u /tmp/upgrade-before.txt /tmp/upgrade-rollback.txt || fail "the data reads differently after going back to $OLD"
+echo "upgrade check passed: $OLD -> $NEW -> $OLD"
