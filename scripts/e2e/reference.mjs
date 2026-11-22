@@ -13,8 +13,10 @@ async function as(user, steps) {
   const tab = await ctx.newPage();
   tab.on("pageerror", (e) => problems.push(e.message));
   await steps(tab);
-  await tab.waitForTimeout(500);
-  await ctx.close(); // pagehide: the SDK flushes with sendBeacon
+  // Closing a context does not reliably fire pagehide, so wait for the
+  // SDK's periodic flush (every 5 s) instead.
+  await tab.waitForTimeout(6000);
+  await ctx.close();
 }
 
 if (app === "notes-ssr") {

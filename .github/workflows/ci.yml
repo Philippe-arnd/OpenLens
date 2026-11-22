@@ -138,7 +138,7 @@ jobs:
   report:
     name: open an issue when main breaks
     needs: [gate, sdk, browser]
-    if: failure() && github.event_name != 'pull_request'
+    if: failure() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       issues: write
