@@ -292,14 +292,24 @@ function pageview() {
   lastPath = path;
   track("$pageview", first && document.referrer ? { $referrer: document.referrer } : {});
 }
-function describe(el) {
+function lineage(el, path) {
+  const from = path ? path.indexOf(el) : -1;
+  if (from >= 0) return path.slice(from).filter((x) => x instanceof Element);
+  const out = [];
+  for (let n = el; n; n = n instanceof ShadowRoot ? n.host : n.parentNode) {
+    if (n instanceof Element) out.push(n);
+  }
+  return out;
+}
+function describe(el, path) {
   var _a;
+  const up = lineage(el, path);
   const p = { $tag: el.tagName.toLowerCase() };
-  const f = el.closest("[data-feature]");
+  const f = up.find((x) => x.hasAttribute("data-feature"));
   if (f) p.$feature = f.getAttribute("data-feature");
   if (el.id) p.$id = el.id;
   const isInput = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
-  const masked = !!el.closest("[data-openlens-mask]");
+  const masked = up.some((x) => x.hasAttribute("data-openlens-mask"));
   if (!isInput && !masked) {
     const text = (el.textContent || "").replace(/\s+/g, " ").trim();
     if (text) p.$text = text.slice(0, 60);
@@ -333,12 +343,13 @@ function autocapture() {
   document.addEventListener(
     "click",
     (e) => {
-      const target = e.target instanceof Element ? e.target.closest(CLICKABLE) : null;
-      if (!target || target.closest("[data-openlens-ignore]")) return;
+      const path = e.composedPath();
+      const target = path.find((x) => x instanceof Element && x.matches(CLICKABLE));
+      if (!target || lineage(target, path).some((x) => x.hasAttribute("data-openlens-ignore"))) return;
       const now = Date.now();
       rage = rage.el === target && now - rage.t < 1e3 ? { el: target, n: rage.n + 1, t: now } : { el: target, n: 1, t: now };
       const pos = e instanceof MouseEvent && innerWidth > 0 ? { $x: Math.round(e.clientX / innerWidth * 1e3) / 1e3, $y: Math.round(e.pageY), $vw: innerWidth } : {};
-      track("$click", { ...describe(target), ...pos, ...rage.n >= 3 ? { $rage: true } : {} });
+      track("$click", { ...describe(target, path), ...pos, ...rage.n >= 3 ? { $rage: true } : {} });
     },
     true
   );

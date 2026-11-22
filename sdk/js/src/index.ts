@@ -315,14 +315,27 @@ function pageview(): void {
   track("$pageview", first && document.referrer ? { $referrer: document.referrer } : {});
 }
 
-function describe(el: Element): Props {
+/** `el` and its ancestors, crossing open shadow roots (web components):
+ * from the event's composed path when there is one. */
+function lineage(el: Element, path?: EventTarget[]): Element[] {
+  const from = path ? path.indexOf(el) : -1;
+  if (from >= 0) return path!.slice(from).filter((x): x is Element => x instanceof Element);
+  const out: Element[] = [];
+  for (let n: Node | null = el; n; n = n instanceof ShadowRoot ? n.host : n.parentNode) {
+    if (n instanceof Element) out.push(n);
+  }
+  return out;
+}
+
+function describe(el: Element, path?: EventTarget[]): Props {
+  const up = lineage(el, path);
   const p: Props = { $tag: el.tagName.toLowerCase() };
-  const f = el.closest("[data-feature]");
+  const f = up.find((x) => x.hasAttribute("data-feature"));
   if (f) p.$feature = f.getAttribute("data-feature");
   if (el.id) p.$id = el.id;
   const isInput = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
   // Text under data-openlens-mask is private (e.g. decrypted user content): never sent.
-  const masked = !!el.closest("[data-openlens-mask]");
+  const masked = up.some((x) => x.hasAttribute("data-openlens-mask"));
   if (!isInput && !masked) {
     const text = (el.textContent || "").replace(/\s+/g, " ").trim();
     if (text) p.$text = text.slice(0, 60);
@@ -360,8 +373,11 @@ function autocapture(): void {
   document.addEventListener(
     "click",
     (e) => {
-      const target = e.target instanceof Element ? e.target.closest(CLICKABLE) : null;
-      if (!target || target.closest("[data-openlens-ignore]")) return;
+      // The composed path reaches inside open shadow roots, where e.target
+      // is only the component's host element.
+      const path = e.composedPath();
+      const target = path.find((x): x is Element => x instanceof Element && x.matches(CLICKABLE));
+      if (!target || lineage(target, path).some((x) => x.hasAttribute("data-openlens-ignore"))) return;
       const now = Date.now();
       rage = rage.el === target && now - rage.t < 1000 ? { el: target, n: rage.n + 1, t: now } : { el: target, n: 1, t: now };
       // Position for heatmaps: x as a share of the viewport width (layouts
@@ -369,7 +385,7 @@ function autocapture(): void {
       const pos = e instanceof MouseEvent && innerWidth > 0
         ? { $x: Math.round((e.clientX / innerWidth) * 1000) / 1000, $y: Math.round(e.pageY), $vw: innerWidth }
         : {};
-      track("$click", { ...describe(target), ...pos, ...(rage.n >= 3 ? { $rage: true } : {}) });
+      track("$click", { ...describe(target, path), ...pos, ...(rage.n >= 3 ? { $rage: true } : {}) });
     },
     true,
   );

@@ -18,6 +18,11 @@ if (admin) {
 const page = `<!doctype html><html><head><meta name="openlens-release" content="e2e-1"></head><body>
 <button data-feature="export">Export</button>
 <div data-openlens-mask><button id="secret">Dear diary, private words</button></div>
+<lens-card data-feature="share"></lens-card>
+<script>customElements.define("lens-card", class extends HTMLElement {
+  constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML =
+    '<button id="share-btn">Share</button><span data-feature="like"><button id="like-btn">Like</button></span>'; }
+});</script>
 <script src="${server}/c.js" data-key="${key}"></script>
 <script>openlens.reset(); openlens.identify("e2e-user", { role: "owner" });</script>
 </body></html>`;
@@ -64,6 +69,9 @@ await tab.click("button[data-feature=export]");
 // Hash routers: a #/route change is a page view of that route.
 await tab.evaluate(() => { location.hash = "#/notes"; });
 await tab.click("#secret");
+// Web components: clicks inside an open shadow root keep their feature.
+await tab.click("#share-btn");
+await tab.click("#like-btn");
 await tab.evaluate(() => { setTimeout(() => { throw new Error("e2e boom"); }, 0); });
 await tab.waitForTimeout(200);
 await tab.evaluate(() => openlens.flush());
@@ -128,6 +136,13 @@ if (lost.length) {
 if (!sent.flatMap((b) => JSON.parse(b).batch).some((e) => e.event === "$pageview" && e.properties.$pathname === "/notes")) {
   console.error("hash route change not counted as a page view");
   process.exit(1);
+}
+const clicks = sent.flatMap((b) => JSON.parse(b).batch).filter((e) => e.event === "$click");
+for (const [feature, text] of [["share", "Share"], ["like", "Like"]]) {
+  if (!clicks.some((c) => c.properties.$feature === feature && c.properties.$tag === "button" && c.properties.$text === text)) {
+    console.error(`shadow DOM click not captured with its feature: ${feature}`);
+    process.exit(1);
+  }
 }
 // identify links the anonymous visit (reset while anonymous is a no-op), so
 // the events sent before login belong to the user.
