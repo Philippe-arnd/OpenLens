@@ -272,7 +272,12 @@ function autocapture(): void {
       if (!target || target.closest("[data-openlens-ignore]")) return;
       const now = Date.now();
       rage = rage.el === target && now - rage.t < 1000 ? { el: target, n: rage.n + 1, t: now } : { el: target, n: 1, t: now };
-      track("$click", { ...describe(target), ...(rage.n >= 3 ? { $rage: true } : {}) });
+      // Position for heatmaps: x as a share of the viewport width (layouts
+      // reflow with width), y in page pixels.
+      const pos = e instanceof MouseEvent && innerWidth > 0
+        ? { $x: Math.round((e.clientX / innerWidth) * 1000) / 1000, $y: Math.round(e.pageY), $vw: innerWidth }
+        : {};
+      track("$click", { ...describe(target), ...pos, ...(rage.n >= 3 ? { $rage: true } : {}) });
     },
     true,
   );

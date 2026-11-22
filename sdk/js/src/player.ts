@@ -93,12 +93,86 @@ async function main(): Promise<void> {
   addEventListener("resize", fit);
 
   // data-at is a UTC timestamp ("2026-11-22 01:22:01.1"): start 3 s before it.
+  if (root.dataset.heatmap) {
+    await heatmapMode(rep, stage, bar, events as unknown as RecEvent[], root.dataset.heatmap, root.dataset.path ?? "", fit);
+    return;
+  }
+
   const at = root.dataset.at ? Date.parse(`${root.dataset.at.replace(" ", "T").slice(0, 23)}Z`) || 0 : 0;
   const first = (events[0] as { timestamp: number }).timestamp;
   const offset = at > first ? Math.min(at - first - 3000, total) : 0;
   rep.pause(Math.max(0, offset));
   fit();
   show();
+}
+
+interface RecEvent {
+  type: number;
+  timestamp: number;
+  data: { href?: string };
+}
+
+interface ClickMapJson {
+  columns: number;
+  row: number;
+  map: { cells: [number, number, number, number][] };
+}
+
+/** Heatmap over the real page: show the first recorded visit of `path`,
+ * stretch the frame to the whole page, and draw the click density on it. */
+async function heatmapMode(
+  rep: Replayer,
+  stage: HTMLElement,
+  bar: HTMLElement,
+  events: RecEvent[],
+  url: string,
+  path: string,
+  fit: () => void,
+): Promise<void> {
+  bar.hidden = true;
+  const first = events[0]?.timestamp ?? 0;
+  const metas = events.filter((e) => e.type === 4 && e.data?.href);
+  const visit =
+    metas.find((e) => {
+      try {
+        return new URL(e.data.href ?? "").pathname === path;
+      } catch {
+        return false;
+      }
+    }) ?? metas[0];
+  rep.pause(Math.max(0, (visit?.timestamp ?? first) - first + 800));
+  const r = await fetch(url, { credentials: "same-origin" });
+  if (!r.ok) return;
+  const data = (await r.json()) as ClickMapJson;
+  await new Promise((done) => setTimeout(done, 300));
+  const frame = stage.querySelector("iframe");
+  const wrapper = stage.querySelector<HTMLElement>(".replayer-wrapper");
+  if (!frame || !wrapper) return;
+  const doc = frame.contentDocument;
+  const width = Number(frame.getAttribute("width")) || 1280;
+  const height = Math.max(
+    Number(frame.getAttribute("height")) || 0,
+    doc?.documentElement?.scrollHeight ?? 0,
+    doc?.body?.scrollHeight ?? 0,
+  );
+  frame.setAttribute("height", String(height));
+  const layer = document.createElement("div");
+  layer.className = "ol-heat";
+  layer.style.width = `${width}px`;
+  layer.style.height = `${height}px`;
+  const max = Math.max(1, ...data.map.cells.map((c) => c[2]));
+  const size = Math.max(18, (width / data.columns) * 1.8);
+  for (const [cx, cy, n] of data.map.cells) {
+    const dot = document.createElement("span");
+    dot.style.left = `${((cx + 0.5) / data.columns) * width}px`;
+    dot.style.top = `${cy * data.row + data.row / 2}px`;
+    dot.style.width = dot.style.height = `${size}px`;
+    dot.style.opacity = String(Math.min(1, 0.25 + (0.75 * n) / max));
+    layer.append(dot);
+  }
+  wrapper.style.position = "relative";
+  wrapper.append(layer);
+  fit();
 }
 
 void main();

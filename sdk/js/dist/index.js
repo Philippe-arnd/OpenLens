@@ -271,7 +271,8 @@ function autocapture() {
       if (!target || target.closest("[data-openlens-ignore]")) return;
       const now = Date.now();
       rage = rage.el === target && now - rage.t < 1e3 ? { el: target, n: rage.n + 1, t: now } : { el: target, n: 1, t: now };
-      track("$click", { ...describe(target), ...rage.n >= 3 ? { $rage: true } : {} });
+      const pos = e instanceof MouseEvent && innerWidth > 0 ? { $x: Math.round(e.clientX / innerWidth * 1e3) / 1e3, $y: Math.round(e.pageY), $vw: innerWidth } : {};
+      track("$click", { ...describe(target), ...pos, ...rage.n >= 3 ? { $rage: true } : {} });
     },
     true
   );
