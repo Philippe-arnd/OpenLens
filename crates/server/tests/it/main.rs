@@ -572,3 +572,56 @@ async fn flags_target_canonical_roles_and_need_the_token_to_change() {
         "cross-site form posts are refused"
     );
 }
+
+#[tokio::test]
+async fn theme_cookie_sets_the_page_theme_and_redirects_back_safely() {
+    let h = harness();
+    let resp = router(h.state.clone())
+        .oneshot(
+            Request::get("/theme/dark")
+                .header("host", "lens.test")
+                .header("referer", "http://lens.test/p/default/events")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.headers()["location"], "/p/default/events");
+    assert!(
+        resp.headers()["set-cookie"]
+            .to_str()
+            .unwrap()
+            .starts_with("ol_theme=dark")
+    );
+    let evil = router(h.state.clone())
+        .oneshot(
+            Request::get("/theme/light")
+                .header("host", "lens.test")
+                .header("referer", "https://evil.example/x")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(evil.headers()["location"], "/", "never redirect off-site");
+
+    let page = get(&h, "/login", Some("ol_theme=dark"), false).await;
+    let html = String::from_utf8_lossy(
+        &axum::body::to_bytes(page.into_body(), 1 << 20)
+            .await
+            .unwrap(),
+    )
+    .to_string();
+    assert!(html.contains(r#"data-theme="dark""#));
+    let page = get(&h, "/login", Some("ol_theme=<script>"), false).await;
+    let html = String::from_utf8_lossy(
+        &axum::body::to_bytes(page.into_body(), 1 << 20)
+            .await
+            .unwrap(),
+    )
+    .to_string();
+    assert!(
+        !html.contains("data-theme"),
+        "only known themes are applied"
+    );
+}

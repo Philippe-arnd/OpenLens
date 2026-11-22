@@ -20,6 +20,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/p/{project}", get(board))
         .route("/p/{project}/events", get(events))
         .route("/assets/app.css", get(css))
+        .route("/theme/{mode}", get(set_theme))
 }
 
 /// Strict headers for every HTML page: no scripts at all, no framing.
@@ -241,4 +242,63 @@ async fn futures_join(
         openlens_engine::board(&state.query, project, f, map),
         openlens_engine::recent_events(&state.query, project, f, map.map(|(m, _)| m), event, 100)
     )
+}
+
+/// `GET /theme/{auto|light|dark}`: remember the theme (cookie, 1 year) and
+/// go back to the page the user came from (same-origin paths only).
+async fn set_theme(headers: HeaderMap, Path(mode): Path<String>) -> Response {
+    let mode = match mode.as_str() {
+        "light" | "dark" => mode,
+        _ => "auto".to_owned(),
+    };
+    let base = crate::base_url(&headers);
+    let back = headers
+        .get(header::REFERER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|r| r.strip_prefix(base.as_str()))
+        .filter(|p| p.starts_with('/') && !p.starts_with("//"))
+        .unwrap_or("/")
+        .to_owned();
+    let cookie = format!("ol_theme={mode}; Path=/; SameSite=Lax; Max-Age=31536000");
+    with_cookie(Redirect::to(&back).into_response(), &cookie)
+}
+
+/// Apply the theme cookie to HTML pages (`<html data-theme="…">`), so the
+/// page renders in the right theme with no script and no flash.
+pub(crate) async fn theme_layer(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let theme = req
+        .headers()
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(';'))
+        .filter_map(|kv| kv.trim().split_once('='))
+        .find(|(k, _)| *k == "ol_theme")
+        .map(|(_, v)| v)
+        .filter(|v| *v == "light" || *v == "dark")
+        .map(str::to_owned);
+    let resp = next.run(req).await;
+    let Some(theme) = theme else { return resp };
+    let is_html = resp
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("text/html"));
+    if !is_html {
+        return resp;
+    }
+    let (mut parts, body) = resp.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(body, 8 * 1024 * 1024).await else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "page too large").into_response();
+    };
+    let html = String::from_utf8_lossy(&bytes).replacen(
+        "<html lang=\"en\">",
+        &format!("<html lang=\"en\" data-theme=\"{theme}\">"),
+        1,
+    );
+    parts.headers.remove(header::CONTENT_LENGTH);
+    Response::from_parts(parts, axum::body::Body::from(html))
 }
