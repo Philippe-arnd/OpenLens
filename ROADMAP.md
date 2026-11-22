@@ -70,5 +70,6 @@ A layered workspace, `cargo xtask ci`, AGENTS.md, Docker and compose with the he
 
 **Exit:** two of Phil's prod apps run on OpenLens for 30 days without data loss.
 
-## Later (not planned until a real need shows)
-Weekly digest, LLM rewording of cards, in-app micro-surveys, experiment significance, server SDKs (thin HTTP clients), multi-user permissions, OIDC login and an S3 storage backend (D-015, accepted), visual heatmap overlays.
+## M7: The former Later list (D-016) 🚧
+- ✅ Experiment significance on flag cohorts (#122)
+- ⏳ Visual heatmap overlays, weekly digest, server SDKs, in-app micro-surveys, LLM rewording of cards (optional), users and roles, OIDC (optional), S3 copy (optional)

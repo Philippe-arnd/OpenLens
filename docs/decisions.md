@@ -59,3 +59,15 @@ Append-only. Each entry: id, date, decision, why, consequences.
 - **Retention is fixed.** Events are kept for 400 days (a little over 13 months), so a month can be compared with the same month a year earlier. Replays are kept for 30 days after their last chunk. The background job deletes older data every 10 minutes. Backfilled history older than 400 days is dropped too. There is no setting for either.
 - **Storage is one local volume.** It is the data dir, mounted by the Coolify template. Backups are a consistent copy of that directory, made by `openlens backup` (SQLite online backup plus a copy of the immutable Parquet and replay files). The S3 backend moves to Later.
 - **OIDC moves to Later.** The persona gets in through one-time login links sent by an agent, and the admin token covers the rest. OIDC would add three settings, JWT crypto and an outbound dependency on the IdP, for a team-SSO need that has not come up yet.
+
+## D-016 (2026-11-22, Phil) The Later list is built, as defaults or optional add-ons
+**Why:** Phil asked for every Later item: experiment significance, visual heatmaps, weekly digest, server SDKs, in-app micro-surveys, LLM rewording of cards, multi-user permissions, OIDC and an S3 backend. This partly supersedes D-015. D-014 still holds: a fresh deploy needs no setting. **Consequences:**
+- **Always on, nothing to set:** significance on flag cohorts, heatmap overlays, the digest page, server SDKs, micro-surveys (defined by agents through the API, like flags), and users with roles (admin and viewer, invited by login link).
+- **Optional, and off until configured** (environment variables documented in `docs/deploy/coolify.md`):
+  - SMTP for the emailed digest;
+  - an LLM endpoint and key for rewording cards (the original wording is always kept);
+  - OIDC (issuer, client id and secret);
+  - S3 (bucket and credentials) as a second copy of closed partitions.
+
+  Each one is skipped silently when it is not configured.
+- Local disk remains the source of truth. S3 receives closed days and backups, so losing the bucket never loses data.
