@@ -66,31 +66,34 @@ const pt = await phone.newPage();
 await pt.goto(`${server}/login`);
 await pt.fill("input[name=token]", token);
 await Promise.all([pt.waitForNavigation(), pt.click("button[type=submit]")]);
-for (const p of [...pages.map((x) => `/p/default${x}`), ...global]) {
-  await pt.goto(`${server}${p}`);
-  const over = await pt.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-  if (over > 1) {
-    // Name the outermost elements that stick out, to fix them quickly.
-    const culprits = await pt.evaluate(() => {
-      const w = document.documentElement.clientWidth;
-      const out = [];
-      for (const el of document.querySelectorAll("body *")) {
-        const r = el.getBoundingClientRect();
-        // Skip what a scrolling box clips (it does not widen the page).
-        let clipped = false;
-        for (let a = el.parentElement; a; a = a.parentElement) {
-          const s = getComputedStyle(a);
-          if (s.overflowX === "auto" || s.overflowX === "hidden" || s.overflowX === "scroll") { clipped = true; break; }
+for (const theme of ["light", "dark"]) {
+  await pt.goto(`${server}/theme/${theme}`);
+  for (const p of [...pages.map((x) => `/p/default${x}`), ...global]) {
+    await pt.goto(`${server}${p}`);
+    const over = await pt.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    if (over > 1) {
+      // Name the outermost elements that stick out, to fix them quickly.
+      const culprits = await pt.evaluate(() => {
+        const w = document.documentElement.clientWidth;
+        const out = [];
+        for (const el of document.querySelectorAll("body *")) {
+          const r = el.getBoundingClientRect();
+          // Skip what a scrolling box clips (it does not widen the page).
+          let clipped = false;
+          for (let a = el.parentElement; a; a = a.parentElement) {
+            const s = getComputedStyle(a);
+            if (s.overflowX === "auto" || s.overflowX === "hidden" || s.overflowX === "scroll") { clipped = true; break; }
+          }
+          if (!clipped && r.right > w + 1 && !(el.parentElement && el.parentElement.getBoundingClientRect().right > w + 1)) {
+            out.push(`${el.tagName.toLowerCase()}${el.className && typeof el.className === "string" ? "." + el.className.trim().replace(/\s+/g, ".") : ""} (${Math.round(r.right - w)}px)`);
+          }
         }
-        if (!clipped && r.right > w + 1 && !(el.parentElement && el.parentElement.getBoundingClientRect().right > w + 1)) {
-          out.push(`${el.tagName.toLowerCase()}${el.className && typeof el.className === "string" ? "." + el.className.trim().replace(/\s+/g, ".") : ""} (${Math.round(r.right - w)}px)`);
-        }
-      }
-      return out.slice(0, 4).join(", ");
-    });
-    problems.push(`${p} (phone): the page scrolls sideways by ${over}px: ${culprits}`);
+        return out.slice(0, 4).join(", ");
+      });
+      problems.push(`${p} (phone, ${theme}): the page scrolls sideways by ${over}px: ${culprits}`);
+    }
+    await pt.screenshot({ path: `${out}/phone${p.replace("/p/default", "").replace(/\//g, "-") || "-board"}-${theme}.png`, fullPage: true });
   }
-  await pt.screenshot({ path: `${out}/phone${p.replace("/p/default", "").replace(/\//g, "-") || "-board"}.png`, fullPage: true });
 }
 await phone.close();
 
