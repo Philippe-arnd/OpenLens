@@ -6,6 +6,7 @@
 set -euo pipefail
 tag="$1"            # vX.Y.Z, or vX.Y.Z-YYMMDD-sha for a snapshot
 prev="${2:-}"       # previous release tag, if any
+ref="${3:-$tag}"    # the commit, when the tag does not exist yet
 repo="https://github.com/Philippe-arnd/OpenLens"
 version="${tag#v}"
 if [ -f "docs/releases/$tag.md" ]; then
@@ -25,7 +26,7 @@ cat <<EOF
 - **Image:** \`ghcr.io/philippe-arnd/openlens:$tag\`
 - **Binaries:** attached below (Linux x86_64 and aarch64), with \`SHA256SUMS\`. Check them with \`sha256sum -c SHA256SUMS\`.
 EOF
-if git cat-file -e "$tag:deploy/helm/openlens/Chart.yaml" 2>/dev/null; then
+if git cat-file -e "$ref:deploy/helm/openlens/Chart.yaml" 2>/dev/null; then
   printf -- '- **Helm:** `helm install openlens oci://ghcr.io/philippe-arnd/charts/openlens --version %s`\n' "$version"
 fi
 if [ -n "$prev" ]; then

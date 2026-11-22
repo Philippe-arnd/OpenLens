@@ -175,7 +175,7 @@ The full list, with what is planned, is in [docs/gaps.md](docs/gaps.md) and the 
 
 ## 📦 Releases
 
-OpenLens follows [SemVer](https://semver.org) and keeps a [CHANGELOG](CHANGELOG.md). Each [GitHub release](https://github.com/Philippe-arnd/OpenLens/releases) ships:
+OpenLens follows [SemVer](https://semver.org) and keeps a [CHANGELOG](CHANGELOG.md). Every merge to `main` publishes a build release, **`vX.Y.Z-YYMMDD-sha`** (for example `v0.2.0-261122-a1b2c3d`), and versions are tagged `vX.Y.Z`. Each [GitHub release](https://github.com/Philippe-arnd/OpenLens/releases) ships:
 - its notes;
 - Linux binaries for x86_64 and aarch64 (`openlens`, `openlens-cli`);
 - the SDK bundles;

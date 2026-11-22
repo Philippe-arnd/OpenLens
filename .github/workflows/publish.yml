@@ -1,15 +1,20 @@
 name: Release
 
-# Builds the release assets and the GitHub release for a tag:
+# Builds the release assets and the GitHub release:
+# - on every push to main (code changes): a build release vX.Y.Z-YYMMDD-sha,
+#   where X.Y.Z is the version being developed (Cargo.toml), YYMMDD the UTC
+#   date and sha the commit. SemVer-valid (a pre-release of X.Y.Z), marked
+#   pre-release until X.Y.Z itself is tagged. A newer push cancels an older
+#   build. The image and chart workflows are started for that tag too;
 # - on v* tags (pushed by a maintainer, see docs/development.md#releasing);
 # - on demand with `tag`: rebuild and re-attach the assets of an existing tag;
-# - on demand with `snapshot`: tag the current main as vX.Y.Z-YYMMDD-sha
-#   (a pre-release), then do the same. The image and the chart workflows are
-#   started for that tag too.
+# - on demand with `snapshot`: the same as a push to main, now.
 # Assets: Linux x86_64 and aarch64 binaries, the SDK bundles, the Helm chart, SHA256SUMS.
 on:
   push:
     tags: ["v*"]
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**", "examples/**", ".github/ISSUE_TEMPLATE/**"]
   workflow_dispatch:
     inputs:
       tag:
@@ -26,13 +31,15 @@ permissions:
 
 concurrency:
   group: publish-${{ github.ref }}-${{ inputs.tag }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
 
 jobs:
   prepare:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.t.outputs.tag }}
+      ref: ${{ steps.t.outputs.ref }}
+      new: ${{ steps.t.outputs.new }}
       prev: ${{ steps.t.outputs.prev }}
       pre: ${{ steps.t.outputs.pre }}
     steps:
@@ -43,22 +50,25 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "${{ inputs.snapshot }}" = "true" ]; then
+          new=false; ref=""
+          if [ "${{ inputs.snapshot }}" = "true" ] || [ "$GITHUB_REF" = refs/heads/main ]; then
+            # A build release: the tag is created with the release, at the end.
             v=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
             tag="v$v-$(date -u +%y%m%d)-$(git rev-parse --short=7 HEAD)"
-            git tag "$tag" && git push origin "$tag"
-            # Pushes made with this token start no workflow: start them.
-            gh workflow run release.yml --ref "$tag"
-            gh workflow run k8s.yml --ref "$tag"
+            ref=$(git rev-parse HEAD); new=true
           elif [ -n "${{ inputs.tag }}" ]; then
             tag="${{ inputs.tag }}"
           else
             tag="$GITHUB_REF_NAME"
           fi
-          git rev-parse -q --verify "refs/tags/$tag" > /dev/null || { echo "no tag $tag"; exit 1; }
+          if [ "$new" = false ]; then
+            git rev-parse -q --verify "refs/tags/$tag" > /dev/null || { echo "no tag $tag"; exit 1; }
+            ref="$tag"
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"; echo "new=$new" >> "$GITHUB_OUTPUT"
           case "$tag" in *-*) pre=true ;; *) pre=false ;; esac
           if [ "$pre" = true ]; then
-            prev=$(git tag --list 'v*' --sort=-v:refname | grep -vx "$tag" | head -1)
+            prev=$(git tag --list 'v*' --sort=-creatordate | grep -vx "$tag" | head -1)
           else
             prev=$(git tag --list 'v*' --sort=-v:refname | grep -v -- - | grep -vx "$tag" | head -1)
           fi
@@ -79,7 +89,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
       - uses: Swatinem/rust-cache@v2
         with:
           key: release-${{ matrix.arch }}
@@ -104,7 +114,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
       - uses: actions/download-artifact@v5
         with:
           pattern: binaries-*
@@ -148,12 +158,19 @@ jobs:
           name: release-assets
           path: dist
       - name: notes
-        run: scripts/release/notes.sh "$TAG" "$PREV" > notes.md && cat notes.md
+        run: scripts/release/notes.sh "$TAG" "$PREV" "${{ needs.prepare.outputs.ref }}" > notes.md && cat notes.md
       - name: create or update the release
         run: |
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" dist/* --clobber
             gh release edit "$TAG" --notes-file notes.md
+          elif [ "${{ needs.prepare.outputs.new }}" = true ]; then
+            # Creates the tag on that commit, then starts the image and chart
+            # workflows for it (a tag made with this token starts none).
+            gh release create "$TAG" dist/* --title "OpenLens $TAG" --notes-file notes.md \
+              --target "${{ needs.prepare.outputs.ref }}" --prerelease
+            gh workflow run release.yml --ref "$TAG"
+            gh workflow run k8s.yml --ref "$TAG"
           else
             pre=""; [ "${{ needs.prepare.outputs.pre }}" = true ] && pre="--prerelease"
             gh release create "$TAG" dist/* --title "OpenLens $TAG" --notes-file notes.md --verify-tag $pre
