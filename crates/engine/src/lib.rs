@@ -12,7 +12,9 @@ use openlens_query::{QueryEngine, QueryError};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
+mod errors;
 mod insights;
+pub use errors::{ErrorGroup, error_groups};
 pub use insights::{CohortStats, FlagCohort, Funnel, FunnelStep, Insight, Journey, Readiness};
 
 /// Engine errors.
@@ -238,7 +240,7 @@ fn rating(name: &str, v: f64) -> &'static str {
 /// projection where `role` is the canonical role and `feature` includes
 /// route-matched features. Every query reads from this, so the map applies
 /// everywhere without rewriting stored data.
-fn source(map: Option<&FeatureMap>) -> String {
+pub fn source(map: Option<&FeatureMap>) -> String {
     match map {
         None => "events".into(),
         Some(m) => format!(

@@ -625,3 +625,33 @@ async fn theme_cookie_sets_the_page_theme_and_redirects_back_safely() {
         "only known themes are applied"
     );
 }
+
+#[tokio::test]
+async fn errors_page_and_api_show_groups() {
+    let h = harness();
+    let body = serde_json::json!({"key": h.key, "batch": [
+        {"event": "$error", "distinct_id": "u1", "session_id": "s1", "properties": {"$message": "boom 42", "$source": "https://x.test/a.js:1:2", "$role": "owner"}},
+        {"event": "$error", "distinct_id": "u2", "session_id": "s2", "properties": {"$message": "boom 7", "$source": "https://x.test/a.js:9:9"}}
+    ]}).to_string().into_bytes();
+    post(&h, "/capture", body, false).await;
+    openlens_server::flush_now(&h.state).unwrap();
+    let resp = get(&h, "/api/projects/default/errors", None, true).await;
+    let v: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(v["groups"].as_array().unwrap().len(), 1);
+    assert_eq!(v["groups"][0]["users"], 2);
+    let cookie = login_cookie(&h).await;
+    let page = get(&h, "/p/default/errors", Some(&cookie), false).await;
+    assert_eq!(page.status(), StatusCode::OK);
+    let html = String::from_utf8_lossy(
+        &axum::body::to_bytes(page.into_body(), 1 << 20)
+            .await
+            .unwrap(),
+    )
+    .to_string();
+    assert!(html.contains("boom"));
+}

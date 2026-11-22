@@ -113,6 +113,11 @@ impl Tools for OpenLensTools {
                 input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"}}))}),
             },
             ToolSpec {
+                name: "errors",
+                description: "Top error groups (normalised message + source), with users, sessions, roles, releases and places hit. Last 30 days.",
+                input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"}}))}),
+            },
+            ToolSpec {
                 name: "sql",
                 description: "Read-only SQL (DataFusion) on table `events`: uuid, event, distinct_id, session_id, timestamp, url, path, feature, role, account, plan, environment, release, properties (JSON text), date. Prune with `date >= 'YYYY-MM-DD'`. Max 10k rows.",
                 input_schema: json!({"type":"object","properties":with(json!({"query":{"type":"string"}})),"required":["query"]}),
@@ -206,6 +211,14 @@ impl Tools for OpenLensTools {
                     }
                     _ => v,
                 })
+            }
+            "errors" => {
+                let (st, v) = c.call(
+                    "GET",
+                    &format!("/api/projects/{}/errors", project(args)),
+                    None,
+                )?;
+                ok_or(st, v)
             }
             "sql" => {
                 let query = s(args, "query").ok_or("query is required")?;

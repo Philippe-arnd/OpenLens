@@ -436,3 +436,54 @@ async fn funnels_follow_declared_steps_in_order_and_flag_the_big_drop() {
         card.title
     );
 }
+
+#[tokio::test]
+async fn errors_group_by_normalised_message_and_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let mut evs = Vec::new();
+    for u in 0..9 {
+        let user = format!("e{u}");
+        let (msg, source) = if u < 6 {
+            (
+                format!("Cannot read properties of undefined (reading 'id{u}') at row {u}"),
+                format!("https://app.test/assets/app.js?v={u}:10:{u}"),
+            )
+        } else {
+            (
+                "Network down".to_owned(),
+                "https://app.test/assets/net.js:3:1".to_owned(),
+            )
+        };
+        let props = serde_json::json!({"$message": msg, "$source": source}).to_string();
+        let e = E {
+            user: &user,
+            role: if u % 2 == 0 { "admin" } else { "member" },
+            session: &user,
+            event: "$error",
+            mins_ago: 10,
+            feature: None,
+            release: "v2",
+            props: &props,
+        };
+        evs.push(mk(&e, u));
+    }
+    w.append(&evs).unwrap();
+    w.flush().unwrap();
+    let q = QueryEngine::new(dir.path(), Limits::default());
+    let groups =
+        openlens_engine::error_groups(&q, "p", &openlens_engine::source(None), &Filters::default())
+            .await
+            .unwrap();
+    assert_eq!(groups.len(), 2, "{groups:#?}");
+    assert_eq!(groups[0].users, 6, "six variants of one bug are one group");
+    assert!(
+        groups[0]
+            .fingerprint
+            .ends_with("@ https://app.test/assets/app.js"),
+        "{}",
+        groups[0].fingerprint
+    );
+    assert!(groups[0].roles.iter().any(|(r, n)| r == "admin" && *n == 3));
+    assert_eq!(groups[0].releases[0].0, "v2");
+}
