@@ -2309,6 +2309,12 @@ dependencies = [
 [[package]]
 name = "openlens-errors"
 version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+]
 
 [[package]]
 name = "openlens-event"
@@ -2403,6 +2409,7 @@ dependencies = [
  "hmac",
  "maud",
  "openlens-engine",
+ "openlens-errors",
  "openlens-event",
  "openlens-featuremap",
  "openlens-flags",
@@ -2453,6 +2460,7 @@ dependencies = [
  "chrono",
  "maud",
  "openlens-engine",
+ "openlens-errors",
  "openlens-flags",
  "openlens-replay",
 ]

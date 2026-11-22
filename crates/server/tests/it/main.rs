@@ -856,3 +856,72 @@ async fn breakdown_splits_by_a_fixed_dimension_only() {
     let noauth = get(&h, "/api/projects/default/breakdown?by=role", None, false).await;
     assert_eq!(noauth.status(), StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn source_maps_resolve_error_stacks_per_release() {
+    let h = harness();
+    let put = |uri: String, body: &'static str, bearer: bool| {
+        let st = h.state.clone();
+        async move {
+            let mut req = Request::put(uri);
+            if bearer {
+                req = req.header("authorization", "Bearer adm_test");
+            }
+            router(st)
+                .oneshot(req.body(Body::from(body)).unwrap())
+                .await
+                .unwrap()
+                .status()
+        }
+    };
+    const MAP: &str = r#"{"version":3,"sources":["src/billing/Invoice.tsx"],"names":["pay"],"mappings":"AAAA,UAEIA"}"#;
+    let base = "/api/projects/default/sourcemaps";
+    assert_eq!(
+        put(format!("{base}/v7/app.3f9a.js"), MAP, false).await,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        put(format!("{base}/v7/app.3f9a.js"), "{}", true).await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        put(format!("{base}/v7/..%2Fx"), MAP, true).await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        put(format!("{base}/v7/app.3f9a.js"), MAP, true).await,
+        StatusCode::OK
+    );
+
+    let stack =
+        "TypeError: x is undefined\\n    at pay (https://app.example.com/assets/app.3f9a.js:1:14)";
+    let batch = format!(
+        r#"{{"key":"{}","batch":[{{"event":"$error","distinct_id":"u1","properties":{{"$message":"x is undefined","$stack":"{stack}","$source":"https://app.example.com/assets/app.3f9a.js:1:14","$release":"v7"}}}}]}}"#,
+        h.key
+    );
+    assert_eq!(
+        post(&h, "/capture", batch.into_bytes(), false).await.0,
+        StatusCode::OK
+    );
+    openlens_server::flush_now(&h.state).unwrap();
+    let resp = get(&h, "/api/projects/default/errors", None, true).await;
+    let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let o = &v["groups"][0]["original"];
+    assert_eq!(o["source"], "src/billing/Invoice.tsx", "{v}");
+    assert_eq!(o["line"], 3);
+    assert_eq!(o["name"], "pay");
+    // The dashboard shows the original position too.
+    let cookie = login_cookie(&h).await;
+    let page = get(&h, "/p/default/errors", Some(&cookie), false).await;
+    let html = String::from_utf8(
+        axum::body::to_bytes(page.into_body(), 1 << 20)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(html.contains("src/billing/Invoice.tsx:3"));
+}

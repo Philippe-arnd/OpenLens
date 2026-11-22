@@ -342,7 +342,13 @@ async fn errors_page(
         openlens_engine::error_groups(&state.query, &p.id, &src, &f)
     );
     match (b, groups) {
-        (Ok(b), Ok(g)) => html(StatusCode::OK, openlens_ui::errors(&info, &b, &g, &f)),
+        (Ok(b), Ok(g)) => {
+            let original = crate::resolve_frames(&state, &p.id, &g).await;
+            html(
+                StatusCode::OK,
+                openlens_ui::errors(&info, &b, &g, &original, &f),
+            )
+        }
         (Err(e), _) | (_, Err(e)) => html(
             StatusCode::BAD_REQUEST,
             openlens_ui::message("Can't show that", &e.to_string()),

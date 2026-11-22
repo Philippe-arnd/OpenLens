@@ -685,6 +685,7 @@ pub fn errors(
     p: &ProjectInfo<'_>,
     b: &Board,
     groups: &[openlens_engine::ErrorGroup],
+    original: &[Option<openlens_errors::Original>],
     f: &Filters,
 ) -> Markup {
     let list = |v: &[(String, i64)]| {
@@ -707,11 +708,18 @@ pub fn errors(
                 section.card.wide {
                     table.plain {
                         thead { tr { th { "Error" } th.num { "Users" } th.num { "Sessions" } th.num { "Times" } th { "Roles" } th { "Releases" } th { "Where" } th { "Last seen" } th { span.sr-only { "Replay" } } } }
-                        tbody { @for g in groups {
+                        tbody { @for (i, g) in groups.iter().enumerate() {
                             tr {
                                 th scope="row" {
                                     span.mono { (g.sample.get(..160).unwrap_or(&g.sample)) }
-                                    br; span.muted.small.mono { (g.fingerprint.rsplit(" @ ").next().unwrap_or("")) }
+                                    br;
+                                    @if let Some(Some(o)) = original.get(i) {
+                                        span.small.mono title="Resolved with the release's source map" {
+                                            (icon("route")) " " (o.source) ":" (o.line) @if let Some(n) = &o.name { " · " (n) }
+                                        }
+                                    } @else {
+                                        span.muted.small.mono { (g.fingerprint.rsplit(" @ ").next().unwrap_or("")) }
+                                    }
                                 }
                                 td.num { strong { (compact(g.users)) } }
                                 td.num { (compact(g.sessions)) }

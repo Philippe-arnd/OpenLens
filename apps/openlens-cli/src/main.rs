@@ -80,6 +80,19 @@ enum Command {
         #[command(subcommand)]
         action: FlagsCmd,
     },
+    /// Upload the source maps of a build, so error stacks show original
+    /// files and lines. Run it in the deploy step, with the same release
+    /// the SDK sends.
+    Sourcemaps {
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+        /// Release of this build (as in `init({ release })` / data-release).
+        #[arg(long)]
+        release: String,
+        /// Build output directory; every `*.map` file under it is uploaded.
+        dir: PathBuf,
+    },
     /// Print the rule to add to the app's AGENTS.md / CLAUDE.md so its agents
     /// keep the feature map current.
     Rules,
@@ -315,6 +328,59 @@ fn run(cli: Cli) -> Result<bool, String> {
             Ok(status == 200)
         }
         Command::Verify { project } => verify(&client()?, project),
+        Command::Sourcemaps {
+            project,
+            release,
+            dir,
+        } => {
+            let c = client()?;
+            let mut maps = Vec::new();
+            let mut stack = vec![dir.clone()];
+            while let Some(d) = stack.pop() {
+                let entries = std::fs::read_dir(&d)
+                    .map_err(|e| format!("cannot read {}: {e}", d.display()))?;
+                for e in entries.flatten() {
+                    let p = e.path();
+                    if p.is_dir() {
+                        stack.push(p);
+                    } else if p.extension().is_some_and(|x| x == "map") {
+                        maps.push(p);
+                    }
+                }
+            }
+            let rel: String = release
+                .chars()
+                .map(|ch| {
+                    if ch.is_ascii_alphanumeric() || "-_.@+".contains(ch) {
+                        ch
+                    } else {
+                        '_'
+                    }
+                })
+                .collect();
+            let (mut ok, mut failed) = (Vec::new(), Vec::new());
+            for p in &maps {
+                let Some(bundle) = p.file_stem().and_then(|s| s.to_str()) else {
+                    continue;
+                };
+                let text = std::fs::read_to_string(p)
+                    .map_err(|e| format!("cannot read {}: {e}", p.display()))?;
+                let (status, v) = c.call(
+                    "PUT",
+                    &format!("/api/projects/{project}/sourcemaps/{rel}/{bundle}"),
+                    Some(Body::Text(text)),
+                )?;
+                if status == 200 {
+                    ok.push(bundle.to_owned());
+                } else {
+                    failed.push(
+                        serde_json::json!({ "file": p.display().to_string(), "error": v["error"] }),
+                    );
+                }
+            }
+            out(&serde_json::json!({ "release": rel, "uploaded": ok, "failed": failed }));
+            Ok(failed.is_empty() && !maps.is_empty())
+        }
         Command::Import { project, file } => {
             let text = std::fs::read_to_string(file)
                 .map_err(|e| format!("cannot read {}: {e}", file.display()))?;
