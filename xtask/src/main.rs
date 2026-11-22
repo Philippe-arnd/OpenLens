@@ -5,7 +5,9 @@
 //! - `cargo xtask demo <data-dir>`: write a realistic synthetic app (300
 //!   users, planted patterns) into the `default` project of a data dir, to
 //!   look at the board: `OPENLENS_DATA_DIR=<data-dir> cargo run -p openlens`.
+//! - `cargo xtask bench <url> <key>`: ingestion load test (docs/benchmarks.md).
 
+mod bench;
 mod layers;
 
 use std::process::{Command, ExitCode};
@@ -16,7 +18,8 @@ fn main() -> ExitCode {
         "ci" => ci(),
         "layers" => check_layers(),
         "demo" => demo(std::env::args().nth(2)),
-        _ => Err("usage: cargo xtask <ci|layers|demo DIR>".to_owned()),
+        "bench" => bench::bench(&std::env::args().skip(2).collect::<Vec<_>>()),
+        _ => Err("usage: cargo xtask <ci|layers|demo DIR|bench URL KEY>".to_owned()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
