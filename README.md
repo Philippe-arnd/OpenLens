@@ -118,6 +118,7 @@ OPENLENS_DATA_DIR=./data OPENLENS_ADMIN_TOKEN=demo cargo run -p openlens
 | `apps/openlens-cli` | Agent toolkit: `init`, `features`, `import`, `verify`, `sourcemaps`, `flags`, `export`, `sql`, `login-link`, `mcp` |
 | `crates/*` | Layered engine crates ([architecture](docs/architecture.md), checked by `cargo xtask layers`) |
 | `sdk/js` | Browser SDK `@openlens/web`, the replay recorder and the player |
+| `sdk/node`, `sdk/python` | Server SDKs: thin HTTP clients ([sdk/SERVER.md](sdk/SERVER.md)) |
 | `examples/` | Reference apps: script tag and SPA |
 | `docs/` | Method, KPIs, decisions, architecture, agent guides, deploy, benchmarks, clean-room log |
 

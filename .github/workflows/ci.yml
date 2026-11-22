@@ -75,6 +75,10 @@ jobs:
           npm run build
           npm run check
           git diff --exit-code -- dist || (echo "::error::sdk/js/dist is stale: run npm run build and commit"; exit 1)
+      - name: server SDKs (Node, Python)
+        run: |
+          (cd sdk/node && npm test)
+          (cd sdk/python && python3 -m unittest discover -s tests)
 
   browser:
     name: browser e2e (one script tag, real server)
