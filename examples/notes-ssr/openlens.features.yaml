@@ -1,0 +1,20 @@
+# Feature map of the Notes example (kept by the app's agents; wire.md step 4).
+version: 1
+roles:
+  - key: admin
+    match: ["owner"]
+  - key: member
+    match: ["member"]
+features:
+  - key: write-note
+    name: Write a note
+    entry:
+      routes: ["/notes/new"]
+      selectors: ['[data-feature="write-note"]']
+    success: note_saved
+  - key: search
+    name: Search notes
+    entry:
+      routes: ["/search"]
+      selectors: ['[data-feature="search"]']
+    success: search_done

@@ -15,9 +15,9 @@ const SKIP: &[&str] = &[
     "coverage",
 ];
 const EXT: &[&str] = &[
-    "html", "htm", "js", "jsx", "ts", "tsx", "vue", "svelte", "astro", "erb", "haml", "slim", "py",
-    "rb", "php", "ex", "exs", "heex", "eex", "jinja", "j2", "twig", "blade", "hbs", "mustache",
-    "rs", "go", "cs", "cshtml",
+    "html", "htm", "js", "mjs", "cjs", "jsx", "ts", "mts", "cts", "tsx", "vue", "svelte", "astro",
+    "erb", "haml", "slim", "py", "rb", "php", "ex", "exs", "heex", "eex", "jinja", "j2", "twig",
+    "blade", "hbs", "mustache", "rs", "go", "cs", "cshtml",
 ];
 const MAX_FILES: usize = 20_000;
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
@@ -108,7 +108,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("app.tsx"),
-            r#"<button data-feature="export">x</button> openlens.track("exported")"#,
+            r#"<button data-feature="export">x</button>"#,
+        )
+        .unwrap();
+        // ES module servers (.mjs) are app code too.
+        std::fs::write(
+            dir.path().join("server.mjs"),
+            r#"openlens.track("exported")"#,
         )
         .unwrap();
         std::fs::create_dir(dir.path().join("node_modules")).unwrap();
