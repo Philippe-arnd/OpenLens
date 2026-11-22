@@ -44,7 +44,7 @@ A crate depends only on crates in strictly lower layers. `cargo xtask layers` en
 - Replay chunks are stored separately, one zstd file per chunk: `<root>/replay/project=<p>/<session>/<seq>.zst`, plus `info.json` (owner, start). Sessions are capped at 32 MB compressed.
 - Source maps are stored per release, `<root>/sourcemaps/project=<p>/release=<r>/<bundle>.map`, uploaded by `openlens-cli sourcemaps`, and used to show each error group's original frame.
 - Retention is fixed (D-015): event days older than 400 days and recordings idle for 30 days are deleted by the background job.
-- One local data directory (one volume to back up with `openlens backup`). An S3 backend is in Later (D-015).
+- One local data directory (one volume to back up with `openlens backup`), the source of truth. Optionally, closed days and a daily metadata snapshot are copied to S3-compatible storage (D-016).
 
 ## Why not ClickHouse / Kafka / Postgres
 

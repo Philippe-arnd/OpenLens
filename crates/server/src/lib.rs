@@ -11,6 +11,7 @@ mod flags;
 mod oidc;
 mod replay;
 mod reword;
+mod s3;
 mod surveys;
 mod web;
 
@@ -150,6 +151,10 @@ async fn healthz() -> &'static str {
 pub async fn background(state: AppState) {
     let mut tick = tokio::time::interval(Duration::from_secs(2));
     let mut last_digest_check = std::time::Instant::now();
+    // First S3 copy a few minutes after start, then hourly.
+    let mut last_s3_sync = std::time::Instant::now()
+        .checked_sub(Duration::from_secs(3300))
+        .unwrap_or_else(std::time::Instant::now);
     // Run the first compaction and retention pass right away.
     let mut last_compact = std::time::Instant::now()
         .checked_sub(Duration::from_secs(600))
@@ -159,6 +164,19 @@ pub async fn background(state: AppState) {
         let st = state.clone();
         let res =
             tokio::task::spawn_blocking(move || flush_and_compact(&st, &mut last_compact)).await;
+        if let Some(cfg) = s3::config()
+            && last_s3_sync.elapsed() >= Duration::from_secs(3600)
+        {
+            last_s3_sync = std::time::Instant::now();
+            let (root, meta) = (state.data_dir.clone(), state.meta.clone());
+            let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+            match tokio::task::spawn_blocking(move || s3::sync(&cfg, &root, &meta, &today)).await {
+                Ok(Ok(0)) => {}
+                Ok(Ok(n)) => tracing::info!(objects = n, "copied to S3"),
+                Ok(Err(err)) => tracing::warn!(%err, "S3 copy failed; will retry next hour"),
+                Err(err) => tracing::warn!(%err, "S3 copy task crashed"),
+            }
+        }
         if last_digest_check.elapsed() >= Duration::from_secs(600) {
             last_digest_check = std::time::Instant::now();
             digest::maybe_send(&state).await;
