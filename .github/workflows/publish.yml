@@ -91,11 +91,13 @@ jobs:
           d="openlens-sdk-web-$TAG"
           mkdir -p "dist/$d"
           cp sdk/js/dist/*.js sdk/js/dist/*.css sdk/js/dist/*.d.ts sdk/js/README.md "dist/$d/"
-          cp sdk/js/licenses/rrweb-LICENSE.txt "dist/$d/"
+          if [ -f sdk/js/licenses/rrweb-LICENSE.txt ]; then cp sdk/js/licenses/rrweb-LICENSE.txt "dist/$d/"; fi
           tar -C dist -czf "dist/$d.tar.gz" "$d"
           rm -rf "dist/$d"
       - uses: azure/setup-helm@v4
       - name: Helm chart
+        # Releases before the chart existed (v0.1.x) ship without it.
+        if: hashFiles('deploy/helm/openlens/Chart.yaml') != ''
         run: helm package deploy/helm/openlens --version "${TAG#v}" --app-version "$TAG" --destination dist
       - name: checksums
         run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
@@ -112,9 +114,11 @@ jobs:
       PREV: ${{ needs.prepare.outputs.prev }}
       GH_TOKEN: ${{ github.token }}
     steps:
+      # The workflow's own ref: the tag when a tag starts it, main when run
+      # by hand, so older tags get the current notes script and CHANGELOG.
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          fetch-depth: 0
       - uses: actions/download-artifact@v5
         with:
           name: release-assets
