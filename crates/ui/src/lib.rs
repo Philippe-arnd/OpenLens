@@ -95,34 +95,55 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
             }
             body {
                 (icons::sprite())
-                header.top {
-                    a.brand href="/" aria-label="OpenLens home" {
-                        span.blob aria-hidden="true" {}
-                        span { "OpenLens" }
-                    }
-                    @if let Some(p) = project {
-                        nav aria-label="Project" {
-                            a href={ "/p/" (p.id) } { (icon("board")) "Focus board" }
-                            a href={ "/p/" (p.id) "/events" } { (icon("events")) "Events" }
-                            a href={ "/p/" (p.id) "/pages" } { (icon("layers")) "Pages" }
-                            a href={ "/p/" (p.id) "/errors" } { (icon("alert")) "Errors" }
-                            a href={ "/p/" (p.id) "/replays" } { (icon("play")) "Replays" }
-                            a href={ "/p/" (p.id) "/flags" } { (icon("flag")) "Flags" }
-                            a href={ "/p/" (p.id) "/surveys" } { (icon("idea")) "Surveys" }
+                div.shell {
+                    aside.side aria-label="OpenLens" {
+                        a.brand href="/" title="OpenLens home" aria-label="OpenLens home" {
+                            span.blob aria-hidden="true" {}
+                            span.label { "OpenLens" }
                         }
-                        a.project href="/projects" title="Switch project" { (p.name) " " (icon("down")) }
+                        @if let Some(p) = project {
+                            a.switch href="/projects" title={ "Project: " (p.name) " (switch)" } {
+                                span.initial aria-hidden="true" { (p.name.chars().next().unwrap_or('?').to_uppercase().to_string()) }
+                                span.label { (p.name) }
+                                span.label.chev { (icon("down")) }
+                            }
+                            nav.side-nav aria-label="Project" {
+                                @for (href, glyph, label) in [
+                                    ("", "board", "Focus board"),
+                                    ("/events", "events", "Events"),
+                                    ("/pages", "layers", "Pages"),
+                                    ("/errors", "alert", "Errors"),
+                                    ("/replays", "play", "Replays"),
+                                    ("/flags", "flag", "Flags"),
+                                    ("/surveys", "idea", "Surveys"),
+                                    ("/digest", "mail", "Digest"),
+                                ] {
+                                    a href={ "/p/" (p.id) (href) } title=(label) aria-current=[(title == label || (href.is_empty() && title == p.name)).then_some("page")] {
+                                        (icon(glyph)) span.label { (label) }
+                                    }
+                                }
+                            }
+                        }
+                        div.side-bottom {
+                            nav.theme aria-label="Theme" {
+                                a.auto href="/theme/auto" title="Follow the system" aria-label="Theme: follow the system" { (icon("auto")) }
+                                a.light href="/theme/light" title="Light" aria-label="Theme: light" { (icon("sun")) }
+                                a.dark href="/theme/dark" title="Dark" aria-label="Theme: dark" { (icon("moon")) }
+                            }
+                            @if project.is_some() {
+                                form method="post" action="/logout" {
+                                    button.side-link type="submit" title="Log out" { (icon("logout")) span.label { "Log out" } }
+                                }
+                            }
+                            a.side-link.collapse href="/nav/collapsed" title="Collapse the menu" { (icon("left")) span.label { "Collapse" } }
+                            a.side-link.expand href="/nav/expanded" title="Expand the menu" aria-label="Expand the menu" { (icon("right")) }
+                        }
                     }
-                    nav.theme.solo[project.is_none()] aria-label="Theme" {
-                        a.auto href="/theme/auto" title="Follow the system" aria-label="Theme: follow the system" { (icon("auto")) }
-                        a.light href="/theme/light" title="Light" aria-label="Theme: light" { (icon("sun")) }
-                        a.dark href="/theme/dark" title="Dark" aria-label="Theme: dark" { (icon("moon")) }
-                    }
-                    @if project.is_some() {
-                        form method="post" action="/logout" { button.ghost type="submit" { (icon("logout")) "Log out" } }
+                    div.content {
+                        main { (body) }
+                        footer { "OpenLens · map → measure → focus → act → compare" }
                     }
                 }
-                main { (body) }
-                footer { "OpenLens · map → measure → focus → act → compare" }
             }
         }
     }
