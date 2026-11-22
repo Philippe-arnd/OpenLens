@@ -15,6 +15,7 @@ pub(crate) fn routes() -> Router<AppState> {
     Router::new()
         .route("/", get(home))
         .route("/login", get(login_page).post(login))
+        .route("/projects", get(projects_page))
         .route("/logout", post(logout))
         .route("/l/{token}", get(login_link))
         .route("/p/{project}", get(board))
@@ -89,6 +90,7 @@ async fn home(State(state): State<AppState>, headers: HeaderMap) -> Response {
     }
     let meta = state.meta.clone();
     match tokio::task::spawn_blocking(move || meta.projects()).await {
+        Ok(Ok(ps)) if ps.len() > 1 => Redirect::to("/projects").into_response(),
         Ok(Ok(ps)) => match ps.first() {
             Some(p) => Redirect::to(&format!("/p/{}", p.id)).into_response(),
             None => html(
@@ -617,4 +619,46 @@ async fn watch_churned(
             ),
         ),
     }
+}
+
+async fn projects_page(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if !auth::has_session(&state, &headers) {
+        return to_login();
+    }
+    let meta = state.meta.clone();
+    let Ok(Ok(ps)) = tokio::task::spawn_blocking(move || meta.projects()).await else {
+        return html(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            openlens_ui::message("Oops", "The metadata store is unavailable."),
+        );
+    };
+    let since = (chrono::Utc::now() - chrono::Duration::days(7)).format("%Y-%m-%d");
+    let sql = format!(
+        "SELECT count(*) AS n, CAST(max(timestamp) AS VARCHAR) AS last FROM events WHERE date >= '{since}'"
+    );
+    let mut list = Vec::new();
+    for p in ps {
+        let row = state
+            .query
+            .sql(&p.id, &sql)
+            .await
+            .ok()
+            .and_then(|r| r.rows.into_iter().next());
+        list.push(openlens_ui::ProjectSummary {
+            recent_events: row
+                .as_ref()
+                .and_then(|r| r.get("n"))
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0),
+            last_event: row
+                .as_ref()
+                .and_then(|r| r.get("last"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+            id: p.id,
+            name: p.name,
+        });
+    }
+    list.sort_by_key(|p| std::cmp::Reverse(p.recent_events));
+    html(StatusCode::OK, openlens_ui::projects(&list))
 }

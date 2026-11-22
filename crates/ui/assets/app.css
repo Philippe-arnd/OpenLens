@@ -212,3 +212,11 @@ table.matrix td.heat-5 { background: color-mix(in srgb, var(--violet) 52%, trans
 
 /* Icon sprite: definitions only, never drawn (no inline styles under the CSP). */
 svg.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+/* Project switcher */
+a.project { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 13px; padding: 4px 8px; border-radius: 999px; }
+a.project:hover { color: var(--ink); background: var(--line-2); text-decoration: none; }
+a.project .icon { width: 14px; height: 14px; }
+ul.project-list { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+ul.project-list a.card { display: block; color: var(--ink); }
+ul.project-list a.card:hover { text-decoration: none; border-color: var(--violet); }
