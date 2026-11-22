@@ -1,4 +1,6 @@
-<h1 align="center"><img alt="OpenLens" src="docs/img/wordmark.svg" width="380"></h1>
+<p align="center"><img alt="" src="docs/img/logo.svg" width="112"></p>
+
+<h1 align="center">OpenLens</h1>
 
 <p align="center"><b>Product analytics as a method, not a toolbox.<br>Your agents wire it in. Your PM opens a board that already says where the value is.</b></p>
 
