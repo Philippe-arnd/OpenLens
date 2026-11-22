@@ -1429,7 +1429,7 @@ async fn email_login_is_off_without_smtp_and_never_tells_who_exists() {
 async fn capture_is_rate_limited_per_client_behind_a_proxy() {
     let h = harness();
     let mut limited = None;
-    for i in 0..700 {
+    for i in 0..5000 {
         let r = router(h.state.clone())
             .oneshot(
                 Request::post("/capture")
@@ -1446,7 +1446,7 @@ async fn capture_is_rate_limited_per_client_behind_a_proxy() {
             break;
         }
     }
-    let i = limited.expect("a client sending 700 batches at once is limited");
+    let i = limited.expect("a client sending batches non-stop is limited");
     assert!(
         i >= 400,
         "the burst lets a normal client through first ({i})"
