@@ -7,6 +7,7 @@ mod api;
 mod auth;
 mod capture;
 mod flags;
+mod replay;
 mod web;
 
 use std::path::PathBuf;
@@ -46,6 +47,7 @@ pub fn router(state: AppState) -> Router {
         .route("/capture", post(capture::capture))
         .route("/e", post(capture::capture))
         .route("/flags", get(flags::public))
+        .route("/r", post(replay::ingest))
         .layer(DefaultBodyLimit::max(MAX_BODY))
         .layer(CorsLayer::permissive());
     Router::new()
@@ -55,6 +57,7 @@ pub fn router(state: AppState) -> Router {
         .merge(capture)
         .merge(api::routes())
         .merge(flags::routes())
+        .merge(replay::routes())
         .merge(web::routes())
         .layer(axum::middleware::from_fn(web::theme_layer))
         .with_state(state)

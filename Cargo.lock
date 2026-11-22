@@ -2382,6 +2382,14 @@ dependencies = [
 [[package]]
 name = "openlens-replay"
 version = "0.0.1"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "zstd",
+]
 
 [[package]]
 name = "openlens-server"
@@ -2399,6 +2407,7 @@ dependencies = [
  "openlens-flags",
  "openlens-meta",
  "openlens-query",
+ "openlens-replay",
  "openlens-storage",
  "openlens-testkit",
  "openlens-ui",

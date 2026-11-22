@@ -655,3 +655,67 @@ async fn errors_page_and_api_show_groups() {
     .to_string();
     assert!(html.contains("boom"));
 }
+
+#[tokio::test]
+async fn replay_chunks_are_stored_and_read_back_in_order() {
+    let h = harness();
+    let chunk = |seq: u32, events: &str| {
+        format!(
+            r#"{{"key":"{}","session_id":"s-1","distinct_id":"u1","seq":{seq},"events":{events}}}"#,
+            h.key
+        )
+        .into_bytes()
+    };
+    assert_eq!(
+        post(&h, "/r", chunk(1, r#"[{"t":2}]"#), false).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        post(&h, "/r", chunk(0, r#"[{"t":1}]"#), false).await.0,
+        StatusCode::OK
+    );
+    // Hostile input: path traversal, wrong shape, wrong key.
+    let bad = format!(
+        r#"{{"key":"{}","session_id":"../x","distinct_id":"u","seq":0,"events":[]}}"#,
+        h.key
+    );
+    assert_eq!(
+        post(&h, "/r", bad.into_bytes(), false).await.0,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        post(&h, "/r", chunk(2, "{}"), false).await.0,
+        StatusCode::BAD_REQUEST
+    );
+    let nokey = br#"{"key":"nope","session_id":"s","distinct_id":"u","seq":0,"events":[]}"#;
+    assert_eq!(
+        post(&h, "/r", nokey.to_vec(), false).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+
+    let project = h.state.meta.project_by_key(&h.key).unwrap().unwrap().id;
+    let list = format!("/api/projects/{project}/replays");
+    assert_eq!(
+        get(&h, &list, None, false).await.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let resp = get(&h, &list, None, true).await;
+    let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["replays"][0]["session_id"], "s-1");
+    let resp = get(&h, &format!("{list}/s-1"), None, true).await;
+    let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["distinct_id"], "u1");
+    assert_eq!(v["events"], serde_json::json!([{"t":1},{"t":2}]));
+    assert_eq!(
+        get(&h, &format!("{list}/missing"), None, true)
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+}

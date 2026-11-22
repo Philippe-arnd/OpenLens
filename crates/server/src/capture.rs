@@ -19,8 +19,60 @@ use serde_json::json;
 
 use crate::{AppState, MAX_INFLATED};
 
-fn error(status: StatusCode, msg: &str) -> Response {
+pub(crate) fn error(status: StatusCode, msg: &str) -> Response {
     (status, Json(json!({ "error": msg }))).into_response()
+}
+
+/// The request body, gunzipped when needed (by header or magic bytes) and
+/// bounded by [`MAX_INFLATED`].
+pub(crate) fn inflate(headers: &HeaderMap, body: &Bytes) -> Result<Vec<u8>, Box<Response>> {
+    let gzip = headers
+        .get("content-encoding")
+        .is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"gzip"))
+        || body.starts_with(&[0x1f, 0x8b]);
+    if !gzip {
+        return Ok(body.to_vec());
+    }
+    let mut out = Vec::new();
+    let mut dec = flate2::read::GzDecoder::new(&body[..]).take(MAX_INFLATED + 1);
+    if dec.read_to_end(&mut out).is_err() {
+        return Err(Box::new(error(
+            StatusCode::BAD_REQUEST,
+            "invalid gzip body",
+        )));
+    }
+    if out.len() as u64 > MAX_INFLATED {
+        return Err(Box::new(error(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "body too large once decompressed",
+        )));
+    }
+    Ok(out)
+}
+
+/// The project a capture key names, or the error response to send.
+pub(crate) async fn project_for_key(
+    state: &AppState,
+    key: Option<String>,
+) -> Result<openlens_meta::Project, Box<Response>> {
+    let Some(key) = key else {
+        return Err(Box::new(error(
+            StatusCode::UNAUTHORIZED,
+            "missing project key",
+        )));
+    };
+    let meta = state.meta.clone();
+    match tokio::task::spawn_blocking(move || meta.project_by_key(&key)).await {
+        Ok(Ok(Some(p))) => Ok(p),
+        Ok(Ok(None)) => Err(Box::new(error(
+            StatusCode::UNAUTHORIZED,
+            "unknown project key",
+        ))),
+        _ => Err(Box::new(error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "metadata store unavailable",
+        ))),
+    }
 }
 
 pub(crate) async fn capture(
@@ -29,25 +81,9 @@ pub(crate) async fn capture(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let gzip = headers
-        .get("content-encoding")
-        .is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"gzip"))
-        || body.starts_with(&[0x1f, 0x8b]);
-    let raw = if gzip {
-        let mut out = Vec::new();
-        let mut dec = flate2::read::GzDecoder::new(&body[..]).take(MAX_INFLATED + 1);
-        if dec.read_to_end(&mut out).is_err() {
-            return error(StatusCode::BAD_REQUEST, "invalid gzip body");
-        }
-        if out.len() as u64 > MAX_INFLATED {
-            return error(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "body too large once decompressed",
-            );
-        }
-        out
-    } else {
-        body.to_vec()
+    let raw = match inflate(&headers, &body) {
+        Ok(r) => r,
+        Err(resp) => return *resp,
     };
 
     let batch: CaptureBatch = match serde_json::from_slice(&raw) {
@@ -61,19 +97,9 @@ pub(crate) async fn capture(
         .map(str::to_owned)
         .or_else(|| query.get("key").cloned())
         .or_else(|| batch.key.clone());
-    let Some(key) = key else {
-        return error(StatusCode::UNAUTHORIZED, "missing project key");
-    };
-    let meta = state.meta.clone();
-    let project = match tokio::task::spawn_blocking(move || meta.project_by_key(&key)).await {
-        Ok(Ok(Some(p))) => p,
-        Ok(Ok(None)) => return error(StatusCode::UNAUTHORIZED, "unknown project key"),
-        _ => {
-            return error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "metadata store unavailable",
-            );
-        }
+    let project = match project_for_key(&state, key).await {
+        Ok(p) => p,
+        Err(resp) => return *resp,
     };
 
     let normalized = match normalize_batch(&project.id, batch, Utc::now()) {
