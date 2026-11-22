@@ -153,6 +153,16 @@ impl Meta {
         })
     }
 
+    /// Write a consistent copy of the store to `dest` (which must not
+    /// exist), safe while the server is running (`VACUUM INTO`).
+    pub fn backup_to(&self, dest: &Path) -> Result<()> {
+        let dest = dest.to_string_lossy().into_owned();
+        self.with(|c| {
+            c.execute("VACUUM INTO ?1", [dest])?;
+            Ok(())
+        })
+    }
+
     /// In-memory store, for tests.
     pub fn in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;

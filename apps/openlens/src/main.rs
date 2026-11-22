@@ -10,14 +10,38 @@
 //!
 //! `openlens healthcheck` probes `/healthz` on the local port and exits 0 or 1;
 //! the container image has no shell or curl, so the compose healthcheck uses it.
+//!
+//! `openlens backup <dest>` writes a consistent copy of the data dir to
+//! `dest` (empty or new), safe while the server runs. In the container:
+//! `docker exec <c> openlens backup /data/backups/2026-11-22`.
+
+mod backup;
 
 use std::process::ExitCode;
 
 const DEFAULT_ADDR: &str = "0.0.0.0:8686";
 
 fn main() -> ExitCode {
-    if std::env::args().nth(1).as_deref() == Some("healthcheck") {
-        return healthcheck();
+    match std::env::args().nth(1).as_deref() {
+        Some("healthcheck") => return healthcheck(),
+        Some("backup") => {
+            let Some(dest) = std::env::args().nth(2) else {
+                eprintln!("usage: openlens backup <dest-dir>");
+                return ExitCode::FAILURE;
+            };
+            let data = std::env::var("OPENLENS_DATA_DIR").unwrap_or_else(|_| "./data".into());
+            return match backup::run(std::path::Path::new(&data), std::path::Path::new(&dest)) {
+                Ok(n) => {
+                    println!("{{\"ok\":true,\"files\":{n},\"dest\":{dest:?}}}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("backup failed: {e}");
+                    ExitCode::FAILURE
+                }
+            };
+        }
+        _ => {}
     }
     match tokio::runtime::Runtime::new() {
         Ok(rt) => rt.block_on(serve()),
