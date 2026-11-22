@@ -21,7 +21,23 @@ const page = `<!doctype html><html><head><meta name="openlens-release" content="
 <script src="${server}/c.js" data-key="${key}"></script>
 <script>openlens.reset(); openlens.identify("e2e-user", { role: "owner" });</script>
 </body></html>`;
-const site = http.createServer((_, res) => res.end(page)).listen(0);
+// A page that loads OpenLens through the site's own domain (/_l/ → server),
+// as with an ad-blocker proxy: no host attribute, only the key.
+const proxied = `<!doctype html><html><body><button data-feature="export">Export</button>
+<script src="/_l/c.js" data-key="${key}" data-replay="off"></script></body></html>`;
+const site = http
+  .createServer((req, res) => {
+    if (req.url.startsWith("/_l/")) {
+      const up = http.request(new URL(req.url.slice(3), server), { method: req.method, headers: { "content-type": req.headers["content-type"] || "text/plain" } }, (r) => {
+        res.writeHead(r.statusCode, r.headers);
+        r.pipe(res);
+      });
+      req.pipe(up);
+      return;
+    }
+    res.end(req.url === "/proxied" ? proxied : page);
+  })
+  .listen(0);
 const port = site.address().port;
 
 const browser = await chromium.launch();
@@ -69,6 +85,25 @@ if (!chunk || chunk.status() !== 200) {
   process.exit(1);
 }
 console.log("replay chunk stored");
+// Through the proxy: the SDK posts to /_l/capture on the site itself.
+{
+  const b = await chromium.launch();
+  const t = await b.newPage();
+  const via = [];
+  t.on("request", (r) => r.url().includes("/capture") && via.push(r.url()));
+  await t.goto(`http://localhost:${port}/proxied`);
+  await t.click("button[data-feature=export]");
+  const [ok] = await Promise.all([
+    t.waitForResponse((r) => r.url().includes("/_l/capture"), { timeout: 10000 }).catch(() => null),
+    t.evaluate(() => openlens.flush()),
+  ]);
+  await b.close();
+  if (!ok || ok.status() !== 200 || !via.every((u) => u.startsWith(`http://localhost:${port}/_l/capture`))) {
+    console.error("proxied capture failed:", ok ? ok.status() : "no request", via);
+    process.exit(1);
+  }
+  console.log("proxied capture ok");
+}
 site.close();
 
 const events = sent.flatMap((b) => JSON.parse(b).batch.map((e) => e.event));
