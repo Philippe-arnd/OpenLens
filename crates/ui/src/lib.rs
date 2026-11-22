@@ -718,7 +718,8 @@ pub fn errors(
                                             (icon("route")) " " (o.source) ":" (o.line) @if let Some(n) = &o.name { " · " (n) }
                                         }
                                     } @else {
-                                        span.muted.small.mono { (g.fingerprint.rsplit(" @ ").next().unwrap_or("")) }
+                                        @let place = g.fingerprint.rsplit(" @ ").next().unwrap_or("");
+                                        @if place != "?" { span.muted.small.mono { (place) } }
                                     }
                                 }
                                 td.num { strong { (compact(g.users)) } }
