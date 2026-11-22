@@ -191,3 +191,35 @@ Use the script tag in the main layout, with `data-release` from the deploy (an e
 
 Write the values as JSON with the template engine (`|tojson` in Jinja, `json_script` in Django, `to_json` in Rails, `@json` in Blade), never as raw strings. Call `openlens.reset()` the same way on the page shown after logout. For events that happen on the server (a payment confirmed, a job finished), use the Node or Python server SDK, or a plain `POST /capture` ([sdk/SERVER.md](../../sdk/SERVER.md)).
 
+## Strict Content Security Policy
+
+If the app sends a `Content-Security-Policy` header (or a `<meta http-equiv>`), allow the OpenLens server, or the SDK is blocked silently: no events, and only a console warning in the browser.
+
+| Directive | Why | Add |
+| --- | --- | --- |
+| `script-src` | `c.js` (script tag), and the recorder `/r.js` and survey widget `/s.js` that the SDK loads lazily from the same server | `https://lens.example.com` |
+| `connect-src` | events (`/capture`), flags and surveys (`/flags`), replay chunks (`/r`), all sent with `fetch` or `sendBeacon` | `https://lens.example.com` |
+
+Nothing else is needed:
+- **No `unsafe-inline` or `unsafe-eval`.** The SDK injects no inline scripts and evaluates nothing.
+- **No `img-src`, `worker-src` or `frame-src`.** It uses no images, workers or frames.
+- **Survey styles.** The survey card styles itself with a constructable stylesheet inside a shadow root, which `style-src` does not block in current browsers.
+- **npm package.** The SDK is bundled with your code, so `script-src` only needs the server for `/r.js` and `/s.js`. Without replay or surveys, `connect-src` alone is enough.
+
+```http
+Content-Security-Policy: default-src 'self'; script-src 'self' https://lens.example.com; connect-src 'self' https://lens.example.com
+```
+
+- **Nonces with `'strict-dynamic'`:** give the `c.js` tag the page's nonce. The scripts it loads are then trusted through `'strict-dynamic'`, and only `connect-src` needs the host.
+- **Proxy through the app's own domain** (next section): `'self'` covers everything, so the CSP needs no change.
+- **Check it:**
+  1. Open a page with the browser console open: any `Refused to load` or `Refused to connect` line names the missing directive.
+  2. Run `openlens-cli verify`.
+
+How to set the header:
+- **Next.js:** `headers()` in `next.config.js`.
+- **SvelteKit:** `kit.csp` (add the host to `script-src` and `connect-src`).
+- **Nuxt:** `nuxt-security`'s `contentSecurityPolicy`.
+- **Rails:** `content_security_policy` with `policy.script_src :self, "https://lens.example.com"` and `policy.connect_src :self, "https://lens.example.com"`.
+- **Django:** `django-csp`, with `script-src` and `connect-src` in `CONTENT_SECURITY_POLICY` (version 4) or `CSP_SCRIPT_SRC` and `CSP_CONNECT_SRC` (version 3).
+
