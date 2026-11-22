@@ -300,7 +300,7 @@ fn release_compare(rel: &[openlens_engine::ReleaseRow]) -> Markup {
     }
 }
 
-fn insight_cards(pid: &str, b: &Board) -> Markup {
+fn insight_cards(pid: &str, b: &Board, plain: &[(String, String)]) -> Markup {
     let accent = |kind: &str| match kind {
         "stick_driver" => ("mint", "star"),
         "value_moment" => ("mint", "spark"),
@@ -332,9 +332,14 @@ fn insight_cards(pid: &str, b: &Board) -> Markup {
                         li class={ "insight " (cls) } {
                             span.rank aria-hidden="true" { (icon(glyph)) }
                             div {
-                                h3 { span.sr-only { "Insight " (i + 1) ": " } (c.title) }
+                                @let pl = plain.get(i).filter(|x| x.0 != c.title || x.1 != c.next_step);
+                                @if let Some((t, _)) = pl {
+                                    h3 title={ "Original: " (c.title) } { span.sr-only { "Insight " (i + 1) ": " } (t) }
+                                } @else {
+                                    h3 { span.sr-only { "Insight " (i + 1) ": " } (c.title) }
+                                }
                                 p.evidence { (c.evidence) }
-                                p.next { span.label { "Next step" } " " (c.next_step) }
+                                p.next title=[pl.map(|_| format!("Original: {}", c.next_step))] { span.label { "Next step" } " " (pl.map_or(c.next_step.as_str(), |x| x.1.as_str())) }
                                 @if c.kind == "churn_point" {
                                     p { a.button href={ "/p/" (pid) "/watch?churned_at=" (url_enc(&c.subject)) } { (icon("play")) "Watch a session that churned here" } }
                                 }
@@ -372,7 +377,15 @@ fn empty(p: &ProjectInfo<'_>, host: &str) -> Markup {
 }
 
 /// The Focus board (M1: KPI strip, activity, features, roles, releases).
-pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup {
+/// `plain`: optional plain-language `(title, next step)` per insight card
+/// (same order), shown instead of the original, which stays as the tooltip.
+pub fn board(
+    p: &ProjectInfo<'_>,
+    b: &Board,
+    f: &Filters,
+    host: &str,
+    plain: &[(String, String)],
+) -> Markup {
     if b.total_events == 0 {
         return layout("Focus board", Some(p), empty(p, host));
     }
@@ -424,7 +437,7 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
                 p.muted { "What " (scope) " did lately in " strong { (f.environment) } ". " a href={ "/p/" (p.id) "/digest" } { "This week vs last →" } }
             }
             (filter_bar(p.id, b, f, ""))
-            (insight_cards(p.id, b))
+            (insight_cards(p.id, b, plain))
             section.tiles aria-label="Key numbers" {
                 (tile("violet", "users", "Daily active users", &compact(b.users.dau), &if b.users.resurrected > 0 {
                     format!("{} weekly · {} monthly · {} came back", compact(b.users.wau), compact(b.users.mau), compact(b.users.resurrected))
@@ -1246,4 +1259,44 @@ pub fn message(title: &str, text: &str) -> Markup {
 pub fn render(m: Markup) -> String {
     let PreEscaped(s) = m;
     s
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    #[test]
+    fn plain_wording_replaces_the_card_text_and_keeps_the_original() {
+        let mut b = Board {
+            total_events: 10,
+            ..Board::default()
+        };
+        b.insights.push(openlens_engine::Insight {
+            kind: "churn_point",
+            title: "72% of churned users were last seen in billing".into(),
+            evidence: "113 of 156 churned users".into(),
+            next_step: "Look at what happens in billing.".into(),
+            score: 1.0,
+            subject: "billing".into(),
+        });
+        let p = ProjectInfo {
+            id: "p",
+            name: "P",
+            key: "pk",
+        };
+        let plain = [(
+            "Most people who left (72%) were in billing last".to_owned(),
+            "Check the billing page first.".to_owned(),
+        )];
+        let html = render(board(&p, &b, &Filters::default(), "http://x", &plain));
+        assert!(html.contains("Most people who left (72%)"));
+        assert!(html.contains("Original: 72% of churned users were last seen in billing"));
+        assert!(html.contains("Check the billing page first."));
+        let html = render(board(&p, &b, &Filters::default(), "http://x", &[]));
+        assert!(
+            html.contains("72% of churned users were last seen in billing")
+                && !html.contains("Original:")
+        );
+    }
 }
