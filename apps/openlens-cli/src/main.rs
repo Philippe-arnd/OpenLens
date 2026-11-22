@@ -245,6 +245,34 @@ enum FeaturesCmd {
     },
 }
 
+/// Plain HTTP is accepted only where the token never crosses the internet:
+/// this machine, and addresses that only resolve inside a private network
+/// or a cluster (a Kubernetes Service name, `*.svc`, `*.cluster.local`,
+/// `*.internal`, private IPv4 ranges).
+fn plain_http_ok(server: &str) -> bool {
+    let Some(rest) = server.strip_prefix("http://") else {
+        return false;
+    };
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = host.rsplit_once('@').map_or(host, |(_, h)| h);
+    let host = match host.rsplit_once(':') {
+        Some((h, port)) if port.bytes().all(|b| b.is_ascii_digit()) => h,
+        _ => host,
+    }
+    .to_ascii_lowercase();
+    if host.is_empty() {
+        return false;
+    }
+    if let Ok(ip) = host.parse::<std::net::Ipv4Addr>() {
+        return ip.is_loopback() || ip.is_private();
+    }
+    host == "localhost"
+        || !host.contains('.')
+        || [".svc", ".cluster.local", ".internal", ".localhost"]
+            .iter()
+            .any(|s| host.ends_with(s))
+}
+
 pub(crate) struct Client {
     server: String,
     token: String,
@@ -257,12 +285,9 @@ impl Client {
             .ok_or("missing --server (or OPENLENS_SERVER)")?
             .trim_end_matches('/')
             .to_owned();
-        if !(server.starts_with("https://")
-            || server.starts_with("http://localhost")
-            || server.starts_with("http://127."))
-        {
+        if !(server.starts_with("https://") || plain_http_ok(&server)) {
             return Err(
-                "the server must use https (plain http is only allowed for localhost)".into(),
+                "the server must use https (plain http is only allowed for localhost and cluster-internal addresses)".into(),
             );
         }
         let token = token.ok_or("missing --token (or OPENLENS_TOKEN)")?;
@@ -763,6 +788,36 @@ fn main() -> ExitCode {
         Err(e) => {
             out(&json!({ "error": e }));
             ExitCode::from(2)
+        }
+    }
+}
+
+#[cfg(test)]
+mod http_tests {
+    use super::plain_http_ok;
+
+    #[test]
+    fn plain_http_only_stays_inside() {
+        for ok in [
+            "http://localhost:8686",
+            "http://127.0.0.1:8686",
+            "http://lens-openlens:8686",
+            "http://lens-openlens.default.svc:8686",
+            "http://lens-openlens.default.svc.cluster.local:8686/",
+            "http://10.0.3.7:8686",
+            "http://192.168.1.20",
+        ] {
+            assert!(plain_http_ok(ok), "{ok}");
+        }
+        for no in [
+            "http://lens.example.com",
+            "http://8.8.8.8:8686",
+            "http://evil.com@lens-openlens:8686.example.com",
+            "http://svc.example.com",
+            "https://lens.example.com",
+            "http://",
+        ] {
+            assert!(!plain_http_ok(no), "{no}");
         }
     }
 }

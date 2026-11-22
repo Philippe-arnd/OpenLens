@@ -14,16 +14,8 @@ spec:
     runAsUser: 65532
     seccompProfile: { type: RuntimeDefault }
   containers:
+    # Reaches OpenLens through its Service, as an app or an agent in the cluster would.
     - name: healthz
-      image: {{ include "openlens.image" . | quote }}
-      # Through the Service, with the admin token: API, auth and query engine.
-      command: ["/usr/local/bin/openlens-cli", "sql", "SELECT count(*) AS n FROM events"]
-      env:
-        - name: OPENLENS_SERVER
-          value: "http://{{ include "openlens.fullname" . }}:{{ .Values.service.port }}"
-        - name: OPENLENS_TOKEN
-          valueFrom:
-            secretKeyRef:
-              name: {{ include "openlens.tokenSecret" . }}
-              key: {{ .Values.adminToken.key }}
+      image: busybox:1.37
+      command: ["wget", "-q", "-O", "-", "http://{{ include "openlens.fullname" . }}:{{ .Values.service.port }}/healthz"]
       securityContext: {{- include "openlens.securityContext" . | nindent 8 }}
