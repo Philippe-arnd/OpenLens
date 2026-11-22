@@ -5,3 +5,4 @@ Every vendored file, asset and fixture is recorded here, in the same change that
 | Item | Source | Version | Licence | How obtained |
 | --- | --- | --- | --- | --- |
 | LICENSE text | GNU AGPL-3.0 via the GitHub licences API | 3.0 | text is FSF-copyrighted, verbatim copying permitted | `gh api licenses/agpl-3.0` |
+| rrweb recorder, bundled into `sdk/js/dist/openlens-replay.min.js` (served at `/r.js`) | https://github.com/rrweb-io/rrweb (npm `rrweb`) | 2.2.2 | MIT, © rrweb contributors | `npm install --save-exact rrweb@2.2.2`, bundled by esbuild |

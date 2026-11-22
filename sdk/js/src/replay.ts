@@ -1,0 +1,96 @@
+/**
+ * Session replay recorder, a separate bundle served at `/r.js`.
+ *
+ * The core SDK loads it lazily (after the page is idle, only with consent)
+ * and hands over a bridge on `window.__openlensReplay`. This file records DOM
+ * changes with rrweb (MIT) and sends them to `POST /r` in numbered chunks,
+ * keyed by the same session id as the analytics events.
+ *
+ * Privacy defaults: every input value is masked; elements with
+ * `data-openlens-mask` have their text masked; elements with
+ * `data-openlens-block` (and `data-openlens-ignore`) are not recorded at all.
+ */
+import { record } from "rrweb";
+
+export interface Bridge {
+  host: string;
+  key: string;
+  /** Current session and person, read at every flush. */
+  ids(): { sid: string; uid: string };
+  /** False once consent is withdrawn. */
+  allowed(): boolean;
+}
+
+declare global {
+  interface Window {
+    __openlensReplay?: Bridge;
+  }
+}
+
+const FLUSH_MS = 10_000;
+const MAX_EVENTS = 300;
+
+function start(b: Bridge): void {
+  let buf: unknown[] = [];
+  let sid = b.ids().sid;
+  const url = `${b.host.replace(/\/$/, "")}/r?key=${encodeURIComponent(b.key)}`;
+
+  // Chunk numbers are shared by the tabs of one session, so retries and
+  // parallel tabs never overwrite each other.
+  const nextSeq = (s: string): number => {
+    const k = `openlens_rseq_${s}`;
+    try {
+      const n = Number(localStorage.getItem(k) || "0");
+      localStorage.setItem(k, String(n + 1));
+      return n;
+    } catch {
+      return Math.floor(Math.random() * 9000) + 1000;
+    }
+  };
+
+  const send = (events: unknown[], s: string, uid: string, unloading: boolean) => {
+    if (!events.length || !b.allowed()) return;
+    const body = JSON.stringify({ session_id: s.replace(/[^A-Za-z0-9_-]/g, ""), distinct_id: uid, seq: nextSeq(s), events });
+    const go = (payload: BodyInit) =>
+      fetch(url, { method: "POST", body: payload, keepalive: unloading && body.length < 60_000, headers: { "content-type": "text/plain" } }).catch(
+        () => undefined,
+      );
+    if (!unloading && typeof CompressionStream !== "undefined") {
+      new Response(new Blob([body]).stream().pipeThrough(new CompressionStream("gzip")))
+        .blob()
+        .then(go, () => go(body));
+    } else go(body);
+  };
+
+  const flush = (unloading = false) => {
+    const { sid: cur, uid } = b.ids();
+    const events = buf;
+    buf = [];
+    send(events, sid, uid, unloading);
+    if (cur !== sid) {
+      // A new session started: its recording needs its own full snapshot.
+      sid = cur;
+      record.takeFullSnapshot(true);
+    }
+  };
+
+  record({
+    emit(e) {
+      buf.push(e);
+      if (buf.length >= MAX_EVENTS) flush();
+    },
+    maskAllInputs: true,
+    maskTextSelector: "[data-openlens-mask]",
+    blockSelector: "[data-openlens-block],[data-openlens-ignore]",
+    slimDOMOptions: "all",
+    recordCanvas: false,
+    collectFonts: false,
+    inlineImages: false,
+    sampling: { mousemove: 100, scroll: 150, media: 800, input: "last" },
+  });
+  setInterval(() => flush(), FLUSH_MS);
+  addEventListener("visibilitychange", () => document.visibilityState === "hidden" && flush(true));
+  addEventListener("pagehide", () => flush(true));
+}
+
+if (typeof window !== "undefined" && window.__openlensReplay) start(window.__openlensReplay);

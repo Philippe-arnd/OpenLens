@@ -24,7 +24,16 @@ await tab.evaluate(() => { setTimeout(() => { throw new Error("e2e boom"); }, 0)
 await tab.waitForTimeout(200);
 await tab.evaluate(() => openlens.flush());
 await tab.waitForTimeout(500);
+// Replay: the recorder loads lazily and sends its first chunk within ~10 s.
+const chunk = await tab
+  .waitForResponse((r) => r.url().includes("/r?"), { timeout: 20000 })
+  .catch(() => null);
 await browser.close();
+if (!chunk || chunk.status() !== 200) {
+  console.error("replay chunk not stored:", chunk ? chunk.status() : "no request");
+  process.exit(1);
+}
+console.log("replay chunk stored");
 site.close();
 
 const events = sent.flatMap((b) => JSON.parse(b).batch.map((e) => e.event));

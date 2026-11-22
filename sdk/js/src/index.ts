@@ -9,6 +9,13 @@
 
 import { detectEnvironment } from "./env";
 import { trackVitals } from "./vitals";
+import type { Bridge } from "./replay";
+
+declare global {
+  interface Window {
+    __openlensReplay?: Bridge;
+  }
+}
 
 export type Props = Record<string, unknown>;
 
@@ -25,6 +32,8 @@ export interface Config {
   autocapture?: boolean;
   /** "pending" queues events until consent(true); "denied" captures nothing. Default "granted". */
   consent?: "granted" | "pending" | "denied";
+  /** Record sessions for replay, inputs masked (default true). Loads `/r.js` lazily. */
+  replay?: boolean;
 }
 
 export interface Dimensions {
@@ -178,7 +187,10 @@ export function reset(): void {
 export function setConsent(granted: boolean): void {
   consent = granted ? "granted" : "denied";
   if (!granted) queue = [];
-  else flush();
+  else {
+    flush();
+    if (cfg?.replay !== false) startReplay();
+  }
 }
 
 /** Send queued events now. */
@@ -346,9 +358,31 @@ export function init(config: Config): void {
   if (consent === "denied") return;
   loadFlags();
   if (config.autocapture !== false) autocapture();
+  if (config.replay !== false && consent === "granted") startReplay();
   timer = setInterval(() => flush(), 5000);
   addEventListener("visibilitychange", () => document.visibilityState === "hidden" && flush(true));
   addEventListener("pagehide", () => flush(true));
+}
+
+/** Load the replay recorder once the page is idle (it is a separate, larger bundle). */
+function startReplay(): void {
+  if (!cfg || window.__openlensReplay) return;
+  const c = cfg;
+  window.__openlensReplay = {
+    host: c.host,
+    key: c.key,
+    ids: () => ({ sid: state.sid, uid: state.uid ?? state.anon }),
+    allowed: () => consent === "granted",
+  };
+  const load = () => {
+    const s = document.createElement("script");
+    s.src = `${c.host.replace(/\/$/, "")}/r.js`;
+    s.async = true;
+    document.head.appendChild(s);
+  };
+  const idle = (window as { requestIdleCallback?: (f: () => void) => void }).requestIdleCallback;
+  if (document.readyState === "complete") (idle ?? setTimeout)(load);
+  else addEventListener("load", () => (idle ?? setTimeout)(load));
 }
 
 /** Stop timers (tests, single-page teardown). */
