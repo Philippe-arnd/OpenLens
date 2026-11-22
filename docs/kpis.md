@@ -18,7 +18,7 @@ Roles are the main way to slice every number, so they are declared explicitly, n
 | --- | --- |
 | **DAU / WAU / MAU** | Distinct identified users with at least one event on the day, in the last 7 days or in the last 30 days (UTC days). Anonymous visitors are counted separately. |
 | **Stickiness** | DAU / MAU, as a ratio. |
-| **Churn** | A user is *churned* after `churn_after_days` without an event (14 by default; the one optional setting, in the feature map). **Churn rate** for a period is the number of users active at the start of the period who churned during it, divided by the number of users active at the start. **Resurrected** users (churned, then active again) are reported separately. |
+| **Churn** | A user is *churned* after `churn_after_days` without an event (14 by default; the one optional setting, in the feature map). **Churn rate** for a period is the number of users active at the start of the period who churned during it, divided by the number of users active at the start. **Resurrected** users (churned, then active again) are reported separately: these are users active in the last 30 days whose previous active day was more than `churn_after_days` earlier. |
 | **Session** | A run of a user's events with gaps of less than 30 minutes. A session also ends at midnight UTC. |
 | **Average session duration** | Mean and median of the time from the first to the last event of each session. Sessions with a single event count as 0 s and are flagged separately as "bounces". |
 | **Tasks performed** | The number of *completed tasks* (see Features), in total, per active user per day, and per session. |

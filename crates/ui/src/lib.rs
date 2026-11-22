@@ -421,7 +421,11 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
             (filter_bar(p.id, b, f, ""))
             (insight_cards(p.id, b))
             section.tiles aria-label="Key numbers" {
-                (tile("violet", "users", "Daily active users", &compact(b.users.dau), &format!("{} weekly · {} monthly", compact(b.users.wau), compact(b.users.mau))))
+                (tile("violet", "users", "Daily active users", &compact(b.users.dau), &if b.users.resurrected > 0 {
+                    format!("{} weekly · {} monthly · {} came back", compact(b.users.wau), compact(b.users.mau), compact(b.users.resurrected))
+                } else {
+                    format!("{} weekly · {} monthly", compact(b.users.wau), compact(b.users.mau))
+                }))
                 (tile("mint", "spark", "Stickiness", &pct(b.users.stickiness), "DAU ÷ MAU"))
                 (tile("sky", "clock", "Avg session", &duration(b.sessions.avg_secs), &format!("{} sessions · {} bounce", compact(b.sessions.count), pct(b.sessions.bounce_rate))))
                 (tile("sun", "task", "Tasks per user per day", &format!("{:.1}", b.sessions.tasks_per_user_day), "feature uses, last 7 days"))
@@ -818,6 +822,7 @@ fn feature_pulse(b: &Board, empty: bool) -> Markup {
                         th.num title="Average uses per user" { "Uses / user" }
                         th.num title="Average distinct days each user came back to it" { "Days / user" }
                         th.num title="Users who reached its success event" { "Completion" }
+                        th.num title="Median time from the first use to the success event (p90 below)" { "Task time" }
                     } }
                     tbody { @for x in b.features.iter().filter(|x| x.users > 0) {
                         @let adoption = (x.users as f64 / mau).min(1.0);
@@ -831,10 +836,15 @@ fn feature_pulse(b: &Board, empty: bool) -> Markup {
                                 @if x.declared && x.completed_users > 0 { (pct(ratio(x.completed_users, x.users).min(1.0))) }
                                 @else { span.muted title="No success event declared or reached yet" { "—" } }
                             }
+                            td.num {
+                                @if let Some(t) = b.task_times.iter().find(|t| t.feature == x.key) {
+                                    (duration(t.median_secs)) br; span.muted.small { "p90 " (duration(t.p90_secs)) }
+                                } @else { span.muted { "—" } }
+                            }
                         }
                     } }
                 }
-                p.muted.small { "Last 30 days. Adoption is the share of active users (MAU) who used the feature; completion is the share of them who reached its success event." }
+                p.muted.small { "Last 30 days. Adoption is the share of active users (MAU) who used the feature; completion is the share of them who reached its success event; task time runs from the first use to that event (within 30 minutes)." }
             }
         }
     }

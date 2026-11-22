@@ -564,3 +564,59 @@ async fn pages_show_scroll_depth_hotspots_and_rage_clicks() {
         "3 of 10 reached the end"
     );
 }
+
+#[tokio::test]
+async fn task_times_and_resurrected_users_follow_the_kpi_definitions() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let ev =
+        |user: &'static str, event: &'static str, mins_ago: i64, feature: Option<&'static str>| E {
+            user,
+            role: "member",
+            session: user,
+            event,
+            mins_ago,
+            feature,
+            release: "v1",
+            props: "{}",
+        };
+    let evs: Vec<Event> = [
+        // 60 s task (two entries: the task starts at the first one).
+        ev("a", "$click", 12, Some("export")),
+        ev("a", "$click", 11, Some("export")),
+        ev("a", "export_done", 11, None),
+        // 300 s task.
+        ev("b", "$click", 20, Some("export")),
+        ev("b", "export_done", 15, None),
+        // Abandoned: the success comes 100 min after the only entry.
+        ev("c", "$click", 200, Some("export")),
+        ev("c", "export_done", 100, None),
+        // Resurrected: away for ~60 days, back yesterday.
+        ev("r", "$pageview", 60 * 1440, None),
+        ev("r", "$pageview", 1440, None),
+        // Regular user: no gap.
+        ev("a", "$pageview", 2 * 1440, None),
+    ]
+    .iter()
+    .enumerate()
+    .map(|(i, e)| mk(e, i))
+    .collect();
+    w.append(&evs).unwrap();
+    w.flush().unwrap();
+    let q = QueryEngine::new(dir.path(), Limits::default());
+    let map = parse("features:\n  - key: export\n    name: Export\n    success: export_done\n")
+        .map
+        .unwrap();
+    let b = board(&q, "p", &Filters::default(), Some((&map, 1)))
+        .await
+        .unwrap();
+    let t = b
+        .task_times
+        .iter()
+        .find(|t| t.feature == "export")
+        .expect("export task times");
+    assert_eq!(t.tasks, 2, "the abandoned attempt is not a task: {t:?}");
+    assert!((50.0..=310.0).contains(&t.median_secs), "{t:?}");
+    assert!(t.p90_secs >= 240.0 && t.p90_secs <= 310.0, "{t:?}");
+    assert_eq!(b.users.resurrected, 1);
+}

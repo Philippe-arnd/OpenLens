@@ -15,9 +15,11 @@ use serde_json::{Map, Value};
 mod errors;
 mod insights;
 mod pages;
+mod tasks;
 pub use errors::{ErrorGroup, error_groups};
 pub use insights::{CohortStats, FlagCohort, Funnel, FunnelStep, Insight, Journey, Readiness};
 pub use pages::{Hotspot, PageStats, pages};
+pub use tasks::TaskTime;
 
 /// Engine errors.
 #[derive(Debug, thiserror::Error)]
@@ -94,6 +96,9 @@ pub struct Users {
     pub mau: i64,
     /// DAU / MAU.
     pub stickiness: f64,
+    /// Users back in the last 30 days after being inactive for longer
+    /// than the churn window.
+    pub resurrected: i64,
 }
 
 /// Session numbers, last 7 days.
@@ -195,6 +200,8 @@ pub struct Board {
     pub features: Vec<FeatureUse>,
     /// Users per role, last 30 days.
     pub roles: Vec<RoleUsers>,
+    /// Task durations per declared feature with a success event.
+    pub task_times: Vec<TaskTime>,
     /// Who uses what: distinct users per (role, feature), last 30 days,
     /// ignoring the role filter (the roles × features grid).
     pub role_features: Vec<(String, String, i64)>,
@@ -433,6 +440,7 @@ pub async fn board(
             } else {
                 0.0
             },
+            resurrected: 0,
         };
     }
     if let Some(r) = sessions?.rows.first() {
@@ -570,12 +578,16 @@ pub async fn board(
                 .collect()
         })
         .unwrap_or_default();
-    let ((mut cards, readiness), journeys, cohorts, funnels) = futures::try_join!(
+    let ((mut cards, readiness), journeys, cohorts, funnels, task_times, resurrected) = futures::try_join!(
         insights::compute(q, project, &src, f, churn, &successes),
         insights::journeys(q, project, &src, f, &successes),
         insights::flag_cohorts(q, project, &src, f),
         insights::funnels(q, project, &src, f, &funnel_defs),
+        tasks::task_times(q, project, &src, f, &successes),
+        tasks::resurrected(q, project, &src, f, churn),
     )?;
+    b.task_times = task_times;
+    b.users.resurrected = resurrected;
     cards.extend(insights::funnel_cards(&funnels));
     b.funnels = funnels;
     b.journeys = journeys;
