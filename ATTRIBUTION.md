@@ -6,3 +6,7 @@ Every vendored file, asset and fixture is recorded here, in the same change that
 | --- | --- | --- | --- | --- |
 | LICENSE text | GNU AGPL-3.0 via the GitHub licences API | 3.0 | text is FSF-copyrighted, verbatim copying permitted | `gh api licenses/agpl-3.0` |
 | rrweb recorder, bundled into `sdk/js/dist/openlens-replay.min.js` (served at `/r.js`) | https://github.com/rrweb-io/rrweb (npm `rrweb`) | 2.2.2 | MIT, © rrweb contributors | `npm install --save-exact rrweb@2.2.2`, bundled by esbuild |
+| rrweb replayer, bundled into `sdk/js/dist/openlens-player.min.js` (served at `/assets/player.js`) | https://github.com/rrweb-io/rrweb (npm `rrweb`) | 2.2.2 | MIT, © rrweb contributors | bundled by esbuild from the same package |
+| rrweb player stylesheet, copied to `sdk/js/dist/openlens-player.min.css` (served at `/assets/player.css`) | `rrweb/dist/style.min.css` | 2.2.2 | MIT, © rrweb contributors | copied by `npm run build` |
+
+rrweb's MIT notice ships at the top of each bundle above (added by `sdk/js/scripts/banner.mjs`), and its text is in `sdk/js/licenses/rrweb-LICENSE.txt`, fetched from https://github.com/rrweb-io/rrweb/blob/master/LICENSE.

@@ -4,6 +4,14 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Fixed
+
+- The replay recorder and player bundles now carry rrweb's MIT notice, which minification had stripped (`sdk/js/licenses/rrweb-LICENSE.txt`).
+
+### Changed
+
+- Docs: the clean-room source log lists every public source used so far; `target-app-parity.md` and `gaps.md` match v0.1.0.
+
 ## [0.1.0] - 2026-11-22
 
 The first release. OpenLens is a self-hosted product analytics tool in one Rust binary. Agents wire it into an app, and the product manager opens a board that already says where the value is.
