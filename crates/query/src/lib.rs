@@ -100,6 +100,18 @@ async fn collect(ctx: &SessionContext, sql: &str) -> Result<(Arc<MemTable>, usiz
     Ok((Arc::new(table), rows))
 }
 
+/// The DataFusion runtime shared by every query.
+///
+/// DataFusion caches directory listings by default, with no expiry. A shared
+/// runtime would then never see the segments written after the first query
+/// (new events, compacted days), until a restart: the listing cache is off.
+/// Parquet footers stay cached: a segment file never changes once written.
+fn runtime_builder(memory: usize) -> RuntimeEnvBuilder {
+    RuntimeEnvBuilder::new()
+        .with_memory_pool(Arc::new(FairSpillPool::new(memory)))
+        .with_object_list_cache_limit(0)
+}
+
 /// Query errors. Messages are safe to show to the caller.
 #[derive(Debug, thiserror::Error)]
 pub enum QueryError {
@@ -164,10 +176,7 @@ pub struct QueryEngine {
 impl QueryEngine {
     /// Engine over the data root written by `openlens-storage`.
     pub fn new(root: impl Into<PathBuf>, limits: Limits) -> Self {
-        let runtime = RuntimeEnvBuilder::new()
-            .with_memory_pool(Arc::new(FairSpillPool::new(limits.memory)))
-            .build_arc()
-            .ok();
+        let runtime = runtime_builder(limits.memory).build_arc().ok();
         Self {
             root: root.into(),
             limits,
@@ -249,8 +258,7 @@ impl QueryEngine {
 
         let runtime = match &self.runtime {
             Some(r) => r.clone(),
-            None => RuntimeEnvBuilder::new()
-                .with_memory_pool(Arc::new(FairSpillPool::new(self.limits.memory)))
+            None => runtime_builder(self.limits.memory)
                 .build_arc()
                 .map_err(|e| QueryError::Storage(e.to_string()))?,
         };
