@@ -620,3 +620,66 @@ async fn task_times_and_resurrected_users_follow_the_kpi_definitions() {
     assert!(t.p90_secs >= 240.0 && t.p90_secs <= 310.0, "{t:?}");
     assert_eq!(b.users.resurrected, 1);
 }
+
+#[tokio::test]
+async fn weekly_retention_cohorts_count_returning_users() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    // Monday 3 weeks ago, noon: 10 users start; 5 come back the next week,
+    // 2 the week after.
+    let now = Utc::now();
+    let monday = now.date_naive()
+        - Duration::days(i64::from(
+            chrono::Datelike::weekday(&now.date_naive()).num_days_from_monday(),
+        ));
+    let start = monday - Duration::days(21);
+    let at = |days: i64| {
+        (now - (start + Duration::days(days))
+            .and_hms_opt(12, 0, 0)
+            .unwrap()
+            .and_utc())
+        .num_minutes()
+    };
+    let users: Vec<String> = (0..10).map(|i| format!("r{i}")).collect();
+    let mut evs = Vec::new();
+    for (i, u) in users.iter().enumerate() {
+        let mut add = |d: i64| {
+            evs.push(mk(
+                &E {
+                    user: u,
+                    role: "member",
+                    session: u,
+                    event: "$pageview",
+                    mins_ago: at(d),
+                    feature: None,
+                    release: "v1",
+                    props: "{}",
+                },
+                evs.len(),
+            ))
+        };
+        add(0);
+        if i < 5 {
+            add(8);
+        }
+        if i < 2 {
+            add(15);
+        }
+    }
+    w.append(&evs).unwrap();
+    w.flush().unwrap();
+    let q = QueryEngine::new(dir.path(), Limits::default());
+    let b = board(&q, "p", &Filters::default(), None).await.unwrap();
+    let c = b
+        .retention
+        .iter()
+        .find(|r| r.week == start.to_string())
+        .expect("the cohort");
+    assert_eq!(c.users, 10, "{:?}", b.retention);
+    assert_eq!(c.weeks.len(), 3, "three full weeks have started since");
+    assert!(
+        (c.weeks[0] - 0.5).abs() < 1e-9 && (c.weeks[1] - 0.2).abs() < 1e-9,
+        "{c:?}"
+    );
+    assert_eq!(c.weeks[2], 0.0);
+}
