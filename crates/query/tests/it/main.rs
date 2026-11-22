@@ -214,3 +214,30 @@ async fn anonymous_events_before_identify_belong_to_the_user() {
     assert_eq!(star.rows.len(), 4);
     assert_eq!(star.columns.last().map(String::as_str), Some("date"));
 }
+
+/// Regression: DataFusion caches directory listings forever by default, so
+/// one engine (one shared runtime) stopped seeing new segments after its
+/// first query, until a restart.
+#[tokio::test]
+async fn new_segments_are_seen_by_the_same_engine() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    w.append(&[ev("a", "admin", 0)]).unwrap();
+    w.flush().unwrap();
+    let q = QueryEngine::new(dir.path(), Limits::default());
+    let count = |q: QueryEngine| async move {
+        q.sql("a", "SELECT count(*) AS n FROM raw_events")
+            .await
+            .unwrap()
+            .rows[0]["n"]
+            .as_i64()
+    };
+    assert_eq!(count(q.clone()).await, Some(1));
+    // A new segment in the same day, then one in a new day.
+    w.append(&[ev("a", "member", 0)]).unwrap();
+    w.flush().unwrap();
+    assert_eq!(count(q.clone()).await, Some(2));
+    w.append(&[ev("a", "member", 3)]).unwrap();
+    w.flush().unwrap();
+    assert_eq!(count(q.clone()).await, Some(3));
+}

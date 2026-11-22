@@ -26,6 +26,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- **New events could stay out of the dashboards until a restart (v0.1.0).** DataFusion caches directory listings with no expiry, and the runtime shared by every query kept the first list of files it saw: events that arrived later, and compacted days, were not read. The listing cache is now off; Parquet footers are still cached. A regression test writes segments between queries of one engine.
 - **Phones:** every dashboard page fits a 390 px screen. Grids never get wider than the screen, wide tables scroll inside their card, the navigation scrolls sideways, filters and tiles stack, and touch targets are 44 px. The nightly browser check now opens every page on a phone and fails if one scrolls sideways (#170).
 - **Accessibility:** the light theme's muted text, links, badges and statuses now meet WCAG AA contrast (4.5:1), and links inside text are underlined. The nightly browser check runs axe-core on every page, light and dark, and fails on any serious or critical issue (#161).
 - Form submits inside web components (open shadow roots) are captured, with their `data-feature` (#151).
