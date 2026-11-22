@@ -108,8 +108,24 @@ jobs:
             ./target/debug/openlens > $RUNNER_TEMP/ol.log 2>&1 &
           for i in $(seq 1 30); do curl -fs localhost:8686/healthz && break; sleep 1; done
           node scripts/e2e/browser.mjs http://localhost:8686 pk_ci
+      - name: dashboard under the real CSP, light and dark (nightly / on demand)
+        if: github.event_name != 'pull_request'
+        run: |
+          cargo build -p xtask
+          ./target/debug/xtask demo $RUNNER_TEMP/demo
+          OPENLENS_DATA_DIR=$RUNNER_TEMP/demo OPENLENS_ADDR=127.0.0.1:8687 OPENLENS_ADMIN_TOKEN=adm_ci \
+            ./target/debug/openlens > $RUNNER_TEMP/demo.log 2>&1 &
+          for i in $(seq 1 30); do curl -fs localhost:8687/healthz && break; sleep 1; done
+          node scripts/e2e/screens.mjs http://localhost:8687 adm_ci $RUNNER_TEMP/screens
+      - if: always() && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-screens
+          path: ${{ runner.temp }}/screens
+          if-no-files-found: ignore
+          retention-days: 14
       - if: failure()
-        run: cat $RUNNER_TEMP/ol.log
+        run: cat $RUNNER_TEMP/ol.log $RUNNER_TEMP/demo.log 2>/dev/null || true
 
   report:
     name: open an issue when main breaks
