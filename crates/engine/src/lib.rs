@@ -19,7 +19,9 @@ pub mod stats;
 mod tasks;
 pub use errors::{ErrorGroup, error_groups};
 pub use insights::{CohortStats, FlagCohort, Funnel, FunnelStep, Insight, Journey, Readiness};
-pub use pages::{Hotspot, PageStats, pages};
+pub use pages::{
+    ClickMap, Hotspot, MAP_COLUMNS, MAP_ROW, PageStats, click_map, pages, sessions_on_path,
+};
 pub use tasks::{RetentionRow, TaskTime};
 
 /// Engine errors.

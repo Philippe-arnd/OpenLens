@@ -100,3 +100,85 @@ pub async fn pages(
         })
         .collect())
 }
+
+/// Click positions on one page, bucketed for a heatmap: 50 columns (2% of
+/// the viewport width each) by 20-pixel rows, last 30 days.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ClickMap {
+    /// Page path.
+    pub path: String,
+    /// `(column 0..50, row, clicks, rage clicks)`, busiest first.
+    pub cells: Vec<(i64, i64, i64, i64)>,
+    /// Clicks with a position.
+    pub clicks: i64,
+    /// Median viewport width of those clicks, in pixels.
+    pub viewport: i64,
+}
+
+/// Columns of a click map.
+pub const MAP_COLUMNS: i64 = 50;
+/// Row height of a click map, in pixels.
+pub const MAP_ROW: i64 = 20;
+
+/// The click map of `path`.
+pub async fn click_map(
+    q: &QueryEngine,
+    project: &str,
+    src: &str,
+    f: &Filters,
+    path: &str,
+) -> Result<ClickMap> {
+    let w = f.clause(30)?;
+    let p = crate::lit(path)?;
+    let base = format!(
+        "SELECT CAST(regexp_match(properties, '\"\\$x\":([0-9.]+)')[1] AS DOUBLE) AS x, \
+                CAST(regexp_match(properties, '\"\\$y\":([0-9]+)')[1] AS DOUBLE) AS y, \
+                CAST(regexp_match(properties, '\"\\$vw\":([0-9]+)')[1] AS DOUBLE) AS vw, \
+                CASE WHEN properties LIKE '%\"$rage\":true%' THEN 1 ELSE 0 END AS rage \
+         FROM {src} WHERE {w} AND event = '$click' AND path = {p}"
+    );
+    let cells_sql = format!(
+        "SELECT CAST(least(floor(x * {MAP_COLUMNS}), {MAP_COLUMNS} - 1) AS BIGINT) AS cx, CAST(floor(y / {MAP_ROW}) AS BIGINT) AS cy, \
+                count(*) AS n, sum(rage) AS rage \
+         FROM ({base}) c WHERE x IS NOT NULL AND y IS NOT NULL AND x <= 1 AND y < 30000 \
+         GROUP BY 1, 2 ORDER BY n DESC LIMIT 3000"
+    );
+    let totals_sql = format!(
+        "SELECT count(*) AS n, approx_median(vw) AS vw FROM ({base}) c WHERE x IS NOT NULL AND y IS NOT NULL"
+    );
+    let (cells, totals) = futures::join!(q.sql(project, &cells_sql), q.sql(project, &totals_sql));
+    let t = totals?.rows;
+    Ok(ClickMap {
+        path: path.to_owned(),
+        cells: cells?
+            .rows
+            .iter()
+            .map(|r| (int(r, "cx"), int(r, "cy"), int(r, "n"), int(r, "rage")))
+            .collect(),
+        clicks: t.first().map_or(0, |r| int(r, "n")),
+        viewport: t.first().map_or(0, |r| float(r, "vw") as i64),
+    })
+}
+
+/// Recent sessions that viewed `path` (newest first, at most 200), to find a
+/// recording to draw a heatmap over.
+pub async fn sessions_on_path(
+    q: &QueryEngine,
+    project: &str,
+    src: &str,
+    f: &Filters,
+    path: &str,
+) -> Result<Vec<String>> {
+    let w = f.clause(30)?;
+    let sql = format!(
+        "SELECT session_id, max(timestamp) AS t FROM {src} WHERE {w} AND event = '$pageview' AND path = {} \
+         AND session_id IS NOT NULL GROUP BY session_id ORDER BY t DESC LIMIT 200",
+        crate::lit(path)?
+    );
+    Ok(q.sql(project, &sql)
+        .await?
+        .rows
+        .iter()
+        .filter_map(|r| text(r, "session_id"))
+        .collect())
+}

@@ -658,6 +658,7 @@ pub fn pages(
                 @for pg in list {
                     section.card {
                         h2.sky { (icon("layers")) span.mono { (pg.path) } }
+                        p.small { a href={ "/p/" (p.id) "/heatmap?path=" (url_enc(&pg.path)) } { (icon("spark")) " Click heatmap" } }
                         p.small.muted { (compact(pg.views)) " views · " (compact(pg.users)) " users" }
                         @if pg.median_scroll >= 0.0 {
                             table.bars { tbody {
@@ -992,6 +993,77 @@ pub fn projects(list: &[ProjectSummary]) -> Markup {
                     }
                 }
             }
+        },
+    )
+}
+
+/// A page's click heatmap: density drawn in SVG (no script), plus a link to
+/// see it over the real page when a recording of that page exists.
+pub fn heatmap(
+    p: &ProjectInfo<'_>,
+    map: &openlens_engine::ClickMap,
+    overlay: Option<&str>,
+) -> Markup {
+    let cols = openlens_engine::MAP_COLUMNS;
+    let row = openlens_engine::MAP_ROW;
+    let vw = if map.viewport > 0 { map.viewport } else { 1280 };
+    let rows = map.cells.iter().map(|c| c.1).max().unwrap_or(0) + 2;
+    let height = (rows * row).max(400);
+    let max = map.cells.iter().map(|c| c.2).max().unwrap_or(1).max(1) as f64;
+    let cw = vw as f64 / cols as f64;
+    layout(
+        "Heatmap",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "Click heatmap" }
+                p.muted { span.mono { (map.path) } " · " (compact(map.clicks)) " clicks with a position, last 30 days · median screen " (vw) " px wide" }
+            } }
+            @if let Some(href) = overlay {
+                p { a.button href=(href) { (icon("play")) "See it over the real page" } }
+            }
+            @if map.cells.is_empty() {
+                section.card { p.muted { "No clicks with a position on this page yet (positions are recorded by SDK 0.1 builds from 2026-11-22 on)." } }
+            } @else {
+                section.card.wide {
+                    svg.heatmap viewBox={ "0 0 " (vw) " " (height) } role="img" aria-label={ "Click density on " (map.path) } {
+                        rect.page x="0" y="0" width=(vw) height=(height) {}
+                        @for (cx, cy, n, rage) in &map.cells {
+                            @let o = format!("{:.2}", (0.15 + 0.85 * (*n as f64 / max)).min(1.0));
+                            circle class=(if *rage > 0 { "dot rage" } else { "dot" })
+                                cx=(format!("{:.0}", (*cx as f64 + 0.5) * cw)) cy=((cy * row) + row / 2)
+                                r=(format!("{:.0}", (cw * 0.9).max(8.0))) fill-opacity=(o) {
+                                title { (n) " clicks" @if *rage > 0 { ", " (rage) " rage" } }
+                            }
+                        }
+                    }
+                    p.muted.small { "Each dot is a 2% × 20 px area; darker means more clicks. Red marks rage clicks. The page is drawn at its median screen width." }
+                }
+            }
+        },
+    )
+}
+
+/// The heatmap drawn over a recorded visit of the page (player page).
+pub fn heatmap_overlay(p: &ProjectInfo<'_>, path: &str, session: &str) -> Markup {
+    layout(
+        "Heatmap",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "Click heatmap" }
+                p.muted { span.mono { (path) } " · drawn over a recorded visit of this page (text is masked as recorded)" }
+            } }
+            link rel="stylesheet" href="/assets/player.css";
+            section.card.wide {
+                div #ol-player
+                    data-src={ "/p/" (p.id) "/replays/" (session) "/events.json" }
+                    data-heatmap={ "/p/" (p.id) "/heatmap.json?path=" (url_enc(path)) }
+                    data-path=(path) {
+                    p.muted { "Loading the page…" }
+                }
+            }
+            script src="/assets/player.js" defer {}
         },
     )
 }

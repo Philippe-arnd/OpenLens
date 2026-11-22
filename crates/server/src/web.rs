@@ -29,6 +29,9 @@ pub(crate) fn routes() -> Router<AppState> {
             get(replay_events),
         )
         .route("/p/{project}/watch", get(watch_churned))
+        .route("/p/{project}/heatmap", get(heatmap_page))
+        .route("/p/{project}/heatmap.json", get(heatmap_json))
+        .route("/p/{project}/heatmap/overlay", get(heatmap_overlay))
         .route("/assets/player.js", get(player_js))
         .route("/assets/player.css", get(player_css))
         .route("/assets/app.css", get(css))
@@ -661,4 +664,139 @@ async fn projects_page(State(state): State<AppState>, headers: HeaderMap) -> Res
     }
     list.sort_by_key(|p| std::cmp::Reverse(p.recent_events));
     html(StatusCode::OK, openlens_ui::projects(&list))
+}
+
+#[derive(Deserialize)]
+struct HeatmapQuery {
+    path: String,
+    session: Option<String>,
+}
+
+async fn click_map_for(
+    state: &AppState,
+    p: &openlens_meta::Project,
+    path: &str,
+) -> Result<(openlens_engine::ClickMap, String), openlens_engine::EngineError> {
+    let map = crate::load_map(state, &p.id).await;
+    let src = openlens_engine::source(map.as_ref().map(|(m, _)| m));
+    let f = openlens_engine::Filters::default();
+    Ok((
+        openlens_engine::click_map(&state.query, &p.id, &src, &f, path).await?,
+        src,
+    ))
+}
+
+async fn heatmap_page(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(q): Query<HeatmapQuery>,
+) -> Response {
+    if !auth::has_session(&state, &headers) {
+        return to_login();
+    }
+    let Some(p) = project(&state, id).await else {
+        return html(
+            StatusCode::NOT_FOUND,
+            openlens_ui::message("Not found", "No such project."),
+        );
+    };
+    let (map, src) = match click_map_for(&state, &p, &q.path).await {
+        Ok(m) => m,
+        Err(e) => {
+            return html(
+                StatusCode::BAD_REQUEST,
+                openlens_ui::message("Can't show that", &e.to_string()),
+            );
+        }
+    };
+    // A recorded visit of this page, to draw the heatmap over the real page.
+    let f = openlens_engine::Filters::default();
+    let sessions = openlens_engine::sessions_on_path(&state.query, &p.id, &src, &f, &q.path)
+        .await
+        .unwrap_or_default();
+    let root = state.data_dir.clone();
+    let pid = p.id.clone();
+    let recorded: std::collections::HashSet<String> =
+        match tokio::task::spawn_blocking(move || openlens_replay::list(&root, &pid, None)).await {
+            Ok(Ok(l)) => l.into_iter().map(|r| r.session_id).collect(),
+            _ => Default::default(),
+        };
+    let overlay = sessions
+        .into_iter()
+        .find(|s| recorded.contains(s))
+        .map(|s| {
+            format!(
+                "/p/{}/heatmap/overlay?path={}&session={s}",
+                p.id,
+                openlens_ui::url_enc(&q.path)
+            )
+        });
+    let info = openlens_ui::ProjectInfo {
+        id: &p.id,
+        name: &p.name,
+        key: &p.api_key,
+    };
+    html(
+        StatusCode::OK,
+        openlens_ui::heatmap(&info, &map, overlay.as_deref()),
+    )
+}
+
+async fn heatmap_json(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(q): Query<HeatmapQuery>,
+) -> Response {
+    if !auth::has_session(&state, &headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let Some(p) = project(&state, id).await else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    match click_map_for(&state, &p, &q.path).await {
+        Ok((m, _)) => (
+            [(header::CACHE_CONTROL, "no-store")],
+            axum::Json(serde_json::json!({
+                "columns": openlens_engine::MAP_COLUMNS,
+                "row": openlens_engine::MAP_ROW,
+                "map": m,
+            })),
+        )
+            .into_response(),
+        Err(_) => StatusCode::BAD_REQUEST.into_response(),
+    }
+}
+
+async fn heatmap_overlay(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(q): Query<HeatmapQuery>,
+) -> Response {
+    if !auth::has_session(&state, &headers) {
+        return to_login();
+    }
+    let Some(p) = project(&state, id).await else {
+        return html(
+            StatusCode::NOT_FOUND,
+            openlens_ui::message("Not found", "No such project."),
+        );
+    };
+    let Some(session) = q.session.filter(|s| openlens_replay::valid_id(s)) else {
+        return html(
+            StatusCode::NOT_FOUND,
+            openlens_ui::message("No recording", "Pick a page with a recorded visit."),
+        );
+    };
+    let info = openlens_ui::ProjectInfo {
+        id: &p.id,
+        name: &p.name,
+        key: &p.api_key,
+    };
+    player_csp(html(
+        StatusCode::OK,
+        openlens_ui::heatmap_overlay(&info, &q.path, &session),
+    ))
 }

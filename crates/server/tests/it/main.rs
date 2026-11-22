@@ -980,3 +980,67 @@ async fn several_projects_open_on_the_project_switcher() {
         StatusCode::SEE_OTHER
     );
 }
+
+#[tokio::test]
+async fn click_heatmap_draws_positions_without_inline_styles() {
+    let h = harness();
+    let mut batch = vec![
+        serde_json::json!({"event":"$pageview","distinct_id":"u1","properties":{"$pathname":"/pricing"}}),
+    ];
+    for i in 0..12 {
+        batch.push(
+            serde_json::json!({"event":"$click","distinct_id":"u1","properties":{
+                "$pathname":"/pricing","$x": 0.5,"$y": 300 + i,"$vw": 1280, "$rage": i == 0
+            }}),
+        );
+    }
+    let body = serde_json::json!({"key": h.key, "batch": batch})
+        .to_string()
+        .into_bytes();
+    assert_eq!(post(&h, "/capture", body, false).await.0, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let cookie = login_cookie(&h).await;
+    let page = get(
+        &h,
+        "/p/default/heatmap?path=%2Fpricing",
+        Some(&cookie),
+        false,
+    )
+    .await;
+    assert_eq!(page.status(), StatusCode::OK);
+    let html = String::from_utf8(
+        axum::body::to_bytes(page.into_body(), 1 << 20)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        html.contains("<circle") && html.contains("12 clicks with a position"),
+        "{html}"
+    );
+    assert!(html.contains("dot rage"));
+    assert!(!html.contains(" style="));
+    let json = get(
+        &h,
+        "/p/default/heatmap.json?path=%2Fpricing",
+        Some(&cookie),
+        false,
+    )
+    .await;
+    let v: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(json.into_body(), 1 << 20)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(v["map"]["cells"][0][0], 25, "x = 0.5 → column 25");
+    assert_eq!(v["map"]["cells"][0][1], 15, "y = 300 → row 15");
+    assert_eq!(v["map"]["clicks"], 12);
+    assert_eq!(
+        get(&h, "/p/default/heatmap.json?path=%2F", None, false)
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+}
