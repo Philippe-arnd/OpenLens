@@ -66,7 +66,13 @@ for (const p of [...pages.map((x) => `/p/default${x}`), ...global]) {
       const out = [];
       for (const el of document.querySelectorAll("body *")) {
         const r = el.getBoundingClientRect();
-        if (r.right > w + 1 && !(el.parentElement && el.parentElement.getBoundingClientRect().right > w + 1)) {
+        // Skip what a scrolling box clips (it does not widen the page).
+        let clipped = false;
+        for (let a = el.parentElement; a; a = a.parentElement) {
+          const s = getComputedStyle(a);
+          if (s.overflowX === "auto" || s.overflowX === "hidden" || s.overflowX === "scroll") { clipped = true; break; }
+        }
+        if (!clipped && r.right > w + 1 && !(el.parentElement && el.parentElement.getBoundingClientRect().right > w + 1)) {
           out.push(`${el.tagName.toLowerCase()}${el.className && typeof el.className === "string" ? "." + el.className.trim().replace(/\s+/g, ".") : ""} (${Math.round(r.right - w)}px)`);
         }
       }
