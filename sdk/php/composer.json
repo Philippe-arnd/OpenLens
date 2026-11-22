@@ -1,0 +1,8 @@
+{
+  "name": "openlens/openlens",
+  "description": "OpenLens server SDK: send events and check feature flags from PHP",
+  "license": "AGPL-3.0-only",
+  "type": "library",
+  "require": { "php": ">=8.1", "ext-json": "*" },
+  "autoload": { "psr-4": { "OpenLens\\": "src/" } }
+}

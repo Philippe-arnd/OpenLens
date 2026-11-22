@@ -6,6 +6,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Added
 
+- **Server SDKs for Go, Ruby and PHP** (`sdk/go`, `sdk/ruby`, `sdk/php`), standard library only, with the same calls as Node and Python: capture, feature, identify and flags. CI tests each one (#157).
 - **Replay player:** the session's events as markers on the timeline (page views, successes, forms, clicks, rage clicks, errors), with a legend, a list of events that follows the playhead (click one to jump), ±10 s, speed 0.5× to 8×, keyboard shortcuts (Space, J/L, ←/→, +/−), and a phone layout (#170).
 - **Releases ship Linux aarch64 binaries** next to x86_64 (built on GitHub's ARM runners, free for public repositories).
 - **Upgrade check in CI:** before an image is published, `scripts/upgrade-check.sh` starts the last release on a fresh volume, writes events, a flag and a feature map, then starts the new image on that volume and requires the same events, people, sessions, projects, keys, flags and feature map, and a board that loads (#158).

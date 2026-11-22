@@ -113,7 +113,7 @@ openlens.identify(user.id, { role: user.role, account: user.orgId, plan: user.pl
   - [framework recipes](docs/agents/wire.md#framework-recipes) for Next.js, Nuxt, SvelteKit, Astro, Remix, Vite and Angular;
   - [strict CSP](docs/agents/wire.md#strict-content-security-policy);
   - an [ad-blocker proxy](docs/agents/wire.md#ad-blockers-proxy-through-the-apps-domain).
-- **Server events:** [Node and Python](sdk/SERVER.md) thin clients, or a plain `POST /capture`.
+- **Server events:** [Node, Python, Go, Ruby and PHP](sdk/SERVER.md) thin clients, or a plain `POST /capture`.
 - **Examples:** [`examples/`](examples/) has two reference apps, which CI clicks through every night until `verify` is green.
 
 ## 🌐 Try it in two minutes
