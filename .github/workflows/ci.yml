@@ -176,3 +176,33 @@ jobs:
         run: |
           gh issue create -R "$GITHUB_REPOSITORY" --title "main is broken: CI failed on ${GITHUB_SHA::7}" \
             --body "CI failed on main ($GITHUB_EVENT_NAME). Run: $RUN. Fix before merging new work."
+
+  advisory-report:
+    # One issue per open advisory state (label security-advisory): opened or
+    # updated when the RustSec check fails on main or nightly, closed when it
+    # is green again. Renovate's vulnerability PRs usually fix it (#196).
+    name: track dependency advisories
+    needs: [advisories]
+    if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RESULT: ${{ needs.advisories.result }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create security-advisory -R "$GITHUB_REPOSITORY" --color B60205 --description "A dependency has a RustSec advisory" 2>/dev/null || true
+          open=$(gh issue list -R "$GITHUB_REPOSITORY" --label security-advisory --state open --json number -q '.[0].number')
+          if [ "$RESULT" = failure ]; then
+            if [ -n "$open" ]; then
+              gh issue comment "$open" -R "$GITHUB_REPOSITORY" --body "Still failing: $RUN"
+            else
+              gh issue create -R "$GITHUB_REPOSITORY" --label security-advisory \
+                --title "Dependency advisory: cargo deny check advisories fails on main" \
+                --body "The RustSec check failed on main ($GITHUB_EVENT_NAME). Details: $RUN. Fix by updating the dependency (Renovate opens a PR for fixable ones), or add a reasoned ignore to deny.toml when no fix exists."
+            fi
+          elif [ "$RESULT" = success ] && [ -n "$open" ]; then
+            gh issue close "$open" -R "$GITHUB_REPOSITORY" --comment "The RustSec check is green again: $RUN"
+          fi

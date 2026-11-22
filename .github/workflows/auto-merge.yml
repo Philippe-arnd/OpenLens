@@ -1,0 +1,40 @@
+name: Auto Merge
+
+# Renovate PRs merge themselves once CI is green; a PR that fails a required
+# check gets a deduplicated issue (label renovate-ci-failure), closed again
+# when it is fixed (#195). Majors (label major-update) wait for a person.
+on:
+  workflow_run:
+    workflows:
+      - "CI"
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  issues: write
+
+concurrency:
+  group: auto-merge-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  auto-merge:
+    name: Auto Merge
+    # One CI workflow: run on failure too, or a failing PR never gets its issue.
+    if: github.event.workflow_run.event == 'pull_request' && (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure')
+    uses: Philippe-arnd/reusable-workflow-vibecoded/.github/workflows/reusable-auto-merge.yml@main
+    with:
+      required-checks: |
+        cargo xtask ci
+        sdk (build, size budget, committed bundle up to date)
+        dependency advisories (RustSec)
+      conditional-checks: |
+        browser e2e (one script tag, real server)
+      merge-method: "merge"
+      base-branch: "main"
+      block-label: "major-update"
+      file-issue-on-failure: true
+      triggering-conclusion: ${{ github.event.workflow_run.conclusion }}
+      triggering-branch: ${{ github.event.workflow_run.head_branch }}

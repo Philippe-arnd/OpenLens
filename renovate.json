@@ -1,4 +1,37 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"]
+  "extends": ["config:recommended", ":dependencyDashboard", "helpers:pinGitHubActionDigests"],
+  "timezone": "Europe/Paris",
+  "schedule": ["before 8am on monday"],
+  "lockFileMaintenance": { "enabled": true, "schedule": ["before 8am on monday"], "automerge": true },
+  "vulnerabilityAlerts": { "enabled": true, "schedule": ["at any time"], "automerge": true, "labels": ["security"] },
+  "minimumReleaseAge": "3 days",
+  "prConcurrentLimit": 6,
+  "packageRules": [
+    {
+      "description": "DataFusion, Arrow and Parquet move together: one PR, one CI run.",
+      "groupName": "datafusion and arrow",
+      "matchPackageNames": ["/^datafusion/", "/^arrow/", "parquet", "object_store"]
+    },
+    {
+      "description": "Everything non-major merges itself once the gate is green (auto-merge.yml).",
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest", "lockFileMaintenance"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    },
+    {
+      "description": "Before 1.0, a 0.x minor of a crate is a major: review it like one.",
+      "matchManagers": ["cargo"],
+      "matchCurrentVersion": "/^0\\./",
+      "matchUpdateTypes": ["minor"],
+      "automerge": false,
+      "addLabels": ["major-update"]
+    },
+    {
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "addLabels": ["major-update"]
+    }
+  ]
 }
