@@ -29,7 +29,7 @@ jobs:
       TAG: ${{ github.ref_type == 'tag' && github.ref_name || 'latest' }}
     steps:
       - uses: actions/checkout@v6
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
       - name: lint and render
         run: |
           helm lint "$CHART"
@@ -46,7 +46,7 @@ jobs:
             echo "deploy/k8s/base/openlens.yaml is stale: run scripts/render-k8s.sh (rendered file attached as an artifact)"; exit 1
           fi
           ! grep -q "kind: Secret" deploy/k8s/base/openlens.yaml
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: rendered-k8s
