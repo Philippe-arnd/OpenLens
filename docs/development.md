@@ -37,7 +37,7 @@ OpenLens follows [SemVer](https://semver.org) and keeps a [CHANGELOG](../CHANGEL
 
 1. Move the `Unreleased` entries of `CHANGELOG.md` under the new version and date. Set the same version in `sdk/js/package.json`, and in the `Cargo.toml` workspace version.
 2. Merge that through a PR as usual.
-3. Tag `main`: `git tag -a vX.Y.Z -m "OpenLens vX.Y.Z" && git push origin vX.Y.Z`. The tag builds, smoke-tests and publishes the image `ghcr.io/philippe-arnd/openlens:vX.Y.Z` (`release.yml`), and publishes `@openlens/web` (`npm.yml`, public repo only).
+3. Tag `main`: `git tag -a vX.Y.Z -m "OpenLens vX.Y.Z" && git push origin vX.Y.Z`. The tag builds, smoke-tests and publishes the image `ghcr.io/philippe-arnd/openlens:vX.Y.Z` (also `X.Y.Z` and `X.Y`) (`release.yml`), and publishes `@openlens/web` (`npm.yml`, public repo only).
 4. Create the GitHub release from the tag, with the changelog section as notes: `gh release create vX.Y.Z --notes-file <notes>`.
 
 **npm, once.** On npmjs.com, add a *trusted publisher* for `@openlens/web`: repository `Philippe-arnd/OpenLens`, workflow `npm.yml`. No token is needed; `NPM_TOKEN` as a repository secret also works.

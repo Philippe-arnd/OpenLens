@@ -14,7 +14,7 @@ OpenLens is a method plus the tool that carries it out ([docs/method.md](docs/me
 | M3 Focus | ✅ | ✅ planted patterns found (testkit); 🟡 "Journal's board makes sense to Phil" waits for the deployment |
 | M4 Act | ✅ | ✅ a flagged cohort shows on the board |
 | M5 See it | ✅ | ✅ churn card → replay of a session that churned there |
-| M6 Production + dogfooding | 🚧 | ⏳ two of Phil's apps on OpenLens for 30 days without data loss |
+| M6 Production + dogfooding | 🚧 | ⏳ Journal and Kanban on OpenLens since 2026-11-22: 30 days without data loss (until 2026-12-22) |
 | M7 The former Later list (D-016) | ✅ | every item shipped, optional ones off until configured |
 
 ---
@@ -26,7 +26,7 @@ A layered workspace, `cargo xtask ci`, AGENTS.md, Docker and compose with the he
 - **`POST /capture`:** batched and gzip-compressed, with a key per project, and safe against hostile input. Events go to the WAL, then to **daily** Parquet partitions (`project=/date=`), with compaction.
 - **Metadata:** projects, persons, role history (D-009).
 - **`environment` and `release`** on every event (D-012).
-- **`@openlens/web` SDK** (3.8 kB gz), served at `/c.js`. It covers autocapture (page views, SPA routes, clicks, submits, rage clicks, scroll depth), `identify(id, { role, account, plan })`, sessions, errors, Web Vitals, failed requests, environment and release detection, consent and DNT.
+- **`@openlens/web` SDK** (4.6 kB gz), served at `/c.js`. It covers autocapture (page views, SPA routes, clicks, submits, rage clicks, scroll depth), `identify(id, { role, account, plan })`, sessions, errors, Web Vitals, failed requests, environment and release detection, consent and DNT.
 - **Query engine:** DataFusion over the partitions, with read-only SQL per project.
 - **Dashboard:** login with the admin token or a one-time link.
 - **Deployment:** the Coolify one-click template and the GHCR image, with no required environment variables.
@@ -67,7 +67,9 @@ A layered workspace, `cargo xtask ci`, AGENTS.md, Docker and compose with the he
 ## M6: Production-grade and dogfooding 🚧
 - ✅ Fixed retention (events 400 days, replays 30 days), `openlens backup` while running, benchmarks ([docs/benchmarks.md](docs/benchmarks.md)): about 80k events/s on one vCPU.
 - ✅ A nightly check of every dashboard page in a real browser, under the real CSP, with screenshots.
-- ⏳ Deploy OpenLens, then move Journal and Kanban from OpenObserve RUM to OpenLens (#42).
+- ✅ OpenLens deployed (2026-11-22). Journal and Kanban send their events to it, with OpenObserve RUM kept in parallel for the comparison (#42).
+- ✅ An audit of the numbers against [docs/kpis.md](docs/kpis.md): anonymous visits linked to the user, identified users only, bounces, tasks, and first seen (#133–#136).
+- ⏳ 30 days of dogfooding, until 2026-12-22.
 
 **Exit:** two of Phil's prod apps run on OpenLens for 30 days without data loss.
 
