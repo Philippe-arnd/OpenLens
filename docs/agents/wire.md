@@ -223,3 +223,80 @@ How to set the header:
 - **Rails:** `content_security_policy` with `policy.script_src :self, "https://lens.example.com"` and `policy.connect_src :self, "https://lens.example.com"`.
 - **Django:** `django-csp`, with `script-src` and `connect-src` in `CONTENT_SECURITY_POLICY` (version 4) or `CSP_SCRIPT_SRC` and `CSP_CONNECT_SRC` (version 3).
 
+## Ad blockers: proxy through the app's domain
+
+Some content blockers drop requests to third-party analytics hosts. That undercounts users, and unevenly: blocker use differs by audience. To avoid it, serve OpenLens under a path of the app's own domain, then point the SDK at that path. CORS and CSP become same-origin as a bonus.
+
+1. **Pick a neutral prefix**, for example `/_l`. Avoid words that block lists match, such as `analytics`, `track`, `collect` or `openlens`.
+2. **Forward `/_l/*` to the OpenLens server with the prefix removed:** `/_l/capture` → `https://lens.example.com/capture`. The paths in use are `/c.js`, `/r.js`, `/s.js`, `/capture`, `/flags` and `/r`. Requests are at most 1 MB.
+3. **Point the SDK at the prefix:**
+   - **script tag:** `<script src="/_l/c.js" data-key="pk_…" defer></script>`. The server is wherever `c.js` came from, prefix included, so no other attribute is needed.
+   - **npm:** `openlens.init({ host: "/_l", key: "pk_…" })`. A relative host works, as does `https://app.example.com/_l`.
+4. **Check it:** in the browser's network tab, events go to `/_l/capture` on the app's domain. Then run `openlens-cli verify`.
+
+The dashboard and the API stay on the OpenLens domain; only the SDK's traffic goes through the proxy.
+
+**Nginx**
+
+```nginx
+location /_l/ {
+    proxy_pass https://lens.example.com/;   # the trailing slash strips /_l/
+    proxy_set_header Host lens.example.com;
+    proxy_ssl_server_name on;
+    client_max_body_size 1m;
+}
+```
+
+**Caddy**
+
+```caddy
+handle_path /_l/* {
+    reverse_proxy https://lens.example.com {
+        header_up Host {upstream_hostport}
+    }
+}
+```
+
+**Traefik** (file provider; with Coolify, add it under the proxy's dynamic configuration)
+
+```yaml
+http:
+  routers:
+    app-lens:
+      rule: Host(`app.example.com`) && PathPrefix(`/_l`)
+      middlewares: [app-lens-strip]
+      service: app-lens
+  middlewares:
+    app-lens-strip:
+      stripPrefix:
+        prefixes: [/_l]
+  services:
+    app-lens:
+      loadBalancer:
+        passHostHeader: false
+        servers:
+          - url: https://lens.example.com
+```
+
+**Next.js** (`next.config.js`)
+
+```js
+module.exports = {
+  async rewrites() {
+    return [{ source: "/_l/:path*", destination: "https://lens.example.com/:path*" }];
+  },
+};
+```
+
+**Vercel / Netlify** (static hosting)
+
+```json
+// vercel.json
+{ "rewrites": [{ "source": "/_l/:path*", "destination": "https://lens.example.com/:path*" }] }
+```
+
+```text
+# netlify: public/_redirects
+/_l/*  https://lens.example.com/:splat  200
+```
+

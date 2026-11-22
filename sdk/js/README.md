@@ -6,7 +6,7 @@ It is the one non-Rust part of OpenLens (`docs/decisions.md`, D-003). It has to 
 
 ## Install
 
-**Script tag** (server-rendered apps). The host is the script's own origin, so the key is the only attribute you need:
+**Script tag** (server-rendered apps). The server is wherever the script came from, path prefix included, so the key is the only attribute you need, also behind a proxy on your own domain:
 
 ```html
 <script src="https://lens.example.com/c.js" data-key="pk_..." data-release="v1.4.2" defer></script>
