@@ -6,7 +6,7 @@ The reference is the public feature lists of hosted product-analytics suites, de
 | --- | --- | --- | --- |
 | Capture | Batched ingestion, WAL, Parquet, compaction | M1 | ● |
 | Capture | Script tag and npm SDK: autocapture, identify, sessions, errors, Web Vitals, failed requests, scroll depth | M1 | ● (npm publish once the repo is public) |
-| Capture | Server-side events: Node and Python clients, plain HTTP | M7 | ● |
+| Capture | Server-side events: Node, Python, Go, Ruby and PHP clients, plain HTTP | M7 | ● |
 | Capture | Native mobile SDKs (iOS, Android, React Native, Flutter) | — | — not planned yet |
 | Capture | ★ Environment and release on every event | M1 | ● |
 | Platform | ★ One-click Coolify deploy with no required env vars | M1 | ● |

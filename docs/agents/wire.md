@@ -191,7 +191,7 @@ Use the script tag in the main layout, with `data-release` from the deploy (an e
 </script>
 ```
 
-Write the values as JSON with the template engine (`|tojson` in Jinja, `json_script` in Django, `to_json` in Rails, `@json` in Blade), never as raw strings. Call `openlens.reset()` the same way on the page shown after logout. For events that happen on the server (a payment confirmed, a job finished), use the Node or Python server SDK, or a plain `POST /capture` ([sdk/SERVER.md](../../sdk/SERVER.md)).
+Write the values as JSON with the template engine (`|tojson` in Jinja, `json_script` in Django, `to_json` in Rails, `@json` in Blade), never as raw strings. Call `openlens.reset()` the same way on the page shown after logout. For events that happen on the server (a payment confirmed, a job finished), use a server SDK (Node, Python, Go, Ruby, PHP), or a plain `POST /capture` ([sdk/SERVER.md](../../sdk/SERVER.md)).
 
 ## Strict Content Security Policy
 
