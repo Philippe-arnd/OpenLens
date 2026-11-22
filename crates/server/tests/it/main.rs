@@ -1396,3 +1396,29 @@ async fn first_owner_login_creates_the_admin_account() {
         "set up: straight to the board"
     );
 }
+
+/// Without SMTP and a public URL there is no email sign-in, and asking for a
+/// link says the same thing whatever the address.
+#[tokio::test]
+async fn email_login_is_off_without_smtp_and_never_tells_who_exists() {
+    let h = harness();
+    let page = get(&h, "/login", None, false).await;
+    let body = axum::body::to_bytes(page.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    assert!(!String::from_utf8_lossy(&body).contains("Email me a login link"));
+    for email in ["nobody@example.com", "x"] {
+        let r = router(h.state.clone())
+            .oneshot(
+                Request::post("/login/email")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(format!("email={email}")))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("Check your inbox"));
+    }
+}

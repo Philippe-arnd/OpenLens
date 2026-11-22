@@ -15,6 +15,7 @@ pub(crate) fn routes() -> Router<AppState> {
     Router::new()
         .route("/", get(home))
         .route("/login", get(login_page).post(login))
+        .route("/login/email", post(login_email))
         .route("/projects", get(projects_page))
         .route("/welcome", get(welcome_page).post(welcome_create))
         .route("/users", get(users_page).post(users_invite))
@@ -125,7 +126,7 @@ async fn home(State(state): State<AppState>, headers: HeaderMap) -> Response {
 async fn login_page() -> Response {
     html(
         StatusCode::OK,
-        openlens_ui::login(false, crate::oidc::enabled()),
+        openlens_ui::login(false, crate::oidc::enabled(), email_login().is_some()),
     )
 }
 
@@ -152,8 +153,87 @@ async fn login(
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     html(
         StatusCode::UNAUTHORIZED,
-        openlens_ui::login(true, crate::oidc::enabled()),
+        openlens_ui::login(true, crate::oidc::enabled(), email_login().is_some()),
     )
+}
+
+/// Sign-in links by email: needs SMTP and the public URL, which the link
+/// is built from (never from the request's Host header, which a caller
+/// controls). Returns (SMTP URL, sender, public URL).
+fn email_login() -> Option<(String, String, String)> {
+    let (smtp, from) = crate::digest::login_mail()?;
+    let base = std::env::var("OPENLENS_PUBLIC_URL")
+        .or_else(|_| std::env::var("SERVICE_URL_OPENLENS"))
+        .ok()
+        .filter(|u| u.starts_with("https://") || u.starts_with("http://localhost"))?;
+    Some((smtp, from, base.trim_end_matches('/').to_owned()))
+}
+
+/// At most one email per address every 10 minutes, and 30 an hour in all.
+fn email_allowed(email: &str) -> bool {
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+    type Sent = (Vec<Instant>, std::collections::HashMap<String, Instant>);
+    static SENT: OnceLock<Mutex<Sent>> = OnceLock::new();
+    let Ok(mut s) = SENT.get_or_init(Mutex::default).lock() else {
+        return false;
+    };
+    let now = Instant::now();
+    s.0.retain(|t| now.duration_since(*t) < Duration::from_secs(3600));
+    s.1.retain(|_, t| now.duration_since(*t) < Duration::from_secs(600));
+    if s.0.len() >= 30 || s.1.contains_key(email) {
+        return false;
+    }
+    s.0.push(now);
+    s.1.insert(email.to_owned(), now);
+    true
+}
+
+#[derive(Deserialize)]
+struct EmailForm {
+    email: String,
+}
+
+/// "Email me a login link": the same answer whether the address has an
+/// account or not, and the email goes out in the background.
+async fn login_email(State(state): State<AppState>, Form(f): Form<EmailForm>) -> Response {
+    let done = html(
+        StatusCode::OK,
+        openlens_ui::message(
+            "Check your inbox",
+            "If this address was invited, a login link is on its way. It works once, within 15 minutes.",
+        ),
+    );
+    let Some((smtp, from, base)) = email_login() else {
+        return done;
+    };
+    let email = f.email.trim().to_lowercase();
+    if email.len() > 200 || !email.contains('@') || !email_allowed(&email) {
+        return done;
+    }
+    tokio::spawn(async move {
+        let meta = state.meta.clone();
+        let e = email.clone();
+        let link = tokio::task::spawn_blocking(move || {
+            let u = meta.user_by_email(&e).ok()??;
+            meta.create_login_link_for(Some(&u.id), 15 * 60).ok()
+        })
+        .await
+        .ok()
+        .flatten();
+        if let Some(token) = link {
+            let body = format!(
+                "Here is your OpenLens login link. It works once, within 15 minutes:\n\n{base}/l/{token}\n\nIf you did not ask for it, ignore this email.\n"
+            );
+            if let Err(err) =
+                crate::digest::send_mail(&smtp, &from, &[email], "Your OpenLens login link", &body)
+                    .await
+            {
+                tracing::warn!(%err, "login email failed");
+            }
+        }
+    });
+    done
 }
 
 async fn logout(headers: HeaderMap) -> Response {
