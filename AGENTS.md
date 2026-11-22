@@ -65,7 +65,7 @@ Layers (checked by `cargo xtask layers`; register every new crate in `xtask/src/
 
 - L0 `event`
 - L1 `storage`, `meta`
-- L2 `query`, `flags`, `replay`, `errors`, `heatmaps`, `featuremap`
+- L2 `query`, `flags`, `replay`, `errors`, `featuremap`
 - L3 `engine`
 - L4 `ui` (HTML rendering), `mcp`
 - L5 `server`

@@ -2346,10 +2346,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "openlens-heatmaps"
-version = "0.0.1"
-
-[[package]]
 name = "openlens-mcp"
 version = "0.0.1"
 dependencies = [
