@@ -44,6 +44,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- **Image tags are update channels:** `:latest` is now the newest *stable* release, where until now it followed `main`. `:0.2` follows the patches of a minor version, and `:edge` follows `main`. A stable release can redeploy a Coolify instance by itself (secrets `COOLIFY_DEPLOY_URL` and `COOLIFY_TOKEN`), and the dashboard footer shows the version and *Update available* (one daily GET to GitHub, `OPENLENS_UPDATE_CHECK=off` to disable) (#198).
 - **Build releases on every merge:** each code change on `main` is published as `vX.Y.Z-YYMMDD-sha` (version in development, UTC date, commit), with the binaries, SDK bundles, chart, checksums, image and notes. They are marked pre-release until `vX.Y.Z` is tagged.
 - **Navigation is a sidebar on the left**, collapsible to icons only. Collapse and Expand links remember the choice in a cookie (no script), and phones always get the icon rail. It holds the project switcher, the project's pages (with Digest), the current page marked, the theme and Log out (#170).
 - **No more automatic `default` project.** Agents create one project per app (`openlens-cli init --name <app>`). A `default` project is created only when `OPENLENS_PROJECT_KEY` is set (CI, demos, templates that want a key at once). With no project, the home page points to `/agents.md`. The admin token is logged once, when it is generated.

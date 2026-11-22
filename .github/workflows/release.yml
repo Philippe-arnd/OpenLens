@@ -69,13 +69,16 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/philippe-arnd/openlens
+          # Channels (#198): `latest` = newest stable release (set by the
+          # semver tags, never by main or a pre-release), `0.2` = patches of
+          # a minor, `edge` = main. Installs that update themselves follow
+          # `latest` or a minor channel, never `edge`.
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=edge,enable={{is_default_branch}}
             type=sha,prefix=
             type=ref,event=tag
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{version}}
       - name: publish (reuses the cached layers)
         uses: docker/build-push-action@v6
         with:
@@ -84,6 +87,16 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
+      # Automatic deploy of the maintainer's own instance after a stable
+      # release (#198). Skipped when the secrets are absent (forks, others).
+      - name: deploy to Coolify (stable releases only)
+        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+        env:
+          URL: ${{ secrets.COOLIFY_DEPLOY_URL }}
+          TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+        run: |
+          if [ -z "$URL" ] || [ -z "$TOKEN" ]; then echo "no Coolify deploy configured"; exit 0; fi
+          curl -fsS --retry 3 -H "Authorization: Bearer $TOKEN" "$URL"
       - if: failure() && github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
