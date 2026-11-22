@@ -1,0 +1,13 @@
+apiVersion: v2
+name: openlens
+description: Self-hosted product analytics in one binary. Agents wire it in; the PM opens a board that already says where the value is.
+type: application
+# The chart version follows the OpenLens release (set by CI on v* tags).
+version: 0.1.0
+appVersion: "v0.1.0"
+home: https://github.com/Philippe-arnd/OpenLens
+sources:
+  - https://github.com/Philippe-arnd/OpenLens
+keywords: [analytics, product-analytics, session-replay, feature-flags, self-hosted]
+annotations:
+  artifacthub.io/license: AGPL-3.0-only

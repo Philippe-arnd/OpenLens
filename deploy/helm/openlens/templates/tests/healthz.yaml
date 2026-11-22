@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "openlens.fullname" . }}-healthz
+  labels: {{- include "openlens.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    seccompProfile: { type: RuntimeDefault }
+  containers:
+    - name: healthz
+      image: {{ include "openlens.image" . | quote }}
+      # Through the Service, with the admin token: API, auth and query engine.
+      command: ["/usr/local/bin/openlens-cli", "sql", "SELECT count(*) AS n FROM events"]
+      env:
+        - name: OPENLENS_SERVER
+          value: "http://{{ include "openlens.fullname" . }}:{{ .Values.service.port }}"
+        - name: OPENLENS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "openlens.tokenSecret" . }}
+              key: {{ .Values.adminToken.key }}
+      securityContext: {{- include "openlens.securityContext" . | nindent 8 }}

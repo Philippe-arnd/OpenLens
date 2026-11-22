@@ -1,0 +1,18 @@
+OpenLens is starting ({{ include "openlens.image" . }}).
+
+1. Admin token:
+   kubectl -n {{ .Release.Namespace }} get secret {{ include "openlens.tokenSecret" . }} -o jsonpath='{.data.{{ .Values.adminToken.key }}}' | base64 -d; echo
+
+2. Open the dashboard:
+{{- if .Values.ingress.enabled }}
+   https://{{ .Values.ingress.host }}
+{{- else }}
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "openlens.fullname" . }} 8686:{{ .Values.service.port }}
+   then http://localhost:8686 (enable the Ingress to expose it).
+{{- end }}
+   Log in with the token. The first login creates your admin account.
+
+3. Wire an app (agents): follow {{ if .Values.ingress.enabled }}https://{{ .Values.ingress.host }}{{ else }}http://localhost:8686{{ end }}/agents.md
+   with OPENLENS_SERVER set to that URL and OPENLENS_TOKEN to the token above.
+
+One replica by design (single writer). Data lives in the PVC data-{{ include "openlens.fullname" . }}-0.

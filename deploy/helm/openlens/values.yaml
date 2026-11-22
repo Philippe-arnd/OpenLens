@@ -1,0 +1,63 @@
+# OpenLens needs no value to run: `helm install openlens <chart>` is enough.
+# Everything below is optional.
+
+image:
+  repository: ghcr.io/philippe-arnd/openlens
+  # Defaults to the chart's appVersion (the matching OpenLens release).
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# OpenLens is a single writer (write-ahead log + SQLite on one volume):
+# exactly one replica. Any other value is refused at install.
+replicaCount: 1
+
+adminToken:
+  # Use your own Secret (key below) instead of the generated one.
+  existingSecret: ""
+  key: admin-token
+
+# Public URL of the dashboard, used in emailed links (digest). Defaults to
+# https://<ingress.host> when the Ingress is enabled.
+publicUrl: ""
+
+persistence:
+  size: 10Gi
+  # Empty: the cluster's default storage class.
+  storageClass: ""
+  accessModes: [ReadWriteOnce]
+
+service:
+  type: ClusterIP
+  port: 8686
+
+ingress:
+  enabled: false
+  className: ""
+  host: ""
+  # Serve HTTPS from a TLS Secret (default name: <release>-openlens-tls).
+  # With cert-manager, add its annotation below and the Secret is created for you.
+  tls: false
+  tlsSecretName: ""
+  annotations: {}
+  # cert-manager.io/cluster-issuer: letsencrypt
+
+# Optional features (SMTP digest, LLM rewording, OIDC, S3 copy) read their
+# OPENLENS_* variables from Secrets or ConfigMaps you create (never values):
+# extraEnvFrom:
+#   - secretRef:
+#       name: openlens-options
+extraEnvFrom: []
+extraEnv: []
+
+# About 80k events/s per vCPU (docs/benchmarks.md): small apps need little.
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 1Gi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}
