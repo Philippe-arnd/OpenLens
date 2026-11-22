@@ -9,7 +9,8 @@ Your agents wire it in. Your PM opens a board that already says where the value 
 [![Image](https://github.com/Philippe-arnd/OpenLens/actions/workflows/release.yml/badge.svg)](https://github.com/Philippe-arnd/OpenLens/actions/workflows/release.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-6d5efc)](LICENSE)
 ![Rust](https://img.shields.io/badge/rust-2024-e5486a?logo=rust)
-![SDK](https://img.shields.io/badge/SDK-3.8%20kB%20gz-0e9f6e)
+[![Release](https://img.shields.io/github/v/release/Philippe-arnd/OpenLens?color=6d5efc)](https://github.com/Philippe-arnd/OpenLens/releases)
+![SDK](https://img.shields.io/badge/SDK-4.6%20kB%20gz-0e9f6e)
 ![Ingest](https://img.shields.io/badge/ingest-80k%20events%2Fs%2FvCPU-2f8cf0)
 ![Config](https://img.shields.io/badge/config-none%20required-d99400)
 
@@ -78,7 +79,7 @@ openlens.identify(user.id, { role: user.role, account: user.orgId, plan: user.pl
   - input values are never captured;
   - Do Not Track and consent are respected;
   - `data-openlens-mask` and `data-openlens-block` give finer control over what replay records.
-- **Size:** the core SDK is **3.8 kB** gzipped. The replay recorder loads separately, only once the page is idle.
+- **Size:** the core SDK is **4.6 kB** gzipped. The replay recorder loads separately, only once the page is idle.
 
 Two complete examples, both wired by following the agent guide, live in [`examples/`](examples/). Every night, CI clicks through them in Chromium and requires a green `verify`.
 
@@ -104,7 +105,7 @@ OPENLENS_DATA_DIR=./data OPENLENS_ADMIN_TOKEN=demo cargo run -p openlens
 
 ## 🗺️ Status
 
-**Working, tested, not yet in production.** Milestones M0–M5 are done. M6, dogfooding on two real apps for 30 days, starts with the first deployment. See [ROADMAP.md](ROADMAP.md), [gaps](docs/gaps.md) and [parity with the category](docs/target-app-parity.md).
+**v0.1.0, in production.** Milestones M0–M5 and M7 are done. M6 is under way: two real apps (Journal and Kanban) have been sending their events to a production instance since 2026-11-22, and the exit check is 30 days without data loss. What changed is in the [CHANGELOG](CHANGELOG.md). See [ROADMAP.md](ROADMAP.md), [gaps](docs/gaps.md) and [parity with the category](docs/target-app-parity.md).
 
 | | |
 | --- | --- |
