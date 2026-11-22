@@ -121,3 +121,27 @@ fn project_ids_that_escape_the_tree_are_refused() {
     }
     assert!(valid_project("default"));
 }
+
+#[test]
+fn retention_drops_days_older_than_the_window_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let now = Utc::now();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let keep = openlens_storage::EVENT_RETENTION_DAYS - 1;
+    let drop = openlens_storage::EVENT_RETENTION_DAYS + 2;
+    w.append(&[
+        ev("p", now),
+        ev("p", now - Duration::days(keep)),
+        ev("p", now - Duration::days(drop)),
+    ])
+    .unwrap();
+    w.flush().unwrap();
+    assert_eq!(count_rows(dir.path(), "p").unwrap(), 3);
+    assert_eq!(openlens_storage::prune(dir.path(), "p", now).unwrap(), 1);
+    assert_eq!(count_rows(dir.path(), "p").unwrap(), 2);
+    assert_eq!(openlens_storage::prune(dir.path(), "p", now).unwrap(), 0);
+    assert_eq!(
+        openlens_storage::prune(dir.path(), "empty", now).unwrap(),
+        0
+    );
+}

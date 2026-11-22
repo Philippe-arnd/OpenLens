@@ -69,10 +69,10 @@ Layered workspace, `cargo xtask ci`, AGENTS.md, Docker + compose with the health
 **Exit:** from a churn-point card, one click opens a replay of a session that churned there.
 
 ## M6: Production-grade and dogfooding
-- OIDC login, retention/TTL, S3 backend, backups, benchmarks.
+- Fixed retention (events 400 days, replays 30 days), `openlens backup`, benchmarks (docs/benchmarks.md). OIDC and the S3 backend moved to Later (D-015).
 - Move Journal and Kanban from OpenObserve RUM to OpenLens.
 
 **Exit:** two of Phil's prod apps run on OpenLens for 30 days without data loss.
 
 ## Later (not planned until a real need shows)
-Weekly digest, LLM rewording of cards, in-app micro-surveys, experiment significance, server SDKs (thin HTTP clients), multi-user permissions.
+Weekly digest, LLM rewording of cards, in-app micro-surveys, experiment significance, server SDKs (thin HTTP clients), multi-user permissions, OIDC login, S3 storage backend (D-015).

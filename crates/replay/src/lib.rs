@@ -222,6 +222,39 @@ pub fn list(root: &Path, project: &str, distinct_id: Option<&str>) -> Result<Vec
     Ok(out)
 }
 
+/// Days a recording is kept after its last chunk. Fixed by design (D-015):
+/// replays are for looking at recent behaviour, and they are the bulk of
+/// the data.
+pub const RETENTION_DAYS: i64 = 30;
+
+/// Delete a project's recordings whose last chunk is older than
+/// [`RETENTION_DAYS`]. Returns the number removed.
+pub fn prune(root: &Path, project: &str, now: DateTime<Utc>) -> Result<usize> {
+    let dir = project_dir(root, project)?;
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Ok(0);
+    };
+    let cutoff: std::time::SystemTime = (now - chrono::Duration::days(RETENTION_DAYS)).into();
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let valid = entry.file_name().to_str().is_some_and(valid_id);
+        if !valid || !path.is_dir() {
+            continue;
+        }
+        let last = chunk_files(&path)?
+            .iter()
+            .map(|c| c.3)
+            .max()
+            .or_else(|| entry.metadata().and_then(|m| m.modified()).ok());
+        if last.is_none_or(|t| t < cutoff) {
+            fs::remove_dir_all(&path)?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
 /// One recording's owner and all its events in chunk order, as one JSON
 /// array, or `None` if it does not exist.
 pub fn load(root: &Path, project: &str, session: &str) -> Result<Option<(Info, String)>> {
@@ -293,6 +326,17 @@ mod tests {
         assert_eq!(l[0].chunks, 3);
         assert!(list(d.path(), "p1", Some("other")).unwrap().is_empty());
         assert!(load(d.path(), "p1", "nope").unwrap().is_none());
+    }
+
+    #[test]
+    fn prune_keeps_recent_recordings_only() {
+        let d = tempfile::tempdir().unwrap();
+        append(d.path(), "p", "s", "u", 0, &raw("[]"), Utc::now()).unwrap();
+        assert_eq!(prune(d.path(), "p", Utc::now()).unwrap(), 0);
+        let later = Utc::now() + chrono::Duration::days(RETENTION_DAYS + 1);
+        assert_eq!(prune(d.path(), "p", later).unwrap(), 1);
+        assert!(list(d.path(), "p", None).unwrap().is_empty());
+        assert_eq!(prune(d.path(), "nobody", later).unwrap(), 0);
     }
 
     #[test]
