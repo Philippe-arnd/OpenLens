@@ -92,7 +92,8 @@ async function main(): Promise<void> {
   rep.on("resize", fit);
   addEventListener("resize", fit);
 
-  const at = Number(root.dataset.at || "0");
+  // data-at is a UTC timestamp ("2026-11-22 01:22:01.1"): start 3 s before it.
+  const at = root.dataset.at ? Date.parse(`${root.dataset.at.replace(" ", "T").slice(0, 23)}Z`) || 0 : 0;
   const first = (events[0] as { timestamp: number }).timestamp;
   const offset = at > first ? Math.min(at - first - 3000, total) : 0;
   rep.pause(Math.max(0, offset));

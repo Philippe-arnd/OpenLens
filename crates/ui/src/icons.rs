@@ -15,6 +15,10 @@ const ICONS: &[(&str, &str)] = &[
         "events",
         r#"<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="5" cy="6" r=".6"/><circle cx="5" cy="12" r=".6"/><circle cx="5" cy="18" r=".6"/>"#,
     ),
+    (
+        "play",
+        r#"<circle cx="12" cy="12" r="8.5"/><path d="M10 8.8v6.4l5.2-3.2z"/>"#,
+    ),
     ("flag", r#"<path d="M5 21V4M5 4h11l-2.5 4L16 12H5"/>"#),
     (
         "users",

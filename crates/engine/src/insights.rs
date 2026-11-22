@@ -52,6 +52,18 @@ fn rows(
 
 /// Compute all insights. `src` is the event source (raw or map-resolved),
 /// `w90` the filter clause over the analysis window, `churn` the window in days.
+/// Events of the last 90 days and the cohort judged for retention: users
+/// first seen before the churn window, `retained` = seen within it.
+pub(crate) fn cohort_base(src: &str, w: &str, churn: i64) -> String {
+    format!(
+        "WITH ev AS (SELECT distinct_id, timestamp, feature, event, path, release, session_id FROM {src} WHERE {w}), \
+         users AS (SELECT distinct_id, min(timestamp) AS first_seen, max(timestamp) AS last_seen FROM ev GROUP BY distinct_id), \
+         cohort AS (SELECT distinct_id, first_seen, last_seen, \
+                    CASE WHEN last_seen >= now() - INTERVAL '{churn} days' THEN 1 ELSE 0 END AS retained \
+                    FROM users WHERE first_seen <= now() - INTERVAL '{churn} days')"
+    )
+}
+
 pub(crate) async fn compute(
     q: &QueryEngine,
     project: &str,
@@ -61,13 +73,7 @@ pub(crate) async fn compute(
     successes: &[(String, String)],
 ) -> Result<(Vec<Insight>, Readiness)> {
     let w = f.clause(90)?;
-    let base = format!(
-        "WITH ev AS (SELECT distinct_id, timestamp, feature, event, path, release, session_id FROM {src} WHERE {w}), \
-         users AS (SELECT distinct_id, min(timestamp) AS first_seen, max(timestamp) AS last_seen FROM ev GROUP BY distinct_id), \
-         cohort AS (SELECT distinct_id, first_seen, last_seen, \
-                    CASE WHEN last_seen >= now() - INTERVAL '{churn} days' THEN 1 ELSE 0 END AS retained \
-                    FROM users WHERE first_seen <= now() - INTERVAL '{churn} days')"
-    );
+    let base = cohort_base(src, &w, churn);
     let totals_sql = format!("{base} SELECT count(*) AS n, sum(retained) AS kept FROM cohort");
     let early_sql = format!(
         "{base}, early AS (SELECT e.distinct_id, e.feature, count(*) AS uses FROM ev e JOIN cohort c ON e.distinct_id = c.distinct_id \

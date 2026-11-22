@@ -2449,9 +2449,11 @@ dependencies = [
 name = "openlens-ui"
 version = "0.0.1"
 dependencies = [
+ "chrono",
  "maud",
  "openlens-engine",
  "openlens-flags",
+ "openlens-replay",
 ]
 
 [[package]]

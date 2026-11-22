@@ -21,6 +21,15 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/p/{project}/events", get(events))
         .route("/p/{project}/errors", get(errors_page))
         .route("/p/{project}/pages", get(pages_page))
+        .route("/p/{project}/replays", get(replays_page))
+        .route("/p/{project}/replays/{session}", get(player_page))
+        .route(
+            "/p/{project}/replays/{session}/events.json",
+            get(replay_events),
+        )
+        .route("/p/{project}/watch", get(watch_churned))
+        .route("/assets/player.js", get(player_js))
+        .route("/assets/player.css", get(player_css))
         .route("/assets/app.css", get(css))
         .route("/theme/{mode}", get(set_theme))
 }
@@ -373,6 +382,233 @@ async fn pages_page(
         (Err(e), _) | (_, Err(e)) => html(
             StatusCode::BAD_REQUEST,
             openlens_ui::message("Can't show that", &e.to_string()),
+        ),
+    }
+}
+
+/// The replay player (rrweb Replayer, MIT) and its stylesheet.
+const PLAYER_JS: &str = include_str!("../../../sdk/js/dist/openlens-player.min.js");
+const PLAYER_CSS: &str = include_str!("../../../sdk/js/dist/openlens-player.min.css");
+
+async fn player_js() -> Response {
+    (
+        [
+            (
+                header::CONTENT_TYPE,
+                "application/javascript; charset=utf-8",
+            ),
+            (header::CACHE_CONTROL, "public, max-age=3600"),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        ],
+        PLAYER_JS,
+    )
+        .into_response()
+}
+
+async fn player_css() -> Response {
+    (
+        [
+            (header::CONTENT_TYPE, "text/css; charset=utf-8"),
+            (header::CACHE_CONTROL, "public, max-age=3600"),
+        ],
+        PLAYER_CSS,
+    )
+        .into_response()
+}
+
+#[derive(Deserialize)]
+struct ReplayQuery {
+    u: Option<String>,
+    at: Option<String>,
+}
+
+async fn replays_page(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(q): Query<ReplayQuery>,
+) -> Response {
+    if !auth::has_session(&state, &headers) {
+        return to_login();
+    }
+    let Some(p) = project(&state, id).await else {
+        return html(
+            StatusCode::NOT_FOUND,
+            openlens_ui::message("Not found", "No such project."),
+        );
+    };
+    let root = state.data_dir.clone();
+    let pid = p.id.clone();
+    let who = q.u.clone();
+    let list =
+        tokio::task::spawn_blocking(move || openlens_replay::list(&root, &pid, who.as_deref()))
+            .await;
+    let info = openlens_ui::ProjectInfo {
+        id: &p.id,
+        name: &p.name,
+        key: &p.api_key,
+    };
+    match list {
+        Ok(Ok(l)) => html(
+            StatusCode::OK,
+            openlens_ui::replays(&info, &l, q.u.as_deref()),
+        ),
+        _ => html(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            openlens_ui::message("Can't show that", "Recordings cannot be read right now."),
+        ),
+    }
+}
+
+/// The player page is the only dashboard page that runs a script: its own
+/// (`script-src 'self'`). Recorded pages are rebuilt in rrweb's sandboxed
+/// iframe (no scripts) and may reference their own images, styles and fonts.
+fn player_csp(mut r: Response) -> Response {
+    r.headers_mut().insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(
+            "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self' 'unsafe-inline' https:; img-src * data: blob:; font-src https: data:; media-src https: blob:; frame-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+        ),
+    );
+    r
+}
+
+async fn player_page(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((id, session)): Path<(String, String)>,
+    Query(q): Query<ReplayQuery>,
+) -> Response {
+    if !auth::has_session(&state, &headers) {
+        return to_login();
+    }
+    let Some(p) = project(&state, id).await else {
+        return html(
+            StatusCode::NOT_FOUND,
+            openlens_ui::message("Not found", "No such project."),
+        );
+    };
+    let info = openlens_ui::ProjectInfo {
+        id: &p.id,
+        name: &p.name,
+        key: &p.api_key,
+    };
+    let not_found = || {
+        html(
+            StatusCode::NOT_FOUND,
+            openlens_ui::message(
+                "No recording",
+                "This session has no recording (replay was off, consent was not given, or it was not kept).",
+            ),
+        )
+    };
+    if !openlens_replay::valid_id(&session) {
+        return not_found();
+    }
+    let root = state.data_dir.clone();
+    let (pid, sid) = (p.id.clone(), session.clone());
+    let owner = tokio::task::spawn_blocking(move || {
+        openlens_replay::list(&root, &pid, None).map(|l| {
+            l.into_iter()
+                .find(|r| r.session_id == sid)
+                .map(|r| r.distinct_id)
+        })
+    })
+    .await;
+    let Ok(Ok(Some(who))) = owner else {
+        return not_found();
+    };
+    let at = q.at.filter(|a| {
+        a.len() <= 40
+            && a.chars()
+                .all(|c| c.is_ascii_digit() || " -:.TZ".contains(c))
+    });
+    player_csp(html(
+        StatusCode::OK,
+        openlens_ui::player(&info, &session, Some(&who), at.as_deref()),
+    ))
+}
+
+async fn replay_events(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((id, session)): Path<(String, String)>,
+) -> Response {
+    if !auth::has_session(&state, &headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    match crate::replay::load(&state, id, session).await {
+        Ok(Some((_, events))) => (
+            [
+                (header::CONTENT_TYPE, "application/json"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+            format!("{{\"events\":{events}}}"),
+        )
+            .into_response(),
+        _ => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct WatchQuery {
+    churned_at: String,
+}
+
+/// From a churn-point card: open the replay of the latest recorded session
+/// of a user who churned at that place, at the moment they left.
+async fn watch_churned(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(q): Query<WatchQuery>,
+) -> Response {
+    if !auth::has_session(&state, &headers) {
+        return to_login();
+    }
+    let Some(p) = project(&state, id).await else {
+        return html(
+            StatusCode::NOT_FOUND,
+            openlens_ui::message("Not found", "No such project."),
+        );
+    };
+    let map = crate::load_map(&state, &p.id).await;
+    let f = openlens_engine::Filters::default();
+    let (sessions, recorded) = tokio::join!(
+        openlens_engine::churned_sessions(
+            &state.query,
+            &p.id,
+            map.as_ref().map(|(m, _)| m),
+            &f,
+            &q.churned_at
+        ),
+        {
+            let root = state.data_dir.clone();
+            let pid = p.id.clone();
+            tokio::task::spawn_blocking(move || openlens_replay::list(&root, &pid, None))
+        }
+    );
+    let recorded: std::collections::HashSet<String> = match recorded {
+        Ok(Ok(l)) => l.into_iter().map(|r| r.session_id).collect(),
+        _ => Default::default(),
+    };
+    let hit = sessions
+        .unwrap_or_default()
+        .into_iter()
+        .find(|(s, _)| recorded.contains(s));
+    match hit {
+        Some((s, ts)) => Redirect::to(&format!(
+            "/p/{}/replays/{s}?at={}",
+            p.id,
+            openlens_ui::url_enc(&ts)
+        ))
+        .into_response(),
+        None => html(
+            StatusCode::OK,
+            openlens_ui::message(
+                "No recording yet",
+                "None of the sessions that churned there was recorded. Replays fill in as new sessions come in.",
+            ),
         ),
     }
 }

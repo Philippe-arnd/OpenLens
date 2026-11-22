@@ -11,6 +11,8 @@ publish.workspace = true
 [dependencies]
 openlens-engine = { path = "../engine" }
 openlens-flags = { path = "../flags" }
+openlens-replay = { path = "../replay" }
+chrono.workspace = true
 maud.workspace = true
 
 [lints]

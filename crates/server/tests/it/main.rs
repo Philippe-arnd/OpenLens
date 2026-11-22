@@ -725,3 +725,85 @@ async fn replay_chunks_are_stored_and_read_back_in_order() {
         StatusCode::NOT_FOUND
     );
 }
+
+#[tokio::test]
+async fn replay_pages_list_play_and_lock_down() {
+    let h = harness();
+    let body = format!(
+        r#"{{"key":"{}","session_id":"sess-9","distinct_id":"ana","seq":0,"events":[{{"type":4,"timestamp":1}},{{"type":2,"timestamp":2}}]}}"#,
+        h.key
+    );
+    assert_eq!(
+        post(&h, "/r", body.into_bytes(), false).await.0,
+        StatusCode::OK
+    );
+    let project = h.state.meta.project_by_key(&h.key).unwrap().unwrap().id;
+    let base = format!("/p/{project}/replays");
+    assert_eq!(
+        get(&h, &base, None, false).await.status(),
+        StatusCode::SEE_OTHER
+    );
+    let cookie = login_cookie(&h).await;
+    let text = |r: axum::response::Response| async move {
+        String::from_utf8(
+            axum::body::to_bytes(r.into_body(), 1 << 22)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap()
+    };
+    let list = text(get(&h, &base, Some(&cookie), false).await).await;
+    assert!(list.contains("sess-9") && list.contains("ana"));
+    let page = get(
+        &h,
+        &format!("{base}/sess-9?at=2026-01-01%2010:00:00"),
+        Some(&cookie),
+        false,
+    )
+    .await;
+    assert_eq!(page.status(), StatusCode::OK);
+    let csp = page.headers()["content-security-policy"]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    assert!(csp.contains("script-src 'self'") && csp.contains("frame-ancestors 'none'"));
+    let html = text(page).await;
+    assert!(html.contains("/assets/player.js") && html.contains("events.json"));
+    // Other pages keep the no-script policy.
+    let ev = get(&h, &format!("/p/{project}/events"), Some(&cookie), false).await;
+    assert!(
+        !ev.headers()["content-security-policy"]
+            .to_str()
+            .unwrap()
+            .contains("script-src")
+    );
+    let json = text(
+        get(
+            &h,
+            &format!("{base}/sess-9/events.json"),
+            Some(&cookie),
+            false,
+        )
+        .await,
+    )
+    .await;
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["events"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        get(&h, &format!("{base}/sess-9/events.json"), None, false)
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        get(&h, &format!("{base}/nope"), Some(&cookie), false)
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        get(&h, "/assets/player.js", None, false).await.status(),
+        StatusCode::OK
+    );
+}

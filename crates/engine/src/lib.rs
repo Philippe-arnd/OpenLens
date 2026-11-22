@@ -540,6 +540,37 @@ pub struct EventRow {
     pub feature: Option<String>,
     /// Release.
     pub release: Option<String>,
+    /// Session (links to its replay).
+    pub session_id: Option<String>,
+}
+
+/// The last sessions of churned users whose last event was at `place` (a
+/// feature or page, as on the churn-point card), newest first, with the time
+/// of that last event: what to watch to see why they left.
+pub async fn churned_sessions(
+    q: &QueryEngine,
+    project: &str,
+    map: Option<&FeatureMap>,
+    f: &Filters,
+    place: &str,
+) -> Result<Vec<(String, String)>> {
+    let src = source(map);
+    let churn = map.map_or(14, |m| i64::from(m.churn_days()));
+    let base = insights::cohort_base(&src, &f.clause(90)?, churn);
+    let sql = format!(
+        "{base}, churned AS (SELECT distinct_id, last_seen FROM cohort WHERE retained = 0) \
+         SELECT e.session_id AS sid, CAST(e.timestamp AS VARCHAR) AS ts FROM ev e \
+         JOIN churned ch ON e.distinct_id = ch.distinct_id AND e.timestamp = ch.last_seen \
+         WHERE coalesce(e.feature, e.path) = {} AND e.session_id IS NOT NULL \
+         ORDER BY e.timestamp DESC LIMIT 200",
+        lit(place)?
+    );
+    Ok(q.sql(project, &sql)
+        .await?
+        .rows
+        .iter()
+        .filter_map(|r| Some((text(r, "sid")?, text(r, "ts")?)))
+        .collect())
 }
 
 /// The latest events, newest first (at most 200).
@@ -557,7 +588,7 @@ pub async fn recent_events(
         w.push_str(&format!(" AND event = {}", lit(e)?));
     }
     let sql = format!(
-        "SELECT CAST(timestamp AS VARCHAR) AS ts, event, distinct_id, role, path, feature, release \
+        "SELECT CAST(timestamp AS VARCHAR) AS ts, event, distinct_id, role, path, feature, release, session_id \
          FROM {src} WHERE {w} ORDER BY timestamp DESC LIMIT {}",
         limit.min(200)
     );
@@ -572,6 +603,7 @@ pub async fn recent_events(
             path: text(r, "path"),
             feature: text(r, "feature"),
             release: text(r, "release"),
+            session_id: text(r, "session_id"),
         })
         .collect())
 }
