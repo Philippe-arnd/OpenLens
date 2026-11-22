@@ -6,7 +6,7 @@ name: Release
 # - on demand with `snapshot`: tag the current main as vX.Y.Z-YYMMDD-sha
 #   (a pre-release), then do the same. The image and the chart workflows are
 #   started for that tag too.
-# Assets: Linux x86_64 binaries, the SDK bundles, the Helm chart, SHA256SUMS.
+# Assets: Linux x86_64 and aarch64 binaries, the SDK bundles, the Helm chart, SHA256SUMS.
 on:
   push:
     tags: ["v*"]
@@ -65,10 +65,15 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"; echo "prev=$prev" >> "$GITHUB_OUTPUT"; echo "pre=$pre" >> "$GITHUB_OUTPUT"
           echo "tag $tag, previous ${prev:-none}, pre-release $pre"
 
-  assets:
+  binaries:
     needs: prepare
-    # An older glibc than ubuntu-latest, so the binaries run on more hosts.
-    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        include:
+          # Older glibc than ubuntu-latest, so the binaries run on more hosts.
+          - { runner: ubuntu-22.04, arch: x86_64 }
+          - { runner: ubuntu-22.04-arm, arch: aarch64 }
+    runs-on: ${{ matrix.runner }}
     env:
       TAG: ${{ needs.prepare.outputs.tag }}
     steps:
@@ -77,15 +82,34 @@ jobs:
           ref: ${{ needs.prepare.outputs.tag }}
       - uses: Swatinem/rust-cache@v2
         with:
-          key: release
+          key: release-${{ matrix.arch }}
       - name: binaries
         run: |
           cargo build --release --locked -p openlens -p openlens-cli
-          d="openlens-$TAG-x86_64-linux"
+          d="openlens-$TAG-${{ matrix.arch }}-linux"
           mkdir -p "dist/$d"
           cp target/release/openlens target/release/openlens-cli LICENSE README.md CHANGELOG.md "dist/$d/"
           tar -C dist -czf "dist/$d.tar.gz" "$d"
           rm -rf "dist/$d"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: binaries-${{ matrix.arch }}
+          path: dist/*.tar.gz
+
+  assets:
+    needs: [prepare, binaries]
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: binaries-*
+          merge-multiple: true
+          path: dist
       - name: SDK bundles
         run: |
           d="openlens-sdk-web-$TAG"

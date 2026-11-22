@@ -9,11 +9,11 @@ OpenLens needs **no environment variables**. On Coolify, the template only maps 
 3. Open the domain and log in with that token. Or let your agent call `POST /api/login-links` and send you the link.
    The first time, OpenLens asks for your email and creates your admin account, so the team list knows who you are (you can skip it). Invite others from **Team**.
 
-The image `ghcr.io/philippe-arnd/openlens` is published from `main` by the release workflow. While the repository is private, the package is private too: either give Coolify a GHCR registry credential or use option B.
+The image `ghcr.io/philippe-arnd/openlens` is public: each release publishes `:vX.Y.Z`, and `main` publishes `:latest`. Pin a release tag in production.
 
 ## Option B: build from the repository
 
-**New Resource → Private Repository (GitHub App) → openlens → Build pack: Docker Compose → `/docker-compose.yml`**.
+**New Resource → Public Repository (or your fork through the GitHub App) → openlens → Build pack: Docker Compose → `/docker-compose.yml`**.
 
 The root compose file already carries the healthcheck (Coolify reads healthchecks from the compose file, not from the Dockerfile). To pin the admin token, set `OPENLENS_ADMIN_TOKEN` in Coolify. If you don't, it is generated on first start and printed in the logs.
 

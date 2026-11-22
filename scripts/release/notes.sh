@@ -23,7 +23,7 @@ cat <<EOF
 ## Install
 
 - **Image:** \`ghcr.io/philippe-arnd/openlens:$tag\`
-- **Binaries:** attached below (Linux x86_64), with \`SHA256SUMS\`. Check them with \`sha256sum -c SHA256SUMS\`.
+- **Binaries:** attached below (Linux x86_64 and aarch64), with \`SHA256SUMS\`. Check them with \`sha256sum -c SHA256SUMS\`.
 EOF
 if git cat-file -e "$tag:deploy/helm/openlens/Chart.yaml" 2>/dev/null; then
   printf -- '- **Helm:** `helm install openlens oci://ghcr.io/philippe-arnd/charts/openlens --version %s`\n' "$version"
