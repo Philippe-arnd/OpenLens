@@ -62,3 +62,10 @@ OpenLens follows [SemVer](https://semver.org) and keeps a [CHANGELOG](../CHANGEL
 
 **npm, once.** On npmjs.com, add a *trusted publisher* for `@openlens/web`: repository `Philippe-arnd/OpenLens`, workflow `npm.yml`. No token is needed; `NPM_TOKEN` as a repository secret also works.
 
+
+## Maintenance on autopilot (M9)
+
+Nobody should have to babysit dependencies:
+- **Renovate** (`renovate.json`) opens grouped PRs every Monday morning, Paris time, and security fixes at once. DataFusion, Arrow and Parquet move together. New releases wait 3 days before they are proposed.
+- **Auto Merge** (`.github/workflows/auto-merge.yml`, the shared `reusable-auto-merge.yml`) merges a Renovate PR once `cargo xtask ci`, `sdk` and the RustSec check are green, and the browser e2e too when it ran. A failing PR gets one issue labelled `renovate-ci-failure`, closed when the PR is fixed. A major update, including a 0.x minor of a crate, gets the `major-update` label and waits for a person or an agent.
+- **RustSec:** `cargo deny check advisories` runs on every PR and nightly. On `main` it keeps one `security-advisory` issue open while it fails. An ignore in `deny.toml` needs its reason.
