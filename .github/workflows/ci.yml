@@ -104,7 +104,7 @@ jobs:
         working-directory: scripts/e2e
         run: |
           npm init -y > /dev/null
-          npm install --no-audit --no-fund playwright@1
+          npm install --no-audit --no-fund playwright@1 axe-core@4
           npx playwright install --with-deps chromium
       - name: run
         run: |

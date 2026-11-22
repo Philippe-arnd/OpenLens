@@ -5,6 +5,10 @@
 // The server should hold demo data (`xtask demo`).
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
+import { createRequire } from "node:module";
+
+// axe-core is injected by this test only (the dashboard ships no script).
+const axePath = createRequire(import.meta.url).resolve("axe-core/axe.min.js");
 
 const [server, token, out] = process.argv.slice(2);
 mkdirSync(out, { recursive: true });
@@ -43,6 +47,35 @@ for (const g of global) {
   const r = await tab.goto(`${server}${g}`);
   if (!r || r.status() !== 200) problems.push(`${g}: HTTP ${r ? r.status() : "none"}`);
   await tab.screenshot({ path: `${out}${g.replace("/", "/global-")}.png`, fullPage: true });
+}
+
+// Accessibility (#161): axe-core on every page, light and dark. Injecting a
+// script needs a context that bypasses the CSP; the checks above ran under it.
+const a11y = await browser.newContext({ viewport: { width: 1360, height: 900 }, bypassCSP: true, reducedMotion: "reduce" });
+const at = await a11y.newPage();
+await at.goto(`${server}/login`);
+const loginIssues = await audit(at, "/login");
+await at.fill("input[name=token]", token);
+await Promise.all([at.waitForNavigation(), at.click("button[type=submit]")]);
+const found = [...loginIssues];
+for (const theme of ["light", "dark"]) {
+  await at.goto(`${server}/theme/${theme}`);
+  for (const p of [...pages.map((x) => `/p/default${x}`), ...global]) {
+    await at.goto(`${server}${p}`);
+    found.push(...(await audit(at, `${p} (${theme})`)));
+  }
+}
+async function audit(page, label) {
+  await page.addScriptTag({ path: axePath });
+  const res = await page.evaluate(() => window.axe.run(document, { runOnly: ["wcag2a", "wcag2aa"], resultTypes: ["violations"] }));
+  return res.violations
+    .filter((v) => v.impact === "serious" || v.impact === "critical")
+    .map((v) => `${label}: ${v.id} (${v.impact}) x${v.nodes.length}: ${v.help}; e.g. ${v.nodes[0]?.target?.join(" ")}`);
+}
+if (found.length) {
+  problems.push("accessibility (axe, serious or critical):", ...found);
+} else {
+  console.log("accessibility: no serious or critical axe violation");
 }
 await browser.close();
 
