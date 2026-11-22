@@ -105,7 +105,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                             a href={ "/p/" (p.id) "/replays" } { (icon("play")) "Replays" }
                             a href={ "/p/" (p.id) "/flags" } { (icon("flag")) "Flags" }
                         }
-                        span.project { (p.name) }
+                        a.project href="/projects" title="Switch project" { (p.name) " " (icon("down")) }
                     }
                     nav.theme.solo[project.is_none()] aria-label="Theme" {
                         a.auto href="/theme/auto" title="Follow the system" aria-label="Theme: follow the system" { (icon("auto")) }
@@ -940,6 +940,44 @@ fn role_matrix(b: &Board) -> Markup {
             p.muted.small { "Share of each role's users who used the feature, last 30 days. Empty cells are features a role never touches." }
         }
     }
+}
+
+/// One project in the switcher.
+pub struct ProjectSummary {
+    /// Project id.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Events in the last 7 days, all environments.
+    pub recent_events: i64,
+    /// Latest event (UTC), if any.
+    pub last_event: Option<String>,
+}
+
+/// All projects, busiest first.
+pub fn projects(list: &[ProjectSummary]) -> Markup {
+    layout(
+        "Projects",
+        None,
+        html! {
+            div.heading { div { h1 { "Projects" } p.muted { "One per app. Pick one to open its Focus board." } } }
+            ul.project-list {
+                @for p in list {
+                    li {
+                        a.card href={ "/p/" (p.id) } {
+                            h2.violet { (icon("board")) (p.name) }
+                            @if p.recent_events > 0 {
+                                p { strong { (compact(p.recent_events)) } " events in the last 7 days" }
+                            } @else {
+                                p.muted { "No events in the last 7 days" }
+                            }
+                            @if let Some(t) = &p.last_event { p.muted.small { "Last event " (t.get(..16).unwrap_or(t)) " UTC" } }
+                        }
+                    }
+                }
+            }
+        },
+    )
 }
 
 /// Generic message page (errors, not found).

@@ -953,3 +953,30 @@ async fn user_timeline_tells_one_persons_story() {
         StatusCode::UNAUTHORIZED
     );
 }
+
+#[tokio::test]
+async fn several_projects_open_on_the_project_switcher() {
+    let h = harness();
+    let cookie = login_cookie(&h).await;
+    // One project: straight to its board.
+    let r = get(&h, "/", Some(&cookie), false).await;
+    assert_eq!(r.headers()["location"], "/p/default");
+    h.state.meta.create_project("Journal", None).unwrap();
+    let r = get(&h, "/", Some(&cookie), false).await;
+    assert_eq!(r.headers()["location"], "/projects");
+    let page = get(&h, "/projects", Some(&cookie), false).await;
+    assert_eq!(page.status(), StatusCode::OK);
+    let html = String::from_utf8(
+        axum::body::to_bytes(page.into_body(), 1 << 20)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(html.contains("/p/journal") && html.contains("/p/default"));
+    assert!(!html.contains(" style="));
+    assert_eq!(
+        get(&h, "/projects", None, false).await.status(),
+        StatusCode::SEE_OTHER
+    );
+}
