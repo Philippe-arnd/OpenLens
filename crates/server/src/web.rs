@@ -223,7 +223,17 @@ async fn board(
     {
         Ok(b) => html(
             StatusCode::OK,
-            openlens_ui::board(&info, &b, &f, &crate::base_url(&headers)),
+            openlens_ui::board(
+                &info,
+                &b,
+                &f,
+                &crate::base_url(&headers),
+                &crate::reword::plain(&b.insights)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|p| (p.title, p.next_step))
+                    .collect::<Vec<_>>(),
+            ),
         ),
         Err(e) => html(
             StatusCode::BAD_REQUEST,

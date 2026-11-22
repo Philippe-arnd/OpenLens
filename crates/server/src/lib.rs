@@ -10,6 +10,7 @@ mod digest;
 mod flags;
 mod oidc;
 mod replay;
+mod reword;
 mod surveys;
 mod web;
 
