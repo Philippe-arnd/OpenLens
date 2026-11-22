@@ -255,6 +255,10 @@ pub fn source(map: Option<&FeatureMap>) -> String {
     }
 }
 
+/// Largest 90-day window the board keeps in memory (about 1 GB worst case
+/// with large properties); beyond it, each query reads the files.
+const BOARD_SNAPSHOT_ROWS: usize = 2_000_000;
+
 /// Compute the board for a project, with its feature map when it has one.
 /// Queries run concurrently.
 pub async fn board(
@@ -263,7 +267,28 @@ pub async fn board(
     f: &Filters,
     map: Option<(&FeatureMap, i64)>,
 ) -> Result<Board> {
-    let src = source(map.map(|(m, _)| m));
+    // Every board query reads the same projection (roles and features
+    // resolved from the map) over at most 90 days: compute it once, in
+    // memory, unless it is too large, then each query only filters it.
+    let window = Filters {
+        role: None,
+        release: None,
+        ..f.clone()
+    }
+    .clause(90)?;
+    let projected = source(map.map(|(m, _)| m));
+    let snap = q
+        .snapshot(
+            project,
+            "board_events",
+            &format!("SELECT * FROM {projected} WHERE {window}"),
+            BOARD_SNAPSHOT_ROWS,
+        )
+        .await?;
+    let (q, src) = match &snap {
+        Some(s) => (s, "board_events".to_owned()),
+        None => (q, projected),
+    };
     let w30 = f.clause(30)?;
     let w14 = f.clause(14)?;
     let w7 = f.clause(7)?;

@@ -130,3 +130,33 @@ async fn invalid_project_ids_are_refused() {
     let q = QueryEngine::new(dir.path(), Limits::default());
     assert!(q.sql("../x", "SELECT 1").await.is_err());
 }
+
+#[tokio::test]
+async fn snapshots_are_per_project_bounded_and_read_only() {
+    let (_d, q) = seeded();
+    let s = q
+        .snapshot(
+            "a",
+            "snap",
+            "SELECT * FROM events WHERE role = 'admin'",
+            100,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let n = s.sql("a", "SELECT count(*) AS n FROM snap").await.unwrap();
+    assert_eq!(n.rows[0]["n"], 2);
+    // Other projects do not see it; the original engine is unchanged.
+    assert!(s.sql("b", "SELECT count(*) AS n FROM snap").await.is_err());
+    assert!(q.sql("a", "SELECT count(*) AS n FROM snap").await.is_err());
+    // Too many rows: no snapshot, the caller falls back.
+    assert!(
+        q.snapshot("a", "snap", "SELECT * FROM events", 1)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    // Still read-only, and names are restricted.
+    assert!(s.sql("a", "DROP TABLE snap").await.is_err());
+    assert!(q.snapshot("a", "x; drop", "SELECT 1", 10).await.is_err());
+}
