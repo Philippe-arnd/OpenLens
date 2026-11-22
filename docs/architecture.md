@@ -40,7 +40,7 @@ A crate depends only on crates in strictly lower layers. `cargo xtask layers` en
 
 - Partitioning: `<root>/events/project=<p>/date=<yyyy-mm-dd>/<segment>.parquet` (daily: hourly partitions made 24× more small files and slowed every query). Closed days compact to one file; the current day compacts once it holds more than 24 segments.
 - The write-ahead log is fsynced per batch. On restart, unflushed segments are replayed.
-- Replay blobs are stored separately: `<root>/<project>/replay/<session>/<chunk>.zst`.
+- Replay chunks are stored separately, one zstd file per chunk: `<root>/replay/project=<p>/<session>/<seq>.zst`, plus `info.json` (owner, start). Sessions are capped at 32 MB compressed.
 - Backends go through the `object_store` crate: local filesystem first, S3-compatible in M9.
 
 ## Why not ClickHouse / Kafka / Postgres
