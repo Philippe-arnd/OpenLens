@@ -118,10 +118,12 @@ fn limited(headers: &HeaderMap, key: &str, events: usize) -> bool {
     // Public traffic comes through the proxy (Coolify, an Ingress), which
     // says who the client is. Direct connections come from the host or the
     // cluster (server SDKs, benchmarks, health checks) and are not limited.
+    // The last X-Forwarded-For entry is the one our proxy added; earlier
+    // ones come from the client and could be anything.
     let Some(ip) = headers
         .get("x-forwarded-for")
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.split(',').next())
+        .and_then(|v| v.rsplit(',').next())
         .or_else(|| headers.get("x-real-ip").and_then(|v| v.to_str().ok()))
         .map(|v| v.trim().to_owned())
     else {

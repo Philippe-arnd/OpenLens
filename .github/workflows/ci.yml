@@ -61,6 +61,19 @@ jobs:
           tool: cargo-deny
       - run: cargo xtask ci
 
+  advisories:
+    # Known vulnerabilities in dependencies (RustSec). Separate from the
+    # gate: a new advisory should not block unrelated work, but it shows
+    # red on every PR and nightly until a dependency update fixes it.
+    name: dependency advisories (RustSec)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - run: cargo deny check advisories
+
   sdk:
     name: sdk (build, size budget, committed bundle up to date)
     runs-on: ubuntu-latest

@@ -477,6 +477,27 @@ async fn futures_join(
     )
 }
 
+/// The page the user came from, as a same-origin path, else `/`. A path
+/// that a browser could read as another host (`//x`, `/\x`) is refused.
+fn back_to(headers: &HeaderMap) -> String {
+    let base = crate::base_url(headers);
+    headers
+        .get(header::REFERER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|r| r.strip_prefix(base.as_str()))
+        .filter(|p| safe_local_path(p))
+        .unwrap_or("/")
+        .to_owned()
+}
+
+/// A path on this server: starts with one `/`, and has no backslash or
+/// control character (browsers turn `/\host` into `//host`).
+fn safe_local_path(p: &str) -> bool {
+    p.starts_with('/')
+        && !p.starts_with("//")
+        && !p.bytes().any(|b| b == b'\\' || b.is_ascii_control())
+}
+
 /// `GET /theme/{auto|light|dark}`: remember the theme (cookie, 1 year) and
 /// go back to the page the user came from (same-origin paths only).
 async fn set_theme(headers: HeaderMap, Path(mode): Path<String>) -> Response {
@@ -484,14 +505,7 @@ async fn set_theme(headers: HeaderMap, Path(mode): Path<String>) -> Response {
         "light" | "dark" => mode,
         _ => "auto".to_owned(),
     };
-    let base = crate::base_url(&headers);
-    let back = headers
-        .get(header::REFERER)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|r| r.strip_prefix(base.as_str()))
-        .filter(|p| p.starts_with('/') && !p.starts_with("//"))
-        .unwrap_or("/")
-        .to_owned();
+    let back = back_to(&headers);
     let cookie = format!("ol_theme={mode}; Path=/; SameSite=Lax; Max-Age=31536000");
     with_cookie(Redirect::to(&back).into_response(), &cookie)
 }
@@ -504,14 +518,7 @@ async fn set_nav(headers: HeaderMap, Path(mode): Path<String>) -> Response {
     } else {
         "expanded"
     };
-    let base = crate::base_url(&headers);
-    let back = headers
-        .get(header::REFERER)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|r| r.strip_prefix(base.as_str()))
-        .filter(|p| p.starts_with('/') && !p.starts_with("//"))
-        .unwrap_or("/")
-        .to_owned();
+    let back = back_to(&headers);
     let cookie = format!("ol_nav={mode}; Path=/; SameSite=Lax; Max-Age=31536000");
     with_cookie(Redirect::to(&back).into_response(), &cookie)
 }
@@ -1258,4 +1265,24 @@ async fn users_delete(
     let meta = state.meta.clone();
     let _ = tokio::task::spawn_blocking(move || meta.delete_user(&id)).await;
     Redirect::to("/users").into_response()
+}
+
+#[cfg(test)]
+mod back_tests {
+    #[test]
+    fn only_local_paths_are_followed() {
+        for ok in ["/", "/p/app/events?env=prod", "/p/a/replays/s1#t", "/%0d"] {
+            assert!(super::safe_local_path(ok), "{ok}");
+        }
+        for bad in [
+            "//evil.com",
+            "/\\evil.com",
+            "/\\/evil.com",
+            "https://evil.com",
+            "evil",
+            "/\tx",
+        ] {
+            assert!(!super::safe_local_path(bad), "{bad}");
+        }
+    }
 }

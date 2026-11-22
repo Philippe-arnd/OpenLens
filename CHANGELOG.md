@@ -27,6 +27,11 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- **Security pass before v0.2:**
+  - the capture rate limit reads the client address from the last `X-Forwarded-For` entry, the one the proxy added, so a client can no longer pick its own;
+  - the theme and sidebar links refuse to return to a path a browser could read as another site (`/\host`);
+  - CI checks dependencies against RustSec advisories (`cargo deny check advisories`).
+  - SQLite 3.54.1, which fixes CVE-2026-119375 (RUSTSEC-2026-0459): crafted database and `-wal` files could make queries return stale memory. It is a local vector. rusqlite goes from 0.37 to 0.43.
 - **Board on large projects:** the in-memory snapshot keeps only the columns the board reads, and `properties` only for Web Vitals. That is about 160 bytes per event, so the in-memory cap rises from 2 M to 4 M events in 90 days. At 2.2 M events, the board went from 6–7 s to 3.7 s on one vCPU (#190).
 - **Faster board with identities:** the identified-users filter is decided once per board (from the `persons` count) instead of as an `OR` of subqueries that DataFusion could not plan as a semi-join, and the all-time totals skip the identity join. The board on 368 k events with anonymous visits went from 1.7 s to 0.8 s on one vCPU. `xtask bench` now sends realistic anonymous visits, and `RUST_LOG=openlens_query=debug` logs what each query costs (#159).
 - **New events could stay out of the dashboards until a restart (v0.1.0).** DataFusion caches directory listings with no expiry, and the runtime shared by every query kept the first list of files it saw: events that arrived later, and compacted days, were not read. The listing cache is now off; Parquet footers are still cached. A regression test writes segments between queries of one engine.
