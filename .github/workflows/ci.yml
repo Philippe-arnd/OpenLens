@@ -111,7 +111,7 @@ jobs:
           OPENLENS_DATA_DIR=$RUNNER_TEMP/ol OPENLENS_ADMIN_TOKEN=adm_ci OPENLENS_PROJECT_KEY=pk_ci \
             ./target/debug/openlens > $RUNNER_TEMP/ol.log 2>&1 &
           for i in $(seq 1 30); do curl -fs localhost:8686/healthz && break; sleep 1; done
-          node scripts/e2e/browser.mjs http://localhost:8686 pk_ci
+          node scripts/e2e/browser.mjs http://localhost:8686 pk_ci adm_ci
       - name: dashboard under the real CSP, light and dark (nightly / on demand)
         if: github.event_name != 'pull_request'
         run: |

@@ -5,7 +5,16 @@
 import { chromium } from "playwright";
 import http from "node:http";
 
-const [server, key] = process.argv.slice(2);
+const [server, key, admin] = process.argv.slice(2);
+// A micro-survey shown after any click, to check the widget end to end.
+if (admin) {
+  const r = await fetch(`${server}/api/projects/default/surveys/e2e`, {
+    method: "PUT",
+    headers: { authorization: `Bearer ${admin}`, "content-type": "application/json" },
+    body: JSON.stringify({ key: "e2e", question: "How was it?", kind: "rating", trigger: "$click", enabled: true, sample: 100 }),
+  });
+  if (!r.ok) throw new Error(`survey setup failed: ${r.status}`);
+}
 const page = `<!doctype html><html><head><meta name="openlens-release" content="e2e-1"></head><body>
 <button data-feature="export">Export</button>
 <div data-openlens-mask><button id="secret">Dear diary, private words</button></div>
@@ -19,13 +28,24 @@ const browser = await chromium.launch();
 const tab = await browser.newPage();
 const sent = [];
 tab.on("request", (r) => r.url().includes("/capture") && sent.push(r.postData()));
-await tab.goto(`http://localhost:${port}/`);
+// Wait for the flags answer (it carries the surveys) before clicking.
+await Promise.all([
+  tab.waitForResponse((r) => r.url().includes("/flags?"), { timeout: 10000 }).catch(() => null),
+  tab.goto(`http://localhost:${port}/`),
+]);
 await tab.click("button[data-feature=export]");
 await tab.click("#secret");
 await tab.evaluate(() => { setTimeout(() => { throw new Error("e2e boom"); }, 0); });
 await tab.waitForTimeout(200);
 await tab.evaluate(() => openlens.flush());
 await tab.waitForTimeout(500);
+if (admin) {
+  // The survey card appears after the click; answer 4.
+  const four = tab.locator("#openlens-survey").locator("button", { hasText: "4" });
+  await four.click({ timeout: 10000 });
+  await tab.evaluate(() => openlens.flush());
+  await tab.waitForTimeout(500);
+}
 // Replay: the recorder loads lazily and sends its first chunk within ~10 s.
 const chunk = await tab
   .waitForResponse((r) => r.url().includes("/r?"), { timeout: 20000 })
@@ -39,6 +59,14 @@ console.log("replay chunk stored");
 site.close();
 
 const events = sent.flatMap((b) => JSON.parse(b).batch.map((e) => e.event));
+if (admin) {
+  const answered = sent.flatMap((b) => JSON.parse(b).batch).some((e) => e.event === "$survey" && e.properties.$answer === 4);
+  if (!answered) {
+    console.error("survey answer not sent");
+    process.exit(1);
+  }
+  console.log("survey answered");
+}
 if (sent.some((b) => b.includes("private words"))) {
   console.error("masked text was sent");
   process.exit(1);

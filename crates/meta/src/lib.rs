@@ -99,6 +99,13 @@ CREATE TABLE IF NOT EXISTS imports (
   imported_at TEXT NOT NULL,
   PRIMARY KEY (project, sha)
 );
+CREATE TABLE IF NOT EXISTS surveys (
+  project TEXT NOT NULL,
+  key TEXT NOT NULL,
+  json TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (project, key)
+);
 CREATE TABLE IF NOT EXISTS flags (
   project TEXT NOT NULL,
   key TEXT NOT NULL,
@@ -625,6 +632,37 @@ impl Meta {
         self.with(|c| {
             Ok(c.execute(
                 "DELETE FROM flags WHERE project = ?1 AND key = ?2",
+                params![project, key],
+            )? == 1)
+        })
+    }
+
+    /// Create or replace a survey definition (stored as JSON).
+    pub fn save_survey(&self, project: &str, key: &str, json: &str) -> Result<()> {
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO surveys (project, key, json, updated_at) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT (project, key) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at",
+                params![project, key, json, Utc::now().to_rfc3339()],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// All survey definitions of a project (JSON), by key.
+    pub fn surveys(&self, project: &str) -> Result<Vec<String>> {
+        self.with(|c| {
+            let mut st = c.prepare("SELECT json FROM surveys WHERE project = ?1 ORDER BY key")?;
+            let rows = st.query_map([project], |r| r.get(0))?;
+            Ok(rows.collect::<rusqlite::Result<_>>()?)
+        })
+    }
+
+    /// Delete a survey; true when it existed.
+    pub fn delete_survey(&self, project: &str, key: &str) -> Result<bool> {
+        self.with(|c| {
+            Ok(c.execute(
+                "DELETE FROM surveys WHERE project = ?1 AND key = ?2",
                 params![project, key],
             )? == 1)
         })

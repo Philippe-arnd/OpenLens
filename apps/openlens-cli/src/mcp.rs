@@ -160,6 +160,25 @@ impl Tools for OpenLensTools {
                 })),"required":["key"]}),
             },
             ToolSpec {
+                name: "surveys",
+                description: "The project's micro-surveys and their results (answers, mean rating, by role, latest text answers, dismissals), last 30 days.",
+                input_schema: json!({"type":"object","properties":proj}),
+            },
+            ToolSpec {
+                name: "survey_set",
+                description: "Create or update a micro-survey: one question shown right after `trigger` (a success event like entry_saved) to `sample`% of users (optionally some roles), once each. kind: rating (1-5), yes_no, choice (2-6 choices) or text. Ask about the moment that just happened, in plain words.",
+                input_schema: json!({"type":"object","properties":with(json!({
+                    "key":{"type":"string"},
+                    "question":{"type":"string"},
+                    "kind":{"type":"string","enum":["rating","yes_no","choice","text"]},
+                    "choices":{"type":"array","items":{"type":"string"}},
+                    "trigger":{"type":"string"},
+                    "sample":{"type":"integer","minimum":0,"maximum":100},
+                    "roles":{"type":"array","items":{"type":"string"}},
+                    "enabled":{"type":"boolean"}
+                })),"required":["key","question","kind","trigger"]}),
+            },
+            ToolSpec {
                 name: "login_link",
                 description: "A one-time login link (7 days). Without email: an owner link for the PM. With email (+ role viewer|admin, optional projects): invites that person with that access.",
                 input_schema: json!({"type":"object","properties":{"email":{"type":"string"},"role":{"type":"string","enum":["viewer","admin"]},"projects":{"type":"array","items":{"type":"string"}}}}),
@@ -325,6 +344,33 @@ impl Tools for OpenLensTools {
                 let (st, v) = c.call(
                     "PUT",
                     &format!("/api/projects/{}/flags/{key}", project(args)),
+                    Some(Body::Json(body)),
+                )?;
+                ok_or(st, v)
+            }
+            "surveys" => {
+                let (st, v) = c.call(
+                    "GET",
+                    &format!("/api/projects/{}/surveys", project(args)),
+                    None,
+                )?;
+                ok_or(st, v)
+            }
+            "survey_set" => {
+                let key = s(args, "key").ok_or("key is required")?;
+                let body = json!({
+                    "key": key,
+                    "question": s(args, "question").ok_or("question is required")?,
+                    "kind": s(args, "kind").ok_or("kind is required")?,
+                    "choices": args.get("choices").cloned().unwrap_or_else(|| json!([])),
+                    "trigger": s(args, "trigger").ok_or("trigger is required")?,
+                    "sample": args.get("sample").and_then(Value::as_u64).unwrap_or(10),
+                    "roles": args.get("roles").cloned().unwrap_or_else(|| json!([])),
+                    "enabled": args.get("enabled").and_then(Value::as_bool).unwrap_or(true),
+                });
+                let (st, v) = c.call(
+                    "PUT",
+                    &format!("/api/projects/{}/surveys/{key}", project(args)),
                     Some(Body::Json(body)),
                 )?;
                 ok_or(st, v)

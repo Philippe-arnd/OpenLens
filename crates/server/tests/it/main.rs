@@ -1225,3 +1225,92 @@ async fn viewers_see_their_projects_only_and_change_nothing() {
         .unwrap();
     assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn micro_surveys_are_targeted_served_with_flags_and_summarised() {
+    let h = harness();
+    let put = |body: serde_json::Value| {
+        let st = h.state.clone();
+        async move {
+            router(st)
+                .oneshot(
+                    Request::put("/api/projects/default/surveys/useful")
+                        .header("authorization", "Bearer adm_test")
+                        .header("content-type", "application/json")
+                        .body(Body::from(body.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+                .status()
+        }
+    };
+    let good = serde_json::json!({"key":"useful","question":"How useful was that?","kind":"rating","trigger":"entry_saved","enabled":true,"sample":100});
+    assert_eq!(put(serde_json::json!({"key":"useful","question":"?","kind":"essay","trigger":"x","enabled":true,"sample":100})).await, StatusCode::BAD_REQUEST);
+    assert_eq!(put(good.clone()).await, StatusCode::OK);
+    let flags = |id: &'static str| {
+        let (st, key) = (h.state.clone(), h.key.clone());
+        async move {
+            let r = router(st)
+                .oneshot(
+                    Request::get(format!("/flags?key={key}&distinct_id={id}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            serde_json::from_slice::<serde_json::Value>(
+                &axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap(),
+            )
+            .unwrap()
+        }
+    };
+    let v = flags("u1").await;
+    assert_eq!(v["surveys"][0]["key"], "useful");
+    assert_eq!(v["surveys"][0]["trigger"], "entry_saved");
+    assert!(
+        v["surveys"][0].get("sample").is_none(),
+        "targeting stays server-side"
+    );
+    let mut off = good.clone();
+    off["enabled"] = false.into();
+    assert_eq!(put(off).await, StatusCode::OK);
+    assert_eq!(flags("u1").await["surveys"].as_array().unwrap().len(), 0);
+
+    let batch = serde_json::json!({"key": h.key, "batch": [
+        {"event":"$identify","distinct_id":"a","properties":{"$role":"owner"}},
+        {"event":"$survey","distinct_id":"a","properties":{"$survey":"useful","$answer":5}},
+        {"event":"$survey","distinct_id":"b","properties":{"$survey":"useful","$answer":3}},
+        {"event":"$survey","distinct_id":"c","properties":{"$survey":"useful","$dismissed":true}},
+        {"event":"$survey","distinct_id":"d","properties":{"$survey":"why","$answer":"too slow on mobile"}}
+    ]});
+    assert_eq!(
+        post(&h, "/capture", batch.to_string().into_bytes(), false)
+            .await
+            .0,
+        StatusCode::OK
+    );
+    openlens_server::flush_now(&h.state).unwrap();
+    let r = get(&h, "/api/projects/default/surveys", None, true).await;
+    let v: serde_json::Value =
+        serde_json::from_slice(&axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap())
+            .unwrap();
+    let res = v["results"].as_array().unwrap();
+    let useful = res.iter().find(|r| r["key"] == "useful").unwrap();
+    assert_eq!(useful["mean"], 4.0);
+    assert_eq!(useful["dismissed"], 1);
+    let why = res.iter().find(|r| r["key"] == "why").unwrap();
+    assert_eq!(why["latest_text"][0], "too slow on mobile");
+    let cookie = login_cookie(&h).await;
+    let page = get(&h, "/p/default/surveys", Some(&cookie), false).await;
+    let html = String::from_utf8(
+        axum::body::to_bytes(page.into_body(), 1 << 20)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(html.contains("How useful was that?") && !html.contains(" style="));
+    let js = get(&h, "/s.js", None, false).await;
+    assert_eq!(js.status(), StatusCode::OK);
+}

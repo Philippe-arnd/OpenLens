@@ -34,6 +34,14 @@ export interface Dimensions {
     account?: string;
     plan?: string;
 }
+/** A micro-survey the server says this user may be asked (see survey.ts). */
+export interface SurveyDef {
+    key: string;
+    question: string;
+    kind: "rating" | "yes_no" | "choice" | "text";
+    choices: string[];
+    trigger: string;
+}
 /** Record an event. */
 export declare function track(event: string, props?: Props): void;
 /** Mark a use of a feature (a task start), for features without a data-feature control. */

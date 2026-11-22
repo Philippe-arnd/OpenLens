@@ -104,6 +104,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                             a href={ "/p/" (p.id) "/errors" } { (icon("alert")) "Errors" }
                             a href={ "/p/" (p.id) "/replays" } { (icon("play")) "Replays" }
                             a href={ "/p/" (p.id) "/flags" } { (icon("flag")) "Flags" }
+                            a href={ "/p/" (p.id) "/surveys" } { (icon("idea")) "Surveys" }
                         }
                         a.project href="/projects" title="Switch project" { (p.name) " " (icon("down")) }
                     }
@@ -1170,6 +1171,61 @@ pub fn users(
                                 td { form method="post" action={ "/users/" (u.id) "/delete" } { button.ghost type="submit" { "Remove" } } }
                             }
                         } }
+                    }
+                }
+            }
+        },
+    )
+}
+
+/// Micro-surveys and their answers.
+pub fn surveys(
+    p: &ProjectInfo<'_>,
+    list: &[openlens_flags::survey::Survey],
+    results: &[openlens_engine::SurveyResults],
+) -> Markup {
+    layout(
+        "Surveys",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "Micro-surveys" }
+                p.muted { "One question, right after a moment of value, to a sample of users, once each. Agents create them (" code { "survey_set" } "); answers are " code { "$survey" } " events." }
+            } }
+            @if list.is_empty() {
+                section.card { p.muted { "No survey yet. Ask your agent, for example: “after entry_saved, ask 10% of users how useful writing felt, 1 to 5”." } }
+            }
+            @for s in list {
+                @let r = results.iter().find(|r| r.key == s.key);
+                @let answered: i64 = r.map_or(0, |r| r.answers.iter().map(|a| a.1).sum());
+                @let max = r.map_or(1, |r| r.answers.iter().map(|a| a.1).max().unwrap_or(1)).max(1) as f64;
+                section.card.wide {
+                    h2.violet { (icon("idea")) (s.question) }
+                    p.small.muted {
+                        span.chip { (s.kind) } " after " code { (s.trigger) } " · " (s.sample) "% of "
+                        @if s.roles.is_empty() { "everyone" } @else { (s.roles.join(", ")) }
+                        " · " (compact(answered)) " answers"
+                        @if let Some(r) = r { " · " (compact(r.dismissed)) " dismissed" }
+                    }
+                    form.inline method="post" action={ "/p/" (p.id) "/surveys/" (s.key) } {
+                        label { input type="checkbox" name="enabled" checked[s.enabled]; " on" }
+                        label { "sample " input type="number" name="sample" min="0" max="100" value=(s.sample); "%" }
+                        button.soft type="submit" { "Save" }
+                    }
+                    @if let Some(r) = r {
+                        @if let Some(m) = r.mean { p { "Mean " strong { (format!("{m:.1}")) } " / 5" } }
+                        @if s.kind != "text" && !r.answers.is_empty() {
+                            table.bars { tbody { @for (a, n) in &r.answers {
+                                tr { th scope="row" { (a) } td.meter { (meter(*n as f64 / max)) } td.num { (compact(*n)) } }
+                            } } }
+                        }
+                        @if !r.by_role.is_empty() {
+                            p.small { "By role: " @for (i, (role, m, n)) in r.by_role.iter().enumerate() { @if i > 0 { " · " } strong { (role) } " " (format!("{m:.1}")) span.muted { " (" (n) ")" } } }
+                        }
+                        @if !r.latest_text.is_empty() {
+                            h3.small { "Latest answers" }
+                            ul { @for t in &r.latest_text { li { q { (t) } } } }
+                        }
                     }
                 }
             }
