@@ -1,0 +1,12 @@
+{
+  "name": "@openlens/node",
+  "version": "0.1.0",
+  "description": "OpenLens server SDK for Node: capture server-side events, identify users, check flags. No dependencies.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "files": ["src"],
+  "engines": { "node": ">=18" },
+  "scripts": { "test": "node --test test/*.test.js" }
+}
