@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use arrow::datatypes::DataType;
+use datafusion::datasource::MemTable;
 use datafusion::datasource::file_format::parquet::ParquetFormat;
 use datafusion::datasource::listing::{
     ListingOptions, ListingTable, ListingTableConfig, ListingTableUrl,
@@ -80,6 +81,8 @@ pub struct QueryEngine {
     /// DataFusion's Parquet metadata cache is reused across queries and
     /// requests (segments are immutable, so cached footers never go stale).
     runtime: Option<Arc<datafusion::execution::runtime_env::RuntimeEnv>>,
+    /// In-memory tables added by [`QueryEngine::snapshot`], for one project.
+    snapshots: Arc<Vec<(String, String, Arc<MemTable>)>>,
 }
 
 impl QueryEngine {
@@ -93,7 +96,73 @@ impl QueryEngine {
             root: root.into(),
             limits,
             runtime,
+            snapshots: Arc::default(),
         }
+    }
+
+    /// A copy of this engine where `name` is also a table for `project`:
+    /// the result of `sql`, computed once and kept in memory. Used to run
+    /// many queries over the same expensive projection (the board).
+    ///
+    /// Returns `Ok(None)` when the result has more than `max_rows` rows, so
+    /// the caller falls back to querying the files directly and memory stays
+    /// bounded.
+    pub async fn snapshot(
+        &self,
+        project: &str,
+        name: &str,
+        sql: &str,
+        max_rows: usize,
+    ) -> Result<Option<QueryEngine>, QueryError> {
+        if name.is_empty() || !name.bytes().all(|b| b.is_ascii_lowercase() || b == b'_') {
+            return Err(QueryError::Rejected("invalid snapshot name".into()));
+        }
+        let run = async {
+            let ctx = self.context(project).await?;
+            let options = SQLOptions::new()
+                .with_allow_ddl(false)
+                .with_allow_dml(false)
+                .with_allow_statements(false);
+            let df = ctx
+                .sql_with_options(sql, options)
+                .await
+                .map_err(|e| QueryError::Rejected(e.to_string()))?;
+            let schema = Arc::new(df.schema().as_arrow().clone());
+            let mut stream = df
+                .execute_stream()
+                .await
+                .map_err(|e| QueryError::Rejected(e.to_string()))?;
+            let mut batches = Vec::new();
+            let mut rows = 0usize;
+            while let Some(batch) = stream.next().await {
+                let batch = batch.map_err(|e| QueryError::Rejected(e.to_string()))?;
+                rows += batch.num_rows();
+                if rows > max_rows {
+                    return Ok(None);
+                }
+                batches.push(batch);
+            }
+            let table = MemTable::try_new(schema, vec![batches])
+                .map_err(|e| QueryError::Storage(e.to_string()))?;
+            Ok(Some(table))
+        };
+        let table = match tokio::time::timeout(self.limits.timeout, run).await {
+            Ok(r) => r?,
+            Err(_) => return Err(QueryError::Timeout(self.limits.timeout)),
+        };
+        Ok(table.map(|t| {
+            let mut snaps: Vec<_> = self
+                .snapshots
+                .iter()
+                .filter(|(p, n, _)| !(p == project && n == name))
+                .cloned()
+                .collect();
+            snaps.push((project.to_owned(), name.to_owned(), Arc::new(t)));
+            QueryEngine {
+                snapshots: Arc::new(snaps),
+                ..self.clone()
+            }
+        }))
     }
 
     async fn context(&self, project: &str) -> Result<SessionContext, QueryError> {
@@ -125,6 +194,12 @@ impl QueryEngine {
             ListingTable::try_new(table_config).map_err(|e| QueryError::Storage(e.to_string()))?;
         ctx.register_table("events", Arc::new(table))
             .map_err(|e| QueryError::Storage(e.to_string()))?;
+        for (p, name, t) in self.snapshots.iter() {
+            if p == project {
+                ctx.register_table(name.as_str(), t.clone())
+                    .map_err(|e| QueryError::Storage(e.to_string()))?;
+            }
+        }
         Ok(ctx)
     }
 
