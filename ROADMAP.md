@@ -16,6 +16,7 @@ OpenLens is a method plus the tool that carries it out ([docs/method.md](docs/me
 | M5 See it | ✅ | ✅ churn card → replay of a session that churned there |
 | M6 Production + dogfooding | 🚧 | ⏳ Journal and Kanban on OpenLens since 2026-11-22: 30 days without data loss (until 2026-12-22) |
 | M7 The former Later list (D-016) | ✅ | every item shipped, optional ones off until configured |
+| M8 Kubernetes (v0.2) | 🚧 | `helm install` with no value and `kubectl apply -k`, installed, upgraded and smoke-tested on kind in CI |
 
 ---
 
@@ -83,3 +84,14 @@ A layered workspace, `cargo xtask ci`, AGENTS.md, Docker and compose with the he
 - ✅ In-app micro-surveys: one question after a success event, sampled, once per user; results by role (`/p/{id}/surveys`, CLI, MCP `survey_set`)
 - ✅ LLM rewording of cards (optional `OPENLENS_LLM_API_KEY`; numbers guarded, originals kept)
 - ✅ S3 copy (optional): closed days and a daily metadata snapshot, signed with our own SigV4 (checked against the AWS example)
+
+## M8: Kubernetes, packaged for agents (v0.2) 🚧
+Same philosophy as the Coolify template: one command, no required value, and a guide an agent can follow from an empty cluster to a wired app.
+- ✅ Helm chart (`deploy/helm/openlens`): exactly one replica (single writer), PVC, a generated admin token kept across upgrades, an optional Ingress with TLS, probes, a hardened pod, optional features from Secrets (#145).
+- ✅ Plain manifests and a Kustomize base rendered from the chart, plus an Ingress component and an example overlay (#146).
+- ✅ [docs/deploy/kubernetes.md](docs/deploy/kubernetes.md): install, token, reach, wire, options, upgrade, backup, sizing (#147).
+- ✅ CI on kind: lint, install, `helm test`, events in, upgrade with the events and the token kept, Kustomize base too (#148). The chart is published to `oci://ghcr.io/philippe-arnd/charts` on release tags.
+- ⏳ Scheduled backups in the cluster (#149).
+
+**Exit:** on a fresh kind cluster, an agent following the guide gets a running instance, a wired example app and a green `verify`, with no hand edits.
+
