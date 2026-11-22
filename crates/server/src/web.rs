@@ -1,10 +1,10 @@
 //! Dashboard routes (server-rendered, D-011).
 
-use axum::{Json, Router};
 use axum::extract::{Form, Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
+use axum::{Json, Router};
 use maud::Markup;
 use serde::Deserialize;
 use serde_json::json;
