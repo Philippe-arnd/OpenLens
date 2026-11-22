@@ -1,65 +1,89 @@
-<div align="center">
+<h1 align="center"><img alt="OpenLens" src="docs/img/wordmark.svg" width="380"></h1>
 
-# 🔭 OpenLens
+<p align="center"><b>Product analytics as a method, not a toolbox.<br>Your agents wire it in. Your PM opens a board that already says where the value is.</b></p>
 
-**Product analytics as a method, not a toolbox.**<br>
-Your agents wire it in. Your PM opens a board that already says where the value is.
+<p align="center">
+  <a href="#-try-it-in-two-minutes"><b>Try it</b></a> ·
+  <a href="#-what-the-board-answers">The board</a> ·
+  <a href="#-zero-human-setup">Agents</a> ·
+  <a href="#-wire-an-app">Wire an app</a> ·
+  <a href="#-deploy">Deploy</a> ·
+  <a href="#-how-it-works">How it works</a> ·
+  <a href="#-performance">Performance</a> ·
+  <a href="#-known-limits">Known limits</a> ·
+  <a href="#-releases">Releases</a>
+</p>
 
-[![CI](https://github.com/Philippe-arnd/OpenLens/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Philippe-arnd/OpenLens/actions/workflows/ci.yml)
-[![Image](https://github.com/Philippe-arnd/OpenLens/actions/workflows/release.yml/badge.svg)](https://github.com/Philippe-arnd/OpenLens/actions/workflows/release.yml)
-[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-6d5efc)](LICENSE)
-![Rust](https://img.shields.io/badge/rust-2024-e5486a?logo=rust)
-[![Release](https://img.shields.io/github/v/release/Philippe-arnd/OpenLens?color=6d5efc)](https://github.com/Philippe-arnd/OpenLens/releases)
-![SDK](https://img.shields.io/badge/SDK-4.6%20kB%20gz-0e9f6e)
-![Ingest](https://img.shields.io/badge/ingest-80k%20events%2Fs%2FvCPU-2f8cf0)
-![Config](https://img.shields.io/badge/config-none%20required-d99400)
+<p align="center">
+  <a href="https://github.com/Philippe-arnd/OpenLens/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Philippe-arnd/OpenLens/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/Philippe-arnd/OpenLens/actions/workflows/k8s.yml"><img alt="Kubernetes" src="https://github.com/Philippe-arnd/OpenLens/actions/workflows/k8s.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/Philippe-arnd/OpenLens/releases"><img alt="Release" src="https://img.shields.io/github/v/release/Philippe-arnd/OpenLens?color=6d5efc"></a>
+  <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-6d5efc"></a>
+  <img alt="SDK 4.7 kB gz" src="https://img.shields.io/badge/SDK-4.7%20kB%20gz-0e9f6e">
+  <img alt="No configuration" src="https://img.shields.io/badge/config-none%20required-d99400">
+</p>
 
-**map → measure → focus → act → compare** · [the method](docs/method.md) · [roadmap](ROADMAP.md) · [agent guide](docs/agents/wire.md)
+OpenLens is self-hosted product analytics in **one Rust binary**: ingestion, storage, queries, dashboard and an MCP server for agents. It follows one method, **map → measure → focus → act → compare** ([the method](docs/method.md)), so there is nothing to configure.
 
-</div>
+Your coding agent wires an app in a few minutes:
+1. it declares the app's features, their success moments and its roles in a small feature map;
+2. it adds one script;
+3. it backfills history from the app's database.
+
+On the first login, the product manager sees KPIs **by role and by release**, and a handful of ranked insights:
+- what makes users stick, and where they churn;
+- which journeys lead to value;
+- what the last release broke.
+
+<p align="center">
+  <img alt="Apps send events through the browser or server SDKs to /capture; a write-ahead log becomes daily Parquet files next to a SQLite metadata store; DataFusion and the method turn them into the Focus board, the MCP server and CLI, and the weekly digest, all in one binary" src="docs/img/architecture.svg" width="860">
+</p>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/board-dark.png">
   <img alt="The OpenLens Focus board: ranked insight cards, KPIs, feature pulse, roles × features, retention cohorts and release comparison" src="docs/img/board-light.png">
 </picture>
 
-## ✨ What you get
+## 🎯 What the board answers
 
-On first login, the **Focus board** is already populated. It answers what product managers actually ask:
-
-- 🎯 **What to focus on.** Three to seven ranked insight cards, each with its evidence, its cohort size and a next step:
+- **What to focus on.** Three to seven ranked insight cards, each with its evidence, its cohort size and a next step:
   - *"Users who use export in their first week stay 5.2× more"*
-  - *"72% of churned users were last seen in billing"*, with a ▶ link to watch one of those sessions
-  - *"admins almost never use reports"*
+  - *"72% of churned users were last seen in billing"*, with a ▶ link to a replay of one of those sessions
+  - *"Admins almost never use reports"*
   - *"Release v2: sessions with errors went from 3% to 33%"*
-- 👥 **Who does what.** Every KPI by **role** (canonical roles, mapped from your app's raw values), account and plan. A *roles × features* grid shows blind spots at a glance.
-- 📈 **KPIs that matter.** These are the [definitions](docs/kpis.md):
-  - DAU/WAU/MAU, stickiness, users who came back, session length, tasks per user
-  - error rate and Core Web Vitals
-- 🧩 **Feature pulse.** Per feature: adoption, uses per user, active days, completion, and task time (median and p90).
-- 🔁 **Do they come back?** Weekly retention cohorts.
-- 🛣️ **Journeys and funnels.** The paths that lead to each feature's success event, and the steps where people drop off.
-- 🚀 **Release vs release, environment vs environment.** Every event carries its release, so the board tells you whether the last change moved the number.
-- 🚩 **Feature flags.** Roll out by percentage, role or account. Each flag becomes its own cohort on the board (*with vs without*).
-- 🎬 **Session replay.** Inputs are always masked. Replays are linked from events, errors and churn cards.
-- 🐞 **Errors.** Grouped by cause, split by role, release and page. Each group links to its replay and, with source maps, to the original file and line.
-- 🔥 **Pages.** Scroll depth, most-clicked elements, rage clicks.
+- **Who does what.** Every KPI by role, account and plan, plus a *roles × features* grid. The team's own accounts are left out.
+- **KPIs with fixed definitions** ([docs/kpis.md](docs/kpis.md)):
+  - DAU/WAU/MAU of identified users, and stickiness;
+  - weekly retention, resurrected users;
+  - sessions, bounces, tasks completed per user-day;
+  - error rate and Core Web Vitals.
+- **Feature pulse:** adoption, frequency, active days, completion and task time (median and p90) for every feature.
+- **Journeys and funnels:** the paths into each success event, and the step where people drop off.
+- **Release vs release, environment vs environment.** Every event carries its release.
+- **Act on it:**
+  - feature flags, each one a cohort with a significance test;
+  - one-question micro-surveys after a success;
+  - a weekly digest.
+- **See it:**
+  - session replays, with inputs always masked;
+  - errors grouped by cause, with source maps;
+  - scroll depth, rage clicks and click heatmaps.
 
 ## 🤖 Zero human setup
 
-OpenLens is built for apps that agents write and maintain. **Your coding agent does the wiring**, following [`/agents.md`](docs/agents/wire.md), which every server serves:
+OpenLens is built for apps that agents write and maintain. Every server serves its own wiring guide at `/agents.md` ([docs/agents/wire.md](docs/agents/wire.md)):
 
-1. `openlens-cli init`: creates the project.
-2. It adds the snippet and `identify(user.id, { role })` with your real role field.
-3. It drafts `openlens.features.yaml`, the **feature map**: your features, their entry points and their *success* moment, plus your roles. It then lints the map against the code.
-4. It **backfills** history from your database, so day one already shows months of signal.
-5. `openlens-cli verify`: green. Then `openlens-cli login-link` → 📩 to the PM.
+1. `openlens-cli init` creates the project.
+2. The agent adds the SDK and `identify(user.id, { role })`, using the app's real role field.
+3. It drafts `openlens.features.yaml`: features, entry points, success events and roles. `features lint` checks the map against the code.
+4. `openlens-cli import` backfills history, so day one already shows months of signal.
+5. `openlens-cli verify` goes green. `openlens-cli login-link` is then sent to the PM, whose first login creates their admin account.
 
-From then on, agents keep the map current, and they can ask OpenLens anything over **MCP**:
-- `insights`, `kpi_report` (split by role, account, plan, page or feature) and `user_timeline`;
-- `errors`, read-only `sql`, `flags`, …
+From then on, agents keep the map current. Over **MCP** (`openlens-cli mcp`) they can ask:
+- `insights`, `kpi_report` (by role, account, plan, page or feature), `user_timeline`;
+- `errors`, `digest`, read-only `sql`, `flags`, `surveys`.
 
-## 🔌 One dependency, any stack
+## 🔌 Wire an app
 
 ```html
 <!-- server-rendered apps: one tag -->
@@ -67,72 +91,126 @@ From then on, agents keep the map current, and they can ask OpenLens anything ov
 ```
 
 ```js
-// SPAs: npm install @openlens/web
+// SPAs and frameworks
 import openlens from "@openlens/web";
 openlens.init({ host: "https://lens.example.com", key: "pk_…", release: BUILD_SHA });
 openlens.identify(user.id, { role: user.role, account: user.orgId, plan: user.plan });
 ```
 
-- **Captured automatically:** page views and SPA routes, clicks (named by `data-feature`), forms, errors, Web Vitals, failed requests, scroll depth, environment and release.
+- **Captured on its own:**
+  - page views (History API and `#/` routes);
+  - clicks named by `data-feature`, including inside web components;
+  - submits, errors, Web Vitals, failed requests and scroll depth.
 - **Privacy:**
   - no cookies;
-  - input values are never captured;
+  - input values are never sent;
   - Do Not Track and consent are respected;
-  - `data-openlens-mask` and `data-openlens-block` give finer control over what replay records.
-- **Size:** the core SDK is **4.6 kB** gzipped. The replay recorder loads separately, only once the page is idle.
+  - `data-openlens-mask` and `data-openlens-block` for what replays may show.
+- **Reliable:** failed sends are retried with the same event ids and stored once. Tabs share one session. Robots are not counted.
+- **Guides:**
+  - [framework recipes](docs/agents/wire.md#framework-recipes) for Next.js, Nuxt, SvelteKit, Astro, Remix, Vite and Angular;
+  - [strict CSP](docs/agents/wire.md#strict-content-security-policy);
+  - an [ad-blocker proxy](docs/agents/wire.md#ad-blockers-proxy-through-the-apps-domain).
+- **Server events:** [Node and Python](sdk/SERVER.md) thin clients, or a plain `POST /capture`.
+- **Examples:** [`examples/`](examples/) has two reference apps, which CI clicks through every night until `verify` is green.
 
-Two complete examples, both wired by following the agent guide, live in [`examples/`](examples/). Every night, CI clicks through them in Chromium and requires a green `verify`.
-
-## ⚡ Try it in two minutes
+## 🌐 Try it in two minutes
 
 ```sh
-cargo xtask demo ./data                                   # 300 synthetic users with planted patterns
+cargo xtask demo ./data          # 300 synthetic users with planted patterns
 OPENLENS_DATA_DIR=./data OPENLENS_ADMIN_TOKEN=demo cargo run -p openlens
 # → http://localhost:8686, token "demo"
 ```
 
-**Deploy:** use the one-click [Coolify template](docs/deploy/coolify.md), or [Kubernetes](docs/deploy/kubernetes.md) (Helm chart or Kustomize, tested on a real cluster in CI). There are no required environment variables, and the admin token generates itself. Back up with `openlens backup <dir>`, which is safe while the server runs.
+Or with Docker, which doesn't need a Rust toolchain:
 
-## 🪶 Why it is lean
+```sh
+docker run -p 8686:8686 -v openlens-data:/data ghcr.io/philippe-arnd/openlens:latest
+# the admin token is printed in the log on first start
+```
 
-| | |
-| --- | --- |
-| 📦 **One binary** | API, ingestion, dashboard and retention in one Rust process. No Kafka, ClickHouse or Redis. |
-| 🗂️ **Files you own** | WAL → daily Parquet (zstd), about 11 bytes per event. Metadata lives in SQLite. One directory to back up. |
-| 🏎️ **Fast on small boxes** | About 80k events/s ingested on **one vCPU**. The board answers in ~1 s on 500k events ([benchmarks](docs/benchmarks.md)). |
-| 🔒 **Locked down** | The dashboard has no JavaScript and a strict CSP (only the replay page runs a script, its own). There are no `unwrap`/`panic` calls in production code, and every input is treated as hostile. |
-| 🧘 **Almost no settings** | One method, fixed KPI definitions and fixed retention (13 months of events, 30 days of replays). The feature map is the only configuration ([D-014](docs/decisions.md)). |
+## 🚀 Deploy
 
-## 🗺️ Status
+| Where | How | Guide |
+| --- | --- | --- |
+| **Coolify** | one-click template, no variable to fill in | [docs/deploy/coolify.md](docs/deploy/coolify.md) |
+| **Kubernetes** | `helm install openlens oci://ghcr.io/philippe-arnd/charts/openlens`, or `kubectl apply -k` | [docs/deploy/kubernetes.md](docs/deploy/kubernetes.md) |
+| **Docker / any host** | one container, one volume | [Try it](#-try-it-in-two-minutes) |
 
-**v0.1.0, in production.** Milestones M0–M5 and M7 are done. M6 is under way: two real apps (Journal and Kanban) have been sending their events to a production instance since 2026-11-22, and the exit check is 30 days without data loss. What changed is in the [CHANGELOG](CHANGELOG.md). See [ROADMAP.md](ROADMAP.md), [gaps](docs/gaps.md) and [parity with the category](docs/target-app-parity.md).
+- The admin token generates itself.
+- Optional features stay off until their variables are set: SMTP digest, LLM rewording of cards, OpenID Connect single sign-on, S3 copy.
+- `openlens backup` makes a consistent copy while the server runs.
 
-| | |
-| --- | --- |
-| <img alt="Errors grouped by cause" src="docs/img/errors-light.png"> | <img alt="Pages: scroll depth and clicks" src="docs/img/pages-light.png"> |
+## 🔍 How it works
 
-## 🧱 Layout
+- **Capture.** `POST /capture` takes gzip-compressed batches and treats every field as hostile: sizes and depth are bounded, and clock skew is corrected. Events reach a **write-ahead log** (fsynced), then **daily Parquet files** (zstd). Compaction merges each day and drops resent events.
+- **Metadata** lives in **SQLite**: projects, keys, people and role history, flags, surveys, users. Everything is in one directory you own.
+- **Queries** run on **DataFusion**, read-only and scoped to one project, with time, memory and row caps. `events` is a view that gives each user the events they sent before logging in.
+- **The method** is code, not configuration. The feature map resolves canonical roles and features in SQL. The engine computes the KPIs, insight cards, journeys, funnels, cohorts and significance tests, and the board keeps one in-memory snapshot of the 90-day window.
+- **The dashboard** is server-rendered HTML (maud) with **no JavaScript** and a strict CSP. Only the replay player runs a script, under its own policy.
+- **Agents** use `openlens-cli`, which prints JSON, and its MCP server. They drive the same commands as the dashboard.
+- **The codebase** is a layered Rust workspace (`cargo xtask layers`), with no `unwrap` or `panic` in production code ([architecture](docs/architecture.md), [decisions](docs/decisions.md)).
 
-| Path | What |
-| --- | --- |
-| `apps/openlens` | The server binary: API, ingestion, dashboard, `backup`, `healthcheck` |
-| `apps/openlens-cli` | Agent toolkit: `init`, `features`, `import`, `verify`, `sourcemaps`, `flags`, `export`, `sql`, `login-link`, `mcp` |
-| `crates/*` | Layered engine crates ([architecture](docs/architecture.md), checked by `cargo xtask layers`) |
-| `sdk/js` | Browser SDK `@openlens/web`, the replay recorder and the player |
-| `sdk/node`, `sdk/python` | Server SDKs: thin HTTP clients ([sdk/SERVER.md](sdk/SERVER.md)) |
-| `examples/` | Reference apps: script tag and SPA |
-| `docs/` | Method, KPIs, decisions, architecture, agent guides, deploy, benchmarks, clean-room log |
+## ⚡ Performance
+
+Measured on 2026-11-22, on one core of a 4-vCPU VPS ([docs/benchmarks.md](docs/benchmarks.md)):
+
+- **Ingestion:** about **80,000 events/s on one vCPU**, p99 under 9 ms.
+- **Storage:** about **11 bytes per event** on disk (2.3 M events took 25 MB).
+- **Board:** about **1 s on 515k events**. It keeps up to 2 M rows of the 90-day window in memory, and reads the files beyond that.
+- **SDK:** **4.7 kB** gzipped. The replay recorder loads separately, once the page is idle.
+- **Footprint:** one process, 256 MiB requested on Kubernetes, and no Kafka, ClickHouse or Redis to run next to it.
+
+## 🚧 Known limits
+
+- **One node.** The WAL and SQLite have one writer, so Kubernetes runs one replica. The S3 option is a backup copy, not shared storage.
+- **Web first.** There is no native mobile SDK yet.
+- **UTC days** in every daily KPI.
+- **Small samples:** insight cards wait for at least 8 users per compared group.
+- **npm:** `@openlens/web` is not on the npm registry while the repository is private. Use the script tag.
+
+The full list, with what is planned, is in [docs/gaps.md](docs/gaps.md) and the [backlog](https://github.com/Philippe-arnd/OpenLens/milestones).
+
+## 📦 Releases
+
+OpenLens follows [SemVer](https://semver.org) and keeps a [CHANGELOG](CHANGELOG.md). Each [GitHub release](https://github.com/Philippe-arnd/OpenLens/releases) ships:
+- its notes;
+- Linux binaries (`openlens`, `openlens-cli`);
+- the SDK bundles;
+- the Helm chart;
+- SHA-256 checksums.
+
+Next to it, the image `ghcr.io/philippe-arnd/openlens:vX.Y.Z` and the chart `oci://ghcr.io/philippe-arnd/charts/openlens` are published.
+
+The process is in [docs/development.md](docs/development.md#releasing).
 
 ## 🛠️ Develop
 
 ```sh
-cargo xtask ci     # fmt, clippy, tests, layers, licences: exactly what the PR gate runs
+cargo xtask ci     # fmt, clippy, tests, layers, licences: what the PR gate runs
 ```
 
 More in [docs/development.md](docs/development.md). Contributors and agents: read [AGENTS.md](AGENTS.md) first.
 
+| Path | What |
+| --- | --- |
+| `apps/openlens` | The server binary: API, ingestion, dashboard, `backup`, `healthcheck` |
+| `apps/openlens-cli` | The agent toolkit and MCP server |
+| `crates/*` | Layered engine crates |
+| `sdk/js`, `sdk/node`, `sdk/python` | The browser SDK, replay and player; the server SDKs |
+| `deploy/` | Coolify template, Helm chart, Kustomize base |
+| `examples/` | Reference apps |
+| `docs/` | Method, KPIs, decisions, architecture, agent guides, deploy, benchmarks, clean-room log |
+
 ## 🙏 Credits
 
-The architecture is inspired by OpenObserve's public design (single binary, columnar storage, DataFusion). The working method comes from the ArtCraft team's shared contribution standards ([storytold/craft-contrib](https://github.com/storytold/craft-contrib)). This is a clean-room implementation: no code or text was copied from these projects or from any product-analytics suite ([clean-room log](docs/clean-room.md)). Session recording uses rrweb (MIT), as recorded in [ATTRIBUTION.md](ATTRIBUTION.md).
+- **OpenObserve's public design** inspired the architecture: one binary, columnar storage, DataFusion.
+- **The ArtCraft team's shared contribution standards** ([storytold/craft-contrib](https://github.com/storytold/craft-contrib)) shaped the way of working.
+- **rrweb** (MIT) records the sessions.
+- **DataFusion, Arrow, axum, maud and SQLite** carry the rest.
 
-**License:** [AGPL-3.0](LICENSE).
+This is a clean-room implementation: no code or text was copied from these projects or from any product-analytics suite ([clean-room log](docs/clean-room.md), [ATTRIBUTION.md](ATTRIBUTION.md)).
+
+## 📄 License
+
+[AGPL-3.0](LICENSE).

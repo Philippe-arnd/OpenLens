@@ -22,7 +22,8 @@ permissions:
 jobs:
   publish:
     name: build, check, publish @openlens/web
-    if: ${{ !github.event.repository.private }}
+    # Pre-release snapshots (vX.Y.Z-YYMMDD-sha) are not published to npm.
+    if: ${{ !github.event.repository.private && !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     defaults:
       run:
