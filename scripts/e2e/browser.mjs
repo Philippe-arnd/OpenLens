@@ -21,7 +21,9 @@ const page = `<!doctype html><html><head><meta name="openlens-release" content="
 <lens-card data-feature="share"></lens-card>
 <script>customElements.define("lens-card", class extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML =
-    '<button id="share-btn">Share</button><span data-feature="like"><button id="like-btn">Like</button></span>'; }
+    '<button id="share-btn">Share</button><span data-feature="like"><button id="like-btn">Like</button></span>' +
+    '<form name="invite" data-feature="invite"><input id="invite-email" name="email"><button id="invite-send">Send</button></form>';
+    this.shadowRoot.querySelector("form").addEventListener("submit", (e) => e.preventDefault()); }
 });</script>
 <script src="${server}/c.js" data-key="${key}"></script>
 <script>openlens.reset(); openlens.identify("e2e-user", { role: "owner" });</script>
@@ -72,6 +74,9 @@ await tab.click("#secret");
 // Web components: clicks inside an open shadow root keep their feature.
 await tab.click("#share-btn");
 await tab.click("#like-btn");
+// and a form inside it: typing then Enter submits it.
+await tab.fill("#invite-email", "x@example.com");
+await tab.press("#invite-email", "Enter");
 await tab.evaluate(() => { setTimeout(() => { throw new Error("e2e boom"); }, 0); });
 await tab.waitForTimeout(200);
 await tab.evaluate(() => openlens.flush());
@@ -143,6 +148,15 @@ for (const [feature, text] of [["share", "Share"], ["like", "Like"]]) {
     console.error(`shadow DOM click not captured with its feature: ${feature}`);
     process.exit(1);
   }
+}
+const submits = sent.flatMap((b) => JSON.parse(b).batch).filter((e) => e.event === "$submit");
+if (!submits.some((e) => e.properties.$form === "invite" && e.properties.$feature === "invite")) {
+  console.error("shadow DOM form submit not captured");
+  process.exit(1);
+}
+if (sent.some((b) => b.includes("x@example.com"))) {
+  console.error("an input value was sent");
+  process.exit(1);
 }
 // identify links the anonymous visit (reset while anonymous is a no-op), so
 // the events sent before login belong to the user.

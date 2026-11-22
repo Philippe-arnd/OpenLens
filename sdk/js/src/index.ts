@@ -389,15 +389,25 @@ function autocapture(): void {
     },
     true,
   );
-  document.addEventListener(
-    "submit",
-    (e) => {
-      const form = e.target instanceof HTMLFormElement ? e.target : null;
-      if (!form || form.closest("[data-openlens-ignore]")) return;
-      track("$submit", { ...describe(form), $form: form.getAttribute("name") || form.id || undefined });
-    },
-    true,
-  );
+  const onSubmit = (e: Event) => {
+    const form = e.target instanceof HTMLFormElement ? e.target : null;
+    if (!form || lineage(form).some((x) => x.hasAttribute("data-openlens-ignore"))) return;
+    track("$submit", { ...describe(form), $form: form.getAttribute("name") || form.id || undefined });
+  };
+  document.addEventListener("submit", onSubmit, true);
+  // `submit` does not leave a shadow root: listen on each open root the
+  // user reaches (focus or click inside it comes before any submit).
+  const watched = new WeakSet<ShadowRoot>();
+  const watch = (e: Event) => {
+    for (const n of e.composedPath()) {
+      if (n instanceof ShadowRoot && !watched.has(n)) {
+        watched.add(n);
+        n.addEventListener("submit", onSubmit, true);
+      }
+    }
+  };
+  document.addEventListener("focusin", watch, true);
+  document.addEventListener("pointerdown", watch, true);
 
   // Errors: at most 5 of the same message per page.
   const seen: Record<string, number> = {};

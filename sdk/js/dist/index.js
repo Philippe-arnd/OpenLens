@@ -353,15 +353,23 @@ function autocapture() {
     },
     true
   );
-  document.addEventListener(
-    "submit",
-    (e) => {
-      const form = e.target instanceof HTMLFormElement ? e.target : null;
-      if (!form || form.closest("[data-openlens-ignore]")) return;
-      track("$submit", { ...describe(form), $form: form.getAttribute("name") || form.id || void 0 });
-    },
-    true
-  );
+  const onSubmit = (e) => {
+    const form = e.target instanceof HTMLFormElement ? e.target : null;
+    if (!form || lineage(form).some((x) => x.hasAttribute("data-openlens-ignore"))) return;
+    track("$submit", { ...describe(form), $form: form.getAttribute("name") || form.id || void 0 });
+  };
+  document.addEventListener("submit", onSubmit, true);
+  const watched = /* @__PURE__ */ new WeakSet();
+  const watch = (e) => {
+    for (const n of e.composedPath()) {
+      if (n instanceof ShadowRoot && !watched.has(n)) {
+        watched.add(n);
+        n.addEventListener("submit", onSubmit, true);
+      }
+    }
+  };
+  document.addEventListener("focusin", watch, true);
+  document.addEventListener("pointerdown", watch, true);
   const seen = {};
   const report = (kind, message, stack, source) => {
     var _a;

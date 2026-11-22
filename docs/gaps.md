@@ -11,5 +11,4 @@ What is missing or behaves differently from what a user might expect. The UI and
 - **Funnels** come from the feature map's declared steps. There is no funnel builder by design (D-014): agents run ad hoc funnels with `sql`.
 - **Journeys** look at the day before a user's first success only.
 - **Insights need history and size:** cards wait for at least 8 users per compared group, and retention-based cards for users older than the churn window. Backfill (`openlens-cli import`) fills the history gap on day one.
-- **Shadow DOM:** clicks inside open shadow roots are captured; form submits inside them are not yet.
 - **Sign-in by email** needs OIDC or a login link from the CLI: there is no "email me a link" on the login page yet, even with SMTP set.

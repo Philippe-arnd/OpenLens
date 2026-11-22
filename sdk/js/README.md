@@ -37,7 +37,7 @@ Framework recipes (Next.js, Nuxt, SvelteKit, Astro, Remix), strict CSP and ad-bl
 
 - **Page views**, including SPA route changes (History API and `#/` hash routes) and back/forward-cache restores. Prerendered pages count only once they are shown.
 - **Clicks** on interactive elements, including inside web components (open shadow roots). `$feature` comes from the nearest `data-feature` attribute, inside or around the component, and 3 quick clicks set a `$rage` flag.
-- **Form submits.** Input values are never captured.
+- **Form submits**, also inside web components. Input values are never captured.
 - **Sessions:** a new one after 30 minutes of inactivity or a UTC day change. Tabs of the same app share the visitor and the session.
 - **Errors** (`$error`): uncaught errors and unhandled rejections, at most 5 of the same message per page.
 - **Web Vitals** (`$vital`): LCP, INP, CLS, FCP and TTFB, each rated good, needs-improvement or poor.
