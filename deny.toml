@@ -33,3 +33,13 @@ allow-wildcard-paths = true
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+
+[advisories]
+# Each ignore needs its reason, and is reviewed when its dependency moves.
+ignore = [
+  # chrono is "unmaintained" (no fix exists). Arrow and DataFusion depend on
+  # it for every timestamp, so it cannot be dropped; nothing is vulnerable.
+  { id = "RUSTSEC-2026-0543", reason = "unmaintained, no alternative: arrow/datafusion depend on chrono" },
+  # chrono-tz, same reason (arrow's time-zone support, and D-017).
+  { id = "RUSTSEC-2026-0555", reason = "unmaintained, no alternative: arrow's time-zone support depends on chrono-tz" },
+]
