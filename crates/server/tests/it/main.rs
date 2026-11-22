@@ -1422,3 +1422,45 @@ async fn email_login_is_off_without_smtp_and_never_tells_who_exists() {
         assert!(String::from_utf8_lossy(&body).contains("Check your inbox"));
     }
 }
+
+/// Through a proxy, one client address gets a burst, then 429 with
+/// Retry-After (which the SDK honours by retrying later).
+#[tokio::test]
+async fn capture_is_rate_limited_per_client_behind_a_proxy() {
+    let h = harness();
+    let mut limited = None;
+    for i in 0..700 {
+        let r = router(h.state.clone())
+            .oneshot(
+                Request::post("/capture")
+                    .header("content-type", "text/plain")
+                    .header("x-forwarded-for", "203.0.113.9")
+                    .body(Body::from(batch(&h.key)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        if r.status() == StatusCode::TOO_MANY_REQUESTS {
+            assert_eq!(r.headers()["retry-after"], "5");
+            limited = Some(i);
+            break;
+        }
+    }
+    let i = limited.expect("a client sending 700 batches at once is limited");
+    assert!(
+        i >= 400,
+        "the burst lets a normal client through first ({i})"
+    );
+    // Another client is not affected.
+    let other = router(h.state.clone())
+        .oneshot(
+            Request::post("/capture")
+                .header("content-type", "text/plain")
+                .header("x-forwarded-for", "198.51.100.7")
+                .body(Body::from(batch(&h.key)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(other.status(), StatusCode::OK);
+}
