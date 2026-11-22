@@ -64,10 +64,12 @@ fn events_view_sql() -> String {
     )
 }
 
-/// `persons(person, first_seen)`: every identified user and their first
-/// `$identify`, over all time (not just a query's window), so "first seen"
-/// is the real first visit of a returning user.
-const PERSONS_SQL: &str = "SELECT distinct_id AS person, min(timestamp) AS first_seen \
+/// `persons(person, first_seen, internal)`: every identified user, their
+/// first `$identify` over all time (not just a query's window, so "first
+/// seen" is the real first visit of a returning user), and whether the app
+/// marked them as the team's own (`identify(id, { internal: true })`).
+const PERSONS_SQL: &str = "SELECT distinct_id AS person, min(timestamp) AS first_seen, \
+     max(CASE WHEN properties LIKE '%\"$internal\":true%' THEN 1 ELSE 0 END) = 1 AS internal \
      FROM raw_events WHERE event = '$identify' GROUP BY distinct_id";
 
 /// The identity tables of one project, read together.

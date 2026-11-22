@@ -56,7 +56,7 @@ Framework recipes (Next.js, Nuxt, SvelteKit, Astro, Remix), strict CSP and ad-bl
 | Call | What it does |
 | --- | --- |
 | `init(config)` | Start. Config: `host`, `key`, `release?`, `environment?`, `autocapture?`, `consent?` (`"granted"`, `"pending"` or `"denied"`), `replay?` |
-| `identify(id, { role, account, plan })` | Name the user and the dimensions the board slices by. Links the anonymous visit before login. |
+| `identify(id, { role, account, plan, internal })` | Name the user and the dimensions the board slices by. Links the anonymous visit before login. `internal: true` marks the team's own accounts, which the board leaves out by default. |
 | `track(event, props?)` | A custom event, such as a feature's success moment |
 | `feature(key, props?)` | Mark the use of a feature without a DOM element |
 | `isEnabled(flagKey)` | Feature flag. Synchronous: the last answer is cached. |

@@ -737,3 +737,39 @@ async fn users_bounces_and_cohorts_are_counted_as_documented() {
     let newest = b.retention.last().unwrap();
     assert_eq!(newest.users, 1, "only bob is new this week, not alice");
 }
+
+/// The team's own users (`identify(id, { internal: true })`) are left out
+/// of the board unless asked for.
+#[tokio::test]
+async fn internal_users_are_left_out_unless_included() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let e = |user, event, props| E {
+        user,
+        role: "member",
+        session: user,
+        event,
+        mins_ago: 10,
+        feature: None,
+        release: "v1",
+        props,
+    };
+    let rows = [
+        e("customer", "$identify", "{}"),
+        e("customer", "$pageview", "{}"),
+        e("dev", "$identify", r#"{"$internal":true}"#),
+        e("dev", "$pageview", r#"{"$internal":true}"#),
+    ];
+    let evs: Vec<_> = rows.iter().enumerate().map(|(i, e)| mk(e, i)).collect();
+    w.append(&evs).unwrap();
+    w.flush().unwrap();
+    let q = QueryEngine::new(dir.path(), Limits::default());
+    let b = board(&q, "p", &Filters::default(), None).await.unwrap();
+    assert_eq!(b.users.mau, 1, "the team is left out by default");
+    let all = Filters {
+        internal: true,
+        ..Filters::default()
+    };
+    let b = board(&q, "p", &all, None).await.unwrap();
+    assert_eq!(b.users.mau, 2);
+}

@@ -40,6 +40,8 @@ export interface Dimensions {
   role?: string;
   account?: string;
   plan?: string;
+  /** The team's own account (staff, testers): left out of the board by default. */
+  internal?: boolean;
 }
 
 interface State {
@@ -146,6 +148,7 @@ function base(): Props {
   if (state.dims.role) p.$role = state.dims.role;
   if (state.dims.account) p.$account = state.dims.account;
   if (state.dims.plan) p.$plan = state.dims.plan;
+  if (state.dims.internal) p.$internal = true;
   if (activeFlags.length) p.$flags = activeFlags.join(",");
   return p;
 }

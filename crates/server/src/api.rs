@@ -151,6 +151,8 @@ pub(crate) struct FilterQuery {
     pub(crate) role: Option<String>,
     pub(crate) release: Option<String>,
     pub(crate) event: Option<String>,
+    /// `1` or `true`: include the team's own users.
+    pub(crate) internal: Option<String>,
 }
 
 impl FilterQuery {
@@ -165,6 +167,7 @@ impl FilterQuery {
             environment: some(&self.env).unwrap_or_else(|| "production".into()),
             role: some(&self.role),
             release: some(&self.release),
+            internal: matches!(self.internal.as_deref(), Some("1" | "true" | "on")),
         }
     }
 }
