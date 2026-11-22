@@ -47,6 +47,8 @@ OpenLens follows [SemVer](https://semver.org) and keeps a [CHANGELOG](../CHANGEL
    - `publish.yml`: the GitHub release, with the notes (`docs/releases/vX.Y.Z.md`, or the CHANGELOG section, plus a *Full changelog* link), the Linux binaries, the SDK bundles, the chart and `SHA256SUMS`;
    - `npm.yml`: `@openlens/web` (public repository only).
 
+**Upgrades are checked** before any image is published: `scripts/upgrade-check.sh <last release image> <new image>` (run by `release.yml`) writes data with the last release and reads it back with the new image. A change that has to rewrite stored data needs its own migration and a CHANGELOG *Changed* entry.
+
 **A snapshot** (a pre-release of `main`, for testing before a release): run *Release* by hand with `snapshot` ticked. It tags `vX.Y.Z-YYMMDD-sha`, then publishes the same assets with the `Unreleased` notes, as a pre-release. Snapshots are not published to npm.
 
 **Re-attach assets** to an existing tag: run *Release* by hand with `tag` set.
