@@ -21,8 +21,24 @@ fn batch_body(key: &str, n: usize, seed: usize) -> String {
                 3 => ("$feature", r#""$feature":"reports""#),
                 _ => ("$submit", r#""$form":"invite""#),
             };
+            // Realistic identities (#159): a third of the users browse
+            // anonymously before logging in, and `$identify` links that
+            // visit; one event in seven comes from a visitor who never logs in.
+            let (event, extra, who) = if i % 7 == 6 {
+                (event, extra.to_owned(), format!("visitor-{seed}-{i}"))
+            } else if u.is_multiple_of(3) && i % 5 == 4 {
+                (
+                    "$identify",
+                    format!(r#""$anon_distinct_id":"anon-{u}-{}""#, seed % 8),
+                    format!("user-{u}"),
+                )
+            } else if u.is_multiple_of(3) && seed.is_multiple_of(2) {
+                (event, extra.to_owned(), format!("anon-{u}-{}", seed % 8))
+            } else {
+                (event, extra.to_owned(), format!("user-{u}"))
+            };
             format!(
-                r#"{{"event":"{event}","distinct_id":"user-{u}","session_id":"s-{u}-{seed}","properties":{{"$current_url":"https://app.example.com/projects/42","$environment":"production","$release":"v1.4.2","$role":"member","$lib":"web",{extra}}}}}"#
+                r#"{{"event":"{event}","distinct_id":"{who}","session_id":"s-{u}-{seed}","properties":{{"$current_url":"https://app.example.com/projects/42","$environment":"production","$release":"v1.4.2","$role":"member","$lib":"web",{extra}}}}}"#
             )
         })
         .collect();

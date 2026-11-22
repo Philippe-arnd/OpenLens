@@ -8,7 +8,7 @@
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use crate::{Filters, IDENTIFIED, Result, int, text};
+use crate::{Filters, Result, int, text};
 use openlens_query::QueryEngine;
 
 /// Smallest group size an insight may rest on.
@@ -58,9 +58,9 @@ fn rows(
 /// `$identify` ever, so a returning user is not taken for a new one (their
 /// "first week" would be wrong); without identify, users already active on
 /// the window's first day are left out for the same reason.
-pub(crate) fn cohort_base(src: &str, w: &str, churn: i64) -> String {
+pub(crate) fn cohort_base(src: &str, w: &str, ident: &str, churn: i64) -> String {
     format!(
-        "WITH ev AS (SELECT distinct_id, timestamp, feature, event, path, release, session_id FROM {src} WHERE {w} AND {IDENTIFIED}), \
+        "WITH ev AS (SELECT distinct_id, timestamp, feature, event, path, release, session_id FROM {src} WHERE {w} AND {ident}), \
          users AS (SELECT ev.distinct_id, least(min(ev.timestamp), min(p.first_seen)) AS first_seen, max(ev.timestamp) AS last_seen \
                    FROM ev LEFT JOIN persons p ON ev.distinct_id = p.person GROUP BY ev.distinct_id), \
          cohort AS (SELECT distinct_id, first_seen, last_seen, \
@@ -75,11 +75,12 @@ pub(crate) async fn compute(
     project: &str,
     src: &str,
     f: &Filters,
+    ident: &str,
     churn: i64,
     successes: &[(String, String)],
 ) -> Result<(Vec<Insight>, Readiness)> {
     let w = f.clause(90)?;
-    let base = cohort_base(src, &w, churn);
+    let base = cohort_base(src, &w, ident, churn);
     let totals_sql = format!("{base} SELECT count(*) AS n, sum(retained) AS kept FROM cohort");
     let early_sql = format!(
         "{base}, early AS (SELECT e.distinct_id, e.feature, count(*) AS uses FROM ev e JOIN cohort c ON e.distinct_id = c.distinct_id \

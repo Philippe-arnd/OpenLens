@@ -293,8 +293,26 @@ pub fn source(map: Option<&FeatureMap>) -> String {
 /// anyone, in which case every visitor counts. User KPIs (DAU/WAU/MAU,
 /// retention, cohorts) use it, so a visitor who never logged in is not a
 /// user (docs/kpis.md); anonymous visitors are counted on their own.
-pub(crate) const IDENTIFIED: &str =
-    "(distinct_id IN (SELECT person FROM persons) OR NOT EXISTS (SELECT 1 FROM persons))";
+///
+/// Decided here, from the `persons` count, rather than in SQL: DataFusion
+/// cannot plan `IN (…) OR NOT EXISTS (…)` as a semi-join (20× slower), and
+/// a scalar-subquery form returned rows out of `ORDER BY` order (#159).
+pub(crate) fn identified(any_person: bool) -> &'static str {
+    if any_person {
+        "distinct_id IN (SELECT person FROM persons)"
+    } else {
+        "TRUE"
+    }
+}
+
+/// Whether the project identified anyone (the `persons` table is cached).
+pub(crate) async fn any_person(q: &QueryEngine, project: &str) -> Result<bool> {
+    let rows = q
+        .sql(project, "SELECT count(*) AS n FROM persons")
+        .await?
+        .rows;
+    Ok(rows.first().map_or(0, |r| int(r, "n")) > 0)
+}
 
 /// Events a person does on purpose. A session with one of them at most is a
 /// bounce; `$scroll`, `$vital`, `$identify` or `$error` alone are not activity.
@@ -335,6 +353,7 @@ pub async fn board(
         Some(s) => (s, "board_events".to_owned()),
         None => (q, projected),
     };
+    let ident = identified(any_person(q, project).await?);
     let w30 = f.clause(30)?;
     let w14 = f.clause(14)?;
     let w7 = f.clause(7)?;
@@ -367,11 +386,10 @@ pub async fn board(
     let users_sql = format!(
         "SELECT count(DISTINCT CASE WHEN timestamp >= now() - INTERVAL '1 day' THEN distinct_id END) AS dau, \
          count(DISTINCT CASE WHEN timestamp >= now() - INTERVAL '7 days' THEN distinct_id END) AS wau, \
-         count(DISTINCT distinct_id) AS mau FROM {src} WHERE {w30} AND {IDENTIFIED}"
+         count(DISTINCT distinct_id) AS mau FROM {src} WHERE {w30} AND {ident}"
     );
-    let anonymous_sql = format!(
-        "SELECT count(DISTINCT distinct_id) AS n FROM {src} WHERE {w30} AND NOT {IDENTIFIED}"
-    );
+    let anonymous_sql =
+        format!("SELECT count(DISTINCT distinct_id) AS n FROM {src} WHERE {w30} AND NOT {ident}");
     let sessions_sql = format!(
         "SELECT count(*) AS sessions, \
          avg(CASE WHEN n > 1 THEN secs END) AS avg_secs, \
@@ -386,7 +404,7 @@ pub async fn board(
                FROM {src} WHERE {w7} AND session_id IS NOT NULL GROUP BY session_id) s"
     );
     let dau_sql = format!(
-        "SELECT date, count(DISTINCT distinct_id) AS n FROM {src} WHERE {w14} AND {IDENTIFIED} GROUP BY date ORDER BY date"
+        "SELECT date, count(DISTINCT distinct_id) AS n FROM {src} WHERE {w14} AND {ident} GROUP BY date ORDER BY date"
     );
     let vitals_sql = format!(
         "SELECT name, approx_percentile_cont(v, 0.75) AS p75, count(*) AS samples FROM ( \
@@ -433,8 +451,10 @@ pub async fn board(
                GROUP BY release, session_id) s \
          GROUP BY release ORDER BY min(first) DESC LIMIT 5"
     );
-    let env_sql = "SELECT DISTINCT environment FROM events ORDER BY environment".to_owned();
-    let total_sql = "SELECT count(*) AS n FROM events".to_owned();
+    // Neither depends on who did what: read the stored rows, without the
+    // identity join.
+    let env_sql = "SELECT DISTINCT environment FROM raw_events ORDER BY environment".to_owned();
+    let total_sql = "SELECT count(*) AS n FROM raw_events".to_owned();
 
     let success_sql = if successes.is_empty() {
         "SELECT CAST(NULL AS VARCHAR) AS event, 0 AS n, 0 AS users WHERE false".to_owned()
@@ -626,13 +646,13 @@ pub async fn board(
         .unwrap_or_default();
     let ((mut cards, readiness), journeys, cohorts, funnels, task_times, resurrected, retention) =
         futures::try_join!(
-            insights::compute(q, project, &src, f, churn, &successes),
+            insights::compute(q, project, &src, f, ident, churn, &successes),
             insights::journeys(q, project, &src, f, &successes),
             insights::flag_cohorts(q, project, &src, f),
             insights::funnels(q, project, &src, f, &funnel_defs),
             tasks::task_times(q, project, &src, f, &successes),
             tasks::resurrected(q, project, &src, f, churn),
-            tasks::retention(q, project, &src, f),
+            tasks::retention(q, project, &src, f, ident),
         )?;
     b.retention = retention;
     b.task_times = task_times;
@@ -686,7 +706,8 @@ pub async fn churned_sessions(
 ) -> Result<Vec<(String, String)>> {
     let src = source(map);
     let churn = map.map_or(14, |m| i64::from(m.churn_days()));
-    let base = insights::cohort_base(&src, &f.clause(90)?, churn);
+    let ident = identified(any_person(q, project).await?);
+    let base = insights::cohort_base(&src, &f.clause(90)?, ident, churn);
     let sql = format!(
         "{base}, churned AS (SELECT distinct_id, last_seen FROM cohort WHERE retained = 0) \
          SELECT e.session_id AS sid, CAST(e.timestamp AS VARCHAR) AS ts FROM ev e \
