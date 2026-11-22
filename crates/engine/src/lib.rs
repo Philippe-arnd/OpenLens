@@ -355,9 +355,18 @@ pub(crate) async fn any_person(q: &QueryEngine, project: &str) -> Result<bool> {
 pub(crate) const INTERACTION: &str =
     "(event IN ('$pageview', '$click', '$submit', '$feature', '$survey') OR event NOT LIKE '$%')";
 
-/// Largest 90-day window the board keeps in memory (about 1 GB worst case
-/// with large properties); beyond it, each query reads the files.
-const BOARD_SNAPSHOT_ROWS: usize = 2_000_000;
+/// Largest 90-day window the board keeps in memory; beyond it, each query
+/// reads the files. The snapshot holds only the columns the board reads
+/// (properties only for `$vital`), so a row costs about 160 bytes: 4 M rows
+/// stay under ~650 MB (#190).
+const BOARD_SNAPSHOT_ROWS: usize = 4_000_000;
+
+/// The columns of the board snapshot. `uuid`, `url`, `received_at`,
+/// `account` and `plan` are not read by any board query, and `properties`
+/// (most of an event's bytes) only for Web Vitals.
+const BOARD_COLUMNS: &str = "event, distinct_id, session_id, timestamp, path, feature, role, \
+     environment, release, flags, date, \
+     CASE WHEN event = '$vital' THEN properties END AS properties";
 
 /// Compute the board for a project, with its feature map when it has one.
 /// Queries run concurrently.
@@ -381,7 +390,7 @@ pub async fn board(
         .snapshot(
             project,
             "board_events",
-            &format!("SELECT * FROM {projected} WHERE {window}"),
+            &format!("SELECT {BOARD_COLUMNS} FROM {projected} WHERE {window}"),
             BOARD_SNAPSHOT_ROWS,
         )
         .await?;
