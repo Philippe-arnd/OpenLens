@@ -891,7 +891,7 @@ fn role_matrix(b: &Board) -> Markup {
                         @for (r, n) in &roles {
                             @let share = cell(r, &f.key) as f64 / (*n).max(1) as f64;
                             @let level = if share <= 0.0 { 0 } else { ((share * 5.0).ceil() as u8).clamp(1, 5) };
-                            td.num class={ "heat-" (level) } title={ (pct(share)) " of " (r) " users used " (f.name.as_deref().unwrap_or(&f.key)) } {
+                            td class={ "num heat-" (level) } title={ (pct(share)) " of " (r) " users used " (f.name.as_deref().unwrap_or(&f.key)) } {
                                 @if share > 0.0 { (pct(share)) } @else { span.muted { "—" } }
                             }
                         }

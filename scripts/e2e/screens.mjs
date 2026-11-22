@@ -11,7 +11,7 @@ mkdirSync(out, { recursive: true });
 const pages = ["", "/events", "/pages", "/errors", "/replays", "/flags"];
 
 const browser = await chromium.launch();
-const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 }, deviceScaleFactor: 2 });
+const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 }, deviceScaleFactor: 2, reducedMotion: "reduce" });
 const tab = await ctx.newPage();
 const problems = [];
 tab.on("console", (m) => m.type() === "error" && problems.push(`${tab.url()}: ${m.text()}`));
@@ -28,6 +28,9 @@ for (const theme of ["light", "dark"]) {
     const r = await tab.goto(url);
     if (!r || r.status() !== 200) problems.push(`${url}: HTTP ${r ? r.status() : "none"}`);
     // The icon sprite must not take space, and meters must have a length.
+    // Matrix cells must carry their heat class (one class attribute only).
+    const heat = await tab.evaluate(() => document.querySelectorAll("table.matrix td[class*=heat-]").length);
+    if (p === "" && heat === 0) problems.push(`${url}: roles × features cells have no heat class`);
     const spriteHeight = await tab.evaluate(() => document.querySelector("svg.sprite")?.getBoundingClientRect().height ?? 0);
     if (spriteHeight > 0) problems.push(`${url}: icon sprite is visible`);
     const name = (p || "/board").slice(1).replace(/\//g, "-");
