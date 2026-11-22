@@ -101,7 +101,7 @@ jobs:
           cp target/release/openlens target/release/openlens-cli LICENSE README.md CHANGELOG.md "dist/$d/"
           tar -C dist -czf "dist/$d.tar.gz" "$d"
           rm -rf "dist/$d"
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: binaries-${{ matrix.arch }}
           path: dist/*.tar.gz
@@ -115,7 +115,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.prepare.outputs.ref }}
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           pattern: binaries-*
           merge-multiple: true
@@ -128,14 +128,14 @@ jobs:
           if [ -f sdk/js/licenses/rrweb-LICENSE.txt ]; then cp sdk/js/licenses/rrweb-LICENSE.txt "dist/$d/"; fi
           tar -C dist -czf "dist/$d.tar.gz" "$d"
           rm -rf "dist/$d"
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
       - name: Helm chart
         # Releases before the chart existed (v0.1.x) ship without it.
         if: hashFiles('deploy/helm/openlens/Chart.yaml') != ''
         run: helm package deploy/helm/openlens --version "${TAG#v}" --app-version "$TAG" --destination dist
       - name: checksums
         run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: release-assets
           path: dist/
@@ -153,7 +153,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: release-assets
           path: dist
