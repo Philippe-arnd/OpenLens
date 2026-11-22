@@ -29,6 +29,20 @@ pub struct ProjectInfo<'a> {
     pub key: &'a str,
 }
 
+static UPDATE: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None);
+
+/// Record the newest release when it is newer than this one (the server
+/// checks once a day), so every page's footer can say so.
+pub fn set_update_available(tag: Option<String>) {
+    if let Ok(mut u) = UPDATE.write() {
+        *u = tag;
+    }
+}
+
+fn update_available() -> Option<String> {
+    UPDATE.read().ok().and_then(|u| u.clone())
+}
+
 /// Format a count compactly: 1,284 / 12.9K / 4.2M.
 pub fn compact(n: i64) -> String {
     let a = n.unsigned_abs() as f64;
@@ -141,7 +155,12 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                     }
                     div.content {
                         main { (body) }
-                        footer { "OpenLens · map → measure → focus → act → compare" }
+                        footer {
+                            "OpenLens " (env!("CARGO_PKG_VERSION")) " · map → measure → focus → act → compare"
+                            @if let Some(v) = update_available() {
+                                " · " a href={ "https://github.com/Philippe-arnd/OpenLens/releases/tag/" (v) } { "Update available: " (v) }
+                            }
+                        }
                     }
                 }
             }

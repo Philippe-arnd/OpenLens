@@ -146,9 +146,61 @@ async fn healthz() -> &'static str {
     "ok"
 }
 
+/// `vX.Y.Z` as numbers; pre-releases and other tags are ignored.
+fn stable_version(tag: &str) -> Option<(u64, u64, u64)> {
+    let mut it = tag.strip_prefix('v').unwrap_or(tag).split('.');
+    let v = (
+        it.next()?.parse().ok()?,
+        it.next()?.parse().ok()?,
+        it.next()?.parse().ok()?,
+    );
+    it.next().is_none().then_some(v)
+}
+
+/// The newest stable release, when it is newer than `current` (#198).
+/// Sends nothing about the install: one anonymous GET to GitHub's public
+/// API. `OPENLENS_UPDATE_CHECK=off` turns it off.
+fn newer_release(current: &str) -> Option<String> {
+    let body: serde_json::Value =
+        ureq::get("https://api.github.com/repos/Philippe-arnd/OpenLens/releases/latest")
+            .header("user-agent", "openlens-update-check")
+            .header("accept", "application/vnd.github+json")
+            .config()
+            .timeout_global(Some(Duration::from_secs(10)))
+            .build()
+            .call()
+            .ok()?
+            .body_mut()
+            .read_json()
+            .ok()?;
+    let tag = body.get("tag_name")?.as_str()?.to_owned();
+    (stable_version(&tag)? > stable_version(current)?).then_some(tag)
+}
+
+/// Check for a newer release once a day (first check a minute after start).
+async fn update_check() {
+    if std::env::var("OPENLENS_UPDATE_CHECK").is_ok_and(|v| v == "off") {
+        return;
+    }
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    loop {
+        let found = tokio::task::spawn_blocking(|| newer_release(env!("CARGO_PKG_VERSION")))
+            .await
+            .ok()
+            .flatten();
+        if let Some(t) = &found {
+            tracing::info!(release = %t, "a newer OpenLens release is available");
+        }
+        openlens_ui::set_update_available(found);
+        tokio::time::sleep(Duration::from_secs(24 * 3600)).await;
+    }
+}
+
 /// Run the periodic jobs: flush buffered events per the flush policy,
-/// compact closed days and apply retention (D-015). Runs until the process exits.
+/// compact closed days and apply retention (D-015), and check for a newer release
+/// once a day. Runs until the process exits.
 pub async fn background(state: AppState) {
+    tokio::spawn(update_check());
     let mut tick = tokio::time::interval(Duration::from_secs(2));
     let mut last_digest_check = std::time::Instant::now();
     // First S3 copy a few minutes after start, then hourly.
@@ -292,4 +344,16 @@ pub(crate) async fn load_map(
         .ok()?
         .ok()??;
     openlens_featuremap::parse(&yaml).map.map(|m| (m, version))
+}
+
+#[cfg(test)]
+mod version_tests {
+    #[test]
+    fn only_newer_stable_releases_count() {
+        use super::stable_version as v;
+        assert!(v("v0.3.0") > v("0.2.0"));
+        assert!(v("v0.10.0") > v("v0.9.9"));
+        assert_eq!(v("v0.2.0-261122-755dcee"), None);
+        assert_eq!(v("nightly"), None);
+    }
 }
