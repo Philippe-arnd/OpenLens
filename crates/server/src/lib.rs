@@ -8,6 +8,7 @@ mod auth;
 mod capture;
 mod digest;
 mod flags;
+mod oidc;
 mod replay;
 mod web;
 
@@ -58,6 +59,8 @@ pub fn router(state: AppState) -> Router {
         .route("/agents.md", get(agents_guide))
         .merge(capture)
         .route("/api/projects/{project}/digest", get(digest::api))
+        .route("/oidc/start", get(oidc::start))
+        .route("/oidc/callback", get(oidc::callback))
         .merge(api::routes())
         .merge(flags::routes())
         .merge(replay::routes())

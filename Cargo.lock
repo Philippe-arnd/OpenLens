@@ -2477,6 +2477,7 @@ dependencies = [
  "openlens-storage",
  "openlens-testkit",
  "openlens-ui",
+ "rand",
  "serde",
  "serde_json",
  "sha2",
@@ -2486,6 +2487,7 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
+ "ureq",
 ]
 
 [[package]]

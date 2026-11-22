@@ -76,4 +76,5 @@ A layered workspace, `cargo xtask ci`, AGENTS.md, Docker and compose with the he
 - ✅ Visual heatmaps: click density per page (SVG) and over a recorded visit of the real page
 - ✅ Weekly digest: dashboard page, MCP `digest`, Monday email when SMTP is set
 - ✅ Users and roles: admin / viewer, optional per-project access, invites by login link (`/users`, CLI, MCP)
-- ⏳ in-app micro-surveys, LLM rewording of cards (optional), OIDC (optional), S3 copy (optional)
+- ✅ Single sign-on with OpenID Connect (optional: issuer, client id and secret; invited emails only)
+- ⏳ in-app micro-surveys, LLM rewording of cards (optional), S3 copy (optional)
