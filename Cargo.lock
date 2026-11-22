@@ -2269,6 +2269,7 @@ dependencies = [
  "openlens-query",
  "openlens-server",
  "openlens-storage",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",

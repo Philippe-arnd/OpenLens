@@ -23,4 +23,12 @@ Connect <app> to OpenLens at https://<your-domain>.
 Guide: https://<your-domain>/agents.md — admin token: <token>.
 ```
 
-The agent creates the project, wires the SDK with roles, writes the feature map and sends you a login link. Data lives in the `openlens-data` volume (one directory: Parquet segments plus `meta.db`), so backing it up means copying that volume.
+The agent creates the project, wires the SDK with roles, writes the feature map and sends you a login link. Data lives in the `openlens-data` volume, one directory holding the Parquet segments, the WAL, the replays and `meta.db`. Events are kept for 400 days and replays for 30 days (D-015).
+
+**Backups.** `openlens backup` writes a consistent copy of that directory, and it is safe while the server runs. From Coolify's terminal or the host:
+
+```sh
+docker exec <container> openlens backup /data/backups/$(date +%F)
+```
+
+Then copy `/data/backups/<date>` off the machine (for example a Coolify scheduled task with rsync or rclone). **To restore:** stop the service, replace the volume's contents with the backup, then start it again. If the admin token came from `OPENLENS_ADMIN_TOKEN`, keep it set to the same value.
