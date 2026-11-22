@@ -1,0 +1,93 @@
+name: Kubernetes
+
+# The Helm chart on a real cluster (kind): install, helm test, send events,
+# upgrade, and check that events and the admin token survive. Publishes the
+# chart to oci://ghcr.io/philippe-arnd/charts on v* tags.
+on:
+  pull_request:
+    paths: ["deploy/helm/**", "deploy/k8s/**", ".github/workflows/k8s.yml"]
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths: ["deploy/helm/**", "deploy/k8s/**", ".github/workflows/k8s.yml"]
+  schedule:
+    - cron: "53 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  issues: write
+
+jobs:
+  kind:
+    name: install, upgrade, smoke-test on kind
+    runs-on: ubuntu-latest
+    env:
+      CHART: deploy/helm/openlens
+      # Tags test their own image; everything else the latest published one.
+      TAG: ${{ github.ref_type == 'tag' && github.ref_name || 'latest' }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: azure/setup-helm@v4
+      - name: lint and render
+        run: |
+          helm lint "$CHART"
+          helm template t "$CHART" > /dev/null
+          helm template t "$CHART" --set ingress.enabled=true,ingress.host=lens.example.com,ingress.tls=true > /dev/null
+          if helm template t "$CHART" --set replicaCount=2 > /dev/null 2>&1; then
+            echo "replicaCount=2 must be refused"; exit 1
+          fi
+      - uses: helm/kind-action@v1
+      - name: wait for the image (tags are built by release.yml)
+        if: github.ref_type == 'tag'
+        run: |
+          for i in $(seq 1 60); do docker pull -q "ghcr.io/philippe-arnd/openlens:$TAG" && exit 0; sleep 30; done
+          exit 1
+      - name: install
+        run: |
+          helm install lens "$CHART" --set image.tag="$TAG" --wait --timeout 5m
+          helm test lens --logs
+      - name: send events, check them
+        run: |
+          token() { kubectl get secret lens-openlens-admin -o jsonpath='{.data.admin-token}' | base64 -d; }
+          kubectl port-forward svc/lens-openlens 8686:8686 > /dev/null 2>&1 &
+          sleep 3
+          T=$(token); echo "$T" > /tmp/token1
+          KEY=$(curl -fsS -H "Authorization: Bearer $T" localhost:8686/api/projects | jq -r '.projects[0].key')
+          curl -fsS -XPOST "localhost:8686/capture?key=$KEY" -H 'content-type: text/plain' \
+            -d '{"batch":[{"event":"$pageview","distinct_id":"k8s-1","properties":{"$pathname":"/"}},{"event":"k8s_ok","distinct_id":"k8s-1"}]}'
+          for i in $(seq 1 20); do
+            N=$(curl -fsS -H "Authorization: Bearer $T" localhost:8686/api/projects/default/sql -H 'content-type: application/json' \
+              -d '{"sql":"SELECT count(*) AS n FROM events"}' | jq '.rows[0].n')
+            [ "$N" -ge 2 ] && break; sleep 2
+          done
+          echo "events: $N"; [ "$N" -ge 2 ]
+          echo "$N" > /tmp/n1
+      - name: upgrade keeps the data and the token
+        run: |
+          helm upgrade lens "$CHART" --set image.tag="$TAG" --set-string podAnnotations.upgraded="$(date +%s)" --wait --timeout 5m
+          kubectl rollout status statefulset/lens-openlens --timeout 3m
+          T=$(kubectl get secret lens-openlens-admin -o jsonpath='{.data.admin-token}' | base64 -d)
+          [ "$T" = "$(cat /tmp/token1)" ] || { echo "admin token changed on upgrade"; exit 1; }
+          kubectl port-forward svc/lens-openlens 8687:8686 > /dev/null 2>&1 &
+          sleep 3
+          N=$(curl -fsS -H "Authorization: Bearer $T" localhost:8687/api/projects/default/sql -H 'content-type: application/json' \
+            -d '{"sql":"SELECT count(*) AS n FROM events"}' | jq '.rows[0].n')
+          echo "events after upgrade: $N"; [ "$N" -ge "$(cat /tmp/n1)" ]
+      - name: logs on failure
+        if: failure()
+        run: kubectl describe pods; kubectl logs statefulset/lens-openlens --tail=100 || true
+      - name: publish the chart
+        if: github.ref_type == 'tag'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          helm package "$CHART" --version "${GITHUB_REF_NAME#v}" --app-version "$GITHUB_REF_NAME"
+          helm push "openlens-${GITHUB_REF_NAME#v}.tgz" oci://ghcr.io/philippe-arnd/charts
+      - name: open an issue when main breaks
+        if: failure() && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create --title "Kubernetes chart broken on main ($(date -u +%F))" \
+            --body "The kind install/upgrade check failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" || true
