@@ -1,12 +1,13 @@
 //! Dashboard routes (server-rendered, D-011).
 
-use axum::Router;
 use axum::extract::{Form, Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
+use axum::{Json, Router};
 use maud::Markup;
 use serde::Deserialize;
+use serde_json::json;
 
 use crate::api::FilterQuery;
 use crate::{AppState, auth};
@@ -28,6 +29,10 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/p/{project}/pages", get(pages_page))
         .route("/p/{project}/replays", get(replays_page))
         .route("/p/{project}/replays/{session}", get(player_page))
+        .route(
+            "/p/{project}/replays/{session}/timeline.json",
+            get(replay_timeline),
+        )
         .route(
             "/p/{project}/replays/{session}/events.json",
             get(replay_events),
@@ -769,6 +774,36 @@ async fn replay_events(
         )
             .into_response(),
         _ => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// The session's OpenLens events (page views, clicks, submits, errors,
+/// success and custom events), for the markers on the player's timeline.
+async fn replay_timeline(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((id, session)): Path<(String, String)>,
+) -> Response {
+    if !auth::has_session(&state, &headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    if !openlens_replay::valid_id(&session) || project(&state, id.clone()).await.is_none() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let sql = format!(
+        "SELECT event, CAST(date_part('epoch', timestamp) * 1000 AS BIGINT) AS ms, feature, path, \
+         regexp_match(properties, '\"\\$message\":\"([^\"]{{0,120}})')[1] AS message, \
+         properties LIKE '%\"$rage\":true%' AS rage \
+         FROM events WHERE session_id = '{session}' \
+         AND event NOT IN ('$scroll', '$vital', '$identify') ORDER BY timestamp LIMIT 1000"
+    );
+    match state.query.sql(&id, &sql).await {
+        Ok(r) => (
+            [(header::CACHE_CONTROL, "no-store")],
+            Json(json!({ "events": r.rows })),
+        )
+            .into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }
 

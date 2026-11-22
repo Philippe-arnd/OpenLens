@@ -1,10 +1,13 @@
 /**
  * Dashboard replay player, served at `/assets/player.js` on the replay page
  * only. Plays a recording with rrweb's Replayer (MIT) inside its sandboxed
- * iframe; recorded scripts never run. Controls are our own: play/pause, a
- * seek bar, speed and "skip idle".
+ * iframe; recorded scripts never run. Controls are our own: play/pause,
+ * ±10 s, a seek bar with the session's events as markers, speed, "skip
+ * idle", keyboard shortcuts, and the list of events that follows the
+ * playhead (click one to jump there).
  *
- * Markup it expects: `<div id="ol-player" data-src="…events.json" data-at="ms?">`.
+ * Markup it expects: `<div id="ol-player" data-src="…events.json"
+ * data-timeline="…timeline.json" data-at="time?">`.
  */
 import { Replayer } from "rrweb";
 
@@ -38,42 +41,91 @@ async function main(): Promise<void> {
   }
   const stage = el("div", { class: "ol-stage" });
   const bar = el("div", { class: "ol-controls" });
-  const play = el("button", { type: "button", class: "ol-play" }, "Play");
+  const back = el("button", { type: "button", class: "ol-jump", "aria-label": "Back 10 seconds", title: "Back 10 s (J)" }, "−10 s");
+  const play = el("button", { type: "button", class: "ol-play", "aria-label": "Play", title: "Play / pause (Space)" }, "▶");
+  const fwd = el("button", { type: "button", class: "ol-jump", "aria-label": "Forward 10 seconds", title: "Forward 10 s (L)" }, "+10 s");
+  const track = el("div", { class: "ol-track" });
   const seek = el("input", { type: "range", min: "0", step: "100", value: "0", "aria-label": "Position" });
+  const marks = el("div", { class: "ol-marks" });
+  track.append(seek, marks);
   const time = el("span", { class: "ol-time" });
-  const speed = el("select", { "aria-label": "Speed" });
-  for (const s of ["1", "2", "4", "8"]) speed.append(el("option", { value: s }, `${s}×`));
-  const skipLabel = el("label");
+  const speed = el("select", { "aria-label": "Speed", title: "Speed (+ / −)" });
+  for (const s of ["0.5", "1", "2", "4", "8"]) speed.append(el("option", { value: s }, `${s}×`));
+  speed.value = "1";
+  const skipLabel = el("label", { class: "ol-skip" });
   const skip = el("input", { type: "checkbox", checked: "" });
   skipLabel.append(skip, " skip idle");
-  bar.append(play, seek, time, speed, skipLabel);
-  root.replaceChildren(stage, bar);
+  bar.append(back, play, fwd, track, time, speed, skipLabel);
+  const legend = el("ul", { class: "ol-legend", "aria-label": "Event types" });
+  const log = el("ol", { class: "ol-log", "aria-label": "Events in this session" });
+  const help = el("p", { class: "ol-help" }, "Space play/pause · J/L ±10 s · ←/→ ±5 s · +/− speed · click an event to jump to it");
+  root.replaceChildren(stage, bar, legend, log, help);
 
   const rep = new Replayer(events, { root: stage, skipInactive: true, mouseTail: false, showWarning: false });
   const total = rep.getMetaData().totalTime;
   seek.max = String(total);
   let playing = false;
+  let items: { t: number; li: HTMLLIElement }[] = [];
+  let current: HTMLLIElement | undefined;
   const show = () => {
     const t = rep.getCurrentTime();
     seek.value = String(t);
     time.textContent = `${fmt(t)} / ${fmt(total)}`;
+    // The event list follows the playhead.
+    const now = [...items].reverse().find((x) => x.t <= t + 250)?.li;
+    if (now !== current) {
+      current?.removeAttribute("aria-current");
+      now?.setAttribute("aria-current", "true");
+      if (now) log.scrollTop = now.offsetTop - log.offsetTop - log.clientHeight / 2;
+      current = now;
+    }
   };
   const setPlaying = (p: boolean) => {
     playing = p;
-    play.textContent = p ? "Pause" : "Play";
+    play.textContent = p ? "❚❚" : "▶";
+    play.setAttribute("aria-label", p ? "Pause" : "Play");
   };
-  play.addEventListener("click", () => {
+  const go = (t: number) => {
+    const at = Math.max(0, Math.min(total, t));
+    if (playing) rep.play(at);
+    else rep.pause(at);
+    show();
+  };
+  const toggle = () => {
     if (playing) rep.pause();
     else rep.play(rep.getCurrentTime() >= total ? 0 : rep.getCurrentTime());
     setPlaying(!playing);
+  };
+  play.addEventListener("click", toggle);
+  back.addEventListener("click", () => go(rep.getCurrentTime() - 10_000));
+  fwd.addEventListener("click", () => go(rep.getCurrentTime() + 10_000));
+  seek.addEventListener("input", () => go(Number(seek.value)));
+  const setSpeed = (v: string) => {
+    speed.value = v;
+    rep.setConfig({ speed: Number(v) });
+  };
+  speed.addEventListener("change", () => setSpeed(speed.value));
+  addEventListener("keydown", (e) => {
+    const t = e.target as HTMLElement;
+    if (e.ctrlKey || e.metaKey || e.altKey || (t.tagName === "INPUT" && (t as HTMLInputElement).type !== "range") || t.tagName === "SELECT") return;
+    const opts = [...speed.options].map((o) => o.value);
+    const i = opts.indexOf(speed.value);
+    const keys: Record<string, () => void> = {
+      " ": toggle,
+      k: toggle,
+      j: () => go(rep.getCurrentTime() - 10_000),
+      l: () => go(rep.getCurrentTime() + 10_000),
+      ArrowLeft: () => go(rep.getCurrentTime() - 5_000),
+      ArrowRight: () => go(rep.getCurrentTime() + 5_000),
+      "+": () => setSpeed(opts[Math.min(opts.length - 1, i + 1)] ?? "1"),
+      "-": () => setSpeed(opts[Math.max(0, i - 1)] ?? "1"),
+    };
+    const f = keys[e.key];
+    if (f) {
+      e.preventDefault();
+      f();
+    }
   });
-  seek.addEventListener("input", () => {
-    const t = Number(seek.value);
-    if (playing) rep.play(t);
-    else rep.pause(t);
-    show();
-  });
-  speed.addEventListener("change", () => rep.setConfig({ speed: Number(speed.value) }));
   skip.addEventListener("change", () => rep.setConfig({ skipInactive: skip.checked }));
   rep.on("finish", () => setPlaying(false));
   setInterval(show, 250);
@@ -98,12 +150,108 @@ async function main(): Promise<void> {
     return;
   }
 
+  const first0 = (events[0] as { timestamp: number }).timestamp;
+  if (root.dataset.timeline) {
+    items = await timeline(root.dataset.timeline, first0, total, marks, legend, log, (t) => go(t - 1000));
+  }
+  if (!items.length) {
+    legend.hidden = true;
+    log.hidden = true;
+  }
+
   const at = root.dataset.at ? Date.parse(`${root.dataset.at.replace(" ", "T").slice(0, 23)}Z`) || 0 : 0;
   const first = (events[0] as { timestamp: number }).timestamp;
   const offset = at > first ? Math.min(at - first - 3000, total) : 0;
   rep.pause(Math.max(0, offset));
   fit();
   show();
+}
+
+interface Mark {
+  event: string;
+  ms: number;
+  feature?: string | null;
+  path?: string | null;
+  message?: string | null;
+  rage?: boolean | null;
+}
+
+// Fixed order and colours (checked for colour-blind separation in light and
+// dark); errors use the status colour and their own shape.
+const KINDS: Record<string, string> = {
+  page: "Page view",
+  goal: "Success or custom event",
+  submit: "Form sent",
+  click: "Click",
+  rage: "Rage click",
+  error: "Error",
+};
+
+function kindOf(m: Mark): string {
+  if (m.event === "$pageview") return "page";
+  if (m.event === "$click") return m.rage ? "rage" : "click";
+  if (m.event === "$submit") return "submit";
+  if (m.event === "$error" || m.event === "$request_failed") return "error";
+  return "goal";
+}
+
+function labelOf(m: Mark): string {
+  switch (m.event) {
+    case "$pageview":
+      return m.path ?? "page";
+    case "$click":
+    case "$submit":
+      return m.feature ? `${m.event === "$click" ? "click" : "submit"}: ${m.feature}` : `${m.event.slice(1)} on ${m.path ?? "the page"}`;
+    case "$error":
+      return `error: ${m.message ?? "unknown"}`;
+    case "$request_failed":
+      return `failed request on ${m.path ?? "the page"}`;
+    case "$feature":
+      return `feature: ${m.feature ?? ""}`;
+    default:
+      return m.event;
+  }
+}
+
+/** Markers on the seek bar, a legend, and the list of events. */
+async function timeline(
+  url: string,
+  first: number,
+  total: number,
+  marks: HTMLElement,
+  legend: HTMLElement,
+  log: HTMLElement,
+  jump: (t: number) => void,
+): Promise<{ t: number; li: HTMLLIElement }[]> {
+  const r = await fetch(url, { credentials: "same-origin" }).catch(() => null);
+  if (!r?.ok) return [];
+  const data = (await r.json()) as { events?: Mark[] };
+  const seen = new Set<string>();
+  const out: { t: number; li: HTMLLIElement }[] = [];
+  for (const m of data.events ?? []) {
+    const t = Math.max(0, Math.min(total, m.ms - first));
+    const k = kindOf(m);
+    seen.add(k);
+    const label = labelOf(m);
+    const b = el("button", { type: "button", class: `ol-mark k-${k}`, title: `${fmt(t)} · ${label}`, "aria-label": `${fmt(t)}, ${label}` });
+    b.style.left = `${total ? (t / total) * 100 : 0}%`;
+    b.addEventListener("click", () => jump(t));
+    marks.append(b);
+    const li = el("li", { class: `k-${k}` });
+    const go = el("button", { type: "button" });
+    go.append(el("span", { class: "ol-at" }, fmt(t)), el("span", { class: "ol-dot", "aria-hidden": "true" }), el("span", { class: "ol-what" }, label));
+    go.addEventListener("click", () => jump(t));
+    li.append(go);
+    log.append(li);
+    out.push({ t, li });
+  }
+  for (const [k, name] of Object.entries(KINDS)) {
+    if (!seen.has(k)) continue;
+    const li = el("li", { class: `k-${k}` });
+    li.append(el("span", { class: "ol-dot", "aria-hidden": "true" }), name);
+    legend.append(li);
+  }
+  return out;
 }
 
 interface RecEvent {
