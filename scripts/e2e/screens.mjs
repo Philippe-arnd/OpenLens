@@ -43,6 +43,16 @@ for (const theme of ["light", "dark"]) {
     await tab.screenshot({ path: `${out}/${name}-${theme}.png`, fullPage: true });
   }
 }
+// Sidebar collapsed to icons (#170): remembered by a cookie, no script.
+await tab.goto(`${server}/theme/light`);
+await tab.goto(`${server}/p/default/events`);
+await tab.goto(`${server}/nav/collapsed`);
+const rail = await tab.evaluate(() => document.querySelector(".side")?.getBoundingClientRect().width ?? 0);
+if (rail === 0 || rail > 80) problems.push(`sidebar did not collapse (width ${rail})`);
+const current = await tab.locator('.side-nav a[aria-current="page"]').count();
+if (current !== 1) problems.push(`the current page is not marked in the sidebar (${current})`);
+await tab.screenshot({ path: `${out}/events-collapsed-light.png`, fullPage: true });
+await tab.goto(`${server}/nav/expanded`);
 for (const g of global) {
   const r = await tab.goto(`${server}${g}`);
   if (!r || r.status() !== 200) problems.push(`${g}: HTTP ${r ? r.status() : "none"}`);

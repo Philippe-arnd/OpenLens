@@ -8,6 +8,16 @@ use maud::{Markup, PreEscaped, html};
 
 const ICONS: &[(&str, &str)] = &[
     (
+        "flag",
+        r#"<path d="M6 20.5V4"/><path d="M6 4.5h10.5l-2.2 4 2.2 4H6"/>"#,
+    ),
+    (
+        "mail",
+        r#"<rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="M4.5 7.5 12 13l7.5-5.5"/>"#,
+    ),
+    ("left", r#"<path d="M14.5 6.5 9 12l5.5 5.5"/>"#),
+    ("right", r#"<path d="M9.5 6.5 15 12l-5.5 5.5"/>"#),
+    (
         "board",
         r#"<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="4" rx="1.5"/><rect x="13" y="10" width="7" height="10" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/>"#,
     ),

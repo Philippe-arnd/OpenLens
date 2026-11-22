@@ -48,6 +48,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/assets/favicon.svg", get(favicon))
         .route("/favicon.ico", get(favicon))
         .route("/theme/{mode}", get(set_theme))
+        .route("/nav/{mode}", get(set_nav))
 }
 
 /// Strict headers for every HTML page: no scripts at all, no framing.
@@ -495,25 +496,56 @@ async fn set_theme(headers: HeaderMap, Path(mode): Path<String>) -> Response {
     with_cookie(Redirect::to(&back).into_response(), &cookie)
 }
 
+/// `GET /nav/{collapsed|expanded}`: remember whether the sidebar shows only
+/// icons (cookie, 1 year), then go back.
+async fn set_nav(headers: HeaderMap, Path(mode): Path<String>) -> Response {
+    let mode = if mode == "collapsed" {
+        "collapsed"
+    } else {
+        "expanded"
+    };
+    let base = crate::base_url(&headers);
+    let back = headers
+        .get(header::REFERER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|r| r.strip_prefix(base.as_str()))
+        .filter(|p| p.starts_with('/') && !p.starts_with("//"))
+        .unwrap_or("/")
+        .to_owned();
+    let cookie = format!("ol_nav={mode}; Path=/; SameSite=Lax; Max-Age=31536000");
+    with_cookie(Redirect::to(&back).into_response(), &cookie)
+}
+
 /// Apply the theme cookie to HTML pages (`<html data-theme="…">`), so the
 /// page renders in the right theme with no script and no flash.
 pub(crate) async fn theme_layer(
     req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> Response {
-    let theme = req
-        .headers()
-        .get_all(header::COOKIE)
-        .iter()
-        .filter_map(|v| v.to_str().ok())
-        .flat_map(|v| v.split(';'))
-        .filter_map(|kv| kv.trim().split_once('='))
-        .find(|(k, _)| *k == "ol_theme")
-        .map(|(_, v)| v)
-        .filter(|v| *v == "light" || *v == "dark")
-        .map(str::to_owned);
+    let attrs = {
+        let cookie = |name: &str| {
+            req.headers()
+                .get_all(header::COOKIE)
+                .iter()
+                .filter_map(|v| v.to_str().ok())
+                .flat_map(|v| v.split(';'))
+                .filter_map(|kv| kv.trim().split_once('='))
+                .find(|(k, _)| *k == name)
+                .map(|(_, v)| v.to_owned())
+        };
+        let mut attrs = String::new();
+        if let Some(t) = cookie("ol_theme").filter(|v| v == "light" || v == "dark") {
+            attrs.push_str(&format!(" data-theme=\"{t}\""));
+        }
+        if cookie("ol_nav").as_deref() == Some("collapsed") {
+            attrs.push_str(" data-nav=\"collapsed\"");
+        }
+        attrs
+    };
     let resp = next.run(req).await;
-    let Some(theme) = theme else { return resp };
+    if attrs.is_empty() {
+        return resp;
+    }
     let is_html = resp
         .headers()
         .get(header::CONTENT_TYPE)
@@ -528,7 +560,7 @@ pub(crate) async fn theme_layer(
     };
     let html = String::from_utf8_lossy(&bytes).replacen(
         "<html lang=\"en\">",
-        &format!("<html lang=\"en\" data-theme=\"{theme}\">"),
+        &format!("<html lang=\"en\"{attrs}>"),
         1,
     );
     parts.headers.remove(header::CONTENT_LENGTH);
