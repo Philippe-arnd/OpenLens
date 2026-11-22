@@ -97,7 +97,17 @@ enum Command {
     /// keep the feature map current.
     Rules,
     /// Create a one-time login link for the PM (valid 7 days).
-    LoginLink,
+    LoginLink {
+        /// Invite this person (else: an owner link, full access).
+        #[arg(long)]
+        email: Option<String>,
+        /// Their role: viewer (look) or admin (change flags, invite).
+        #[arg(long, default_value = "viewer")]
+        role: String,
+        /// Comma-separated project ids they may see (default: all).
+        #[arg(long)]
+        projects: Option<String>,
+    },
     /// Run read-only SQL on a project's `events` table.
     Sql {
         /// Project id.
@@ -497,8 +507,19 @@ fn run(cli: Cli) -> Result<bool, String> {
             println!("{}", RULES_SNIPPET);
             Ok(true)
         }
-        Command::LoginLink => {
-            let (status, v) = client()?.call("POST", "/api/login-links", None)?;
+        Command::LoginLink {
+            email,
+            role,
+            projects,
+        } => {
+            let body = email.as_ref().map(|e| {
+                Body::Json(json!({
+                    "email": e,
+                    "role": role,
+                    "projects": projects.as_ref().map(|p| p.split(',').map(str::trim).collect::<Vec<_>>()),
+                }))
+            });
+            let (status, v) = client()?.call("POST", "/api/login-links", body)?;
             out(&v);
             Ok(status == 200)
         }

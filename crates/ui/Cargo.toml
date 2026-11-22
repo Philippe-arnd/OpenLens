@@ -13,6 +13,7 @@ openlens-engine = { path = "../engine" }
 openlens-flags = { path = "../flags" }
 openlens-replay = { path = "../replay" }
 openlens-errors = { path = "../errors" }
+openlens-meta = { path = "../meta" }
 chrono.workspace = true
 maud.workspace = true
 

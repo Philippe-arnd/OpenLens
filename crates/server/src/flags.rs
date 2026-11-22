@@ -180,7 +180,7 @@ async fn project_exists(state: &AppState, id: &str) -> Option<openlens_meta::Pro
 }
 
 /// Same-origin check for dashboard form posts (on top of SameSite=Lax).
-fn same_origin(headers: &HeaderMap) -> bool {
+pub(crate) fn same_origin(headers: &HeaderMap) -> bool {
     let base = crate::base_url(headers);
     match headers.get("origin").and_then(|v| v.to_str().ok()) {
         Some(o) => {

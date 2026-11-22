@@ -110,7 +110,57 @@ CREATE TABLE IF NOT EXISTS login_links (
   hash TEXT PRIMARY KEY,
   expires_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
+  role TEXT NOT NULL CHECK (role IN ('admin', 'viewer')),
+  projects TEXT,
+  created_at TEXT NOT NULL
+);
 ";
+
+/// Additive schema changes for stores created by older versions.
+fn migrate(c: &Connection) -> rusqlite::Result<()> {
+    let has_user_col: bool = c
+        .prepare("SELECT 1 FROM pragma_table_info('login_links') WHERE name = 'user_id'")?
+        .exists([])?;
+    if !has_user_col {
+        c.execute_batch("ALTER TABLE login_links ADD COLUMN user_id TEXT")?;
+    }
+    Ok(())
+}
+
+/// A dashboard user (D-016). `admin` can change things (flags, users);
+/// `viewer` can only look. `projects: None` means every project.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct User {
+    /// Stable id (derived from the email).
+    pub id: String,
+    /// Email, lowercased.
+    pub email: String,
+    /// `admin` or `viewer`.
+    pub role: String,
+    /// Projects this user may see, or `None` for all.
+    pub projects: Option<Vec<String>>,
+    /// When the user was invited.
+    pub created_at: String,
+}
+
+fn user_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
+    let projects: Option<String> = r.get(3)?;
+    Ok(User {
+        id: r.get(0)?,
+        email: r.get(1)?,
+        role: r.get(2)?,
+        projects: projects.map(|p| {
+            p.split(',')
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect()
+        }),
+        created_at: r.get(4)?,
+    })
+}
 
 /// Random lowercase alphanumeric string.
 fn token(len: usize) -> String {
@@ -148,6 +198,7 @@ impl Meta {
         let conn = Connection::open(path)?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
         conn.execute_batch(SCHEMA)?;
+        migrate(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -167,6 +218,7 @@ impl Meta {
     pub fn in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(SCHEMA)?;
+        migrate(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -372,6 +424,12 @@ impl Meta {
     /// Create a one-time login link token valid for `ttl_secs`. Only its
     /// SHA-256 is stored, so a leaked database does not leak live links.
     pub fn create_login_link(&self, ttl_secs: i64) -> Result<String> {
+        self.create_login_link_for(None, ttl_secs)
+    }
+
+    /// A one-time login link for a user (`None`: the owner, i.e. admin of
+    /// everything, as with the admin token).
+    pub fn create_login_link_for(&self, user_id: Option<&str>, ttl_secs: i64) -> Result<String> {
         let token = format!("ll_{}", token(40));
         let expires = Utc::now().timestamp() + ttl_secs;
         self.with(|c| {
@@ -380,24 +438,102 @@ impl Meta {
                 [Utc::now().timestamp()],
             )?;
             c.execute(
-                "INSERT INTO login_links (hash, expires_at) VALUES (?1, ?2)",
-                params![sha256_hex(&token), expires],
+                "INSERT INTO login_links (hash, expires_at, user_id) VALUES (?1, ?2, ?3)",
+                params![sha256_hex(&token), expires, user_id],
             )?;
             Ok(token)
         })
     }
 
-    /// Use a login link: true once, if it exists and has not expired.
-    pub fn consume_login_link(&self, token: &str) -> Result<bool> {
+    /// Use a login link once. `Some(None)`: an owner link; `Some(Some(id))`:
+    /// a link for that user; `None`: invalid, used or expired.
+    pub fn consume_login_link(&self, token: &str) -> Result<Option<Option<String>>> {
         if token.len() > 100 {
-            return Ok(false);
+            return Ok(None);
         }
         self.with(|c| {
-            let n = c.execute(
-                "DELETE FROM login_links WHERE hash = ?1 AND expires_at >= ?2",
-                params![sha256_hex(token), Utc::now().timestamp()],
+            let hash = sha256_hex(token);
+            let row: Option<Option<String>> = c
+                .query_row(
+                    "SELECT user_id FROM login_links WHERE hash = ?1 AND expires_at >= ?2",
+                    params![hash, Utc::now().timestamp()],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if row.is_some() {
+                c.execute("DELETE FROM login_links WHERE hash = ?1", [&hash])?;
+            }
+            Ok(row)
+        })
+    }
+
+    /// Invite or update a user. `role` is `admin` or `viewer`; `projects`
+    /// limits what they see (`None`: all).
+    pub fn upsert_user(
+        &self,
+        email: &str,
+        role: &str,
+        projects: Option<&[String]>,
+    ) -> Result<User> {
+        let email = email.trim().to_lowercase();
+        if email.len() > 200 || !email.contains('@') || email.chars().any(char::is_whitespace) {
+            return Err(MetaError::Invalid("invalid email"));
+        }
+        if role != "admin" && role != "viewer" {
+            return Err(MetaError::Invalid("role must be admin or viewer"));
+        }
+        let projects = projects.map(|p| {
+            p.iter()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join(",")
+        });
+        let id = slug(&email.replace('@', "-at-"));
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO users (id, email, role, projects, created_at) VALUES (?1, ?2, ?3, ?4, ?5) \
+                 ON CONFLICT(email) DO UPDATE SET role = excluded.role, projects = excluded.projects",
+                params![id, email, role, projects, Utc::now().to_rfc3339()],
             )?;
-            Ok(n == 1)
+            Ok(c.query_row(
+                "SELECT id, email, role, projects, created_at FROM users WHERE email = ?1",
+                [&email],
+                user_from_row,
+            )?)
+        })
+    }
+
+    /// One user by id.
+    pub fn user(&self, id: &str) -> Result<Option<User>> {
+        self.with(|c| {
+            Ok(c.query_row(
+                "SELECT id, email, role, projects, created_at FROM users WHERE id = ?1",
+                [id],
+                user_from_row,
+            )
+            .optional()?)
+        })
+    }
+
+    /// Every user, by email.
+    pub fn users(&self) -> Result<Vec<User>> {
+        self.with(|c| {
+            let mut st = c.prepare(
+                "SELECT id, email, role, projects, created_at FROM users ORDER BY email",
+            )?;
+            let rows = st
+                .query_map([], user_from_row)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// Remove a user (their sessions stop working at once) and their links.
+    pub fn delete_user(&self, id: &str) -> Result<bool> {
+        self.with(|c| {
+            c.execute("DELETE FROM login_links WHERE user_id = ?1", [id])?;
+            Ok(c.execute("DELETE FROM users WHERE id = ?1", [id])? == 1)
         })
     }
 

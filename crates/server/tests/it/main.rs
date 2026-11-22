@@ -1080,3 +1080,148 @@ async fn weekly_digest_compares_this_week_with_last() {
     .unwrap();
     assert!(html.contains("This week vs last") && !html.contains(" style="));
 }
+
+async fn invite(h: &Harness, body: serde_json::Value) -> String {
+    let resp = router(h.state.clone())
+        .oneshot(
+            Request::post("/api/login-links")
+                .header("authorization", "Bearer adm_test")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let url = v["url"].as_str().unwrap();
+    let r = get(h, &url[url.find("/l/").unwrap()..], None, false).await;
+    r.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned()
+}
+
+async fn post_form(h: &Harness, uri: &str, cookie: &str, body: &str) -> StatusCode {
+    router(h.state.clone())
+        .oneshot(
+            Request::post(uri)
+                .header("cookie", cookie)
+                .header("origin", "http://localhost:8686")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(body.to_owned()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .status()
+}
+
+#[tokio::test]
+async fn viewers_see_their_projects_only_and_change_nothing() {
+    let h = harness();
+    h.state.meta.create_project("Other", None).unwrap();
+    let viewer = invite(
+        &h,
+        serde_json::json!({"email": "Ana@Example.com", "role": "viewer", "projects": ["default"]}),
+    )
+    .await;
+    assert_eq!(
+        get(&h, "/p/default", Some(&viewer), false).await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        get(&h, "/p/other", Some(&viewer), false).await.status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        get(&h, "/p/other/events", Some(&viewer), false)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/flags/beta",
+            &viewer,
+            "enabled=on&rollout=50"
+        )
+        .await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        get(&h, "/users", Some(&viewer), false).await.status(),
+        StatusCode::FORBIDDEN
+    );
+    // One visible project: home goes straight to it.
+    assert_eq!(
+        get(&h, "/", Some(&viewer), false).await.headers()["location"],
+        "/p/default"
+    );
+
+    let admin = invite(
+        &h,
+        serde_json::json!({"email": "boss@example.com", "role": "admin"}),
+    )
+    .await;
+    let page = get(&h, "/users", Some(&admin), false).await;
+    assert_eq!(page.status(), StatusCode::OK);
+    let html = String::from_utf8(
+        axum::body::to_bytes(page.into_body(), 1 << 20)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(html.contains("ana@example.com") && html.contains("boss@example.com"));
+    assert!(!html.contains(" style="));
+    assert_eq!(
+        get(&h, "/p/other", Some(&admin), false).await.status(),
+        StatusCode::OK
+    );
+
+    // Removing a user ends their session at once.
+    let id = h
+        .state
+        .meta
+        .users()
+        .unwrap()
+        .into_iter()
+        .find(|u| u.email == "ana@example.com")
+        .unwrap()
+        .id;
+    let del = router(h.state.clone())
+        .oneshot(
+            Request::delete(format!("/api/users/{id}"))
+                .header("authorization", "Bearer adm_test")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(del.status(), StatusCode::OK);
+    assert_eq!(
+        get(&h, "/p/default", Some(&viewer), false).await.status(),
+        StatusCode::SEE_OTHER
+    );
+    // Bad input is refused.
+    let bad = router(h.state.clone())
+        .oneshot(
+            Request::post("/api/login-links")
+                .header("authorization", "Bearer adm_test")
+                .body(Body::from(r#"{"email":"x@y.z","role":"god"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+}

@@ -16,6 +16,8 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/", get(home))
         .route("/login", get(login_page).post(login))
         .route("/projects", get(projects_page))
+        .route("/users", get(users_page).post(users_invite))
+        .route("/users/{id}/delete", post(users_delete))
         .route("/logout", post(logout))
         .route("/l/{token}", get(login_link))
         .route("/p/{project}", get(board))
@@ -93,7 +95,17 @@ async fn home(State(state): State<AppState>, headers: HeaderMap) -> Response {
         return to_login();
     }
     let meta = state.meta.clone();
-    match tokio::task::spawn_blocking(move || meta.projects()).await {
+    let viewer = auth::viewer(&state, &headers);
+    let visible = tokio::task::spawn_blocking(move || meta.projects())
+        .await
+        .map(|r| {
+            r.map(|ps| {
+                ps.into_iter()
+                    .filter(|p| viewer.as_ref().is_some_and(|v| v.can_see(&p.id)))
+                    .collect::<Vec<_>>()
+            })
+        });
+    match visible {
         Ok(Ok(ps)) if ps.len() > 1 => Redirect::to("/projects").into_response(),
         Ok(Ok(ps)) => match ps.first() {
             Some(p) => Redirect::to(&format!("/p/{}", p.id)).into_response(),
@@ -124,7 +136,11 @@ async fn login(
     Form(f): Form<LoginForm>,
 ) -> Response {
     if crate::token_matches(f.token.trim(), &state.admin_token) {
-        let c = auth::set_cookie(&auth::new_session(&state), &headers, auth::SESSION_SECS);
+        let c = auth::set_cookie(
+            &auth::new_session(&state, auth::OWNER),
+            &headers,
+            auth::SESSION_SECS,
+        );
         return with_cookie(Redirect::to("/").into_response(), &c);
     }
     // Slow down guessing.
@@ -145,11 +161,11 @@ async fn login_link(
     Path(token): Path<String>,
 ) -> Response {
     let meta = state.meta.clone();
-    let ok = matches!(
-        tokio::task::spawn_blocking(move || meta.consume_login_link(&token)).await,
-        Ok(Ok(true))
-    );
-    if !ok {
+    let who = match tokio::task::spawn_blocking(move || meta.consume_login_link(&token)).await {
+        Ok(Ok(Some(user))) => Some(user.unwrap_or_else(|| auth::OWNER.to_owned())),
+        _ => None,
+    };
+    let Some(who) = who else {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         return html(
             StatusCode::UNAUTHORIZED,
@@ -158,8 +174,12 @@ async fn login_link(
                 "This login link was already used or has expired. Ask your agent for a new one.",
             ),
         );
-    }
-    let c = auth::set_cookie(&auth::new_session(&state), &headers, auth::SESSION_SECS);
+    };
+    let c = auth::set_cookie(
+        &auth::new_session(&state, &who),
+        &headers,
+        auth::SESSION_SECS,
+    );
     with_cookie(Redirect::to("/").into_response(), &c)
 }
 
@@ -626,9 +646,9 @@ async fn watch_churned(
 }
 
 async fn projects_page(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if !auth::has_session(&state, &headers) {
+    let Some(viewer) = auth::viewer(&state, &headers) else {
         return to_login();
-    }
+    };
     let meta = state.meta.clone();
     let Ok(Ok(ps)) = tokio::task::spawn_blocking(move || meta.projects()).await else {
         return html(
@@ -641,7 +661,7 @@ async fn projects_page(State(state): State<AppState>, headers: HeaderMap) -> Res
         "SELECT count(*) AS n, CAST(max(timestamp) AS VARCHAR) AS last FROM events WHERE date >= '{since}'"
     );
     let mut list = Vec::new();
-    for p in ps {
+    for p in ps.into_iter().filter(|p| viewer.can_see(&p.id)) {
         let row = state
             .query
             .sql(&p.id, &sql)
@@ -664,7 +684,7 @@ async fn projects_page(State(state): State<AppState>, headers: HeaderMap) -> Res
         });
     }
     list.sort_by_key(|p| std::cmp::Reverse(p.recent_events));
-    html(StatusCode::OK, openlens_ui::projects(&list))
+    html(StatusCode::OK, openlens_ui::projects(&list, viewer.admin))
 }
 
 #[derive(Deserialize)]
@@ -832,4 +852,143 @@ async fn digest_page(
             openlens_ui::message("Can't show that", &e.to_string()),
         ),
     }
+}
+
+/// Access rules for every dashboard route (D-016): a user only reaches the
+/// projects they may see, and only admins change things (any non-GET under
+/// a project) or manage users.
+pub(crate) async fn access_layer(
+    State(state): State<AppState>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let path = req.uri().path().to_owned();
+    let viewer = auth::viewer(&state, req.headers());
+    if let (Some(v), Some(rest)) = (&viewer, path.strip_prefix("/p/")) {
+        let project = rest.split('/').next().unwrap_or("");
+        if !v.can_see(project) {
+            return html(
+                StatusCode::FORBIDDEN,
+                openlens_ui::message("Not for you", "You do not have access to this project."),
+            );
+        }
+        if req.method() != axum::http::Method::GET && !v.admin {
+            return html(
+                StatusCode::FORBIDDEN,
+                openlens_ui::message(
+                    "Read-only",
+                    "Your role can look but not change things. Ask an admin.",
+                ),
+            );
+        }
+    }
+    if path == "/users" || path.starts_with("/users/") {
+        match &viewer {
+            None => return to_login(),
+            Some(v) if !v.admin => {
+                return html(
+                    StatusCode::FORBIDDEN,
+                    openlens_ui::message("Admins only", "Ask an admin to invite people."),
+                );
+            }
+            _ => {}
+        }
+    }
+    next.run(req).await
+}
+
+#[derive(Deserialize)]
+struct InviteForm {
+    email: String,
+    role: String,
+    #[serde(default)]
+    projects: String,
+}
+
+async fn users_page(State(state): State<AppState>) -> Response {
+    users_render(&state, None).await
+}
+
+async fn users_render(state: &AppState, link: Option<(String, String)>) -> Response {
+    let meta = state.meta.clone();
+    let meta2 = state.meta.clone();
+    let (users, projects) =
+        match tokio::task::spawn_blocking(move || (meta.users(), meta2.projects())).await {
+            Ok((Ok(u), Ok(p))) => (u, p),
+            _ => {
+                return html(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    openlens_ui::message("Oops", "The metadata store is unavailable."),
+                );
+            }
+        };
+    let ids: Vec<String> = projects.into_iter().map(|p| p.id).collect();
+    html(
+        StatusCode::OK,
+        openlens_ui::users(
+            &users,
+            &ids,
+            link.as_ref().map(|(e, l)| (e.as_str(), l.as_str())),
+        ),
+    )
+}
+
+async fn users_invite(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(f): Form<InviteForm>,
+) -> Response {
+    if !crate::flags::same_origin(&headers) {
+        return html(
+            StatusCode::FORBIDDEN,
+            openlens_ui::message("Refused", "Cross-site form."),
+        );
+    }
+    let projects: Vec<String> = f
+        .projects
+        .split(',')
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let meta = state.meta.clone();
+    let res = tokio::task::spawn_blocking(move || {
+        let u = meta.upsert_user(
+            &f.email,
+            &f.role,
+            (!projects.is_empty()).then_some(&projects[..]),
+        )?;
+        let t = meta.create_login_link_for(Some(&u.id), 7 * 24 * 3600)?;
+        Ok::<_, openlens_meta::MetaError>((u.email, t))
+    })
+    .await;
+    match res {
+        Ok(Ok((email, t))) => {
+            let link = format!("{}/l/{t}", crate::base_url(&headers));
+            users_render(&state, Some((email, link))).await
+        }
+        Ok(Err(e)) => html(
+            StatusCode::BAD_REQUEST,
+            openlens_ui::message("Can't invite", &e.to_string()),
+        ),
+        Err(_) => html(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            openlens_ui::message("Oops", "Try again."),
+        ),
+    }
+}
+
+async fn users_delete(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    if !crate::flags::same_origin(&headers) {
+        return html(
+            StatusCode::FORBIDDEN,
+            openlens_ui::message("Refused", "Cross-site form."),
+        );
+    }
+    let meta = state.meta.clone();
+    let _ = tokio::task::spawn_blocking(move || meta.delete_user(&id)).await;
+    Redirect::to("/users").into_response()
 }

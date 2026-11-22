@@ -37,6 +37,8 @@ pub(crate) fn routes() -> Router<AppState> {
         )
         .route("/api/projects/{project}/export", get(export))
         .route("/api/login-links", post(login_link))
+        .route("/api/users", get(list_users))
+        .route("/api/users/{id}", axum::routing::delete(delete_user))
 }
 
 /// Largest import chunk, in bytes (the CLI sends ~5,000 lines per chunk).
@@ -194,16 +196,95 @@ async fn board(
     }
 }
 
-async fn login_link(State(state): State<AppState>, headers: HeaderMap) -> Response {
+#[derive(Deserialize, Default)]
+struct LinkRequest {
+    email: Option<String>,
+    role: Option<String>,
+    projects: Option<Vec<String>>,
+}
+
+/// `POST /api/login-links`: a one-time link. Without a body it logs in as the
+/// owner; with `{email, role, projects?}` it invites (or updates) that user
+/// and logs in as them (D-016).
+async fn login_link(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if let Some(r) = guard(&state, &headers) {
+        return r;
+    }
+    let req: LinkRequest = if body.is_empty() {
+        LinkRequest::default()
+    } else {
+        match serde_json::from_slice(&body) {
+            Ok(r) => r,
+            Err(_) => {
+                return err(
+                    StatusCode::BAD_REQUEST,
+                    "body must be {email, role, projects?}",
+                );
+            }
+        }
+    };
+    let meta = state.meta.clone();
+    let host = crate::base_url(&headers);
+    let res = tokio::task::spawn_blocking(move || {
+        let user = match &req.email {
+            Some(email) => Some(meta.upsert_user(
+                email,
+                req.role.as_deref().unwrap_or("viewer"),
+                req.projects.as_deref(),
+            )?),
+            None => None,
+        };
+        let t = meta.create_login_link_for(user.as_ref().map(|u| u.id.as_str()), 7 * 24 * 3600)?;
+        Ok::<_, openlens_meta::MetaError>((user, t))
+    })
+    .await;
+    match res {
+        Ok(Ok((user, t))) => Json(json!({
+            "url": format!("{host}/l/{t}"),
+            "expires_in_days": 7,
+            "user": user,
+        }))
+        .into_response(),
+        Ok(Err(openlens_meta::MetaError::Invalid(m))) => err(StatusCode::BAD_REQUEST, m),
+        _ => err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "metadata store unavailable",
+        ),
+    }
+}
+
+/// `GET /api/users`: the team.
+async fn list_users(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if let Some(r) = guard(&state, &headers) {
         return r;
     }
     let meta = state.meta.clone();
-    let host = crate::base_url(&headers);
-    match tokio::task::spawn_blocking(move || meta.create_login_link(7 * 24 * 3600)).await {
-        Ok(Ok(t)) => {
-            Json(json!({ "url": format!("{host}/l/{t}"), "expires_in_days": 7 })).into_response()
-        }
+    match tokio::task::spawn_blocking(move || meta.users()).await {
+        Ok(Ok(u)) => Json(json!({ "users": u })).into_response(),
+        _ => err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "metadata store unavailable",
+        ),
+    }
+}
+
+/// `DELETE /api/users/{id}`: remove someone; their sessions stop at once.
+async fn delete_user(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    if let Some(r) = guard(&state, &headers) {
+        return r;
+    }
+    let meta = state.meta.clone();
+    match tokio::task::spawn_blocking(move || meta.delete_user(&id)).await {
+        Ok(Ok(true)) => Json(json!({ "deleted": true })).into_response(),
+        Ok(Ok(false)) => err(StatusCode::NOT_FOUND, "no such user"),
         _ => err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "metadata store unavailable",

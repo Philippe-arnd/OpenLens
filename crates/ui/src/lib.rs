@@ -972,12 +972,15 @@ pub struct ProjectSummary {
 }
 
 /// All projects, busiest first.
-pub fn projects(list: &[ProjectSummary]) -> Markup {
+pub fn projects(list: &[ProjectSummary], admin: bool) -> Markup {
     layout(
         "Projects",
         None,
         html! {
-            div.heading { div { h1 { "Projects" } p.muted { "One per app. Pick one to open its Focus board." } } }
+            div.heading {
+                div { h1 { "Projects" } p.muted { "One per app. Pick one to open its Focus board." } }
+                @if admin { a.button href="/users" { (icon("users")) "Team" } }
+            }
             ul.project-list {
                 @for p in list {
                     li {
@@ -1111,6 +1114,59 @@ pub fn digest(p: &ProjectInfo<'_>, d: &openlens_engine::Digest, mailed: bool) ->
                 section.card.wide {
                     h2.violet { (icon("idea")) "What to focus on" }
                     ul { @for i in &d.insights { li { strong { (i.title) } " · " span.muted { (i.evidence) } br; span.small { "Next step: " (i.next_step) } } } }
+                }
+            }
+        },
+    )
+}
+
+/// Team: who can see the dashboard (admins only).
+pub fn users(
+    users: &[openlens_meta::User],
+    projects: &[String],
+    new_link: Option<(&str, &str)>,
+) -> Markup {
+    layout(
+        "Team",
+        None,
+        html! {
+            div.heading { div {
+                h1 { "Team" }
+                p.muted { "Admins change things (flags, team); viewers look. The owner (admin token) always has access." }
+            } }
+            @if let Some((email, link)) = new_link {
+                section.card.wide {
+                    h2.mint { (icon("task")) "Invitation for " (email) }
+                    p { "Send this one-time link (valid 7 days):" }
+                    p { code { (link) } }
+                }
+            }
+            section.card.wide {
+                h2.violet { (icon("users")) "Invite someone" }
+                form.invite method="post" action="/users" {
+                    label { "Email " input type="email" name="email" required; }
+                    label { "Role " select name="role" { option value="viewer" { "viewer" } option value="admin" { "admin" } } }
+                    label { "Projects " input type="text" name="projects" placeholder="all" list="project-ids"; }
+                    datalist #project-ids { @for p in projects { option value=(p) {} } }
+                    button type="submit" { "Create the login link" }
+                }
+                p.muted.small { "Projects: comma-separated ids (" (projects.join(", ")) "), or empty for all." }
+            }
+            section.card.wide {
+                @if users.is_empty() { p.muted { "Nobody invited yet." } }
+                @else {
+                    table.plain {
+                        thead { tr { th { "Email" } th { "Role" } th { "Projects" } th { "Invited" } th {} } }
+                        tbody { @for u in users {
+                            tr {
+                                td { (u.email) }
+                                td { span.chip { (u.role) } }
+                                td.small { @match &u.projects { Some(p) => (p.join(", ")), None => span.muted { "all" } } }
+                                td.small.muted { (u.created_at.get(..10).unwrap_or(&u.created_at)) }
+                                td { form method="post" action={ "/users/" (u.id) "/delete" } { button.ghost type="submit" { "Remove" } } }
+                            }
+                        } }
+                    }
                 }
             }
         },
