@@ -39,6 +39,15 @@ enum Command {
         #[arg(long)]
         name: String,
     },
+    /// Delete a project and all its data (events, replays, people, flags,
+    /// surveys, feature map). Irreversible: repeat the id with --confirm.
+    DeleteProject {
+        /// Project id.
+        id: String,
+        /// The same id again.
+        #[arg(long)]
+        confirm: String,
+    },
     /// Feature map commands.
     Features {
         #[command(subcommand)]
@@ -382,6 +391,15 @@ fn out(v: &Value) {
 fn run(cli: Cli) -> Result<bool, String> {
     let client = || Client::new(cli.server.clone(), cli.token.clone());
     match &cli.command {
+        Command::DeleteProject { id, confirm } => {
+            let (status, v) = client()?.call(
+                "DELETE",
+                &format!("/api/projects/{id}?confirm={confirm}"),
+                None,
+            )?;
+            out(&v);
+            Ok(status == 200)
+        }
         Command::Init { name } => {
             let (status, v) = client()?.call(
                 "POST",

@@ -5,8 +5,9 @@
 //! - `OPENLENS_DATA_DIR`: data root (default `./data`).
 //! - `OPENLENS_ADMIN_TOKEN`: admin token; generated and stored on first start
 //!   when unset.
-//! - `OPENLENS_PROJECT_KEY`: capture key of the default project, used only
-//!   when the first project is created (lets a deploy template choose it).
+//! - `OPENLENS_PROJECT_KEY`: when set and there is no project yet, a project
+//!   `default` is created with this capture key (CI, demos, templates that
+//!   want a key at once). Otherwise agents create projects (`init`).
 //!
 //! `openlens healthcheck` probes `/healthz` on the local port and exits 0 or 1;
 //! the container image has no shell or curl, so the compose healthcheck uses it.
@@ -193,13 +194,23 @@ fn build_state() -> Result<openlens_server::AppState, String> {
     std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
     let meta = openlens_meta::Meta::open(&data_dir.join("meta.db")).map_err(|e| e.to_string())?;
 
-    let first_start = meta.projects().map_err(|e| e.to_string())?.is_empty();
-    let key = std::env::var("OPENLENS_PROJECT_KEY")
+    // Projects are created by agents (`openlens-cli init --name <app>`). A
+    // deploy that wants a capture key ready at once (CI, a demo, a template)
+    // sets OPENLENS_PROJECT_KEY, and gets a project "default" with that key.
+    if let Some(key) = std::env::var("OPENLENS_PROJECT_KEY")
         .ok()
-        .filter(|k| !k.is_empty());
-    let project = meta
-        .ensure_default_project(key.as_deref())
-        .map_err(|e| e.to_string())?;
+        .filter(|k| !k.is_empty())
+        && meta.projects().map_err(|e| e.to_string())?.is_empty()
+    {
+        let project = meta
+            .ensure_default_project(Some(&key))
+            .map_err(|e| e.to_string())?;
+        tracing::info!(project = %project.id, "created the default project for OPENLENS_PROJECT_KEY");
+    }
+    let token_existed = meta
+        .setting("admin_token")
+        .map_err(|e| e.to_string())?
+        .is_some();
     let admin_token = match std::env::var("OPENLENS_ADMIN_TOKEN")
         .ok()
         .filter(|t| !t.is_empty())
@@ -207,11 +218,8 @@ fn build_state() -> Result<openlens_server::AppState, String> {
         Some(t) => t,
         None => meta.admin_token().map_err(|e| e.to_string())?,
     };
-    if first_start {
-        tracing::info!(project = %project.id, capture_key = %project.api_key, "created default project");
-        if std::env::var("OPENLENS_ADMIN_TOKEN").is_err() {
-            tracing::info!(%admin_token, "generated admin token (store it; set OPENLENS_ADMIN_TOKEN to choose your own)");
-        }
+    if !token_existed && std::env::var("OPENLENS_ADMIN_TOKEN").is_err() {
+        tracing::info!(%admin_token, "generated admin token (store it; set OPENLENS_ADMIN_TOKEN to choose your own)");
     }
 
     let (writer, recovered) =
