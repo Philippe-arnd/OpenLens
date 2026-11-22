@@ -1,47 +1,81 @@
 # @openlens/web
 
-The OpenLens browser SDK. It is the one documented non-Rust part of OpenLens (`docs/decisions.md`, D-003): about **3.3 kB gzipped** against a budget of 10 kB, with no runtime dependencies and no cookies.
+The browser SDK of [OpenLens](https://github.com/Philippe-arnd/OpenLens): self-hosted product analytics by role, feature and release. **About 4.4 kB gzipped**, no runtime dependencies, no cookies.
+
+It is the one non-Rust part of OpenLens (`docs/decisions.md`, D-003). It has to run inside your own pages.
 
 ## Install
 
-Script tag. The host is the script's own origin, so the key is the only attribute you need:
+**Script tag** (server-rendered apps). The host is the script's own origin, so the key is the only attribute you need:
 
 ```html
 <script src="https://lens.example.com/c.js" data-key="pk_..." data-release="v1.4.2" defer></script>
 ```
 
-npm:
+**npm** (SPAs and frameworks):
+
+```sh
+npm install @openlens/web
+```
 
 ```js
 import openlens from "@openlens/web";
-openlens.init({ host: "https://lens.example.com", key: "pk_...", release: "v1.4.2" });
+openlens.init({ host: "https://lens.example.com", key: "pk_...", release: import.meta.env.VITE_RELEASE });
 ```
 
-Then, once the user is known:
+Then, once the user is known (and on every page load where they are logged in):
 
 ```js
 openlens.identify(user.id, { role: user.role, account: user.orgId, plan: user.plan });
 ```
 
+On logout, call `openlens.reset()`.
+
+Framework recipes (Next.js, Nuxt, SvelteKit, Astro, Remix), strict CSP and ad-blocker proxies are covered in the [wiring guide](https://github.com/Philippe-arnd/OpenLens/blob/main/docs/agents/wire.md). Importing the package on the server is safe: `init` does nothing without `window`.
+
 ## What it captures on its own
 
-- Page views, including SPA route changes. Clicks on interactive elements, with `$feature` taken from the nearest `data-feature` attribute and a `$rage` flag on 3 quick clicks. Form submits. **Input values are never captured.**
-- Sessions: a new one after 30 minutes of inactivity or a UTC day change.
-- Errors (`$error`): uncaught errors and unhandled rejections, at most 5 of the same message per page.
-- Web Vitals (`$vital`): LCP, INP, CLS, FCP and TTFB, rated good / needs-improvement / poor.
-- Failed requests (`$request_failed`): fetch/XHR 5xx and network errors, as path and status only.
-- `$environment`: detected from the hostname (localhost → development, `staging.` → staging, preview hosts → preview, otherwise production).
-- `$release`: from `init`, `data-release` or `<meta name="openlens-release">`.
+- **Page views**, including SPA route changes (History API and `#/` hash routes) and back/forward-cache restores. Prerendered pages count only once they are shown.
+- **Clicks** on interactive elements. `$feature` comes from the nearest `data-feature` attribute, and 3 quick clicks set a `$rage` flag.
+- **Form submits.** Input values are never captured.
+- **Sessions:** a new one after 30 minutes of inactivity or a UTC day change. Tabs of the same app share the visitor and the session.
+- **Errors** (`$error`): uncaught errors and unhandled rejections, at most 5 of the same message per page.
+- **Web Vitals** (`$vital`): LCP, INP, CLS, FCP and TTFB, each rated good, needs-improvement or poor.
+- **Failed requests** (`$request_failed`): fetch/XHR 5xx and network errors, sent as path and status only.
+- **Environment** (`$environment`), detected from the hostname:
+  - localhost → `development`;
+  - `staging.` → `staging`;
+  - preview hosts → `preview`;
+  - anything else → `production`.
+- **Release** (`$release`), from `init`, `data-release` or `<meta name="openlens-release">`.
+
+**Delivery:** events are batched every 5 s and on page hide. A failed send (offline, 5xx, 429) is retried with the same event ids. Crawlers and monitoring robots are not captured.
 
 ## API
 
-`init`, `identify(id, {role, account, plan})`, `track(event, props)`, `feature(key)`, `isEnabled(flagKey)`, `reset()` (on logout), `setConsent(bool)`, `flush()`.
+| Call | What it does |
+| --- | --- |
+| `init(config)` | Start. Config: `host`, `key`, `release?`, `environment?`, `autocapture?`, `consent?` (`"granted"`, `"pending"` or `"denied"`), `replay?` |
+| `identify(id, { role, account, plan })` | Name the user and the dimensions the board slices by. Links the anonymous visit before login. |
+| `track(event, props?)` | A custom event, such as a feature's success moment |
+| `feature(key, props?)` | Mark the use of a feature without a DOM element |
+| `isEnabled(flagKey)` | Feature flag. Synchronous: the last answer is cached. |
+| `reset()` | Forget the user (logout) |
+| `setConsent(granted)` | Grant or withdraw consent at runtime |
+| `flush()` | Send queued events now |
 
-Flags are fetched at init and after `identify`. The last answer is cached, so `isEnabled` is synchronous. Active flags are sent with every event as `$flags`.
+Flags are fetched at init and after `identify`. The active flags travel with every event as `$flags`.
 
-Privacy: Do-Not-Track is respected, and `consent: "pending"` holds events until `setConsent(true)` is called. Add `data-openlens-ignore` to any element whose subtree should never be captured.
+## Privacy
 
-Session replay is on by default. Once the page is idle and consent is granted, the SDK loads the recorder (`/r.js`, about 60 kB gzipped, rrweb under MIT). Every input value is masked. Text inside `data-openlens-mask` is masked too (in replays, and in the `$text`/`$href` of clicks), and `data-openlens-block` / `data-openlens-ignore` subtrees are not recorded at all. To turn replay off, pass `replay: false` or add `data-replay="off"` to the script tag.
+- Do Not Track is respected.
+- `consent: "pending"` holds events until `setConsent(true)` is called.
+- `data-openlens-ignore`: nothing in that subtree is captured.
+- **Session replay** is on by default. Once the page is idle and consent is granted, the recorder (`/r.js`, rrweb under MIT) loads from your OpenLens server.
+- Every input value is masked in replays.
+- `data-openlens-mask` masks text, both in replays and in the `$text`/`$href` of clicks.
+- `data-openlens-block` subtrees are not recorded at all.
+- To turn replay off, pass `replay: false` or add `data-replay="off"` to the script tag.
 
 ## Develop
 
@@ -49,4 +83,8 @@ Session replay is on by default. Once the page is idle and consent is granted, t
 npm ci && npm run build && npm run check   # check = typecheck + size budget
 ```
 
-`dist/` is committed so that the Rust server can embed `openlens.min.js` without needing Node. CI fails if `dist/` is stale.
+`dist/` is committed so that the Rust server can embed `openlens.min.js` without Node. CI fails if `dist/` is stale. Releases are published by `.github/workflows/npm.yml` on `v*` tags.
+
+## License
+
+AGPL-3.0-only, like the rest of OpenLens.

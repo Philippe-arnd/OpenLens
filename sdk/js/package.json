@@ -2,17 +2,55 @@
   "name": "@openlens/web",
   "version": "0.1.0",
   "description": "OpenLens browser SDK: one dependency for product analytics by role, feature and release.",
+  "keywords": [
+    "analytics",
+    "product-analytics",
+    "session-replay",
+    "feature-flags",
+    "web-vitals",
+    "self-hosted",
+    "privacy"
+  ],
+  "homepage": "https://github.com/Philippe-arnd/OpenLens/tree/main/sdk/js#readme",
+  "bugs": {
+    "url": "https://github.com/Philippe-arnd/OpenLens/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Philippe-arnd/OpenLens.git",
+    "directory": "sdk/js"
+  },
   "license": "AGPL-3.0-only",
   "type": "module",
   "main": "dist/index.js",
+  "module": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "files": [
-    "dist"
+    "dist/index.js",
+    "dist/*.d.ts",
+    "README.md",
+    "LICENSE"
   ],
   "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "build": "esbuild src/global.ts --bundle --minify --format=iife --target=es2019 --outfile=dist/openlens.min.js && esbuild src/replay.ts --bundle --minify --format=iife --target=es2019 --outfile=dist/openlens-replay.min.js && esbuild src/survey.ts --bundle --minify --format=iife --target=es2019 --outfile=dist/openlens-survey.min.js && esbuild src/player.ts --bundle --minify --format=iife --target=es2019 --outfile=dist/openlens-player.min.js && cp node_modules/rrweb/dist/style.min.css dist/openlens-player.min.css && esbuild src/index.ts --bundle --format=esm --target=es2019 --outfile=dist/index.js && tsc --emitDeclarationOnly --declaration --outDir dist",
-    "check": "tsc --noEmit && node scripts/size.mjs"
+    "check": "tsc --noEmit && node scripts/size.mjs",
+    "prepack": "cp ../../LICENSE LICENSE",
+    "postpack": "rm -f LICENSE"
   },
   "devDependencies": {
     "esbuild": "0.28.2",
