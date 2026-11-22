@@ -19,6 +19,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/l/{token}", get(login_link))
         .route("/p/{project}", get(board))
         .route("/p/{project}/events", get(events))
+        .route("/p/{project}/errors", get(errors_page))
         .route("/assets/app.css", get(css))
         .route("/theme/{mode}", get(set_theme))
 }
@@ -301,4 +302,40 @@ pub(crate) async fn theme_layer(
     );
     parts.headers.remove(header::CONTENT_LENGTH);
     Response::from_parts(parts, axum::body::Body::from(html))
+}
+
+async fn errors_page(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(q): Query<FilterQuery>,
+) -> Response {
+    if !auth::has_session(&state, &headers) {
+        return to_login();
+    }
+    let Some(p) = project(&state, id).await else {
+        return html(
+            StatusCode::NOT_FOUND,
+            openlens_ui::message("Not found", "No such project."),
+        );
+    };
+    let f = q.filters();
+    let map = crate::load_map(&state, &p.id).await;
+    let src = openlens_engine::source(map.as_ref().map(|(m, _)| m));
+    let info = openlens_ui::ProjectInfo {
+        id: &p.id,
+        name: &p.name,
+        key: &p.api_key,
+    };
+    let (b, groups) = tokio::join!(
+        openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
+        openlens_engine::error_groups(&state.query, &p.id, &src, &f)
+    );
+    match (b, groups) {
+        (Ok(b), Ok(g)) => html(StatusCode::OK, openlens_ui::errors(&info, &b, &g, &f)),
+        (Err(e), _) | (_, Err(e)) => html(
+            StatusCode::BAD_REQUEST,
+            openlens_ui::message("Can't show that", &e.to_string()),
+        ),
+    }
 }

@@ -17,6 +17,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/api/projects", get(list_projects).post(create_project))
         .route("/api/projects/{project}/sql", post(sql))
         .route("/api/projects/{project}/board", get(board))
+        .route("/api/projects/{project}/errors", get(errors))
         .route(
             "/api/projects/{project}/feature-map",
             get(get_map).put(put_map),
@@ -510,6 +511,27 @@ async fn export(
             )
                 .into_response()
         }
+        Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()),
+    }
+}
+
+async fn errors(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(project): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<FilterQuery>,
+) -> Response {
+    if let Some(r) = guard(&state, &headers) {
+        return r;
+    }
+    let p = match known_project(&state, &project).await {
+        Ok(p) => p,
+        Err(r) => return *r,
+    };
+    let map = crate::load_map(&state, &p.id).await;
+    let src = openlens_engine::source(map.as_ref().map(|(m, _)| m));
+    match openlens_engine::error_groups(&state.query, &p.id, &src, &q.filters()).await {
+        Ok(g) => Json(json!({ "groups": g })).into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()),
     }
 }

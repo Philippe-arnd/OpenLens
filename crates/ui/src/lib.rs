@@ -88,6 +88,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                         nav aria-label="Project" {
                             a href={ "/p/" (p.id) } { (icon("board")) "Focus board" }
                             a href={ "/p/" (p.id) "/events" } { (icon("events")) "Events" }
+                            a href={ "/p/" (p.id) "/errors" } { (icon("alert")) "Errors" }
                             a href={ "/p/" (p.id) "/flags" } { (icon("flag")) "Flags" }
                         }
                         span.project { (p.name) }
@@ -598,6 +599,55 @@ pub fn flags(p: &ProjectInfo<'_>, flags: &[openlens_flags::Flag]) -> Markup {
                                     input type="hidden" name="rollout" value=(f.rollout);
                                     button type="submit" { (if f.enabled { "Switch off" } else { "Switch on" }) }
                                 } }
+                            }
+                        } }
+                    }
+                }
+            }
+        },
+    )
+}
+
+/// Error groups, most users first.
+pub fn errors(
+    p: &ProjectInfo<'_>,
+    b: &Board,
+    groups: &[openlens_engine::ErrorGroup],
+    f: &Filters,
+) -> Markup {
+    let list = |v: &[(String, i64)]| {
+        v.iter()
+            .map(|(k, n)| format!("{k} ({n})"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    layout(
+        "Errors",
+        Some(p),
+        html! {
+            div.heading {
+                div { h1 { "Errors" } p.muted { "Uncaught errors grouped by cause, most users first, last 30 days." } }
+            }
+            (filter_bar(p.id, b, f, "/errors"))
+            @if groups.is_empty() {
+                section.card { p { (icon("task")) " No errors in the last 30 days. Nice." } }
+            } @else {
+                section.card.wide {
+                    table.plain {
+                        thead { tr { th { "Error" } th.num { "Users" } th.num { "Sessions" } th.num { "Times" } th { "Roles" } th { "Releases" } th { "Where" } th { "Last seen" } } }
+                        tbody { @for g in groups {
+                            tr {
+                                th scope="row" {
+                                    span.mono { (g.sample.get(..160).unwrap_or(&g.sample)) }
+                                    br; span.muted.small.mono { (g.fingerprint.rsplit(" @ ").next().unwrap_or("")) }
+                                }
+                                td.num { strong { (compact(g.users)) } }
+                                td.num { (compact(g.sessions)) }
+                                td.num.muted { (compact(g.count)) }
+                                td.small { (list(&g.roles)) }
+                                td.small { (list(&g.releases)) }
+                                td.small { (list(&g.places)) }
+                                td.small.muted { (g.last_seen.get(..16).unwrap_or(&g.last_seen)) }
                             }
                         } }
                     }
