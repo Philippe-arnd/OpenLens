@@ -37,7 +37,7 @@ OpenLens is a **method for product managers to monitor and improve a web app**. 
 
 | Step | Who | What happens |
 | --- | --- | --- |
-| Deploy | Agent (or one Coolify click) | OpenLens starts with **no required environment variables**. Keys and the admin token generate themselves. |
+| Deploy | Agent (or one command: `docker run`, `helm install`, a panel template) | OpenLens starts with **no required environment variables**. Keys and the admin token generate themselves. |
 | Connect | Agent | `openlens-cli init` in the app repo creates the project and writes the capture key into the app's existing config. It adds the SDK, the `identify()` call with the role, and draft `features` and `roles` read from the code. |
 | Backfill | Agent | `openlens-cli import` loads users (role, signup, last seen) and past successes (rows in domain tables) from the app's database or an export. |
 | Verify | Agent | `openlens-cli verify` sends test events and checks that the round trip, the roles and the feature entry points all work. `openlens-cli features lint` checks the map against the code. |
