@@ -15,6 +15,7 @@ OpenLens is a method plus the tool that carries it out ([docs/method.md](docs/me
 | M4 Act | ✅ | ✅ a flagged cohort shows on the board |
 | M5 See it | ✅ | ✅ churn card → replay of a session that churned there |
 | M6 Production + dogfooding | 🚧 | ⏳ two of Phil's apps on OpenLens for 30 days without data loss |
+| M7 The former Later list (D-016) | ✅ | every item shipped, optional ones off until configured |
 
 ---
 
@@ -70,7 +71,7 @@ A layered workspace, `cargo xtask ci`, AGENTS.md, Docker and compose with the he
 
 **Exit:** two of Phil's prod apps run on OpenLens for 30 days without data loss.
 
-## M7: The former Later list (D-016) 🚧
+## M7: The former Later list (D-016) ✅
 - ✅ Experiment significance on flag cohorts (#122)
 - ✅ Server SDKs: Node and Python, no dependencies ([sdk/SERVER.md](sdk/SERVER.md))
 - ✅ Visual heatmaps: click density per page (SVG) and over a recorded visit of the real page
@@ -79,4 +80,4 @@ A layered workspace, `cargo xtask ci`, AGENTS.md, Docker and compose with the he
 - ✅ Single sign-on with OpenID Connect (optional: issuer, client id and secret; invited emails only)
 - ✅ In-app micro-surveys: one question after a success event, sampled, once per user; results by role (`/p/{id}/surveys`, CLI, MCP `survey_set`)
 - ✅ LLM rewording of cards (optional `OPENLENS_LLM_API_KEY`; numbers guarded, originals kept)
-- ⏳ S3 copy (optional)
+- ✅ S3 copy (optional): closed days and a daily metadata snapshot, signed with our own SigV4 (checked against the AWS example)
