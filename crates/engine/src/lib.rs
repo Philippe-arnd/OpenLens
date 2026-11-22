@@ -19,7 +19,7 @@ mod tasks;
 pub use errors::{ErrorGroup, error_groups};
 pub use insights::{CohortStats, FlagCohort, Funnel, FunnelStep, Insight, Journey, Readiness};
 pub use pages::{Hotspot, PageStats, pages};
-pub use tasks::TaskTime;
+pub use tasks::{RetentionRow, TaskTime};
 
 /// Engine errors.
 #[derive(Debug, thiserror::Error)]
@@ -200,6 +200,8 @@ pub struct Board {
     pub features: Vec<FeatureUse>,
     /// Users per role, last 30 days.
     pub roles: Vec<RoleUsers>,
+    /// Weekly retention cohorts (first-seen week × weeks later).
+    pub retention: Vec<RetentionRow>,
     /// Task durations per declared feature with a success event.
     pub task_times: Vec<TaskTime>,
     /// Who uses what: distinct users per (role, feature), last 30 days,
@@ -578,14 +580,17 @@ pub async fn board(
                 .collect()
         })
         .unwrap_or_default();
-    let ((mut cards, readiness), journeys, cohorts, funnels, task_times, resurrected) = futures::try_join!(
-        insights::compute(q, project, &src, f, churn, &successes),
-        insights::journeys(q, project, &src, f, &successes),
-        insights::flag_cohorts(q, project, &src, f),
-        insights::funnels(q, project, &src, f, &funnel_defs),
-        tasks::task_times(q, project, &src, f, &successes),
-        tasks::resurrected(q, project, &src, f, churn),
-    )?;
+    let ((mut cards, readiness), journeys, cohorts, funnels, task_times, resurrected, retention) =
+        futures::try_join!(
+            insights::compute(q, project, &src, f, churn, &successes),
+            insights::journeys(q, project, &src, f, &successes),
+            insights::flag_cohorts(q, project, &src, f),
+            insights::funnels(q, project, &src, f, &funnel_defs),
+            tasks::task_times(q, project, &src, f, &successes),
+            tasks::resurrected(q, project, &src, f, churn),
+            tasks::retention(q, project, &src, f),
+        )?;
+    b.retention = retention;
     b.task_times = task_times;
     b.users.resurrected = resurrected;
     cards.extend(insights::funnel_cards(&funnels));

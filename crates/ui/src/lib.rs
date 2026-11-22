@@ -475,6 +475,7 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
                     p.muted.small { "Distinct users per role, last 30 days." }
                 }
                 (role_matrix(b))
+                (retention_grid(b))
                 @if !b.funnels.is_empty() {
                     section.card.wide {
                         h2.sky { (icon("funnel")) "Funnels" }
@@ -855,6 +856,43 @@ fn feature_pulse(b: &Board, empty: bool) -> Markup {
                 }
                 p.muted.small { "Last 30 days. Adoption is the share of active users (MAU) who used the feature; completion is the share of them who reached its success event; task time runs from the first use to that event (within 30 minutes)." }
             }
+        }
+    }
+}
+
+/// Weekly retention cohorts: users first seen each week (rows) and the
+/// share of them active again N weeks later (columns).
+fn retention_grid(b: &Board) -> Markup {
+    let rows: Vec<_> = b.retention.iter().filter(|r| r.users > 0).collect();
+    let cols = rows.iter().map(|r| r.weeks.len()).max().unwrap_or(0);
+    if rows.len() < 2 || cols == 0 {
+        return html! {};
+    }
+    html! {
+        section.card.wide {
+            h2.mint { (icon("clock")) "Do they come back?" }
+            table.plain.matrix {
+                thead { tr {
+                    th { "First seen (week of)" }
+                    th.num { "Users" }
+                    @for k in 1..=cols { th.num scope="col" { "Week " (k) } }
+                } }
+                tbody { @for r in &rows {
+                    tr {
+                        th scope="row" { (r.week) }
+                        td.num.muted { (compact(r.users)) }
+                        @for k in 0..cols {
+                            @if let Some(share) = r.weeks.get(k) {
+                                @let level = if *share <= 0.0 { 0 } else { ((share * 5.0).ceil() as u8).clamp(1, 5) };
+                                td class={ "num heat-" (level) } { (pct(*share)) }
+                            } @else {
+                                td {}
+                            }
+                        }
+                    }
+                } }
+            }
+            p.muted.small { "Share of each week's new users who were active again N weeks later (UTC weeks)." }
         }
     }
 }

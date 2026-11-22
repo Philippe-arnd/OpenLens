@@ -1,5 +1,6 @@
 //! Task durations and resurrected users (docs/kpis.md).
 
+use chrono::Datelike;
 use openlens_query::QueryEngine;
 
 use crate::{Filters, Result, float, int, lit, text};
@@ -88,4 +89,73 @@ pub(crate) async fn resurrected(
         .rows
         .first()
         .map_or(0, |r| int(r, "n")))
+}
+
+/// One weekly retention cohort: users first seen that week, and the share
+/// of them active again 1, 2, … weeks later (UTC weeks, Monday first).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RetentionRow {
+    /// First day of the cohort week (YYYY-MM-DD).
+    pub week: String,
+    /// Users first seen that week.
+    pub users: i64,
+    /// Share active in week 1, 2, …, up to the current week.
+    pub weeks: Vec<f64>,
+}
+
+/// Weekly retention cohorts for users first seen in the last 8 weeks.
+pub(crate) async fn retention(
+    q: &QueryEngine,
+    project: &str,
+    src: &str,
+    f: &Filters,
+) -> Result<Vec<RetentionRow>> {
+    let w = f.clause(90)?;
+    let sql = format!(
+        "WITH ev AS (SELECT distinct_id, timestamp FROM {src} WHERE {w}), \
+         fs AS (SELECT distinct_id, date_trunc('week', min(timestamp)) AS cw FROM ev GROUP BY distinct_id), \
+         a AS (SELECT DISTINCT ev.distinct_id, fs.cw, \
+                 CAST(round((date_part('epoch', date_trunc('week', ev.timestamp)) - date_part('epoch', fs.cw)) / 604800) AS BIGINT) AS k \
+               FROM ev JOIN fs ON ev.distinct_id = fs.distinct_id \
+               WHERE fs.cw >= date_trunc('week', now()) - INTERVAL '49 days') \
+         SELECT substr(CAST(cw AS VARCHAR), 1, 10) AS week, k, count(*) AS users FROM a GROUP BY cw, k ORDER BY cw, k"
+    );
+    let rows = q.sql(project, &sql).await?.rows;
+    let mut out: Vec<RetentionRow> = Vec::new();
+    for r in &rows {
+        let (Some(week), k, n) = (text(r, "week"), int(r, "k"), int(r, "users")) else {
+            continue;
+        };
+        if out.last().is_none_or(|x| x.week != week) {
+            out.push(RetentionRow {
+                week,
+                users: 0,
+                weeks: Vec::new(),
+            });
+        }
+        let Some(row) = out.last_mut() else { continue };
+        match k {
+            0 => row.users = n,
+            1..=7 => {
+                let i = usize::try_from(k).unwrap_or(0);
+                if row.weeks.len() < i {
+                    row.weeks.resize(i, 0.0);
+                }
+                row.weeks[i - 1] = n as f64 / row.users.max(1) as f64;
+            }
+            _ => {}
+        }
+    }
+    // A cohort has as many measurable weeks as have started since it began.
+    let today = chrono::Utc::now().date_naive();
+    let this_week =
+        today - chrono::Duration::days(i64::from(today.weekday().num_days_from_monday()));
+    for row in &mut out {
+        let started = chrono::NaiveDate::parse_from_str(&row.week, "%Y-%m-%d").unwrap_or(this_week);
+        let n = usize::try_from((this_week - started).num_days() / 7)
+            .unwrap_or(0)
+            .min(7);
+        row.weeks.resize(n, 0.0);
+    }
+    Ok(out)
 }
