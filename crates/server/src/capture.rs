@@ -75,6 +75,30 @@ pub(crate) async fn project_for_key(
     }
 }
 
+/// Environment given to events sent by robots.
+pub(crate) const BOT_ENVIRONMENT: &str = "bot";
+
+/// A user agent that names itself a crawler, a preview fetcher or an uptime
+/// monitor. Server SDKs, curl and headless browsers used for tests are not.
+pub(crate) fn is_bot(ua: &str) -> bool {
+    let ua = ua.to_ascii_lowercase();
+    ua.split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|w| w.ends_with("bot"))
+        || [
+            "crawler",
+            "spider",
+            "slurp",
+            "facebookexternalhit",
+            "bingpreview",
+            "lighthouse",
+            "pingdom",
+            "uptimerobot",
+            "statuscake",
+        ]
+        .iter()
+        .any(|k| ua.contains(k))
+}
+
 pub(crate) async fn capture(
     State(state): State<AppState>,
     Query(query): Query<HashMap<String, String>>,
@@ -102,10 +126,21 @@ pub(crate) async fn capture(
         Err(resp) => return *resp,
     };
 
-    let normalized = match normalize_batch(&project.id, batch, Utc::now()) {
+    let mut normalized = match normalize_batch(&project.id, batch, Utc::now()) {
         Ok(n) => n,
         Err(e) => return error(StatusCode::PAYLOAD_TOO_LARGE, &e.to_string()),
     };
+    // Crawlers and monitors posting directly (the SDK already skips them in
+    // browsers): kept, but in their own environment, out of every number.
+    let ua = headers
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if is_bot(ua) {
+        for ev in &mut normalized.events {
+            ev.environment = BOT_ENVIRONMENT.to_owned();
+        }
+    }
     let accepted = normalized.events.len();
     let rejected: Vec<_> = normalized
         .rejected
@@ -149,5 +184,34 @@ pub(crate) async fn capture(
             )
         }
         Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "storage task failed"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_bot;
+
+    #[test]
+    fn robots_are_told_apart_from_people_and_server_sdks() {
+        for bot in [
+            "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+            "Mozilla/5.0 (compatible; bingbot/2.0)",
+            "facebookexternalhit/1.1",
+            "Mozilla/5.0 (compatible; AhrefsBot/7.0)",
+            "UptimeRobot/2.0",
+            "Mozilla/5.0 (Linux; Android 11; moto g power (2022)) AppleWebKit/537.36 Chrome-Lighthouse",
+        ] {
+            assert!(is_bot(bot), "{bot}");
+        }
+        for person in [
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 Version/17.5 Safari/605.1.15",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/131.0 Safari/537.36",
+            "openlens-node/0.1.0",
+            "python-urllib/3.12",
+            "curl/8.5.0",
+            "",
+        ] {
+            assert!(!is_bot(person), "{person}");
+        }
     }
 }
