@@ -204,6 +204,9 @@ async fn anonymous_events_before_identify_belong_to_the_user() {
         .await
         .unwrap();
     assert_eq!(raw.rows[0]["n"], 3);
+    let persons = q.sql("a", "SELECT person FROM persons").await.unwrap();
+    assert_eq!(persons.rows.len(), 1);
+    assert_eq!(persons.rows[0]["person"], "alice");
     let star = q
         .sql("a", "SELECT * FROM events WHERE date >= '2000-01-01'")
         .await

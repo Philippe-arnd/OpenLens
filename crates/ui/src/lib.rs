@@ -439,10 +439,15 @@ pub fn board(
             (filter_bar(p.id, b, f, ""))
             (insight_cards(p.id, b, plain))
             section.tiles aria-label="Key numbers" {
-                (tile("violet", "users", "Daily active users", &compact(b.users.dau), &if b.users.resurrected > 0 {
-                    format!("{} weekly · {} monthly · {} came back", compact(b.users.wau), compact(b.users.mau), compact(b.users.resurrected))
-                } else {
-                    format!("{} weekly · {} monthly", compact(b.users.wau), compact(b.users.mau))
+                (tile("violet", "users", "Daily active users", &compact(b.users.dau), &{
+                    let mut sub = format!("{} weekly · {} monthly", compact(b.users.wau), compact(b.users.mau));
+                    if b.users.resurrected > 0 {
+                        sub.push_str(&format!(" · {} came back", compact(b.users.resurrected)));
+                    }
+                    if b.users.anonymous > 0 {
+                        sub.push_str(&format!(" · +{} not logged in", compact(b.users.anonymous)));
+                    }
+                    sub
                 }))
                 (tile("mint", "spark", "Stickiness", &pct(b.users.stickiness), "DAU ÷ MAU"))
                 (tile("sky", "clock", "Avg session", &duration(b.sessions.avg_secs), &format!("{} sessions · {} bounce", compact(b.sessions.count), pct(b.sessions.bounce_rate))))

@@ -8,7 +8,7 @@
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use crate::{Filters, Result, int, text};
+use crate::{Filters, IDENTIFIED, Result, int, text};
 use openlens_query::QueryEngine;
 
 /// Smallest group size an insight may rest on.
@@ -52,15 +52,21 @@ fn rows(
 
 /// Compute all insights. `src` is the event source (raw or map-resolved),
 /// `w90` the filter clause over the analysis window, `churn` the window in days.
-/// Events of the last 90 days and the cohort judged for retention: users
-/// first seen before the churn window, `retained` = seen within it.
+/// Events of the last 90 days and the cohort judged for retention:
+/// identified users first seen inside the window but before the churn
+/// window, `retained` = seen within it. "First seen" is the first
+/// `$identify` ever, so a returning user is not taken for a new one (their
+/// "first week" would be wrong); without identify, users already active on
+/// the window's first day are left out for the same reason.
 pub(crate) fn cohort_base(src: &str, w: &str, churn: i64) -> String {
     format!(
-        "WITH ev AS (SELECT distinct_id, timestamp, feature, event, path, release, session_id FROM {src} WHERE {w}), \
-         users AS (SELECT distinct_id, min(timestamp) AS first_seen, max(timestamp) AS last_seen FROM ev GROUP BY distinct_id), \
+        "WITH ev AS (SELECT distinct_id, timestamp, feature, event, path, release, session_id FROM {src} WHERE {w} AND {IDENTIFIED}), \
+         users AS (SELECT ev.distinct_id, least(min(ev.timestamp), min(p.first_seen)) AS first_seen, max(ev.timestamp) AS last_seen \
+                   FROM ev LEFT JOIN persons p ON ev.distinct_id = p.person GROUP BY ev.distinct_id), \
          cohort AS (SELECT distinct_id, first_seen, last_seen, \
                     CASE WHEN last_seen >= now() - INTERVAL '{churn} days' THEN 1 ELSE 0 END AS retained \
-                    FROM users WHERE first_seen <= now() - INTERVAL '{churn} days')"
+                    FROM users WHERE first_seen <= now() - INTERVAL '{churn} days' \
+                    AND first_seen > now() - INTERVAL '89 days')"
     )
 }
 

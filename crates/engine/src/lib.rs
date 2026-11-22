@@ -94,7 +94,7 @@ impl Filters {
 /// Headline user numbers.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct Users {
-    /// Distinct users, last 24 h.
+    /// Distinct identified users, last 24 h.
     pub dau: i64,
     /// Distinct users, last 7 days.
     pub wau: i64,
@@ -105,6 +105,9 @@ pub struct Users {
     /// Users back in the last 30 days after being inactive for longer
     /// than the churn window.
     pub resurrected: i64,
+    /// Visitors who were never identified, last 30 days (not in the user
+    /// counts above).
+    pub anonymous: i64,
 }
 
 /// Session numbers, last 7 days.
@@ -118,7 +121,8 @@ pub struct Sessions {
     pub bounce_rate: f64,
     /// Share of sessions with at least one `$error`.
     pub error_rate: f64,
-    /// Completed tasks per active user per day (feature uses for now).
+    /// Completed tasks (success events; feature uses without a map) per
+    /// active user-day.
     pub tasks_per_user_day: f64,
 }
 
@@ -278,6 +282,18 @@ pub fn source(map: Option<&FeatureMap>) -> String {
     }
 }
 
+/// Only identified users (`persons`), unless the project never identified
+/// anyone, in which case every visitor counts. User KPIs (DAU/WAU/MAU,
+/// retention, cohorts) use it, so a visitor who never logged in is not a
+/// user (docs/kpis.md); anonymous visitors are counted on their own.
+pub(crate) const IDENTIFIED: &str =
+    "(distinct_id IN (SELECT person FROM persons) OR NOT EXISTS (SELECT 1 FROM persons))";
+
+/// Events a person does on purpose. A session with one of them at most is a
+/// bounce; `$scroll`, `$vital`, `$identify` or `$error` alone are not activity.
+pub(crate) const INTERACTION: &str =
+    "(event IN ('$pageview', '$click', '$submit', '$feature', '$survey') OR event NOT LIKE '$%')";
+
 /// Largest 90-day window the board keeps in memory (about 1 GB worst case
 /// with large properties); beyond it, each query reads the files.
 const BOARD_SNAPSHOT_ROWS: usize = 2_000_000;
@@ -321,25 +337,49 @@ pub async fn board(
     }
     .clause(90)?;
 
+    // Completed tasks are success events when the map declares them;
+    // without a map, every feature use counts.
+    let successes: Vec<&str> = map
+        .map(|(m, _)| {
+            m.features
+                .iter()
+                .filter_map(|x| x.success.as_deref())
+                .collect()
+        })
+        .unwrap_or_default();
+    let success_list = successes
+        .iter()
+        .map(|e| lit(e))
+        .collect::<Result<Vec<_>>>()?
+        .join(", ");
+    let task = if successes.is_empty() {
+        "feature IS NOT NULL".to_owned()
+    } else {
+        format!("event IN ({success_list})")
+    };
     let users_sql = format!(
         "SELECT count(DISTINCT CASE WHEN timestamp >= now() - INTERVAL '1 day' THEN distinct_id END) AS dau, \
          count(DISTINCT CASE WHEN timestamp >= now() - INTERVAL '7 days' THEN distinct_id END) AS wau, \
-         count(DISTINCT distinct_id) AS mau FROM {src} WHERE {w30}"
+         count(DISTINCT distinct_id) AS mau FROM {src} WHERE {w30} AND {IDENTIFIED}"
+    );
+    let anonymous_sql = format!(
+        "SELECT count(DISTINCT distinct_id) AS n FROM {src} WHERE {w30} AND NOT {IDENTIFIED}"
     );
     let sessions_sql = format!(
         "SELECT count(*) AS sessions, \
          avg(CASE WHEN n > 1 THEN secs END) AS avg_secs, \
-         avg(CASE WHEN n = 1 THEN 1.0 ELSE 0.0 END) AS bounce_rate, \
+         avg(CASE WHEN n <= 1 THEN 1.0 ELSE 0.0 END) AS bounce_rate, \
          avg(CASE WHEN errors > 0 THEN 1.0 ELSE 0.0 END) AS error_rate, \
-         sum(tasks) AS tasks, count(DISTINCT uid) AS users \
-         FROM (SELECT session_id, min(distinct_id) AS uid, count(*) AS n, \
+         sum(tasks) AS tasks, count(DISTINCT concat(uid, '|', day)) AS user_days \
+         FROM (SELECT session_id, min(distinct_id) AS uid, min(date) AS day, \
+               sum(CASE WHEN {INTERACTION} THEN 1 ELSE 0 END) AS n, \
                date_part('epoch', max(timestamp)) - date_part('epoch', min(timestamp)) AS secs, \
                sum(CASE WHEN event = '$error' THEN 1 ELSE 0 END) AS errors, \
-               sum(CASE WHEN feature IS NOT NULL THEN 1 ELSE 0 END) AS tasks \
+               sum(CASE WHEN {task} THEN 1 ELSE 0 END) AS tasks \
                FROM {src} WHERE {w7} AND session_id IS NOT NULL GROUP BY session_id) s"
     );
     let dau_sql = format!(
-        "SELECT date, count(DISTINCT distinct_id) AS n FROM {src} WHERE {w14} GROUP BY date ORDER BY date"
+        "SELECT date, count(DISTINCT distinct_id) AS n FROM {src} WHERE {w14} AND {IDENTIFIED} GROUP BY date ORDER BY date"
     );
     let vitals_sql = format!(
         "SELECT name, approx_percentile_cont(v, 0.75) AS p75, count(*) AS samples FROM ( \
@@ -374,13 +414,14 @@ pub async fn board(
     let releases_sql = format!(
         "SELECT release, CAST(min(first) AS VARCHAR) AS first_seen, count(DISTINCT uid) AS users, \
          count(*) AS sessions, avg(CASE WHEN n > 1 THEN secs END) AS avg_secs, \
-         avg(CASE WHEN n = 1 THEN 1.0 ELSE 0.0 END) AS bounce_rate, \
+         avg(CASE WHEN n <= 1 THEN 1.0 ELSE 0.0 END) AS bounce_rate, \
          avg(CASE WHEN errors > 0 THEN 1.0 ELSE 0.0 END) AS error_rate, \
          avg(CAST(tasks AS DOUBLE)) AS tasks_per_session \
-         FROM (SELECT release, session_id, min(distinct_id) AS uid, min(timestamp) AS first, count(*) AS n, \
+         FROM (SELECT release, session_id, min(distinct_id) AS uid, min(timestamp) AS first, \
+               sum(CASE WHEN {INTERACTION} THEN 1 ELSE 0 END) AS n, \
                date_part('epoch', max(timestamp)) - date_part('epoch', min(timestamp)) AS secs, \
                sum(CASE WHEN event = '$error' THEN 1 ELSE 0 END) AS errors, \
-               sum(CASE WHEN feature IS NOT NULL THEN 1 ELSE 0 END) AS tasks \
+               sum(CASE WHEN {task} THEN 1 ELSE 0 END) AS tasks \
                FROM {src} WHERE {all_releases} AND release IS NOT NULL AND session_id IS NOT NULL \
                GROUP BY release, session_id) s \
          GROUP BY release ORDER BY min(first) DESC LIMIT 5"
@@ -388,24 +429,11 @@ pub async fn board(
     let env_sql = "SELECT DISTINCT environment FROM events ORDER BY environment".to_owned();
     let total_sql = "SELECT count(*) AS n FROM events".to_owned();
 
-    let successes: Vec<&str> = map
-        .map(|(m, _)| {
-            m.features
-                .iter()
-                .filter_map(|x| x.success.as_deref())
-                .collect()
-        })
-        .unwrap_or_default();
     let success_sql = if successes.is_empty() {
         "SELECT CAST(NULL AS VARCHAR) AS event, 0 AS n, 0 AS users WHERE false".to_owned()
     } else {
-        let list = successes
-            .iter()
-            .map(|e| lit(e))
-            .collect::<Result<Vec<_>>>()?
-            .join(", ");
         format!(
-            "SELECT event, count(*) AS n, count(DISTINCT distinct_id) AS users FROM {src} WHERE {w30} AND event IN ({list}) GROUP BY event"
+            "SELECT event, count(*) AS n, count(DISTINCT distinct_id) AS users FROM {src} WHERE {w30} AND event IN ({success_list}) GROUP BY event"
         )
     };
     let (
@@ -420,6 +448,7 @@ pub async fn board(
         total,
         success,
         role_features,
+        anonymous,
     ) = futures::join!(
         q.sql(project, &users_sql),
         q.sql(project, &sessions_sql),
@@ -432,6 +461,7 @@ pub async fn board(
         q.sql(project, &total_sql),
         q.sql(project, &success_sql),
         q.sql(project, &role_features_sql),
+        q.sql(project, &anonymous_sql),
     );
 
     let mut b = Board {
@@ -449,16 +479,17 @@ pub async fn board(
                 0.0
             },
             resurrected: 0,
+            anonymous: anonymous?.rows.first().map_or(0, |r| int(r, "n")),
         };
     }
     if let Some(r) = sessions?.rows.first() {
-        let users = int(r, "users").max(1) as f64;
+        let user_days = int(r, "user_days").max(1) as f64;
         b.sessions = Sessions {
             count: int(r, "sessions"),
             avg_secs: float(r, "avg_secs"),
             bounce_rate: float(r, "bounce_rate"),
             error_rate: float(r, "error_rate"),
-            tasks_per_user_day: int(r, "tasks") as f64 / users / 7.0,
+            tasks_per_user_day: int(r, "tasks") as f64 / user_days,
         };
     }
     b.dau_series = dau?

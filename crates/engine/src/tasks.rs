@@ -3,7 +3,7 @@
 use chrono::Datelike;
 use openlens_query::QueryEngine;
 
-use crate::{Filters, Result, float, int, lit, text};
+use crate::{Filters, IDENTIFIED, Result, float, int, lit, text};
 
 /// Time to complete one feature's tasks, last 30 days.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -112,8 +112,9 @@ pub(crate) async fn retention(
 ) -> Result<Vec<RetentionRow>> {
     let w = f.clause(90)?;
     let sql = format!(
-        "WITH ev AS (SELECT distinct_id, timestamp FROM {src} WHERE {w}), \
-         fs AS (SELECT distinct_id, date_trunc('week', min(timestamp)) AS cw FROM ev GROUP BY distinct_id), \
+        "WITH ev AS (SELECT distinct_id, timestamp FROM {src} WHERE {w} AND {IDENTIFIED}), \
+         fs AS (SELECT ev.distinct_id, date_trunc('week', least(min(ev.timestamp), min(p.first_seen))) AS cw \
+                FROM ev LEFT JOIN persons p ON ev.distinct_id = p.person GROUP BY ev.distinct_id), \
          a AS (SELECT DISTINCT ev.distinct_id, fs.cw, \
                  CAST(round((date_part('epoch', date_trunc('week', ev.timestamp)) - date_part('epoch', fs.cw)) / 604800) AS BIGINT) AS k \
                FROM ev JOIN fs ON ev.distinct_id = fs.distinct_id \
