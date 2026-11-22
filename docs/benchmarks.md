@@ -22,11 +22,11 @@ Numbers to keep OpenLens honest about "lean". Re-run them when ingestion, storag
 | --- | --- |
 | 21 k events (demo app, planted patterns) | about 0.4 s (slowest query 41 ms) |
 | 368 k events, with identities (2026-11-22) | about **0.8 s** (1.7 s before #159) |
-| 2.1 M events, with identities (above the in-memory cap) | about 6–7 s |
+| 2.2 M events, with identities | about **3.7 s** (6–7 s before #190), peak memory 800 MB |
 
 **With identities:** `xtask bench` sends realistic visits since #159. A third of the users browse anonymously before logging in, `$identify` links that visit, and one event in seven comes from a visitor who never logs in. So the board pays for the `persons` and `person_aliases` joins like a real app does.
 
-The board takes one in-memory snapshot of the 90-day projection, then filters it for every query (#75). Above 2 M rows in the window it reads the files instead, so memory stays bounded, at the cost of reading them once per query.
+The board takes one in-memory snapshot of the 90-day projection, then filters it for every query (#75). The snapshot keeps only the columns the board reads, and `properties` only for `$vital` events: about 160 bytes per event (#190). Above 4 M rows in the window, about 650 MB, it reads the files instead, so memory stays bounded, at the cost of reading them once per query. At 2.2 M events, building the snapshot takes about 1.5 s, and the twenty queries take about 2 s on one core.
 
 **Watch out for subqueries in `OR`.** DataFusion turns `x IN (SELECT …)` into a semi-join, but not when it sits in an `OR` with `NOT EXISTS (…)`. The "identified users" filter written that way cost 20× more: 0.7 s instead of 35 ms per query. A scalar-subquery variant was fast, but it sometimes returned rows out of `ORDER BY` order. The engine now decides in Rust, from the cached `persons` count, and writes either the plain `IN` or `TRUE`. To see what each query costs, run with `RUST_LOG=openlens_query=debug`.
 

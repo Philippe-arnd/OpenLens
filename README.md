@@ -159,7 +159,7 @@ Measured on 2026-11-22, on one core of a 4-vCPU VPS ([docs/benchmarks.md](docs/b
 
 - **Ingestion:** about **80,000 events/s on one vCPU**, p99 under 9 ms.
 - **Storage:** about **11 bytes per event** on disk (2.3 M events took 25 MB).
-- **Board:** about **1 s on 515k events**. It keeps up to 2 M rows of the 90-day window in memory, and reads the files beyond that.
+- **Board:** about **0.8 s on 368k events and 3.7 s on 2.2 M**, on one vCPU, with identities. It keeps up to 4 M events of the 90-day window in memory (about 160 bytes each), and reads the files beyond that.
 - **SDK:** **4.7 kB** gzipped. The replay recorder loads separately, once the page is idle.
 - **Footprint:** one process, 256 MiB requested on Kubernetes, and no Kafka, ClickHouse or Redis to run next to it.
 
