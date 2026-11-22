@@ -2354,6 +2354,7 @@ name = "openlens-engine"
 version = "0.2.0"
 dependencies = [
  "chrono",
+ "chrono-tz",
  "futures",
  "openlens-event",
  "openlens-featuremap",
@@ -2463,6 +2464,7 @@ version = "0.2.0"
 dependencies = [
  "axum",
  "chrono",
+ "chrono-tz",
  "flate2",
  "hex",
  "hmac",

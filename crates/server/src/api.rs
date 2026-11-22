@@ -17,7 +17,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/api/projects", get(list_projects).post(create_project))
         .route(
             "/api/projects/{project}",
-            axum::routing::delete(delete_project),
+            axum::routing::delete(delete_project).patch(update_project),
         )
         .route("/api/projects/{project}/sql", post(sql))
         .route("/api/projects/{project}/board", get(board))
@@ -85,7 +85,7 @@ async fn list_projects(State(state): State<AppState>, headers: HeaderMap) -> Res
     let meta = state.meta.clone();
     match tokio::task::spawn_blocking(move || meta.projects()).await {
         Ok(Ok(ps)) => Json(json!({
-            "projects": ps.iter().map(|p| json!({"id": p.id, "name": p.name, "key": p.api_key})).collect::<Vec<_>>()
+            "projects": ps.iter().map(|p| json!({"id": p.id, "name": p.name, "key": p.api_key, "timezone": p.timezone})).collect::<Vec<_>>()
         }))
         .into_response(),
         _ => err(StatusCode::INTERNAL_SERVER_ERROR, "metadata store unavailable"),
@@ -95,6 +95,56 @@ async fn list_projects(State(state): State<AppState>, headers: HeaderMap) -> Res
 #[derive(Deserialize)]
 struct NewProject {
     name: String,
+    /// IANA time zone of the team (D-017); `UTC` when absent.
+    timezone: Option<String>,
+}
+
+/// A valid IANA time zone name (`Europe/Paris`, `UTC`), or an error message.
+fn check_timezone(tz: &str) -> Result<String, &'static str> {
+    let tz = tz.trim();
+    tz.parse::<chrono_tz::Tz>()
+        .map(|_| tz.to_owned())
+        .map_err(|_| "timezone must be an IANA name like Europe/Paris or America/New_York")
+}
+
+#[derive(Deserialize)]
+struct ProjectUpdate {
+    timezone: Option<String>,
+}
+
+/// `PATCH /api/projects/{id}` with `{"timezone": "Europe/Paris"}`: where the
+/// project's days and weeks start (D-017).
+async fn update_project(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(project): Path<String>,
+    Json(body): Json<ProjectUpdate>,
+) -> Response {
+    if let Some(r) = guard(&state, &headers) {
+        return r;
+    }
+    let Some(tz) = body.timezone else {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "nothing to change: send {\"timezone\": \"<IANA name>\"}",
+        );
+    };
+    let tz = match check_timezone(&tz) {
+        Ok(t) => t,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e),
+    };
+    let meta = state.meta.clone();
+    let id = project.clone();
+    let t = tz.clone();
+    match tokio::task::spawn_blocking(move || meta.set_project_timezone(&id, &t)).await {
+        Ok(Ok(true)) => Json(json!({ "id": project, "timezone": tz })).into_response(),
+        Ok(Ok(false)) => err(StatusCode::NOT_FOUND, "no such project"),
+        Ok(Err(e)) => err(StatusCode::BAD_REQUEST, &e.to_string()),
+        Err(_) => err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "metadata store unavailable",
+        ),
+    }
 }
 
 #[derive(Deserialize)]
@@ -169,13 +219,26 @@ async fn create_project(
     if body.name.trim().is_empty() || body.name.len() > 80 {
         return err(StatusCode::BAD_REQUEST, "name must be 1-80 characters");
     }
+    let tz = match body.timezone.as_deref().map(check_timezone).transpose() {
+        Ok(t) => t,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e),
+    };
     let meta = state.meta.clone();
     let host = crate::base_url(&headers);
-    match tokio::task::spawn_blocking(move || meta.create_project(body.name.trim(), None)).await {
+    match tokio::task::spawn_blocking(move || {
+        let mut p = meta.create_project(body.name.trim(), None)?;
+        if let Some(tz) = tz {
+            meta.set_project_timezone(&p.id, &tz)?;
+            p.timezone = tz;
+        }
+        Ok::<_, openlens_meta::MetaError>(p)
+    })
+    .await
+    {
         Ok(Ok(p)) => (
             StatusCode::CREATED,
             Json(json!({
-                "id": p.id, "name": p.name, "key": p.api_key,
+                "id": p.id, "name": p.name, "key": p.api_key, "timezone": p.timezone,
                 "snippet": format!(r#"<script src="{host}/c.js" data-key="{}" defer></script>"#, p.api_key),
                 "guide": format!("{host}/agents.md"),
             })),
@@ -221,7 +284,7 @@ pub(crate) struct FilterQuery {
 }
 
 impl FilterQuery {
-    pub(crate) fn filters(&self) -> Filters {
+    pub(crate) fn filters(&self, tz: &str) -> Filters {
         let some = |v: &Option<String>| {
             v.as_deref()
                 .map(str::trim)
@@ -233,6 +296,7 @@ impl FilterQuery {
             role: some(&self.role),
             release: some(&self.release),
             internal: matches!(self.internal.as_deref(), Some("1" | "true" | "on")),
+            tz: tz.to_owned(),
         }
     }
 }
@@ -254,7 +318,7 @@ async fn board(
     match openlens_engine::board(
         &state.query,
         &p.id,
-        &q.filters(),
+        &q.filters(&p.timezone),
         map.as_ref().map(|(m, v)| (m, *v)),
     )
     .await
@@ -687,7 +751,7 @@ async fn errors(
     };
     let map = crate::load_map(&state, &p.id).await;
     let src = openlens_engine::source(map.as_ref().map(|(m, _)| m));
-    match openlens_engine::error_groups(&state.query, &p.id, &src, &q.filters()).await {
+    match openlens_engine::error_groups(&state.query, &p.id, &src, &q.filters(&p.timezone)).await {
         Ok(g) => {
             let original = crate::resolve_frames(&state, &p.id, &g).await;
             let groups: Vec<Value> = g
@@ -727,7 +791,7 @@ async fn breakdown(
         Err(r) => return *r,
     };
     let map = crate::load_map(&state, &p.id).await;
-    let f = q.filters.filters();
+    let f = q.filters.filters(&p.timezone);
     match openlens_engine::breakdown(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f, &q.by)
         .await
     {

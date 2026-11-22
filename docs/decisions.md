@@ -71,3 +71,15 @@ Append-only. Each entry: id, date, decision, why, consequences.
 
   Each one is skipped silently when it is not configured.
 - Local disk remains the source of truth. S3 receives closed days and backups, so losing the bucket never loses data.
+
+## D-017 (2026-11-22, Phil) A time zone per project
+
+**Decision:** each project has one IANA time zone (`Europe/Paris`), `UTC` until set. Days and weeks of every KPI start in it: the DAU series, active days, user-days, tasks per user-day, resurrected users, retention weeks (Monday), and the day a session belongs to.
+
+**Why:** in Paris, a UTC "today" starts at 01:00 (02:00 in summer), so the evening's activity lands on the wrong day. Guessing the zone from the browsers was the alternative, but it changes silently when the audience moves, and it is wrong for a team that serves another continent.
+
+**Consequences:**
+- It is one setting, so it goes against D-014. The agent sets it once, at `openlens-cli init --name <app> --timezone <zone>`, from where the team works. `openlens-cli timezone <project> <zone>`, `PATCH /api/projects/{id}` or the MCP `set_timezone` tool change it later. It is not an environment variable, and it is not in the feature map.
+- Rolling windows ("last 24 h", "last 7 days") do not depend on it.
+- Storage stays in UTC. Partitions are UTC days, so changing the zone rewrites nothing.
+- The SDK still starts a new session when the UTC day changes, because the browser does not know the project's zone. A session belongs to the local day it starts in.

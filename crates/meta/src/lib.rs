@@ -38,6 +38,9 @@ pub struct Project {
     pub name: String,
     /// Public capture key (safe to ship in the browser).
     pub api_key: String,
+    /// IANA time zone the team works in (`Europe/Paris`); days and weeks of
+    /// every KPI are counted in it (D-017). `UTC` until set.
+    pub timezone: String,
 }
 
 /// A known user, with the dimensions OpenLens slices by.
@@ -67,7 +70,8 @@ CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   api_key TEXT NOT NULL UNIQUE,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  timezone TEXT NOT NULL DEFAULT 'UTC'
 );
 CREATE TABLE IF NOT EXISTS persons (
   project TEXT NOT NULL,
@@ -133,6 +137,12 @@ fn migrate(c: &Connection) -> rusqlite::Result<()> {
         .exists([])?;
     if !has_user_col {
         c.execute_batch("ALTER TABLE login_links ADD COLUMN user_id TEXT")?;
+    }
+    let has_tz: bool = c
+        .prepare("SELECT 1 FROM pragma_table_info('projects') WHERE name = 'timezone'")?
+        .exists([])?;
+    if !has_tz {
+        c.execute_batch("ALTER TABLE projects ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC'")?;
     }
     Ok(())
 }
@@ -300,6 +310,7 @@ impl Meta {
                 id,
                 name: name.to_owned(),
                 api_key,
+                timezone: "UTC".to_owned(),
             })
         })
     }
@@ -307,12 +318,14 @@ impl Meta {
     /// All projects, oldest first.
     pub fn projects(&self) -> Result<Vec<Project>> {
         self.with(|c| {
-            let mut st = c.prepare("SELECT id, name, api_key FROM projects ORDER BY created_at")?;
+            let mut st =
+                c.prepare("SELECT id, name, api_key, timezone FROM projects ORDER BY created_at")?;
             let rows = st.query_map([], |r| {
                 Ok(Project {
                     id: r.get(0)?,
                     name: r.get(1)?,
                     api_key: r.get(2)?,
+                    timezone: r.get(3)?,
                 })
             })?;
             Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -323,17 +336,39 @@ impl Meta {
     pub fn project_by_key(&self, key: &str) -> Result<Option<Project>> {
         self.with(|c| {
             Ok(c.query_row(
-                "SELECT id, name, api_key FROM projects WHERE api_key = ?1",
+                "SELECT id, name, api_key, timezone FROM projects WHERE api_key = ?1",
                 [key],
                 |r| {
                     Ok(Project {
                         id: r.get(0)?,
                         name: r.get(1)?,
                         api_key: r.get(2)?,
+                        timezone: r.get(3)?,
                     })
                 },
             )
             .optional()?)
+        })
+    }
+
+    /// Set the time zone of a project (an IANA name, checked by the
+    /// caller). Returns false when the project does not exist.
+    pub fn set_project_timezone(&self, id: &str, timezone: &str) -> Result<bool> {
+        if timezone.is_empty()
+            || timezone.len() > 64
+            || !timezone
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"/_+-".contains(&b))
+        {
+            return Err(MetaError::Invalid(
+                "time zone must be an IANA name like Europe/Paris",
+            ));
+        }
+        self.with(|c| {
+            Ok(c.execute(
+                "UPDATE projects SET timezone = ?2 WHERE id = ?1",
+                params![id, timezone],
+            )? > 0)
         })
     }
 

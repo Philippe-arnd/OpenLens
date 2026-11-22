@@ -1499,3 +1499,73 @@ async fn deleting_a_project_needs_confirmation_and_removes_everything() {
         StatusCode::NOT_FOUND
     );
 }
+
+/// A project's time zone (D-017): set at creation or later, IANA names only.
+#[tokio::test]
+async fn project_time_zone_is_set_and_checked() {
+    let h = harness();
+    let send = |method: &'static str, path: &'static str, body: &'static str| {
+        router(h.state.clone()).oneshot(
+            Request::builder()
+                .method(method)
+                .uri(path)
+                .header("authorization", "Bearer adm_test")
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+    };
+    let created = send(
+        "POST",
+        "/api/projects",
+        r#"{"name":"Paris app","timezone":"Europe/Paris"}"#,
+    )
+    .await
+    .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let p = h.state.meta.project("paris-app").unwrap().unwrap();
+    assert_eq!(p.timezone, "Europe/Paris");
+    assert_eq!(
+        h.state.meta.project("default").unwrap().unwrap().timezone,
+        "UTC"
+    );
+    let bad = send(
+        "POST",
+        "/api/projects",
+        r#"{"name":"Bad","timezone":"Mars/Olympus"}"#,
+    )
+    .await
+    .unwrap();
+    assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+    let ok = send(
+        "PATCH",
+        "/api/projects/default",
+        r#"{"timezone":"America/New_York"}"#,
+    )
+    .await
+    .unwrap();
+    assert_eq!(ok.status(), StatusCode::OK);
+    assert_eq!(
+        h.state.meta.project("default").unwrap().unwrap().timezone,
+        "America/New_York"
+    );
+    let bad = send("PATCH", "/api/projects/default", r#"{"timezone":"x'; --"}"#)
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+    let missing = send("PATCH", "/api/projects/nope", r#"{"timezone":"UTC"}"#)
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    // The board still loads with a zone set.
+    let board = router(h.state.clone())
+        .oneshot(
+            Request::get("/api/projects/default/board")
+                .header("authorization", "Bearer adm_test")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(board.status(), StatusCode::OK);
+}

@@ -77,11 +77,13 @@ pub(crate) async fn resurrected(
     churn: i64,
 ) -> Result<i64> {
     let w = f.clause(90)?;
+    let day = f.day()?;
+    let today = f.local("now()")?;
     let sql = format!(
-        "WITH d AS (SELECT DISTINCT distinct_id, CAST(date AS DATE) AS day FROM {src} WHERE {w}), \
+        "WITH d AS (SELECT DISTINCT distinct_id, CAST({day} AS DATE) AS day FROM {src} WHERE {w}), \
          g AS (SELECT distinct_id, day, lag(day) OVER (PARTITION BY distinct_id ORDER BY day) AS prev FROM d) \
          SELECT count(DISTINCT distinct_id) AS n FROM g \
-         WHERE prev IS NOT NULL AND day >= CAST(now() AS DATE) - INTERVAL '30 days' \
+         WHERE prev IS NOT NULL AND day >= CAST({today} AS DATE) - INTERVAL '30 days' \
            AND day - prev > {churn}"
     );
     Ok(q.sql(project, &sql)
@@ -92,7 +94,8 @@ pub(crate) async fn resurrected(
 }
 
 /// One weekly retention cohort: users first seen that week, and the share
-/// of them active again 1, 2, … weeks later (UTC weeks, Monday first).
+/// of them active again 1, 2, … weeks later (weeks start on Monday, in the
+/// project's time zone).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct RetentionRow {
     /// First day of the cohort week (YYYY-MM-DD).
@@ -112,14 +115,18 @@ pub(crate) async fn retention(
     ident: &str,
 ) -> Result<Vec<RetentionRow>> {
     let w = f.clause(90)?;
+    // Weeks start on Monday in the project's time zone (D-017).
+    let first = f.local("least(min(ev.timestamp), min(p.first_seen))")?;
+    let ts = f.local("ev.timestamp")?;
+    let now = f.local("now()")?;
     let sql = format!(
         "WITH ev AS (SELECT distinct_id, timestamp FROM {src} WHERE {w} AND {ident}), \
-         fs AS (SELECT ev.distinct_id, date_trunc('week', least(min(ev.timestamp), min(p.first_seen))) AS cw \
+         fs AS (SELECT ev.distinct_id, date_trunc('week', {first}) AS cw \
                 FROM ev LEFT JOIN persons p ON ev.distinct_id = p.person GROUP BY ev.distinct_id), \
          a AS (SELECT DISTINCT ev.distinct_id, fs.cw, \
-                 CAST(round((date_part('epoch', date_trunc('week', ev.timestamp)) - date_part('epoch', fs.cw)) / 604800) AS BIGINT) AS k \
+                 CAST(round((date_part('epoch', date_trunc('week', {ts})) - date_part('epoch', fs.cw)) / 604800) AS BIGINT) AS k \
                FROM ev JOIN fs ON ev.distinct_id = fs.distinct_id \
-               WHERE fs.cw >= date_trunc('week', now()) - INTERVAL '49 days') \
+               WHERE fs.cw >= date_trunc('week', {now}) - INTERVAL '49 days') \
          SELECT substr(CAST(cw AS VARCHAR), 1, 10) AS week, k, count(*) AS users FROM a GROUP BY cw, k ORDER BY cw, k"
     );
     let rows = q.sql(project, &sql).await?.rows;
@@ -152,7 +159,10 @@ pub(crate) async fn retention(
         }
     }
     // A cohort has as many measurable weeks as have started since it began.
-    let today = chrono::Utc::now().date_naive();
+    let today = f.tz.parse::<chrono_tz::Tz>().map_or_else(
+        |_| chrono::Utc::now().date_naive(),
+        |tz| chrono::Utc::now().with_timezone(&tz).date_naive(),
+    );
     let this_week =
         today - chrono::Duration::days(i64::from(today.weekday().num_days_from_monday()));
     for row in &mut out {

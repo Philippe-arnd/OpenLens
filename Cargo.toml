@@ -22,6 +22,7 @@ tower-http = { version = "0.6", features = ["cors", "limit"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
+chrono-tz = { version = "0.10", default-features = false }
 uuid = { version = "1", features = ["v7", "serde"] }
 thiserror = "2"
 zstd = { version = "0.13", default-features = false }
