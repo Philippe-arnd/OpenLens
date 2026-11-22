@@ -10,9 +10,10 @@
 //!
 //! Layer: L2 (see `docs/architecture.md`).
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use arrow::datatypes::DataType;
 use datafusion::datasource::MemTable;
@@ -25,6 +26,45 @@ use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::prelude::{SQLOptions, SessionConfig, SessionContext};
 use futures::StreamExt;
 use serde::Serialize;
+
+/// How long the anonymous-id table of a project is reused before it is
+/// read again. Events are flushed every ~10 s, so this stays fresh enough.
+const ALIAS_TTL: Duration = Duration::from_secs(30);
+
+/// `person_aliases(anon, person)`: anonymous ids that were later identified.
+///
+/// The SDK sends `$anon_distinct_id` on `$identify`, so events sent before
+/// login (often the first page view) can be given to the user instead of
+/// counting as an extra visitor. When an anonymous id was identified as
+/// several users, the smallest id wins.
+const ALIAS_SQL: &str = "SELECT anon, min(person) AS person FROM (\
+     SELECT regexp_match(properties, '\"\\$anon_distinct_id\":\"([^\"]{1,200})\"')[1] AS anon, \
+     distinct_id AS person FROM raw_events WHERE event = '$identify') \
+     WHERE anon IS NOT NULL AND anon <> person GROUP BY anon";
+
+/// The `events` table as callers see it: `raw_events` with every
+/// anonymous id found in `person_aliases` replaced by its user. Derived
+/// from the data, so it also fixes what was stored before, and nothing is
+/// rewritten.
+fn events_view_sql() -> String {
+    let cols: Vec<String> = openlens_storage::event_schema()
+        .fields()
+        .iter()
+        .map(|f| {
+            if f.name() == "distinct_id" {
+                "COALESCE(a.person, r.distinct_id) AS distinct_id".to_owned()
+            } else {
+                format!("r.{}", f.name())
+            }
+        })
+        .collect();
+    format!(
+        "SELECT {}, r.date FROM raw_events r LEFT JOIN person_aliases a ON r.distinct_id = a.anon",
+        cols.join(", ")
+    )
+}
+
+type AliasCache = Arc<std::sync::Mutex<HashMap<String, (Instant, Option<Arc<MemTable>>)>>>;
 
 /// Query errors. Messages are safe to show to the caller.
 #[derive(Debug, thiserror::Error)]
@@ -83,6 +123,8 @@ pub struct QueryEngine {
     runtime: Option<Arc<datafusion::execution::runtime_env::RuntimeEnv>>,
     /// In-memory tables added by [`QueryEngine::snapshot`], for one project.
     snapshots: Arc<Vec<(String, String, Arc<MemTable>)>>,
+    /// Per project: the `person_aliases` table and when it was read.
+    aliases: AliasCache,
 }
 
 impl QueryEngine {
@@ -97,6 +139,7 @@ impl QueryEngine {
             limits,
             runtime,
             snapshots: Arc::default(),
+            aliases: AliasCache::default(),
         }
     }
 
@@ -192,8 +235,27 @@ impl QueryEngine {
             .with_schema(openlens_storage::event_schema());
         let table =
             ListingTable::try_new(table_config).map_err(|e| QueryError::Storage(e.to_string()))?;
-        ctx.register_table("events", Arc::new(table))
+        let table: Arc<ListingTable> = Arc::new(table);
+        ctx.register_table("raw_events", table.clone())
             .map_err(|e| QueryError::Storage(e.to_string()))?;
+        match self.aliases(project, &ctx).await? {
+            // Nobody to merge: `events` is the stored table, at no cost.
+            None => {
+                ctx.register_table("events", table)
+                    .map_err(|e| QueryError::Storage(e.to_string()))?;
+            }
+            Some(aliases) => {
+                ctx.register_table("person_aliases", aliases)
+                    .map_err(|e| QueryError::Storage(e.to_string()))?;
+                let view = ctx
+                    .sql(&events_view_sql())
+                    .await
+                    .map_err(|e| QueryError::Storage(e.to_string()))?
+                    .into_view();
+                ctx.register_table("events", view)
+                    .map_err(|e| QueryError::Storage(e.to_string()))?;
+            }
+        }
         for (p, name, t) in self.snapshots.iter() {
             if p == project {
                 ctx.register_table(name.as_str(), t.clone())
@@ -201,6 +263,43 @@ impl QueryEngine {
             }
         }
         Ok(ctx)
+    }
+
+    /// The `person_aliases` table of `project`, read at most every
+    /// [`ALIAS_TTL`]; `None` when no anonymous id was identified.
+    async fn aliases(
+        &self,
+        project: &str,
+        ctx: &SessionContext,
+    ) -> Result<Option<Arc<MemTable>>, QueryError> {
+        if let Ok(cache) = self.aliases.lock()
+            && let Some((at, t)) = cache.get(project)
+            && at.elapsed() < ALIAS_TTL
+        {
+            return Ok(t.clone());
+        }
+        let df = ctx
+            .sql(ALIAS_SQL)
+            .await
+            .map_err(|e| QueryError::Storage(e.to_string()))?;
+        let schema = Arc::new(df.schema().as_arrow().clone());
+        let batches = df
+            .collect()
+            .await
+            .map_err(|e| QueryError::Storage(e.to_string()))?;
+        let rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+        let table = if rows == 0 {
+            None
+        } else {
+            Some(Arc::new(
+                MemTable::try_new(schema, vec![batches])
+                    .map_err(|e| QueryError::Storage(e.to_string()))?,
+            ))
+        };
+        if let Ok(mut cache) = self.aliases.lock() {
+            cache.insert(project.to_owned(), (Instant::now(), table.clone()));
+        }
+        Ok(table)
     }
 
     /// Run one read-only SQL query on `project`'s events.
