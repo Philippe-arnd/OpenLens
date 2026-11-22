@@ -240,11 +240,12 @@ function describe(el) {
   if (f) p.$feature = f.getAttribute("data-feature");
   if (el.id) p.$id = el.id;
   const isInput = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
-  if (!isInput) {
+  const masked = !!el.closest("[data-openlens-mask]");
+  if (!isInput && !masked) {
     const text = (el.textContent || "").replace(/\s+/g, " ").trim();
     if (text) p.$text = text.slice(0, 60);
   }
-  const href = el.getAttribute("href");
+  const href = masked ? null : el.getAttribute("href");
   if (href) p.$href = (_a = href.split("?")[0]) == null ? void 0 : _a.slice(0, 200);
   return p;
 }

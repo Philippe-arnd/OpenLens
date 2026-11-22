@@ -237,11 +237,13 @@ function describe(el: Element): Props {
   if (f) p.$feature = f.getAttribute("data-feature");
   if (el.id) p.$id = el.id;
   const isInput = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
-  if (!isInput) {
+  // Text under data-openlens-mask is private (e.g. decrypted user content): never sent.
+  const masked = !!el.closest("[data-openlens-mask]");
+  if (!isInput && !masked) {
     const text = (el.textContent || "").replace(/\s+/g, " ").trim();
     if (text) p.$text = text.slice(0, 60);
   }
-  const href = el.getAttribute("href");
+  const href = masked ? null : el.getAttribute("href");
   if (href) p.$href = href.split("?")[0]?.slice(0, 200);
   return p;
 }
