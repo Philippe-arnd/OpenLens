@@ -15,6 +15,9 @@ adminToken:
   # Use your own Secret (key below) instead of the generated one.
   existingSecret: ""
   key: admin-token
+  # With existingSecret: start even if that Secret is missing. OpenLens then
+  # generates a token, stores it in its volume and prints it in its log.
+  optional: false
 
 # Public URL of the dashboard, used in emailed links (digest). Defaults to
 # https://<ingress.host> when the Ingress is enabled.

@@ -1,0 +1,7 @@
+# Expose OpenLens with an Ingress. In your overlay:
+#   components: [<path>/deploy/k8s/components/ingress]
+# then patch the host (and the TLS secret / cert-manager annotation).
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - ingress.yaml

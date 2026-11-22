@@ -1,0 +1,6 @@
+# Plain-manifest OpenLens: kubectl apply -k deploy/k8s/base
+# (namespace, image tag, storage size: set them in your own overlay).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - openlens.yaml
