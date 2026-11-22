@@ -18,6 +18,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/api/projects/{project}/sql", post(sql))
         .route("/api/projects/{project}/board", get(board))
         .route("/api/projects/{project}/errors", get(errors))
+        .route("/api/projects/{project}/breakdown", get(breakdown))
         .route(
             "/api/projects/{project}/feature-map",
             get(get_map).put(put_map),
@@ -532,6 +533,43 @@ async fn errors(
     let src = openlens_engine::source(map.as_ref().map(|(m, _)| m));
     match openlens_engine::error_groups(&state.query, &p.id, &src, &q.filters()).await {
         Ok(g) => Json(json!({ "groups": g })).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct BreakdownQuery {
+    by: String,
+    #[serde(flatten)]
+    filters: FilterQuery,
+}
+
+/// `GET /api/projects/{id}/breakdown?by=role|account|plan|page|feature`.
+async fn breakdown(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(project): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<BreakdownQuery>,
+) -> Response {
+    if let Some(r) = guard(&state, &headers) {
+        return r;
+    }
+    let p = match known_project(&state, &project).await {
+        Ok(p) => p,
+        Err(r) => return *r,
+    };
+    let map = crate::load_map(&state, &p.id).await;
+    let f = q.filters.filters();
+    match openlens_engine::breakdown(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f, &q.by)
+        .await
+    {
+        Ok(rows) => Json(json!({
+            "by": q.by,
+            "window_days": 30,
+            "role_rule": "role at event time: each event keeps the role the user had when it was sent",
+            "rows": rows,
+        }))
+        .into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()),
     }
 }
