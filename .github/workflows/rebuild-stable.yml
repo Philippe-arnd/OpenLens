@@ -1,0 +1,26 @@
+name: Rebuild stable image
+
+# Monthly, rebuild the newest stable release's image (same tag, same code,
+# fresh base image), so OS security fixes reach installs that follow
+# `latest` or a minor channel (#201). The image workflow runs its smoke and
+# upgrade tests first, and redeploys Coolify when it is configured.
+on:
+  schedule:
+    - cron: "29 4 3 * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh release list -R "$GITHUB_REPOSITORY" --exclude-pre-releases --limit 1 --json tagName -q '.[0].tagName')
+          [ -n "$tag" ] || { echo "no stable release yet"; exit 0; }
+          echo "::notice::rebuilding $tag"
+          gh workflow run release.yml -R "$GITHUB_REPOSITORY" --ref "$tag"
