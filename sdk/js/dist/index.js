@@ -227,7 +227,7 @@ function identify(id, dims = {}) {
   loadFlags();
 }
 function reset() {
-  if (!cfg) return;
+  if (!cfg || !state.uid) return;
   flush();
   state = { anon: uuid(), dims: {}, sid: uuid(), last: 0 };
   save();

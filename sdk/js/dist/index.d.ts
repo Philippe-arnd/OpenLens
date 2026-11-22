@@ -50,7 +50,8 @@ export declare function feature(key: string, props?: Props): void;
 export declare function isEnabled(key: string): boolean;
 /** Identify the logged-in user and the dimensions OpenLens slices by. */
 export declare function identify(id: string, dims?: Dimensions): void;
-/** Forget the user (call on logout). */
+/** Forget the user (call on logout). A no-op while nobody is identified, so
+ * calling it on every logged-out page load does not mint a new visitor. */
 export declare function reset(): void;
 /** Grant or withdraw consent at runtime. */
 export declare function setConsent(granted: boolean): void;
