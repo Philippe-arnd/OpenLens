@@ -20,6 +20,12 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/api/projects/{project}/errors", get(errors))
         .route("/api/projects/{project}/breakdown", get(breakdown))
         .route(
+            "/api/projects/{project}/sourcemaps/{release}/{bundle}",
+            axum::routing::put(put_sourcemap).layer(axum::extract::DefaultBodyLimit::max(
+                openlens_errors::MAX_MAP_BYTES,
+            )),
+        )
+        .route(
             "/api/projects/{project}/feature-map",
             get(get_map).put(put_map),
         )
@@ -532,7 +538,19 @@ async fn errors(
     let map = crate::load_map(&state, &p.id).await;
     let src = openlens_engine::source(map.as_ref().map(|(m, _)| m));
     match openlens_engine::error_groups(&state.query, &p.id, &src, &q.filters()).await {
-        Ok(g) => Json(json!({ "groups": g })).into_response(),
+        Ok(g) => {
+            let original = crate::resolve_frames(&state, &p.id, &g).await;
+            let groups: Vec<Value> = g
+                .iter()
+                .zip(original)
+                .map(|(g, o)| {
+                    let mut v = json!(g);
+                    v["original"] = json!(o);
+                    v
+                })
+                .collect();
+            Json(json!({ "groups": groups })).into_response()
+        }
         Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()),
     }
 }
@@ -571,5 +589,39 @@ async fn breakdown(
         }))
         .into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()),
+    }
+}
+
+/// `PUT /api/projects/{id}/sourcemaps/{release}/{bundle}`: the source map of
+/// one minified file (`bundle` is its file name, e.g. `app.3f9a.js`).
+async fn put_sourcemap(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((project, release, bundle)): Path<(String, String, String)>,
+    body: String,
+) -> Response {
+    if let Some(r) = guard(&state, &headers) {
+        return r;
+    }
+    let p = match known_project(&state, &project).await {
+        Ok(p) => p,
+        Err(r) => return *r,
+    };
+    let root = state.data_dir.clone();
+    let res = tokio::task::spawn_blocking(move || {
+        openlens_errors::store(&root, &p.id, &release, &bundle, &body)
+    })
+    .await;
+    match res {
+        Ok(Ok(())) => Json(json!({ "stored": true })).into_response(),
+        Ok(Err(openlens_errors::Error::Io(e))) => {
+            tracing::error!(%e, "cannot store source map");
+            err(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "cannot store the source map right now",
+            )
+        }
+        Ok(Err(e)) => err(StatusCode::BAD_REQUEST, &e.to_string()),
+        Err(_) => err(StatusCode::INTERNAL_SERVER_ERROR, "storage task failed"),
     }
 }

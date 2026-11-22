@@ -32,6 +32,10 @@ pub struct ErrorGroup {
     pub places: Vec<(String, i64)>,
     /// The session of the latest occurrence (links to its replay).
     pub last_session: Option<String>,
+    /// The stack of the latest occurrence, as sent (minified).
+    pub stack: Option<String>,
+    /// The release of the latest occurrence (to pick its source maps).
+    pub last_release: Option<String>,
 }
 
 /// The top 20 error groups of the last 30 days, most users first.
@@ -45,7 +49,8 @@ pub async fn error_groups(
     let base = format!(
         "WITH e AS (SELECT distinct_id, session_id, timestamp, role, release, coalesce(feature, path) AS place, \
            regexp_match(properties, '\"\\$message\":\"((?:[^\"\\\\]|\\\\.)*)\"')[1] AS msg, \
-           regexp_match(properties, '\"\\$source\":\"([^\"]*)\"')[1] AS source \
+           regexp_match(properties, '\"\\$source\":\"([^\"]*)\"')[1] AS source, \
+           regexp_match(properties, '\"\\$stack\":\"((?:[^\"\\\\]|\\\\.)*)\"')[1] AS stack \
            FROM {src} WHERE {w} AND event = '$error'), \
          g AS (SELECT *, concat( \
              regexp_replace(regexp_replace(coalesce(msg, '(no message)'), '0x[0-9a-fA-F]+|[0-9a-fA-F-]{{12,}}|[0-9]+', 'N', 'g'), \
@@ -56,7 +61,8 @@ pub async fn error_groups(
         "{base} SELECT fp, min(msg) AS sample, count(*) AS n, count(DISTINCT distinct_id) AS users, \
          count(DISTINCT session_id) AS sessions, CAST(min(timestamp) AS VARCHAR) AS first_seen, \
          CAST(max(timestamp) AS VARCHAR) AS last_seen, \
-         last_value(session_id ORDER BY timestamp) AS last_session FROM g GROUP BY fp ORDER BY users DESC, n DESC LIMIT 20"
+         last_value(session_id ORDER BY timestamp) AS last_session, \
+         last_value(stack ORDER BY timestamp) AS stack, last_value(release ORDER BY timestamp) AS last_release FROM g GROUP BY fp ORDER BY users DESC, n DESC LIMIT 20"
     );
     let dims_sql = format!(
         "{base} SELECT fp, 'role' AS dim, coalesce(role, 'not identified') AS v, count(DISTINCT distinct_id) AS users FROM g GROUP BY fp, role \
@@ -93,6 +99,10 @@ pub async fn error_groups(
                 first_seen: text(r, "first_seen").unwrap_or_default(),
                 last_seen: text(r, "last_seen").unwrap_or_default(),
                 last_session: text(r, "last_session"),
+                // The stack is a JSON string body: undo its escapes.
+                stack: text(r, "stack")
+                    .and_then(|s| serde_json::from_str(&format!("\"{s}\"")).ok()),
+                last_release: text(r, "last_release"),
                 fingerprint: fp,
             }
         })

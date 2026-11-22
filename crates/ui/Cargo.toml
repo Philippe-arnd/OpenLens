@@ -12,6 +12,7 @@ publish.workspace = true
 openlens-engine = { path = "../engine" }
 openlens-flags = { path = "../flags" }
 openlens-replay = { path = "../replay" }
+openlens-errors = { path = "../errors" }
 chrono.workspace = true
 maud.workspace = true
 

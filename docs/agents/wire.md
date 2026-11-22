@@ -38,6 +38,7 @@ API quick reference (send `Authorization: Bearer <admin token>` on every call):
      `{"event":"entry_saved","distinct_id":"42","timestamp":"2026-10-02T09:00:00Z"}`
 
    Use the same event names as the feature map's `success` fields. Then run `openlens-cli import --project <id> --file backfill.jsonl`. Re-running it is safe, because chunks that were already imported are skipped. Export only ids, roles, plans and timestamps: no names, emails or content.
+5b. **Source maps (minified builds).** If the build emits `*.map` files, add `openlens-cli sourcemaps --release <same release as the SDK> <build dir>` to the deploy step, after the build. Errors then show the original file and line. Do not serve the maps publicly for this: the CLI uploads them with the admin token.
 6. **Verify.** Load a page of the app and click through the main features, then run `openlens-cli verify --project <id>`. It must say `"ok": true`: events arrive, users are identified with a role, a release is tagged, and the map is pushed. It also lists each feature's events, so a feature at 0 has not fired yet.
 7. **Keep it current.** Add the rule printed by `openlens-cli rules` to the app's own `AGENTS.md` (or `CLAUDE.md`). In short:
    > When you add, rename or remove a user-facing feature, update `openlens.features.yaml` (entry points, success event) in the same change and run `openlens-cli features lint`.

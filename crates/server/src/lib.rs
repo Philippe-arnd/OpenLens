@@ -204,6 +204,30 @@ pub(crate) fn base_url(headers: &axum::http::HeaderMap) -> String {
     format!("{proto}://{host}")
 }
 
+/// The original source position of each error group's latest stack, using
+/// the source maps uploaded for that occurrence's release.
+pub(crate) async fn resolve_frames(
+    state: &AppState,
+    project: &str,
+    groups: &[openlens_engine::ErrorGroup],
+) -> Vec<Option<openlens_errors::Original>> {
+    let root = state.data_dir.clone();
+    let project = project.to_owned();
+    let work: Vec<(Option<String>, Option<String>)> = groups
+        .iter()
+        .map(|g| (g.stack.clone(), g.last_release.clone()))
+        .collect();
+    tokio::task::spawn_blocking(move || {
+        work.into_iter()
+            .map(|(stack, release)| {
+                openlens_errors::resolve(&root, &project, release.as_deref()?, stack.as_deref()?)
+            })
+            .collect()
+    })
+    .await
+    .unwrap_or_else(|_| vec![None; groups.len()])
+}
+
 /// The project's latest valid feature map, if it has one.
 pub(crate) async fn load_map(
     state: &AppState,

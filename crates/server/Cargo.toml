@@ -17,6 +17,7 @@ openlens-engine = { path = "../engine" }
 openlens-featuremap = { path = "../featuremap" }
 openlens-flags = { path = "../flags" }
 openlens-replay = { path = "../replay" }
+openlens-errors = { path = "../errors" }
 openlens-ui = { path = "../ui" }
 maud.workspace = true
 hmac.workspace = true
