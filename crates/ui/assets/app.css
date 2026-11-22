@@ -189,7 +189,9 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px
 /* Phones (#170): nothing wider than the screen. Wide tables scroll inside
    their card, the navigation scrolls sideways, and controls are big enough
    to tap. */
-.card { min-width: 0; overflow-x: auto; }
+/* position: relative so absolutely placed bits (screen-reader labels in table
+   headers) stay inside the scrolling card instead of widening the page. */
+.card { min-width: 0; overflow-x: auto; position: relative; }
 @media (max-width: 640px) {
   main { width: calc(100% - 24px); }
   .top { flex-wrap: wrap; gap: 8px 10px; padding: 8px 12px; }
