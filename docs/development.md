@@ -13,6 +13,7 @@ cargo run -p openlens   # OPENLENS_ADDR=0.0.0.0:8686 by default
 cargo xtask demo ./data # 300 synthetic users with planted patterns, to look at the board
 OPENLENS_DATA_DIR=./data OPENLENS_ADMIN_TOKEN=demo cargo run -p openlens  # then log in with "demo"
 cargo build --profile perf -p openlens   # optimised, no LTO: use for timing (debug is ~5x slower)
+cargo xtask bench http://127.0.0.1:PORT KEY   # ingestion load test, see docs/benchmarks.md
 ```
 
 ## Docker
