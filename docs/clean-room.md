@@ -47,3 +47,4 @@ A pass over every mention of another product in the repository:
 - **ArtCraft / storytold/craft-contrib** is credited for the structure of the agent rules. Its text is not copied (it has no licence); `AGENTS.md` is written in our own words.
 - **Third-party code shipped:** rrweb (MIT) in the recorder (`/r.js`) and the player (`/assets/player.js`, `/assets/player.css`). Both are recorded in `ATTRIBUTION.md`.
 
+| 2026-11-22 | Public feature pages of Matomo, Plausible, Mixpanel, Amplitude and Umami (PostHog's pages returned no readable content) | capabilities common to the category: path flows, world map and devices, acquisition and UTM, alerts and annotations, live view, share links, privacy tools, revenue, form analytics, importers | M11 issues #224–#233, target-app-parity.md |
