@@ -401,6 +401,37 @@ fn compact_dir(dir: &Path, min_files: usize) -> Result<bool> {
     Ok(true)
 }
 
+/// Days of events kept: 400, a little over 13 months, so a month can be
+/// compared with the same month a year earlier. Fixed by design (D-015).
+pub const EVENT_RETENTION_DAYS: i64 = 400;
+
+/// Delete a project's day partitions older than [`EVENT_RETENTION_DAYS`].
+/// Returns the number of days removed.
+pub fn prune(root: &Path, project: &str, now: DateTime<Utc>) -> Result<usize> {
+    let pdir = project_dir(root, project)?;
+    if !pdir.is_dir() {
+        return Ok(0);
+    }
+    let cutoff = format!(
+        "date={}",
+        (now - chrono::Duration::days(EVENT_RETENTION_DAYS)).format("%Y-%m-%d")
+    );
+    let mut removed = 0;
+    for entry in fs::read_dir(&pdir)? {
+        let path = entry?.path();
+        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        // `date=YYYY-MM-DD` sorts like the date it names.
+        if path.is_dir() && name.starts_with("date=") && name.len() == 15 && name < cutoff.as_str()
+        {
+            fs::remove_dir_all(&path)?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
 /// Count rows in all segments of a project (used by tests and `verify`).
 pub fn count_rows(root: &Path, project: &str) -> Result<usize> {
     let mut total = 0;

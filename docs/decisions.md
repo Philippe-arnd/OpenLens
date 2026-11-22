@@ -53,3 +53,9 @@ Append-only. Each entry: id, date, decision, why, consequences.
 - The **feature map is the only project configuration**, and agents write it. Its one tunable is `churn_after_days`.
 - Sessions (30-minute gap), the task timeout (30 minutes), UTC days and KPI definitions are fixed (docs/kpis.md).
 - There is no dashboard builder or chart configurator. A request for a new knob needs a decision entry explaining why a fixed default cannot work.
+
+## D-015 (2026-11-22) Fixed retention, one volume, no OIDC yet
+**Why:** M6 listed OIDC, TTL, an S3 backend and backups. We apply D-014 and keep only what a self-hosted deploy needs to run for months without supervision. **Consequences:**
+- **Retention is fixed.** Events are kept for 400 days (a little over 13 months), so a month can be compared with the same month a year earlier. Replays are kept for 30 days after their last chunk. The background job deletes older data every 10 minutes. Backfilled history older than 400 days is dropped too. There is no setting for either.
+- **Storage is one local volume.** It is the data dir, mounted by the Coolify template. Backups are a consistent copy of that directory, made by `openlens backup` (SQLite online backup plus a copy of the immutable Parquet and replay files). The S3 backend moves to Later.
+- **OIDC moves to Later.** The persona gets in through one-time login links sent by an agent, and the admin token covers the rest. OIDC would add three settings, JWT crypto and an outbound dependency on the IdP, for a team-SSO need that has not come up yet.

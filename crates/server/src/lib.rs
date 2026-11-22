@@ -116,11 +116,14 @@ async fn healthz() -> &'static str {
     "ok"
 }
 
-/// Run the periodic jobs: flush buffered events per the flush policy and
-/// compact closed hours. Runs until the process exits.
+/// Run the periodic jobs: flush buffered events per the flush policy,
+/// compact closed days and apply retention (D-015). Runs until the process exits.
 pub async fn background(state: AppState) {
     let mut tick = tokio::time::interval(Duration::from_secs(2));
-    let mut last_compact = std::time::Instant::now();
+    // Run the first compaction and retention pass right away.
+    let mut last_compact = std::time::Instant::now()
+        .checked_sub(Duration::from_secs(600))
+        .unwrap_or_else(std::time::Instant::now);
     loop {
         tick.tick().await;
         let st = state.clone();
@@ -147,9 +150,19 @@ fn flush_and_compact(
     }
     if last_compact.elapsed() >= Duration::from_secs(600) {
         for p in state.meta.projects().map_err(|e| e.to_string())? {
-            if let Err(err) = openlens_storage::compact(&state.data_dir, &p.id, chrono::Utc::now())
-            {
+            let now = chrono::Utc::now();
+            if let Err(err) = openlens_storage::compact(&state.data_dir, &p.id, now) {
                 tracing::warn!(project = %p.id, %err, "compaction failed");
+            }
+            match openlens_storage::prune(&state.data_dir, &p.id, now) {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(project = %p.id, days = n, "expired old event days"),
+                Err(err) => tracing::warn!(project = %p.id, %err, "event retention failed"),
+            }
+            match openlens_replay::prune(&state.data_dir, &p.id, now) {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(project = %p.id, recordings = n, "expired old recordings"),
+                Err(err) => tracing::warn!(project = %p.id, %err, "replay retention failed"),
             }
         }
         return Ok(std::time::Instant::now());
