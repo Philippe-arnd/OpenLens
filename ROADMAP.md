@@ -10,7 +10,7 @@ OpenLens is a method plus the tool that carries it out ([docs/method.md](docs/me
 | --- | --- | --- |
 | M0 Foundations | ✅ | ✅ |
 | M1 Measure | ✅ | ✅ smoke test in CI; events show within ~10 s (the flush interval) |
-| M2 Map | ✅ | 🟡 2 of 3 apps (`examples/`, green `verify` nightly); Journal waits for the first deployment |
+| M2 Map | ✅ | 🟡 2 of 3 apps (`examples/`, green `verify` nightly); Journal is wired outside this repo (OpenLens deployed 2026-11-22); its green `verify` and lint-clean map still need to be confirmed and recorded on #18 |
 | M3 Focus | ✅ | ✅ planted patterns found (testkit); 🟡 "Journal's board makes sense to Phil" waits for the deployment |
 | M4 Act | ✅ | ✅ a flagged cohort shows on the board |
 | M5 See it | ✅ | ✅ churn card → replay of a session that churned there |
@@ -42,7 +42,7 @@ A layered workspace, `cargo xtask ci`, AGENTS.md, Docker and compose with the he
 - **Agent guides:** [wire.md](docs/agents/wire.md) (served at `/agents.md`) and [analyze.md](docs/agents/analyze.md).
 - **Reference apps** in [`examples/`](examples/): `notes-ssr` (script tag) and `tasks-spa` (npm).
 
-**Exit:** an agent following `docs/agents/wire.md` connects 3 apps (an npm SPA, a server-rendered app with the script tag, and Journal) to a green `verify` and a lint-clean map, with no hand edits. The first two are checked nightly; Journal comes with the first deployment.
+**Exit:** an agent following `docs/agents/wire.md` connects 3 apps (an npm SPA, a server-rendered app with the script tag, and Journal) to a green `verify` and a lint-clean map, with no hand edits. The first two are checked nightly; Journal is a real app wired outside this repo, so its result is recorded by hand on #18 rather than replayed in CI.
 
 ## M3: Focus, the board ✅
 - **KPIs** per [docs/kpis.md](docs/kpis.md), split by role, environment and release. `kpi_report` also splits them by account, plan, page or feature, and states its role rule ("role at event time").

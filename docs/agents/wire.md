@@ -4,7 +4,7 @@ You are the agent that maintains a web app. Your goal is that the product manage
 
 **No OpenLens server yet?** Deploy one first with the [self-hosting guide](../deploy/README.md): [Docker](../deploy/docker.md), [binary](../deploy/binary.md), [Kubernetes](../deploy/kubernetes.md) (Helm or Kustomize) or [Coolify](../deploy/coolify.md). None needs any configuration.
 
-**Available today:** `openlens-cli` (`init`, `features lint|push`, `import`, `verify`, `sourcemaps`, `flags`, `login-link`, `sql`, `guide`, `mcp`), the HTTP API below, the SDK and the dashboard. Everything below is available. Two small reference apps wired this way live in `examples/` (`notes-ssr`: script tag; `tasks-spa`: npm package).
+**Available today:** `openlens-cli` (`init`, `features lint|push`, `import`, `verify`, `sourcemaps`, `flags`, `login-link`, `sql`, `guide`, `mcp`), the HTTP API below, the SDK and the dashboard. Everything below is available. Two small reference apps wired this way live in `examples/` (`notes-ssr`: script tag; `tasks-spa`: npm package). Journal, a real app wired outside this repo, is the third check of the M2 exit.
 
 **MCP:** `openlens-cli mcp --automation-read-root <app repo> --automation-write-root <scratch dir>` speaks MCP over stdio. Its tools are `guide`, `projects`, `init`, `feature_map_lint`, `feature_map_push`, `map_health`, `map_overview`, `feature_context`, `suggest_map_changes`, `verify`, `insights`, `kpi_report`, `board`, `errors`, `sql`, `flags`, `flag_set` and `login_link`, and it reads files only inside the read root.
 
