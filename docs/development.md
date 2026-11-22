@@ -35,7 +35,20 @@ The healthcheck lives in `docker-compose.yml`, not in the Dockerfile, so Coolify
 
 OpenLens follows [SemVer](https://semver.org) and keeps a [CHANGELOG](../CHANGELOG.md) in the Keep a Changelog format. Every merged change adds its line under `Unreleased`.
 
-**A release (vX.Y.Z):**
+**The release train** (`.github/workflows/release-train.yml`, #197) cuts stable releases by itself every Tuesday at 06:17 UTC. It releases the version in `Cargo.toml` when:
+- `[Unreleased]` has entries;
+- the last nightly CI and image runs on `main` are green;
+- no open issue is labelled `release-blocker` or `release-hold`.
+
+It then:
+1. moves `[Unreleased]` under the version and the date;
+2. tags it;
+3. starts the publish, image and chart workflows;
+4. sets `main` to the next minor version.
+
+Run it by hand from the Actions tab: `dry_run` (on by default) only reports what it would do. Branch protection on `main` must let GitHub Actions push. A minor or major release can add `docs/releases/vX.Y.Z.md` before Tuesday, and its notes are used.
+
+**A release (vX.Y.Z):** (by hand, for a hotfix or when the train is held)
 1. In a PR:
    - move the `Unreleased` entries of `CHANGELOG.md` under the new version and date;
    - set the version in the `Cargo.toml` workspace, `sdk/js/package.json`, `sdk/node/package.json` and `sdk/python`;

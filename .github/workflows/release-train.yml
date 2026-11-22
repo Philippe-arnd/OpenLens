@@ -1,0 +1,92 @@
+name: Release train
+
+# Stable releases without a person (#197). Every Tuesday morning (after
+# Monday's dependency updates had a day of nightlies), cut the version in
+# Cargo.toml as vX.Y.Z when:
+# - the CHANGELOG has something under [Unreleased];
+# - the last nightly CI and image runs on main are green (the image run
+#   includes the upgrade check from the previous release);
+# - no open issue carries `release-blocker` or `release-hold`.
+# Then: move [Unreleased] to the new version, tag, publish (binaries, chart,
+# image, which redeploys Coolify), and move main to the next minor version.
+# Hotfixes of an older minor stay manual (a release branch and a tag).
+on:
+  schedule:
+    - cron: "17 6 * * 2"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Check and print what would be released, change nothing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  actions: write
+  issues: read
+
+concurrency:
+  group: release-train
+  cancel-in-progress: false
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: decide
+        id: d
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          v=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          tag="v$v"
+          echo "version=$v" >> "$GITHUB_OUTPUT"; echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          skip() { echo "::notice::no release: $1"; echo "go=false" >> "$GITHUB_OUTPUT"; exit 0; }
+          git rev-parse -q --verify "refs/tags/$tag" >/dev/null && skip "$tag already exists (bump Cargo.toml after a release)"
+          unreleased=$(awk '/^## \[Unreleased\]/{f=1;next} /^## \[/{f=0} f' CHANGELOG.md | grep -c '^- ' || true)
+          [ "$unreleased" -gt 0 ] || skip "nothing under [Unreleased]"
+          for wf in ci.yml release.yml; do
+            c=$(gh run list -R "$GITHUB_REPOSITORY" --workflow "$wf" --branch main --event schedule --limit 1 --json conclusion -q '.[0].conclusion')
+            [ "$c" = success ] || skip "last nightly $wf on main is '$c'"
+          done
+          for l in release-blocker release-hold; do
+            n=$(gh issue list -R "$GITHUB_REPOSITORY" --label "$l" --state open --json number -q 'length')
+            [ "$n" = 0 ] || skip "$n open issue(s) labelled $l"
+          done
+          echo "::notice::releasing $tag ($unreleased changelog entries)"
+          echo "go=true" >> "$GITHUB_OUTPUT"
+      - name: release
+        if: steps.d.outputs.go == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ steps.d.outputs.version }}
+          TAG: ${{ steps.d.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "openlens-release-train"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          today=$(date -u +%Y-%m-%d)
+          prev=$(git tag --list 'v*' --sort=-v:refname | grep -v -- - | head -1)
+          # 1. The changelog names the release; the tag points at that commit.
+          sed -i "s/^## \[Unreleased\]$/## [Unreleased]\n\n## [$V] - $today/" CHANGELOG.md
+          sed -i "s#^\[Unreleased\]: .*#[Unreleased]: https://github.com/$GITHUB_REPOSITORY/compare/$TAG...HEAD\n[$V]: https://github.com/$GITHUB_REPOSITORY/compare/$prev...$TAG#" CHANGELOG.md
+          git commit -qam "Release $TAG"
+          git tag -a "$TAG" -m "OpenLens $TAG"
+          git push origin HEAD:main "$TAG"
+          # 2. A tag pushed with this token starts no workflow: start them.
+          gh workflow run publish.yml -f tag="$TAG"
+          gh workflow run release.yml --ref "$TAG"
+          gh workflow run k8s.yml --ref "$TAG"
+          # 3. main develops the next minor version (docs/development.md).
+          IFS=. read -r major minor _ <<< "$V"
+          next="$major.$((minor + 1)).0"
+          sed -i "0,/^version = \"$V\"/s//version = \"$next\"/" Cargo.toml
+          cargo update -w --offline -q || cargo update -w -q
+          git commit -qam "Develop $next"
+          git push origin HEAD:main
+          echo "::notice::released $TAG; main is now $next"
