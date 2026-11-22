@@ -1,0 +1,132 @@
+name: Release
+
+# Builds the release assets and the GitHub release for a tag:
+# - on v* tags (pushed by a maintainer, see docs/development.md#releasing);
+# - on demand with `tag`: rebuild and re-attach the assets of an existing tag;
+# - on demand with `snapshot`: tag the current main as vX.Y.Z-YYMMDD-sha
+#   (a pre-release), then do the same. The image and the chart workflows are
+#   started for that tag too.
+# Assets: Linux x86_64 binaries, the SDK bundles, the Helm chart, SHA256SUMS.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)publish, e.g. v0.1.0"
+        required: false
+      snapshot:
+        description: "Tag main as a pre-release snapshot first"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: publish-${{ github.ref }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.t.outputs.tag }}
+      prev: ${{ steps.t.outputs.prev }}
+      pre: ${{ steps.t.outputs.pre }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: t
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ inputs.snapshot }}" = "true" ]; then
+            v=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+            tag="v$v-$(date -u +%y%m%d)-$(git rev-parse --short=7 HEAD)"
+            git tag "$tag" && git push origin "$tag"
+            # Pushes made with this token start no workflow: start them.
+            gh workflow run release.yml --ref "$tag"
+            gh workflow run k8s.yml --ref "$tag"
+          elif [ -n "${{ inputs.tag }}" ]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="$GITHUB_REF_NAME"
+          fi
+          git rev-parse -q --verify "refs/tags/$tag" > /dev/null || { echo "no tag $tag"; exit 1; }
+          case "$tag" in *-*) pre=true ;; *) pre=false ;; esac
+          if [ "$pre" = true ]; then
+            prev=$(git tag --list 'v*' --sort=-v:refname | grep -vx "$tag" | head -1)
+          else
+            prev=$(git tag --list 'v*' --sort=-v:refname | grep -v -- - | grep -vx "$tag" | head -1)
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"; echo "prev=$prev" >> "$GITHUB_OUTPUT"; echo "pre=$pre" >> "$GITHUB_OUTPUT"
+          echo "tag $tag, previous ${prev:-none}, pre-release $pre"
+
+  assets:
+    needs: prepare
+    # An older glibc than ubuntu-latest, so the binaries run on more hosts.
+    runs-on: ubuntu-22.04
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+      - name: binaries
+        run: |
+          cargo build --release --locked -p openlens -p openlens-cli
+          d="openlens-$TAG-x86_64-linux"
+          mkdir -p "dist/$d"
+          cp target/release/openlens target/release/openlens-cli LICENSE README.md CHANGELOG.md "dist/$d/"
+          tar -C dist -czf "dist/$d.tar.gz" "$d"
+          rm -rf "dist/$d"
+      - name: SDK bundles
+        run: |
+          d="openlens-sdk-web-$TAG"
+          mkdir -p "dist/$d"
+          cp sdk/js/dist/*.js sdk/js/dist/*.css sdk/js/dist/*.d.ts sdk/js/README.md "dist/$d/"
+          cp sdk/js/licenses/rrweb-LICENSE.txt "dist/$d/"
+          tar -C dist -czf "dist/$d.tar.gz" "$d"
+          rm -rf "dist/$d"
+      - uses: azure/setup-helm@v4
+      - name: Helm chart
+        run: helm package deploy/helm/openlens --version "${TAG#v}" --app-version "$TAG" --destination dist
+      - name: checksums
+        run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - uses: actions/upload-artifact@v5
+        with:
+          name: release-assets
+          path: dist/
+
+  release:
+    needs: [prepare, assets]
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
+      PREV: ${{ needs.prepare.outputs.prev }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+      - uses: actions/download-artifact@v5
+        with:
+          name: release-assets
+          path: dist
+      - name: notes
+        run: scripts/release/notes.sh "$TAG" "$PREV" > notes.md && cat notes.md
+      - name: create or update the release
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+            gh release edit "$TAG" --notes-file notes.md
+          else
+            pre=""; [ "${{ needs.prepare.outputs.pre }}" = true ] && pre="--prerelease"
+            gh release create "$TAG" dist/* --title "OpenLens $TAG" --notes-file notes.md --verify-tag $pre
+          fi

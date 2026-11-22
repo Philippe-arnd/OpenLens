@@ -24,6 +24,8 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- **README** redesigned: wordmark, section links, architecture diagram, how it works, dated performance numbers, known limits and releases.
+- **Releases** are built by CI (`publish.yml`): every `v*` tag gets Linux binaries, the SDK bundles, the Helm chart and `SHA256SUMS`, with notes from `docs/releases/` or the CHANGELOG and a *Full changelog* link. Pre-release snapshots of `main` can be made by hand; they are not published to npm.
 - Docs: the clean-room source log lists every public source used so far; `target-app-parity.md` and `gaps.md` match v0.1.0.
 
 ## [0.1.0] - 2026-11-22

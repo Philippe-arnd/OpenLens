@@ -33,12 +33,23 @@ The healthcheck lives in `docker-compose.yml`, not in the Dockerfile, so Coolify
 
 ## Releasing
 
-OpenLens follows [SemVer](https://semver.org) and keeps a [CHANGELOG](../CHANGELOG.md) in the Keep a Changelog format.
+OpenLens follows [SemVer](https://semver.org) and keeps a [CHANGELOG](../CHANGELOG.md) in the Keep a Changelog format. Every merged change adds its line under `Unreleased`.
 
-1. Move the `Unreleased` entries of `CHANGELOG.md` under the new version and date. Set the same version in `sdk/js/package.json`, and in the `Cargo.toml` workspace version.
-2. Merge that through a PR as usual.
-3. Tag `main`: `git tag -a vX.Y.Z -m "OpenLens vX.Y.Z" && git push origin vX.Y.Z`. The tag builds, smoke-tests and publishes the image `ghcr.io/philippe-arnd/openlens:vX.Y.Z` (also `X.Y.Z` and `X.Y`) (`release.yml`), and publishes `@openlens/web` (`npm.yml`, public repo only).
-4. Create the GitHub release from the tag, with the changelog section as notes: `gh release create vX.Y.Z --notes-file <notes>`.
+**A release (vX.Y.Z):**
+1. In a PR:
+   - move the `Unreleased` entries of `CHANGELOG.md` under the new version and date;
+   - set the version in the `Cargo.toml` workspace, `sdk/js/package.json`, `sdk/node/package.json` and `sdk/python`;
+   - add `docs/releases/vX.Y.Z.md` (highlights, install, breaking changes, known limits, thanks) for a minor or major release.
+2. Merge it, then tag `main`: `git tag -a vX.Y.Z -m "OpenLens vX.Y.Z" && git push origin vX.Y.Z`.
+3. The tag starts, with nothing more to do:
+   - `release.yml`: the image `ghcr.io/philippe-arnd/openlens:vX.Y.Z` (also `X.Y.Z` and `X.Y`), built and smoke-tested;
+   - `k8s.yml`: the chart, installed on kind, then pushed to `oci://ghcr.io/philippe-arnd/charts/openlens`;
+   - `publish.yml`: the GitHub release, with the notes (`docs/releases/vX.Y.Z.md`, or the CHANGELOG section, plus a *Full changelog* link), the Linux binaries, the SDK bundles, the chart and `SHA256SUMS`;
+   - `npm.yml`: `@openlens/web` (public repository only).
+
+**A snapshot** (a pre-release of `main`, for testing before a release): run *Release* by hand with `snapshot` ticked. It tags `vX.Y.Z-YYMMDD-sha`, then publishes the same assets with the `Unreleased` notes, as a pre-release. Snapshots are not published to npm.
+
+**Re-attach assets** to an existing tag: run *Release* by hand with `tag` set.
 
 **npm, once.** On npmjs.com, add a *trusted publisher* for `@openlens/web`: repository `Philippe-arnd/OpenLens`, workflow `npm.yml`. No token is needed; `NPM_TOKEN` as a repository secret also works.
 
