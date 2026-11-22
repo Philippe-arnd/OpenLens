@@ -6,6 +6,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Added
 
+- **Fresh base images:** Renovate pins the Dockerfile base images by digest and updates them. Every month CI rebuilds the newest stable image from the same code on a fresh base image, so OS security fixes reach installs on `latest` or a minor channel (#201).
 - **Release train:** every Tuesday, CI releases the version in development when the changelog has entries, the nightlies are green and nothing is labelled `release-blocker` or `release-hold`. It then publishes the binaries, image and chart, and moves `main` to the next minor version. No human step (#197).
 - **Safe upgrades:** on start, OpenLens backs up the data when the version changed, in `backups/upgrade/` (only the latest copy is kept), before it migrates anything. It refuses to start on data written by a newer release, which stops a rollback to an older image from damaging it. The data directory records both in `openlens-version.json` (#199).
 - **A time zone per project** (D-017): days and weeks of every KPI (DAU series, active days, retention weeks, resurrected users, tasks per user-day) start in the team's zone. Set it with `openlens-cli init --timezone Europe/Paris`, `openlens-cli timezone <project> <zone>`, `PATCH /api/projects/{id}` or the MCP `set_timezone` tool. It is `UTC` until set, and the projects page shows it (#152).
