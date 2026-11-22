@@ -28,4 +28,13 @@ The reference is the public feature lists of hosted product-analytics suites, de
 | Platform | Users and roles (admin / viewer, per-project access), OIDC single sign-on | M7 | ● |
 | Platform | S3 | M7 | ◐ (a copy of closed days and metadata; queries read the local disk) |
 | Platform | Kubernetes: Helm chart and manifests, tested on a real cluster in CI | M8 | ◐ (in progress for v0.2) |
+| Insights | ★ Feature flow: paths between features of the map, to the value moment | M11 | — (#224) |
+| Insights | Audience: world map, devices, browsers, OS, languages | M11 | — (#225) |
+| Insights | Acquisition: referrers, UTM, channels, judged by value-moment rate | M11 | — (#226) |
+| Insights | Automatic regression alerts and a timeline of changes | M11 | — (#227) |
+| Insights | Live view | M11 | — (#228) |
+| Insights | Revenue on success events; form analytics | M11 | — (#231, #232) |
+| Platform | Read-only share links and embeds | M11 | — (#229) |
+| Platform | Erasure and access requests, cookieless mode, audit log | M11 | — (#230) |
+| Setup | Import from other analytics tools' public export formats | M11 | — (#233) |
 | Out of scope | Data warehouse, CDP pipelines, survey builder, LLM observability, multi-node clustering | — | not planned |
