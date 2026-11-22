@@ -135,6 +135,29 @@ pub fn planted_dataset(project: &str) -> Vec<Event> {
                 "v1"
             };
             let mut t = day;
+            // Like a real app, the first visit starts anonymous: one page
+            // view before login, then `identify` links it to the user.
+            let anon = format!("anon-{user}");
+            if s == 1 {
+                out.push(event(
+                    project,
+                    &anon,
+                    role,
+                    &session,
+                    "$pageview",
+                    t - Duration::seconds(5),
+                    None,
+                    "/login",
+                    release,
+                    "{}",
+                    &mut n,
+                ));
+            }
+            let identify = if s == 1 {
+                format!(r#"{{"$anon_distinct_id":"{anon}"}}"#)
+            } else {
+                "{}".to_owned()
+            };
             let mut ev =
                 |name: &str, feature: Option<&str>, path: &str, props: &str, t: DateTime<Utc>| {
                     out.push(event(
@@ -142,7 +165,7 @@ pub fn planted_dataset(project: &str) -> Vec<Event> {
                         &mut n,
                     ));
                 };
-            ev("$identify", None, "/", "{}", t);
+            ev("$identify", None, "/", &identify, t);
             ev("$pageview", None, "/home", "{}", t);
             t += Duration::minutes(rng.range(1, 6));
             ev("$click", Some("search"), "/search", "{}", t);

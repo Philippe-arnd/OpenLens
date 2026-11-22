@@ -15,3 +15,5 @@ Start from the summaries and drill down only where something stands out. Every t
 | Deep, offline analysis | `openlens-cli export --from --to --out events.jsonl` (raw events, day by day) | your own tools |
 
 Report findings with the numbers and the cohort sizes behind them, and say when a sample is too small to conclude: cards are hidden below 8 users per group for that reason. Backfilled events carry `"$backfill": true` in `properties`.
+
+In SQL, `events` gives each user the events they sent before logging in: an anonymous id that `identify` later linked (`$anon_distinct_id`) is replaced by the user's id. The stored ids are in `raw_events`, and the links in `person_aliases(anon, person)` (present once at least one anonymous id was linked).

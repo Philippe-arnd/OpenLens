@@ -160,3 +160,54 @@ async fn snapshots_are_per_project_bounded_and_read_only() {
     assert!(s.sql("a", "DROP TABLE snap").await.is_err());
     assert!(q.snapshot("a", "x; drop", "SELECT 1", 10).await.is_err());
 }
+
+#[tokio::test]
+async fn anonymous_events_before_identify_belong_to_the_user() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let mut before = ev("a", "user", 0);
+    before.distinct_id = "anon-1".into();
+    let mut identify = ev("a", "user", 0);
+    identify.event = "$identify".into();
+    identify.distinct_id = "alice".into();
+    identify.properties = r#"{"$anon_distinct_id":"anon-1","$lib":"web"}"#.into();
+    let mut after = ev("a", "user", 0);
+    after.distinct_id = "alice".into();
+    let mut stranger = ev("a", "user", 0);
+    stranger.distinct_id = "anon-2".into();
+    w.append(&[before, identify, after, stranger]).unwrap();
+    w.flush().unwrap();
+    let q = QueryEngine::new(dir.path(), Limits::default());
+
+    let r = q
+        .sql("a", "SELECT distinct_id, count(*) AS n FROM events GROUP BY distinct_id ORDER BY distinct_id")
+        .await
+        .unwrap();
+    let got: Vec<(String, i64)> = r
+        .rows
+        .iter()
+        .map(|row| {
+            (
+                row["distinct_id"].as_str().unwrap().to_owned(),
+                row["n"].as_i64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(got, vec![("alice".into(), 3), ("anon-2".into(), 1)]);
+
+    // The stored ids stay available, and the date column survives the view.
+    let raw = q
+        .sql(
+            "a",
+            "SELECT count(DISTINCT distinct_id) AS n FROM raw_events",
+        )
+        .await
+        .unwrap();
+    assert_eq!(raw.rows[0]["n"], 3);
+    let star = q
+        .sql("a", "SELECT * FROM events WHERE date >= '2000-01-01'")
+        .await
+        .unwrap();
+    assert_eq!(star.rows.len(), 4);
+    assert_eq!(star.columns.last().map(String::as_str), Some("date"));
+}
