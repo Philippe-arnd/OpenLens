@@ -717,6 +717,40 @@ pub async fn breakdown(
         .collect())
 }
 
+/// One person's latest events across every environment (at most 200),
+/// newest first: the raw material of a user timeline.
+pub async fn person_events(
+    q: &QueryEngine,
+    project: &str,
+    map: Option<&FeatureMap>,
+    distinct_id: &str,
+    limit: usize,
+) -> Result<Vec<EventRow>> {
+    let src = source(map);
+    let since = (Utc::now() - Duration::days(90)).format("%Y-%m-%d");
+    let sql = format!(
+        "SELECT CAST(timestamp AS VARCHAR) AS ts, event, distinct_id, role, path, feature, release, session_id \
+         FROM {src} WHERE date >= '{since}' AND distinct_id = {} ORDER BY timestamp DESC LIMIT {}",
+        lit(distinct_id)?,
+        limit.min(200)
+    );
+    Ok(q.sql(project, &sql)
+        .await?
+        .rows
+        .iter()
+        .map(|r| EventRow {
+            timestamp: text(r, "ts").unwrap_or_default(),
+            event: text(r, "event").unwrap_or_default(),
+            distinct_id: text(r, "distinct_id").unwrap_or_default(),
+            role: text(r, "role"),
+            path: text(r, "path"),
+            feature: text(r, "feature"),
+            release: text(r, "release"),
+            session_id: text(r, "session_id"),
+        })
+        .collect())
+}
+
 /// The latest events, newest first (at most 200).
 pub async fn recent_events(
     q: &QueryEngine,

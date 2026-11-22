@@ -925,3 +925,31 @@ async fn source_maps_resolve_error_stacks_per_release() {
     .unwrap();
     assert!(html.contains("src/billing/Invoice.tsx:3"));
 }
+
+#[tokio::test]
+async fn user_timeline_tells_one_persons_story() {
+    let h = harness();
+    post(&h, "/capture", batch(&h.key), false).await;
+    openlens_server::flush_now(&h.state).unwrap();
+    let resp = get(&h, "/api/projects/default/people/u1", None, true).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["person"]["role"], "owner");
+    assert_eq!(v["role_history"][0]["role"], "owner");
+    assert!(v["events"].as_array().unwrap().len() >= 2);
+    assert_eq!(
+        get(&h, "/api/projects/default/people/nobody", None, true)
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        get(&h, "/api/projects/default/people/u1", None, false)
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+}
