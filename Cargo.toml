@@ -38,6 +38,7 @@ sha2 = "0.10"
 hex = "0.4"
 serde_norway = "0.9"
 ureq = { version = "3", features = ["json"] }
+lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "rustls-tls", "hostname"] }
 serde_urlencoded = "0.7"
 tempfile = "3"
 

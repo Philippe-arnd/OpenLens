@@ -177,6 +177,29 @@ impl Meta {
         f(&conn)
     }
 
+    /// A stored setting, if set.
+    pub fn setting(&self, key: &str) -> Result<Option<String>> {
+        self.with(|c| {
+            Ok(
+                c.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
+                    r.get(0)
+                })
+                .optional()?,
+            )
+        })
+    }
+
+    /// Store a setting (insert or replace).
+    pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![key, value],
+            )?;
+            Ok(())
+        })
+    }
+
     /// Get a setting, or store `init()` under `key` and return it.
     pub fn setting_or_init(&self, key: &str, init: impl FnOnce() -> String) -> Result<String> {
         self.with(|c| {

@@ -228,3 +228,6 @@ svg.heatmap .dot { fill: var(--violet); }
 svg.heatmap .dot.rage { fill: var(--coral); }
 #ol-player .ol-heat { position: absolute; inset: 0; pointer-events: none; }
 #ol-player .ol-heat span { position: absolute; border-radius: 50%; background: radial-gradient(circle, rgba(229, 72, 106, .85), rgba(109, 94, 252, .35) 60%, transparent 70%); transform: translate(-50%, -50%); }
+
+/* Digest */
+span.up { color: var(--good); font-weight: 600; } span.down { color: var(--bad); font-weight: 600; }
