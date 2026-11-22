@@ -91,7 +91,7 @@ OPENLENS_DATA_DIR=./data OPENLENS_ADMIN_TOKEN=demo cargo run -p openlens
 # → http://localhost:8686, token "demo"
 ```
 
-**Deploy:** use the one-click [Coolify template](docs/deploy/coolify.md). There are no required environment variables, and the admin token generates itself. Back up with `openlens backup <dir>`, which is safe while the server runs.
+**Deploy:** use the one-click [Coolify template](docs/deploy/coolify.md), or [Kubernetes](docs/deploy/kubernetes.md) (Helm chart or Kustomize, tested on a real cluster in CI). There are no required environment variables, and the admin token generates itself. Back up with `openlens backup <dir>`, which is safe while the server runs.
 
 ## 🪶 Why it is lean
 

@@ -4,6 +4,16 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **Kubernetes:**
+  - a Helm chart (`deploy/helm/openlens`): one replica, PVC, a generated admin token kept across upgrades, an optional Ingress with TLS, a hardened pod, and optional features from Secrets;
+  - a Kustomize base rendered from the chart;
+  - the agent guide [docs/deploy/kubernetes.md](docs/deploy/kubernetes.md);
+  - a CI job installing and upgrading both on kind;
+  - the chart published to `oci://ghcr.io/philippe-arnd/charts` on release tags.
+- **CLI:** plain HTTP is accepted for cluster-internal servers (`http://<service>:8686`, `*.svc`, `*.cluster.local`, private addresses), so an agent inside the cluster can use it.
+
 ### Fixed
 
 - The replay recorder and player bundles now carry rrweb's MIT notice, which minification had stripped (`sdk/js/licenses/rrweb-LICENSE.txt`).
