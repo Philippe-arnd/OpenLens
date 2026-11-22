@@ -15,14 +15,14 @@
 //!
 //! Layer: L1 (see `docs/architecture.md`).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
-use arrow::array::{ArrayRef, RecordBatch, StringBuilder, TimestampMicrosecondBuilder};
+use arrow::array::{Array, ArrayRef, RecordBatch, StringBuilder, TimestampMicrosecondBuilder};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef, TimeUnit};
 use chrono::{DateTime, Utc};
 use openlens_event::Event;
@@ -116,8 +116,38 @@ impl Default for FlushPolicy {
     }
 }
 
+/// Event uuids remembered to drop resent events (the SDK retries a failed
+/// send with the same uuids). Retries come within minutes; compaction
+/// removes any duplicate that gets past this window (a restart, say).
+const RECENT_UUIDS: usize = 100_000;
+
+/// The last [`RECENT_UUIDS`] event uuids, oldest first.
+#[derive(Default)]
+struct Recent {
+    set: HashSet<String>,
+    order: VecDeque<String>,
+}
+
+impl Recent {
+    /// Remember `uuid`; false if it was already seen.
+    fn insert(&mut self, uuid: &str) -> bool {
+        if self.set.contains(uuid) {
+            return false;
+        }
+        if self.order.len() >= RECENT_UUIDS
+            && let Some(old) = self.order.pop_front()
+        {
+            self.set.remove(&old);
+        }
+        self.set.insert(uuid.to_owned());
+        self.order.push_back(uuid.to_owned());
+        true
+    }
+}
+
 /// Appends events durably and turns them into Parquet segments.
 pub struct Writer {
+    recent: Recent,
     root: PathBuf,
     policy: FlushPolicy,
     wal: BufWriter<File>,
@@ -163,6 +193,13 @@ impl Writer {
         let (wal, wal_path) = open_wal(&wal_dir, wal_seq)?;
         Ok((
             Self {
+                recent: {
+                    let mut r = Recent::default();
+                    for ev in &recovered {
+                        r.insert(&ev.uuid);
+                    }
+                    r
+                },
                 root,
                 policy,
                 wal,
@@ -176,17 +213,23 @@ impl Writer {
     }
 
     /// Append events. They are on disk (fsynced) when this returns `Ok`.
+    /// Events whose uuid was stored recently (a resent batch) are dropped.
     pub fn append(&mut self, events: &[Event]) -> Result<()> {
+        let events: Vec<Event> = events
+            .iter()
+            .filter(|ev| self.recent.insert(&ev.uuid))
+            .cloned()
+            .collect();
         if events.is_empty() {
             return Ok(());
         }
-        for ev in events {
+        for ev in &events {
             serde_json::to_writer(&mut self.wal, ev).map_err(std::io::Error::other)?;
             self.wal.write_all(b"\n")?;
         }
         self.wal.flush()?;
         self.wal.get_ref().sync_data()?;
-        self.buffer.extend_from_slice(events);
+        self.buffer.extend(events);
         self.oldest.get_or_insert_with(Instant::now);
         Ok(())
     }
@@ -394,11 +437,30 @@ fn compact_dir(dir: &Path, min_files: usize) -> Result<bool> {
         }
     }
     let merged = arrow::compute::concat_batches(&event_schema(), &batches)?;
+    let merged = unique_uuids(&merged)?;
     write_parquet(dir, &merged)?;
     for f in files {
         fs::remove_file(f)?;
     }
     Ok(true)
+}
+
+/// Keep the first row of each uuid (a resent event is stored once).
+fn unique_uuids(batch: &RecordBatch) -> Result<RecordBatch> {
+    let Some(col) = batch
+        .column_by_name("uuid")
+        .and_then(|c| c.as_any().downcast_ref::<arrow::array::StringArray>())
+    else {
+        return Ok(batch.clone());
+    };
+    let mut seen = HashSet::with_capacity(col.len());
+    let keep: arrow::array::BooleanArray = (0..col.len())
+        .map(|i| Some(col.is_null(i) || seen.insert(col.value(i))))
+        .collect();
+    if keep.true_count() == batch.num_rows() {
+        return Ok(batch.clone());
+    }
+    Ok(arrow::compute::filter_record_batch(batch, &keep)?)
 }
 
 /// Days of events kept: 400, a little over 13 months, so a month can be

@@ -145,3 +145,33 @@ fn retention_drops_days_older_than_the_window_only() {
         0
     );
 }
+
+/// The SDK resends a failed batch with the same uuids: it is stored once,
+/// also when the resend comes after a restart (compaction removes it).
+#[test]
+fn a_resent_batch_is_stored_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let old = Utc.with_ymd_and_hms(2026, 11, 20, 8, 0, 0).unwrap();
+    let batch = [ev("p", old), ev("p", old)];
+    {
+        let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+        w.append(&batch).unwrap();
+        w.append(&batch).unwrap();
+        w.flush().unwrap();
+        assert_eq!(count_rows(dir.path(), "p").unwrap(), 2, "resent at once");
+    }
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    w.append(&batch).unwrap();
+    w.flush().unwrap();
+    assert_eq!(
+        count_rows(dir.path(), "p").unwrap(),
+        4,
+        "after a restart, until compaction"
+    );
+    compact(dir.path(), "p", Utc::now()).unwrap();
+    assert_eq!(
+        count_rows(dir.path(), "p").unwrap(),
+        2,
+        "compaction keeps one of each"
+    );
+}

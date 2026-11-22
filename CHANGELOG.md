@@ -17,6 +17,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- A resent batch is stored once: the server drops event uuids it stored recently (the last 100k), and compaction keeps one row per uuid per day (#150).
 - The replay recorder and player bundles now carry rrweb's MIT notice, which minification had stripped (`sdk/js/licenses/rrweb-LICENSE.txt`).
 
 ### Changed
