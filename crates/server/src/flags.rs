@@ -105,15 +105,24 @@ pub(crate) async fn public(
         (_, None) => None,
     };
     let flags = load(&state, &project.id).await;
-    let on = openlens_flags::evaluate(
-        &flags,
-        &Subject {
-            distinct_id: id,
-            role,
-            account: q.get("account").map(String::as_str),
-        },
-    );
-    (StatusCode::OK, cors, Json(json!({ "flags": on }))).into_response()
+    let subject = Subject {
+        distinct_id: id,
+        role,
+        account: q.get("account").map(String::as_str),
+    };
+    let on = openlens_flags::evaluate(&flags, &subject);
+    let all = crate::surveys::load(&state, &project.id).await;
+    let surveys: Vec<_> = all
+        .iter()
+        .filter(|s| s.eligible(&subject))
+        .map(|s| s.public())
+        .collect();
+    (
+        StatusCode::OK,
+        cors,
+        Json(json!({ "flags": on, "surveys": surveys })),
+    )
+        .into_response()
 }
 
 fn guard(state: &AppState, headers: &HeaderMap) -> Option<Response> {

@@ -62,6 +62,17 @@ let timer: ReturnType<typeof setInterval> | undefined;
 let lastPath = "";
 let activeFlags: string[] = [];
 
+/** A micro-survey the server says this user may be asked (see survey.ts). */
+export interface SurveyDef {
+  key: string;
+  question: string;
+  kind: "rating" | "yes_no" | "choice" | "text";
+  choices: string[];
+  trigger: string;
+}
+let activeSurveys: SurveyDef[] = [];
+let surveyOpen = false;
+
 function uuid(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
@@ -131,6 +142,47 @@ export function track(event: string, props?: Props): void {
   });
   if (queue.length > MAX_QUEUE) queue = queue.slice(-MAX_QUEUE);
   if (queue.length >= 20) flush();
+  maybeSurvey(event);
+}
+
+/** Show a micro-survey after its trigger event, once per user. */
+function maybeSurvey(event: string): void {
+  if (surveyOpen || consent !== "granted" || !cfg) return;
+  const done = (k: string) => {
+    try {
+      return localStorage.getItem(`${storageKey()}_survey_${k}`) === "1";
+    } catch {
+      return true;
+    }
+  };
+  const s = activeSurveys.find((x) => x.trigger === event && !done(x.key));
+  if (!s) return;
+  surveyOpen = true;
+  const close = (props: Props) => {
+    try {
+      localStorage.setItem(`${storageKey()}_survey_${s.key}`, "1");
+    } catch {
+      // memory only
+    }
+    surveyOpen = false;
+    track("$survey", { $survey: s.key, ...props });
+    flush();
+  };
+  const w = window as unknown as {
+    __openlensSurvey?: { survey: SurveyDef; answer: (v: string | number) => void; dismiss: () => void };
+    __openlensSurveyShow?: () => void;
+  };
+  w.__openlensSurvey = { survey: s, answer: (v) => close({ $answer: v }), dismiss: () => close({ $dismissed: true }) };
+  const host = cfg.host.replace(/\/$/, "");
+  setTimeout(() => {
+    if (w.__openlensSurveyShow) w.__openlensSurveyShow();
+    else {
+      const el = document.createElement("script");
+      el.src = `${host}/s.js`;
+      el.async = true;
+      document.head.appendChild(el);
+    }
+  }, 1200);
 }
 
 /** Mark a use of a feature (a task start), for features without a data-feature control. */
@@ -146,7 +198,8 @@ function loadFlags(): void {
   if (state.dims.account) q.set("account", state.dims.account);
   origFetch(`${cfg.host.replace(/\/$/, "")}/flags?${q}`)
     .then((r) => (r.ok ? r.json() : null))
-    .then((j: { flags?: string[] } | null) => {
+    .then((j: { flags?: string[]; surveys?: SurveyDef[] } | null) => {
+      if (Array.isArray(j?.surveys)) activeSurveys = j.surveys;
       if (j?.flags) {
         activeFlags = j.flags;
         try {

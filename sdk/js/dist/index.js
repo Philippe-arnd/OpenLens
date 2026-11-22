@@ -95,6 +95,8 @@ var consent = "granted";
 var timer;
 var lastPath = "";
 var activeFlags = [];
+var activeSurveys = [];
+var surveyOpen = false;
 function uuid() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
@@ -156,6 +158,41 @@ function track(event, props) {
   });
   if (queue.length > MAX_QUEUE) queue = queue.slice(-MAX_QUEUE);
   if (queue.length >= 20) flush();
+  maybeSurvey(event);
+}
+function maybeSurvey(event) {
+  if (surveyOpen || consent !== "granted" || !cfg) return;
+  const done = (k) => {
+    try {
+      return localStorage.getItem(`${storageKey()}_survey_${k}`) === "1";
+    } catch {
+      return true;
+    }
+  };
+  const s = activeSurveys.find((x) => x.trigger === event && !done(x.key));
+  if (!s) return;
+  surveyOpen = true;
+  const close = (props) => {
+    try {
+      localStorage.setItem(`${storageKey()}_survey_${s.key}`, "1");
+    } catch {
+    }
+    surveyOpen = false;
+    track("$survey", { $survey: s.key, ...props });
+    flush();
+  };
+  const w = window;
+  w.__openlensSurvey = { survey: s, answer: (v) => close({ $answer: v }), dismiss: () => close({ $dismissed: true }) };
+  const host = cfg.host.replace(/\/$/, "");
+  setTimeout(() => {
+    if (w.__openlensSurveyShow) w.__openlensSurveyShow();
+    else {
+      const el = document.createElement("script");
+      el.src = `${host}/s.js`;
+      el.async = true;
+      document.head.appendChild(el);
+    }
+  }, 1200);
 }
 function feature(key, props) {
   track("$feature", { ...props, $feature: key });
@@ -167,6 +204,7 @@ function loadFlags() {
   if (state.dims.role) q.set("role", state.dims.role);
   if (state.dims.account) q.set("account", state.dims.account);
   origFetch(`${cfg.host.replace(/\/$/, "")}/flags?${q}`).then((r) => r.ok ? r.json() : null).then((j) => {
+    if (Array.isArray(j == null ? void 0 : j.surveys)) activeSurveys = j.surveys;
     if (j == null ? void 0 : j.flags) {
       activeFlags = j.flags;
       try {

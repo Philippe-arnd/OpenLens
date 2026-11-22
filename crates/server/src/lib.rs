@@ -10,6 +10,7 @@ mod digest;
 mod flags;
 mod oidc;
 mod replay;
+mod surveys;
 mod web;
 
 use std::path::PathBuf;
@@ -56,6 +57,7 @@ pub fn router(state: AppState) -> Router {
         .route("/healthz", get(healthz))
         .route("/c.js", get(sdk))
         .route("/r.js", get(recorder))
+        .route("/s.js", get(survey_widget))
         .route("/agents.md", get(agents_guide))
         .merge(capture)
         .route("/api/projects/{project}/digest", get(digest::api))
@@ -63,6 +65,7 @@ pub fn router(state: AppState) -> Router {
         .route("/oidc/callback", get(oidc::callback))
         .merge(api::routes())
         .merge(flags::routes())
+        .merge(surveys::routes())
         .merge(replay::routes())
         .merge(web::routes())
         .layer(axum::middleware::from_fn_with_state(
@@ -103,6 +106,22 @@ async fn recorder() -> impl axum::response::IntoResponse {
             ("x-content-type-options", "nosniff"),
         ],
         RECORDER_JS,
+    )
+}
+
+/// The micro-survey widget, loaded by the SDK only when a survey is due.
+const SURVEY_JS: &str = include_str!("../../../sdk/js/dist/openlens-survey.min.js");
+
+/// `GET /s.js`: the survey widget bundle.
+async fn survey_widget() -> impl axum::response::IntoResponse {
+    (
+        [
+            ("content-type", "application/javascript; charset=utf-8"),
+            ("cache-control", "public, max-age=3600"),
+            ("access-control-allow-origin", "*"),
+            ("x-content-type-options", "nosniff"),
+        ],
+        SURVEY_JS,
     )
 }
 

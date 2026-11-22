@@ -75,6 +75,11 @@ enum Command {
         #[arg(long)]
         out: PathBuf,
     },
+    /// Micro-surveys: list (with results), set (create or update) and delete.
+    Surveys {
+        #[command(subcommand)]
+        action: SurveysCmd,
+    },
     /// Feature flags: list, set (create or update) and delete.
     Flags {
         #[command(subcommand)]
@@ -127,6 +132,53 @@ enum Command {
         /// Directory agents may write to.
         #[arg(long, required = true)]
         automation_write_root: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum SurveysCmd {
+    /// List the project's surveys and their results.
+    List {
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+    },
+    /// Create or update a survey.
+    Set {
+        /// Survey key.
+        key: String,
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+        /// The question (at most 200 characters).
+        #[arg(long)]
+        question: String,
+        /// rating (1-5), yes_no, choice or text.
+        #[arg(long)]
+        kind: String,
+        /// Options for kind=choice (comma-separated, 2-6).
+        #[arg(long, value_delimiter = ',')]
+        choices: Vec<String>,
+        /// Event after which it is shown, e.g. entry_saved.
+        #[arg(long)]
+        trigger: String,
+        /// Share of eligible users asked, 0-100.
+        #[arg(long, default_value_t = 10)]
+        sample: u8,
+        /// Only these canonical roles (comma-separated).
+        #[arg(long, value_delimiter = ',')]
+        roles: Vec<String>,
+        /// Create or leave it switched off.
+        #[arg(long)]
+        off: bool,
+    },
+    /// Delete a survey.
+    Delete {
+        /// Survey key.
+        key: String,
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
     },
 }
 
@@ -497,6 +549,39 @@ fn run(cli: Cli) -> Result<bool, String> {
                 FlagsCmd::Delete { key, project } => c.call(
                     "DELETE",
                     &format!("/api/projects/{project}/flags/{key}"),
+                    None,
+                )?,
+            };
+            out(&v);
+            Ok(status == 200)
+        }
+        Command::Surveys { action } => {
+            let c = client()?;
+            let (status, v) = match action {
+                SurveysCmd::List { project } => {
+                    c.call("GET", &format!("/api/projects/{project}/surveys"), None)?
+                }
+                SurveysCmd::Set {
+                    key,
+                    project,
+                    question,
+                    kind,
+                    choices,
+                    trigger,
+                    sample,
+                    roles,
+                    off,
+                } => c.call(
+                    "PUT",
+                    &format!("/api/projects/{project}/surveys/{key}"),
+                    Some(Body::Json(json!({
+                        "key": key, "question": question, "kind": kind, "choices": choices,
+                        "trigger": trigger, "sample": sample, "roles": roles, "enabled": !off,
+                    }))),
+                )?,
+                SurveysCmd::Delete { key, project } => c.call(
+                    "DELETE",
+                    &format!("/api/projects/{project}/surveys/{key}"),
                     None,
                 )?,
             };

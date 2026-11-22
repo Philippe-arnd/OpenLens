@@ -22,7 +22,8 @@ pub use digest::{Delta, Digest, digest, digest_markdown};
 pub use errors::{ErrorGroup, error_groups};
 pub use insights::{CohortStats, FlagCohort, Funnel, FunnelStep, Insight, Journey, Readiness};
 pub use pages::{
-    ClickMap, Hotspot, MAP_COLUMNS, MAP_ROW, PageStats, click_map, pages, sessions_on_path,
+    ClickMap, Hotspot, MAP_COLUMNS, MAP_ROW, PageStats, SurveyResults, click_map, pages,
+    sessions_on_path, survey_results,
 };
 pub use tasks::{RetentionRow, TaskTime};
 

@@ -182,3 +182,109 @@ pub async fn sessions_on_path(
         .filter_map(|r| text(r, "session_id"))
         .collect())
 }
+
+/// Answers to one micro-survey, last 30 days.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct SurveyResults {
+    /// Survey key.
+    pub key: String,
+    /// `(answer, count)`, most frequent first.
+    pub answers: Vec<(String, i64)>,
+    /// People who closed it without answering.
+    pub dismissed: i64,
+    /// Mean answer, for ratings (1–5).
+    pub mean: Option<f64>,
+    /// Mean rating per canonical role, for ratings.
+    pub by_role: Vec<(String, f64, i64)>,
+    /// Latest free-text answers (at most 10), newest first.
+    pub latest_text: Vec<String>,
+}
+
+/// Results of every survey seen in the last 30 days.
+pub async fn survey_results(
+    q: &QueryEngine,
+    project: &str,
+    src: &str,
+    f: &Filters,
+) -> Result<Vec<SurveyResults>> {
+    let w = f.clause(30)?;
+    let base = format!(
+        "SELECT regexp_match(properties, '\"\\$survey\":\"([a-z0-9_-]+)\"')[1] AS k, \
+                coalesce(regexp_match(properties, '\"\\$answer\":\"((?:[^\"\\\\]|\\\\.){{0,500}})\"')[1], \
+                         regexp_match(properties, '\"\\$answer\":([0-9]+)')[1]) AS a, \
+                CASE WHEN properties LIKE '%\"$dismissed\":true%' THEN 1 ELSE 0 END AS d, \
+                role, timestamp \
+         FROM {src} WHERE {w} AND event = '$survey'"
+    );
+    let counts_sql = format!(
+        "SELECT k, a, d, count(*) AS n FROM ({base}) s WHERE k IS NOT NULL GROUP BY k, a, d ORDER BY n DESC LIMIT 2000"
+    );
+    let roles_sql = format!(
+        "SELECT k, coalesce(role, 'not identified') AS role, avg(TRY_CAST(a AS DOUBLE)) AS m, count(*) AS n \
+         FROM ({base}) s WHERE k IS NOT NULL AND d = 0 AND TRY_CAST(a AS DOUBLE) BETWEEN 1 AND 5 GROUP BY k, role"
+    );
+    let text_sql = format!(
+        "SELECT k, a FROM ({base}) s WHERE k IS NOT NULL AND d = 0 AND a IS NOT NULL \
+         AND TRY_CAST(a AS DOUBLE) IS NULL AND a NOT IN ('yes', 'no') ORDER BY timestamp DESC LIMIT 200"
+    );
+    let (counts, roles, texts) = futures::join!(
+        q.sql(project, &counts_sql),
+        q.sql(project, &roles_sql),
+        q.sql(project, &text_sql)
+    );
+    let (counts, roles, texts) = (counts?.rows, roles?.rows, texts?.rows);
+    let mut out: Vec<SurveyResults> = Vec::new();
+    for r in &counts {
+        let Some(k) = text(r, "k") else { continue };
+        let idx = match out.iter().position(|x| x.key == k) {
+            Some(i) => i,
+            None => {
+                out.push(SurveyResults {
+                    key: k.clone(),
+                    ..Default::default()
+                });
+                out.len() - 1
+            }
+        };
+        let n = int(r, "n");
+        if int(r, "d") == 1 {
+            out[idx].dismissed += n;
+        } else if let Some(a) = text(r, "a") {
+            out[idx].answers.push((a, n));
+        }
+    }
+    for s in &mut out {
+        let rated: Vec<(f64, i64)> = s
+            .answers
+            .iter()
+            .filter_map(|(a, n)| {
+                a.parse::<f64>()
+                    .ok()
+                    .filter(|v| (1.0..=5.0).contains(v))
+                    .map(|v| (v, *n))
+            })
+            .collect();
+        let total: i64 = rated.iter().map(|x| x.1).sum();
+        if total > 0 {
+            s.mean = Some(rated.iter().map(|(v, n)| v * *n as f64).sum::<f64>() / total as f64);
+        }
+        s.by_role = roles
+            .iter()
+            .filter(|r| text(r, "k").as_deref() == Some(s.key.as_str()))
+            .map(|r| {
+                (
+                    text(r, "role").unwrap_or_default(),
+                    float(r, "m"),
+                    int(r, "n"),
+                )
+            })
+            .collect();
+        s.latest_text = texts
+            .iter()
+            .filter(|r| text(r, "k").as_deref() == Some(s.key.as_str()))
+            .filter_map(|r| text(r, "a"))
+            .take(10)
+            .collect();
+    }
+    Ok(out)
+}
