@@ -3,7 +3,7 @@
 use chrono::Datelike;
 use openlens_query::QueryEngine;
 
-use crate::{Filters, IDENTIFIED, Result, float, int, lit, text};
+use crate::{Filters, Result, float, int, lit, text};
 
 /// Time to complete one feature's tasks, last 30 days.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -109,10 +109,11 @@ pub(crate) async fn retention(
     project: &str,
     src: &str,
     f: &Filters,
+    ident: &str,
 ) -> Result<Vec<RetentionRow>> {
     let w = f.clause(90)?;
     let sql = format!(
-        "WITH ev AS (SELECT distinct_id, timestamp FROM {src} WHERE {w} AND {IDENTIFIED}), \
+        "WITH ev AS (SELECT distinct_id, timestamp FROM {src} WHERE {w} AND {ident}), \
          fs AS (SELECT ev.distinct_id, date_trunc('week', least(min(ev.timestamp), min(p.first_seen))) AS cw \
                 FROM ev LEFT JOIN persons p ON ev.distinct_id = p.person GROUP BY ev.distinct_id), \
          a AS (SELECT DISTINCT ev.distinct_id, fs.cw, \
@@ -122,11 +123,14 @@ pub(crate) async fn retention(
          SELECT substr(CAST(cw AS VARCHAR), 1, 10) AS week, k, count(*) AS users FROM a GROUP BY cw, k ORDER BY cw, k"
     );
     let rows = q.sql(project, &sql).await?.rows;
+    // Sorted here too: the ratios need each cohort's size (k = 0) first.
+    let mut cells: Vec<(String, i64, i64)> = rows
+        .iter()
+        .filter_map(|r| Some((text(r, "week")?, int(r, "k"), int(r, "users"))))
+        .collect();
+    cells.sort_by(|a, b| (&a.0, a.1).cmp(&(&b.0, b.1)));
     let mut out: Vec<RetentionRow> = Vec::new();
-    for r in &rows {
-        let (Some(week), k, n) = (text(r, "week"), int(r, "k"), int(r, "users")) else {
-            continue;
-        };
+    for (week, k, n) in cells {
         if out.last().is_none_or(|x| x.week != week) {
             out.push(RetentionRow {
                 week,

@@ -28,7 +28,7 @@ Numbers to keep OpenLens honest about "lean". Re-run them when ingestion, storag
 
 The board takes one in-memory snapshot of the 90-day projection, then filters it for every query (#75). Above 2 M rows in the window it reads the files instead, so memory stays bounded, at the cost of reading them once per query.
 
-**Watch out for subqueries in `OR`.** DataFusion turns `x IN (SELECT …)` into a semi-join, but not when it sits in an `OR` with `NOT EXISTS (…)`: the "identified users" filter written that way cost 20× more (0.7 s instead of 35 ms per query). Use `OR (SELECT count(*) …) = 0`. To see what each query costs, run with `RUST_LOG=openlens_query=debug`.
+**Watch out for subqueries in `OR`.** DataFusion turns `x IN (SELECT …)` into a semi-join, but not when it sits in an `OR` with `NOT EXISTS (…)`. The "identified users" filter written that way cost 20× more: 0.7 s instead of 35 ms per query. A scalar-subquery variant was fast, but it sometimes returned rows out of `ORDER BY` order. The engine now decides in Rust, from the cached `persons` count, and writes either the plain `IN` or `TRUE`. To see what each query costs, run with `RUST_LOG=openlens_query=debug`.
 
 ## How to run
 
