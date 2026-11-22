@@ -686,6 +686,11 @@ pub(crate) fn verify_report(c: &Client, project: &str) -> Result<Value, String> 
         &format!("SELECT count(DISTINCT release) AS n FROM events WHERE {recent}"),
     )?);
 
+    let bots = n(c.sql(
+        project,
+        &format!("SELECT count(*) AS n FROM raw_events WHERE {recent} AND environment = 'bot'"),
+    )?);
+
     let (map_status, map) = c.call("GET", &format!("/api/projects/{project}/feature-map"), None)?;
     let mut features = Vec::new();
     if map_status == 200
@@ -731,6 +736,7 @@ pub(crate) fn verify_report(c: &Client, project: &str) -> Result<Value, String> 
         .is_some_and(|a| a.iter().take(3).all(|c| c["ok"] == true))
         && map_status == 200;
     Ok(json!({ "ok": ok, "checks": checks, "features": features,
+        "robots_last_day": bots,
         "note": "features with 0 events have not been exercised yet; click through them once to confirm they fire" }))
 }
 
