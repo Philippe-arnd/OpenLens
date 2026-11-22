@@ -137,6 +137,11 @@ pub struct FeatureUse {
     pub users: i64,
     /// Completed tasks: success events of this feature.
     pub completed: i64,
+    /// Distinct users who reached the feature's success event.
+    pub completed_users: i64,
+    /// Sum over users of the distinct days they used the feature (so
+    /// `user_days / users` is the active days per user, a stickiness cue).
+    pub user_days: i64,
     /// Declared in the feature map.
     pub declared: bool,
 }
@@ -329,7 +334,8 @@ pub async fn board(
          WHERE name IS NOT NULL AND v IS NOT NULL GROUP BY name ORDER BY name"
     );
     let features_sql = format!(
-        "SELECT feature AS key, count(*) AS uses, count(DISTINCT distinct_id) AS users \
+        "SELECT feature AS key, count(*) AS uses, count(DISTINCT distinct_id) AS users, \
+         count(DISTINCT concat(distinct_id, '|', date)) AS user_days \
          FROM {src} WHERE {w30} AND feature IS NOT NULL GROUP BY feature ORDER BY users DESC, uses DESC LIMIT 12"
     );
     let roles_sql = format!(
@@ -376,7 +382,7 @@ pub async fn board(
         })
         .unwrap_or_default();
     let success_sql = if successes.is_empty() {
-        "SELECT CAST(NULL AS VARCHAR) AS event, 0 AS n WHERE false".to_owned()
+        "SELECT CAST(NULL AS VARCHAR) AS event, 0 AS n, 0 AS users WHERE false".to_owned()
     } else {
         let list = successes
             .iter()
@@ -384,7 +390,7 @@ pub async fn board(
             .collect::<Result<Vec<_>>>()?
             .join(", ");
         format!(
-            "SELECT event, count(*) AS n FROM {src} WHERE {w30} AND event IN ({list}) GROUP BY event"
+            "SELECT event, count(*) AS n, count(DISTINCT distinct_id) AS users FROM {src} WHERE {w30} AND event IN ({list}) GROUP BY event"
         )
     };
     let (
@@ -467,6 +473,8 @@ pub async fn board(
             uses: int(r, "uses"),
             users: int(r, "users"),
             completed: 0,
+            completed_users: 0,
+            user_days: int(r, "user_days"),
             declared: false,
         })
         .collect();
@@ -479,17 +487,21 @@ pub async fn board(
     if let Some((m, version)) = map {
         b.map_version = Some(version);
         for decl in &m.features {
-            let completed = decl.success.as_deref().map_or(0, |ev| {
-                success_rows
-                    .iter()
-                    .filter(|r| text(r, "event").as_deref() == Some(ev))
-                    .map(|r| int(r, "n"))
-                    .sum()
-            });
+            let of = |col: &str| {
+                decl.success.as_deref().map_or(0, |ev| {
+                    success_rows
+                        .iter()
+                        .filter(|r| text(r, "event").as_deref() == Some(ev))
+                        .map(|r| int(r, col))
+                        .sum()
+                })
+            };
+            let (completed, completed_users) = (of("n"), of("users"));
             match b.features.iter_mut().find(|x| x.key == decl.key) {
                 Some(x) => {
                     x.name = Some(decl.name.clone());
                     x.completed = completed;
+                    x.completed_users = completed_users;
                     x.declared = true;
                 }
                 None => b.features.push(FeatureUse {
@@ -498,6 +510,8 @@ pub async fn board(
                     uses: 0,
                     users: 0,
                     completed,
+                    completed_users,
+                    user_days: 0,
                     declared: true,
                 }),
             }

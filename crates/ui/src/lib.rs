@@ -449,11 +449,7 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
                         }
                     }
                 }
-                section.card {
-                    h2.sun { (icon("layers")) "Most used features" }
-                    @if feats.is_empty() { p.muted { "No feature has been used yet. Features come from " code { "data-feature" } " attributes and the feature map." } }
-                    @else { (bars(&feats)) p.muted.small { "By distinct users, last 30 days." } }
-                }
+                (feature_pulse(b, feats.is_empty()))
                 @if !unused.is_empty() {
                     section.card {
                         h2.coral { (icon("ban")) "Never used (last 30 days)" }
@@ -800,6 +796,48 @@ pub fn player(p: &ProjectInfo<'_>, session: &str, who: Option<&str>, at: Option<
             script src="/assets/player.js" defer {}
         },
     )
+}
+
+/// Feature pulse: for each used feature, how many of the active users
+/// adopt it, how often and on how many days they come back to it, and how
+/// many reach its success event.
+fn feature_pulse(b: &Board, empty: bool) -> Markup {
+    let mau = b.users.mau.max(1) as f64;
+    let ratio = |a: i64, n: i64| a as f64 / n.max(1) as f64;
+    html! {
+        section.card.wide {
+            h2.sun { (icon("layers")) "Feature pulse" }
+            @if empty {
+                p.muted { "No feature has been used yet. Features come from " code { "data-feature" } " attributes and the feature map." }
+            } @else {
+                table.plain.pulse {
+                    thead { tr {
+                        th { "Feature" }
+                        th { "Adoption" }
+                        th.num title="Share of active users who used it" { span.sr-only { "Adoption " } "% users" }
+                        th.num title="Average uses per user" { "Uses / user" }
+                        th.num title="Average distinct days each user came back to it" { "Days / user" }
+                        th.num title="Users who reached its success event" { "Completion" }
+                    } }
+                    tbody { @for x in b.features.iter().filter(|x| x.users > 0) {
+                        @let adoption = (x.users as f64 / mau).min(1.0);
+                        tr {
+                            th scope="row" { (x.name.as_deref().unwrap_or(&x.key)) }
+                            td.meter { (meter(adoption)) }
+                            td.num { strong { (pct(adoption)) } br; span.muted.small { (compact(x.users)) " users" } }
+                            td.num { (format!("{:.1}", ratio(x.uses, x.users))) }
+                            td.num { (format!("{:.1}", ratio(x.user_days, x.users))) }
+                            td.num {
+                                @if x.declared && x.completed_users > 0 { (pct(ratio(x.completed_users, x.users).min(1.0))) }
+                                @else { span.muted title="No success event declared or reached yet" { "—" } }
+                            }
+                        }
+                    } }
+                }
+                p.muted.small { "Last 30 days. Adoption is the share of active users (MAU) who used the feature; completion is the share of them who reached its success event." }
+            }
+        }
+    }
 }
 
 /// Roles × features: the share of each role's users who used each
