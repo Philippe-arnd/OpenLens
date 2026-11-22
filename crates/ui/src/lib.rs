@@ -8,6 +8,9 @@
 //! Layer: L4 (see `docs/architecture.md`).
 
 use maud::{DOCTYPE, Markup, PreEscaped, html};
+
+mod icons;
+pub use icons::icon;
 use openlens_engine::{Board, EventRow, Filters};
 
 /// Stylesheet, served at `/assets/app.css`.
@@ -75,6 +78,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                 link rel="stylesheet" href="/assets/app.css";
             }
             body {
+                (icons::sprite())
                 header.top {
                     a.brand href="/" aria-label="OpenLens home" {
                         span.lens aria-hidden="true" { span.pupil {} }
@@ -82,12 +86,19 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                     }
                     @if let Some(p) = project {
                         nav aria-label="Project" {
-                            a href={ "/p/" (p.id) } { "Focus board" }
-                            a href={ "/p/" (p.id) "/events" } { "Events" }
-                            a href={ "/p/" (p.id) "/flags" } { "Flags" }
+                            a href={ "/p/" (p.id) } { (icon("board")) "Focus board" }
+                            a href={ "/p/" (p.id) "/events" } { (icon("events")) "Events" }
+                            a href={ "/p/" (p.id) "/flags" } { (icon("flag")) "Flags" }
                         }
                         span.project { (p.name) }
-                        form method="post" action="/logout" { button.ghost type="submit" { "Log out" } }
+                    }
+                    nav.theme aria-label="Theme" style=(if project.is_none() { "margin-left:auto" } else { "" }) {
+                        a.auto href="/theme/auto" title="Follow the system" aria-label="Theme: follow the system" { (icon("auto")) }
+                        a.light href="/theme/light" title="Light" aria-label="Theme: light" { (icon("sun")) }
+                        a.dark href="/theme/dark" title="Dark" aria-label="Theme: dark" { (icon("moon")) }
+                    }
+                    @if project.is_some() {
+                        form method="post" action="/logout" { button.ghost type="submit" { (icon("logout")) "Log out" } }
                     }
                 }
                 main { (body) }
@@ -150,10 +161,10 @@ fn filter_bar(project: &str, b: &Board, f: &Filters, action: &str) -> Markup {
     }
 }
 
-fn tile(accent: &str, label: &str, value: &str, hint: &str) -> Markup {
+fn tile(accent: &str, glyph: &str, label: &str, value: &str, hint: &str) -> Markup {
     html! {
         div class={ "tile " (accent) } {
-            div.label { (label) }
+            div.label { span.chip-icon { (icon(glyph)) } (label) }
             div.value { (value) }
             div.hint { (hint) }
         }
@@ -182,13 +193,13 @@ fn sparkline(series: &[(String, i64)]) -> Markup {
 }
 
 fn status(rating: &str) -> Markup {
-    let (cls, icon, text) = match rating {
-        "good" => ("good", "✓", "good"),
-        "needs-improvement" => ("warn", "!", "needs work"),
-        "poor" => ("bad", "✕", "poor"),
-        _ => ("muted", "?", "unknown"),
+    let (cls, glyph, text) = match rating {
+        "good" => ("good", "task", "good"),
+        "needs-improvement" => ("warn", "alert", "needs work"),
+        "poor" => ("bad", "ban", "poor"),
+        _ => ("muted", "alert", "unknown"),
     };
-    html! { span class={ "status " (cls) } { span aria-hidden="true" { (icon) } " " (text) } }
+    html! { span class={ "status " (cls) } { (self::icon(glyph)) (text) } }
 }
 
 fn bars(rows: &[(String, i64, String)]) -> Markup {
@@ -248,11 +259,11 @@ fn release_compare(rel: &[openlens_engine::ReleaseRow]) -> Markup {
                 @let change = if o.abs() > f64::EPSILON { (n - o) / o } else { 0.0 };
                 @let flat = change.abs() < 0.05;
                 @let good = (n > o) == up_good;
-                @let (cls, arrow, word) = if flat { ("flat", "→", "about the same") } else if good { ("up", if n > o { "▲" } else { "▼" }, "better") } else { ("down", if n > o { "▲" } else { "▼" }, "worse") };
+                @let (cls, arrow, word) = if flat { ("flat", "release", "about the same") } else if good { ("up", if n > o { "up" } else { "down" }, "better") } else { ("down", if n > o { "up" } else { "down" }, "worse") };
                 li class=(cls) {
                     span.label { (label) }
                     " " strong { (fmt(n)) } " "
-                    span.change { (arrow) " " (format!("{:+.0}%", change * 100.0)) " · " (word) }
+                    span.change { (icon(arrow)) (format!("{:+.0}%", change * 100.0)) " · " (word) }
                     span.muted { " (was " (fmt(o)) ")" }
                 }
             }
@@ -262,16 +273,19 @@ fn release_compare(rel: &[openlens_engine::ReleaseRow]) -> Markup {
 
 fn insight_cards(b: &Board) -> Markup {
     let accent = |kind: &str| match kind {
-        "stick_driver" | "value_moment" => ("mint", "★"),
-        "churn_point" | "friction" | "funnel_drop" => ("coral", "↘"),
-        "role_blind_spot" => ("violet", "◐"),
-        "release_regression" | "flag_regression" => ("sun", "!"),
-        "flag_win" => ("mint", "▲"),
-        _ => ("sky", "⏱"),
+        "stick_driver" => ("mint", "star"),
+        "value_moment" => ("mint", "spark"),
+        "flag_win" => ("mint", "up"),
+        "churn_point" => ("coral", "down"),
+        "friction" | "funnel_drop" => ("coral", "funnel"),
+        "role_blind_spot" => ("violet", "shield"),
+        "release_regression" | "flag_regression" => ("sun", "alert"),
+        _ => ("sky", "bolt"),
     };
+
     html! {
         section.insights aria-label="What to focus on" {
-            h2 { span.dot.violet {} "What to focus on" }
+            h2.violet { (icon("idea")) "What to focus on" }
             @if b.insights.is_empty() {
                 div.insight.waiting {
                     @if b.readiness.judged_users < b.readiness.needed {
@@ -285,9 +299,9 @@ fn insight_cards(b: &Board) -> Markup {
             } @else {
                 ol.cards {
                     @for (i, c) in b.insights.iter().enumerate() {
-                        @let (cls, icon) = accent(c.kind);
+                        @let (cls, glyph) = accent(c.kind);
                         li class={ "insight " (cls) } {
-                            span.rank aria-hidden="true" { (icon) }
+                            span.rank aria-hidden="true" { (icon(glyph)) }
                             div {
                                 h3 { span.sr-only { "Insight " (i + 1) ": " } (c.title) }
                                 p.evidence { (c.evidence) }
@@ -380,20 +394,20 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
             (filter_bar(p.id, b, f, ""))
             (insight_cards(b))
             section.tiles aria-label="Key numbers" {
-                (tile("violet", "Daily active users", &compact(b.users.dau), &format!("{} weekly · {} monthly", compact(b.users.wau), compact(b.users.mau))))
-                (tile("mint", "Stickiness", &pct(b.users.stickiness), "DAU ÷ MAU"))
-                (tile("sky", "Avg session", &duration(b.sessions.avg_secs), &format!("{} sessions · {} bounce", compact(b.sessions.count), pct(b.sessions.bounce_rate))))
-                (tile("sun", "Tasks per user per day", &format!("{:.1}", b.sessions.tasks_per_user_day), "feature uses, last 7 days"))
-                (tile("coral", "Sessions with errors", &pct(b.sessions.error_rate), "last 7 days"))
+                (tile("violet", "users", "Daily active users", &compact(b.users.dau), &format!("{} weekly · {} monthly", compact(b.users.wau), compact(b.users.mau))))
+                (tile("mint", "spark", "Stickiness", &pct(b.users.stickiness), "DAU ÷ MAU"))
+                (tile("sky", "clock", "Avg session", &duration(b.sessions.avg_secs), &format!("{} sessions · {} bounce", compact(b.sessions.count), pct(b.sessions.bounce_rate))))
+                (tile("sun", "task", "Tasks per user per day", &format!("{:.1}", b.sessions.tasks_per_user_day), "feature uses, last 7 days"))
+                (tile("coral", "alert", "Sessions with errors", &pct(b.sessions.error_rate), "last 7 days"))
             }
             div.grid {
                 section.card {
-                    h2 { span.dot.violet {} "Active users" }
+                    h2.violet { (icon("pulse")) "Active users" }
                     (sparkline(&b.dau_series))
                     p.muted.small { "Last 14 days. Hover a bar for the day." }
                 }
                 section.card {
-                    h2 { span.dot.sky {} "Web Vitals (p75)" }
+                    h2.sky { (icon("bolt")) "Web Vitals (p75)" }
                     @if b.vitals.is_empty() { p.muted { "No measurements yet. They arrive when visitors leave a page." } }
                     @else {
                         table.plain {
@@ -409,33 +423,33 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
                     }
                 }
                 section.card {
-                    h2 { span.dot.sun {} "Most used features" }
+                    h2.sun { (icon("layers")) "Most used features" }
                     @if feats.is_empty() { p.muted { "No feature has been used yet. Features come from " code { "data-feature" } " attributes and the feature map." } }
                     @else { (bars(&feats)) p.muted.small { "By distinct users, last 30 days." } }
                 }
                 @if !unused.is_empty() {
                     section.card {
-                        h2 { span.dot.coral {} "Never used (last 30 days)" }
+                        h2.coral { (icon("ban")) "Never used (last 30 days)" }
                         ul.tags { @for x in &unused { li { (x.name.as_deref().unwrap_or(&x.key)) } } }
                         p.muted.small { "Declared in the feature map, but nobody reached them. Hidden, broken, or not needed?" }
                     }
                 }
                 @if !b.role_gaps.is_empty() {
                     section.card {
-                        h2 { span.dot.sun {} "Role gaps" }
+                        h2.sun { (icon("gap")) "Role gaps" }
                         p.small { "These raw role values match no role in the feature map, so they are counted apart:" }
                         ul.tags { @for (raw, n) in &b.role_gaps { li { code { (raw) } " · " (compact(*n)) " users" } } }
                         p.muted.small { "Ask your agent to map them under " code { "roles:" } " in openlens.features.yaml." }
                     }
                 }
                 section.card {
-                    h2 { span.dot.mint {} "Who uses the app" }
+                    h2.mint { (icon("shield")) "Who uses the app" }
                     (bars(&roles))
                     p.muted.small { "Distinct users per role, last 30 days." }
                 }
                 @if !b.funnels.is_empty() {
                     section.card.wide {
-                        h2 { span.dot.sky {} "Funnels" }
+                        h2.sky { (icon("funnel")) "Funnels" }
                         @for fun in &b.funnels {
                             h3.small { (fun.feature) }
                             table.bars {
@@ -454,7 +468,7 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
                 }
                 @if !b.flag_cohorts.is_empty() {
                     section.card.wide {
-                        h2 { span.dot.violet {} "Flags: with vs without" }
+                        h2.violet { (icon("flag")) "Flags: with vs without" }
                         table.plain {
                             thead { tr { th { "Flag" } th.num { "Users with / without" } th.num { "Avg session" } th.num { "Tasks / session" } th.num { "Sessions with errors" } } }
                             tbody { @for c in &b.flag_cohorts {
@@ -472,7 +486,7 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
                 }
                 @if !b.journeys.is_empty() {
                     section.card.wide {
-                        h2 { span.dot.mint {} "Paths to value" }
+                        h2.mint { (icon("route")) "Paths to value" }
                         p.muted.small { "What users did just before reaching each success for the first time (last 30 days)." }
                         ul.journeys {
                             @for j in &b.journeys {
@@ -486,7 +500,7 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
                     }
                 }
                 section.card.wide {
-                    h2 { span.dot.coral {} "Releases" }
+                    h2.coral { (icon("release")) "Releases" }
                     @if b.releases.is_empty() { p.muted { "No release tagged yet. Pass " code { "release" } " to the SDK to compare releases." } }
                     @else {
                         (release_compare(&b.releases))
