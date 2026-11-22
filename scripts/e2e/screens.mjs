@@ -49,6 +49,21 @@ for (const g of global) {
   await tab.screenshot({ path: `${out}${g.replace("/", "/global-")}.png`, fullPage: true });
 }
 
+// Phones (#170): every page at 390 px wide must not scroll sideways (wide
+// tables scroll inside their card), with a screenshot of each.
+const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, reducedMotion: "reduce" });
+const pt = await phone.newPage();
+await pt.goto(`${server}/login`);
+await pt.fill("input[name=token]", token);
+await Promise.all([pt.waitForNavigation(), pt.click("button[type=submit]")]);
+for (const p of [...pages.map((x) => `/p/default${x}`), ...global]) {
+  await pt.goto(`${server}${p}`);
+  const over = await pt.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  if (over > 1) problems.push(`${p} (phone): the page scrolls sideways by ${over}px`);
+  await pt.screenshot({ path: `${out}/phone${p.replace("/p/default", "").replace(/\//g, "-") || "-board"}.png`, fullPage: true });
+}
+await phone.close();
+
 // Accessibility (#161): axe-core on every page, light and dark. Injecting a
 // script needs a context that bypasses the CSP; the checks above ran under it.
 const a11y = await browser.newContext({ viewport: { width: 1360, height: 900 }, bypassCSP: true, reducedMotion: "reduce" });
