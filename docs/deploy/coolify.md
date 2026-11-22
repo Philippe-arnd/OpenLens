@@ -32,3 +32,13 @@ docker exec <container> openlens backup /data/backups/$(date +%F)
 ```
 
 Then copy `/data/backups/<date>` off the machine (for example a Coolify scheduled task with rsync or rclone). **To restore:** stop the service, replace the volume's contents with the backup, then start it again. If the admin token came from `OPENLENS_ADMIN_TOKEN`, keep it set to the same value.
+
+## Optional settings (D-016)
+
+None of these is needed. Each feature stays off until its variables are set.
+
+| Feature | Variables |
+| --- | --- |
+| Weekly digest by email (Mondays, 07:00 UTC) | `OPENLENS_SMTP_URL` (for example `smtps://user:pass@smtp.example.com:465`), `OPENLENS_DIGEST_TO` (comma-separated), optional `OPENLENS_DIGEST_FROM` |
+
+The digest is always visible in the dashboard (*This week vs last*), and agents can read it with the MCP `digest` tool.

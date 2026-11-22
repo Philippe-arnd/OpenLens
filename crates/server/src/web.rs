@@ -30,6 +30,7 @@ pub(crate) fn routes() -> Router<AppState> {
         )
         .route("/p/{project}/watch", get(watch_churned))
         .route("/p/{project}/heatmap", get(heatmap_page))
+        .route("/p/{project}/digest", get(digest_page))
         .route("/p/{project}/heatmap.json", get(heatmap_json))
         .route("/p/{project}/heatmap/overlay", get(heatmap_overlay))
         .route("/assets/player.js", get(player_js))
@@ -799,4 +800,36 @@ async fn heatmap_overlay(
         StatusCode::OK,
         openlens_ui::heatmap_overlay(&info, &q.path, &session),
     ))
+}
+
+async fn digest_page(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    if !auth::has_session(&state, &headers) {
+        return to_login();
+    }
+    let Some(p) = project(&state, id).await else {
+        return html(
+            StatusCode::NOT_FOUND,
+            openlens_ui::message("Not found", "No such project."),
+        );
+    };
+    let mailed = std::env::var("OPENLENS_SMTP_URL").is_ok_and(|s| !s.is_empty())
+        && std::env::var("OPENLENS_DIGEST_TO").is_ok_and(|s| s.contains('@'));
+    match crate::digest::compute(&state, &p, &crate::base_url(&headers)).await {
+        Ok((d, _)) => {
+            let info = openlens_ui::ProjectInfo {
+                id: &p.id,
+                name: &p.name,
+                key: &p.api_key,
+            };
+            html(StatusCode::OK, openlens_ui::digest(&info, &d, mailed))
+        }
+        Err(e) => html(
+            StatusCode::BAD_REQUEST,
+            openlens_ui::message("Can't show that", &e.to_string()),
+        ),
+    }
 }

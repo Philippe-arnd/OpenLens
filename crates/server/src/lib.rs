@@ -6,6 +6,7 @@
 mod api;
 mod auth;
 mod capture;
+mod digest;
 mod flags;
 mod replay;
 mod web;
@@ -56,6 +57,7 @@ pub fn router(state: AppState) -> Router {
         .route("/r.js", get(recorder))
         .route("/agents.md", get(agents_guide))
         .merge(capture)
+        .route("/api/projects/{project}/digest", get(digest::api))
         .merge(api::routes())
         .merge(flags::routes())
         .merge(replay::routes())
@@ -120,6 +122,7 @@ async fn healthz() -> &'static str {
 /// compact closed days and apply retention (D-015). Runs until the process exits.
 pub async fn background(state: AppState) {
     let mut tick = tokio::time::interval(Duration::from_secs(2));
+    let mut last_digest_check = std::time::Instant::now();
     // Run the first compaction and retention pass right away.
     let mut last_compact = std::time::Instant::now()
         .checked_sub(Duration::from_secs(600))
@@ -129,6 +132,10 @@ pub async fn background(state: AppState) {
         let st = state.clone();
         let res =
             tokio::task::spawn_blocking(move || flush_and_compact(&st, &mut last_compact)).await;
+        if last_digest_check.elapsed() >= Duration::from_secs(600) {
+            last_digest_check = std::time::Instant::now();
+            digest::maybe_send(&state).await;
+        }
         match res {
             Ok(Ok(next)) => last_compact = next,
             Ok(Err(err)) => tracing::error!(%err, "background flush failed"),

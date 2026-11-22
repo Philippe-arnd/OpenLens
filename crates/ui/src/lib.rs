@@ -416,7 +416,7 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
         html! {
             div.heading {
                 h1 { "Focus board" }
-                p.muted { "What " (scope) " did lately in " strong { (f.environment) } "." }
+                p.muted { "What " (scope) " did lately in " strong { (f.environment) } ". " a href={ "/p/" (p.id) "/digest" } { "This week vs last →" } }
             }
             (filter_bar(p.id, b, f, ""))
             (insight_cards(p.id, b))
@@ -1064,6 +1064,55 @@ pub fn heatmap_overlay(p: &ProjectInfo<'_>, path: &str, session: &str) -> Markup
                 }
             }
             script src="/assets/player.js" defer {}
+        },
+    )
+}
+
+/// The weekly digest page.
+pub fn digest(p: &ProjectInfo<'_>, d: &openlens_engine::Digest, mailed: bool) -> Markup {
+    let row = |label: &str, x: &openlens_engine::Delta| {
+        let change = x.change();
+        html! {
+            tr {
+                th scope="row" { (label) }
+                td.num { strong { (compact(x.now)) } }
+                td.num.muted { (compact(x.before)) }
+                td.num {
+                    @match change {
+                        Some(c) if c.abs() >= 0.005 => span class=(if c > 0.0 { "up" } else { "down" }) { (format!("{:+.0}%", c * 100.0)) },
+                        Some(_) => span.muted { "same" },
+                        None => span.muted { "—" },
+                    }
+                }
+            }
+        }
+    };
+    layout(
+        "Weekly digest",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "This week vs last" }
+                p.muted { "Last 7 days against the 7 before, production. "
+                    @if mailed { "Emailed every Monday." } @else { "Set OPENLENS_SMTP_URL and OPENLENS_DIGEST_TO to receive it by email every Monday." } }
+            } }
+            section.card.wide {
+                table.plain {
+                    thead { tr { th {} th.num { "This week" } th.num { "Last week" } th.num { "Change" } } }
+                    tbody {
+                        (row("Active users", &d.users))
+                        (row("Sessions", &d.sessions))
+                        (row("Errors", &d.errors))
+                        @for (k, t) in &d.tasks { (row(&format!("Completed: {k}"), t)) }
+                    }
+                }
+            }
+            @if !d.insights.is_empty() {
+                section.card.wide {
+                    h2.violet { (icon("idea")) "What to focus on" }
+                    ul { @for i in &d.insights { li { strong { (i.title) } " · " span.muted { (i.evidence) } br; span.small { "Next step: " (i.next_step) } } } }
+                }
+            }
         },
     )
 }

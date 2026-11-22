@@ -1044,3 +1044,39 @@ async fn click_heatmap_draws_positions_without_inline_styles() {
         StatusCode::UNAUTHORIZED
     );
 }
+
+#[tokio::test]
+async fn weekly_digest_compares_this_week_with_last() {
+    let h = harness();
+    post(&h, "/capture", batch(&h.key), false).await;
+    openlens_server::flush_now(&h.state).unwrap();
+    let resp = get(&h, "/api/projects/default/digest", None, true).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(v["digest"]["users"]["now"], 1);
+    assert_eq!(v["digest"]["users"]["before"], 0);
+    let md = v["markdown"].as_str().unwrap();
+    assert!(md.contains("**Active users:** 1 new this week"), "{md}");
+    assert_eq!(
+        get(&h, "/api/projects/default/digest", None, false)
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let cookie = login_cookie(&h).await;
+    let page = get(&h, "/p/default/digest", Some(&cookie), false).await;
+    assert_eq!(page.status(), StatusCode::OK);
+    let html = String::from_utf8(
+        axum::body::to_bytes(page.into_body(), 1 << 20)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(html.contains("This week vs last") && !html.contains(" style="));
+}

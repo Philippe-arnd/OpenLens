@@ -113,6 +113,11 @@ impl Tools for OpenLensTools {
                 input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"}}))}),
             },
             ToolSpec {
+                name: "digest",
+                description: "This week vs last week (active users, sessions, errors, completed tasks per feature) plus the top 3 insight cards, as JSON and ready-to-send Markdown.",
+                input_schema: json!({"type":"object","properties":proj}),
+            },
+            ToolSpec {
                 name: "kpi_report",
                 description: "Headline KPIs in one compact payload: users (DAU/WAU/MAU, stickiness), sessions, vitals, top features and roles, latest two releases. With `by` (role|account|plan|page|feature), also users, sessions, events, tasks and errors per value (30 days). Roles are 'role at event time'.",
                 input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"},"by":{"type":"string","enum":["role","account","plan","page","feature"]}}))}),
@@ -259,6 +264,14 @@ impl Tools for OpenLensTools {
                     }
                     _ => v,
                 })
+            }
+            "digest" => {
+                let (st, v) = c.call(
+                    "GET",
+                    &format!("/api/projects/{}/digest", project(args)),
+                    None,
+                )?;
+                ok_or(st, v)
             }
             "user_timeline" => {
                 let who = s(args, "distinct_id").ok_or("distinct_id is required")?;

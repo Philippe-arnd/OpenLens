@@ -74,4 +74,5 @@ A layered workspace, `cargo xtask ci`, AGENTS.md, Docker and compose with the he
 - ✅ Experiment significance on flag cohorts (#122)
 - ✅ Server SDKs: Node and Python, no dependencies ([sdk/SERVER.md](sdk/SERVER.md))
 - ✅ Visual heatmaps: click density per page (SVG) and over a recorded visit of the real page
-- ⏳ Weekly digest, in-app micro-surveys, LLM rewording of cards (optional), users and roles, OIDC (optional), S3 copy (optional)
+- ✅ Weekly digest: dashboard page, MCP `digest`, Monday email when SMTP is set
+- ⏳ in-app micro-surveys, LLM rewording of cards (optional), users and roles, OIDC (optional), S3 copy (optional)

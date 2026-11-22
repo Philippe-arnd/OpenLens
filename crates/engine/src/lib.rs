@@ -12,11 +12,13 @@ use openlens_query::{QueryEngine, QueryError};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
+mod digest;
 mod errors;
 mod insights;
 mod pages;
 pub mod stats;
 mod tasks;
+pub use digest::{Delta, Digest, digest, digest_markdown};
 pub use errors::{ErrorGroup, error_groups};
 pub use insights::{CohortStats, FlagCohort, Funnel, FunnelStep, Insight, Journey, Readiness};
 pub use pages::{
