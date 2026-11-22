@@ -28,12 +28,25 @@ const browser = await chromium.launch();
 const tab = await browser.newPage();
 const sent = [];
 tab.on("request", (r) => r.url().includes("/capture") && sent.push(r.postData()));
+// The first capture request fails (offline): its events must be sent again.
+let dropped = null;
+await tab.route("**/capture*", (r) => {
+  if (dropped === null) {
+    dropped = r.request().postData();
+    return r.abort();
+  }
+  return r.continue();
+});
 // Wait for the flags answer (it carries the surveys) before clicking.
 await Promise.all([
   tab.waitForResponse((r) => r.url().includes("/flags?"), { timeout: 10000 }).catch(() => null),
   tab.goto(`http://localhost:${port}/`),
 ]);
+await tab.evaluate(() => openlens.flush());
+await tab.waitForTimeout(300);
 await tab.click("button[data-feature=export]");
+// Hash routers: a #/route change is a page view of that route.
+await tab.evaluate(() => { location.hash = "#/notes"; });
 await tab.click("#secret");
 await tab.evaluate(() => { setTimeout(() => { throw new Error("e2e boom"); }, 0); });
 await tab.waitForTimeout(200);
@@ -69,6 +82,16 @@ if (admin) {
 }
 if (sent.some((b) => b.includes("private words"))) {
   console.error("masked text was sent");
+  process.exit(1);
+}
+const resent = sent.slice(1).flatMap((b) => JSON.parse(b).batch.map((e) => e.uuid));
+const lost = dropped ? JSON.parse(dropped).batch.filter((e) => !resent.includes(e.uuid)) : [{ event: "no failed request" }];
+if (lost.length) {
+  console.error("events of a failed request were lost:", lost.map((e) => e.event).join(", "));
+  process.exit(1);
+}
+if (!sent.flatMap((b) => JSON.parse(b).batch).some((e) => e.event === "$pageview" && e.properties.$pathname === "/notes")) {
+  console.error("hash route change not counted as a page view");
   process.exit(1);
 }
 // identify links the anonymous visit (reset while anonymous is a no-op), so

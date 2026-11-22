@@ -116,6 +116,23 @@ function load() {
   }
   return { anon: uuid(), dims: {}, sid: uuid(), last: 0 };
 }
+function refresh() {
+  try {
+    const raw = localStorage.getItem(storageKey());
+    if (raw) state = { ...state, ...JSON.parse(raw) };
+  } catch {
+  }
+}
+function route() {
+  var _a;
+  const h = location.hash;
+  const hashRoute = h.startsWith("#/") ? h.slice(1) : h.startsWith("#!/") ? h.slice(2) : "";
+  if (!hashRoute) return location.pathname;
+  return location.pathname.replace(/\/$/, "") + ((_a = hashRoute.split("?")[0]) != null ? _a : "");
+}
+function isBot() {
+  return /bot\b|crawler|spider|slurp|facebookexternalhit|lighthouse|pingdom|uptime|prerender/i.test(navigator.userAgent || "");
+}
 function save() {
   try {
     localStorage.setItem(storageKey(), JSON.stringify(state));
@@ -130,7 +147,7 @@ function touchSession(now) {
 function base() {
   const p = {
     $current_url: location.href.split("#")[0],
-    $pathname: location.pathname,
+    $pathname: route(),
     $environment: (cfg == null ? void 0 : cfg.environment) || detectEnvironment(location.hostname),
     $lib: "web",
     $lib_version: VERSION
@@ -146,6 +163,7 @@ function track(event, props) {
   var _a;
   if (!cfg || consent === "denied") return;
   const now = Date.now();
+  refresh();
   touchSession(now);
   save();
   queue.push({
@@ -242,15 +260,17 @@ function setConsent(granted) {
 }
 function flush(beacon = false) {
   if (!cfg || consent !== "granted" || queue.length === 0) return;
-  const body = JSON.stringify({ sent_at: (/* @__PURE__ */ new Date()).toISOString(), batch: queue });
+  const batch = queue;
+  const body = JSON.stringify({ sent_at: (/* @__PURE__ */ new Date()).toISOString(), batch });
   queue = [];
   const url = `${cfg.host.replace(/\/$/, "")}/capture?key=${encodeURIComponent(cfg.key)}`;
-  if (beacon && navigator.sendBeacon) {
-    navigator.sendBeacon(url, new Blob([body], { type: "text/plain" }));
-    return;
-  }
-  origFetch == null ? void 0 : origFetch(url, { method: "POST", body, keepalive: true, headers: { "content-type": "text/plain" } }).catch(
-    () => void 0
+  if (beacon && navigator.sendBeacon && navigator.sendBeacon(url, new Blob([body], { type: "text/plain" }))) return;
+  const retry = () => {
+    queue = batch.concat(queue).slice(-MAX_QUEUE);
+  };
+  origFetch == null ? void 0 : origFetch(url, { method: "POST", body, keepalive: body.length < 6e4, headers: { "content-type": "text/plain" } }).then(
+    (r) => (r.status >= 500 || r.status === 429) && retry(),
+    retry
   );
 }
 var origFetch;
@@ -265,10 +285,11 @@ function reportScroll() {
   maxScroll = 0;
 }
 function pageview() {
-  if (location.pathname === lastPath) return;
+  const path = route();
+  if (path === lastPath) return;
   if (lastPath) reportScroll();
   const first = lastPath === "";
-  lastPath = location.pathname;
+  lastPath = path;
   track("$pageview", first && document.referrer ? { $referrer: document.referrer } : {});
 }
 function describe(el) {
@@ -300,6 +321,13 @@ function autocapture() {
     };
   }
   addEventListener("popstate", pageview);
+  addEventListener("hashchange", pageview);
+  addEventListener("pageshow", (e) => {
+    if (e.persisted) {
+      lastPath = "";
+      pageview();
+    }
+  });
   addEventListener("scroll", measureScroll, { passive: true });
   addEventListener("visibilitychange", () => document.visibilityState === "hidden" && reportScroll(), true);
   document.addEventListener(
@@ -390,9 +418,14 @@ function init(config) {
   } catch {
     activeFlags = [];
   }
+  if (isBot()) consent = "denied";
   if (consent === "denied") return;
   loadFlags();
-  if (config.autocapture !== false) autocapture();
+  const doc = document;
+  if (config.autocapture !== false) {
+    if (doc.prerendering) document.addEventListener("prerenderingchange", autocapture, { once: true });
+    else autocapture();
+  }
   if (config.replay !== false && consent === "granted") startReplay();
   timer = setInterval(() => flush(), 5e3);
   addEventListener("visibilitychange", () => document.visibilityState === "hidden" && flush(true));
