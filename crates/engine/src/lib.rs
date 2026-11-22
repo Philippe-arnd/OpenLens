@@ -642,6 +642,64 @@ pub async fn churned_sessions(
         .collect())
 }
 
+/// One value of a KPI breakdown.
+#[derive(Debug, Clone, Serialize)]
+pub struct BreakdownRow {
+    /// The role, account, plan, page or feature (`null` when unset).
+    pub value: Option<String>,
+    /// Distinct users, last 30 days.
+    pub users: i64,
+    /// Distinct sessions.
+    pub sessions: i64,
+    /// Events.
+    pub events: i64,
+    /// Feature uses (tasks).
+    pub tasks: i64,
+    /// Error events.
+    pub errors: i64,
+}
+
+/// KPIs split by one dimension (`role`, `account`, `plan`, `page` or
+/// `feature`), last 30 days, most users first (at most 50 values). Roles
+/// are the role each event was sent with ("role at event time").
+pub async fn breakdown(
+    q: &QueryEngine,
+    project: &str,
+    map: Option<&FeatureMap>,
+    f: &Filters,
+    by: &str,
+) -> Result<Vec<BreakdownRow>> {
+    let col = match by {
+        "role" => "role",
+        "account" => "account",
+        "plan" => "plan",
+        "page" => "path",
+        "feature" => "feature",
+        _ => return Err(EngineError::InvalidFilter("by")),
+    };
+    let src = source(map);
+    let w = f.clause(30)?;
+    let sql = format!(
+        "SELECT {col} AS value, count(DISTINCT distinct_id) AS users, count(DISTINCT session_id) AS sessions, \
+         count(*) AS events, sum(CASE WHEN feature IS NOT NULL THEN 1 ELSE 0 END) AS tasks, \
+         sum(CASE WHEN event = '$error' THEN 1 ELSE 0 END) AS errors \
+         FROM {src} WHERE {w} GROUP BY {col} ORDER BY users DESC, events DESC LIMIT 50"
+    );
+    Ok(q.sql(project, &sql)
+        .await?
+        .rows
+        .iter()
+        .map(|r| BreakdownRow {
+            value: text(r, "value"),
+            users: int(r, "users"),
+            sessions: int(r, "sessions"),
+            events: int(r, "events"),
+            tasks: int(r, "tasks"),
+            errors: int(r, "errors"),
+        })
+        .collect())
+}
+
 /// The latest events, newest first (at most 200).
 pub async fn recent_events(
     q: &QueryEngine,

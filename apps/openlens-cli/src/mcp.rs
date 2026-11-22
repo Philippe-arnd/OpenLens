@@ -108,6 +108,16 @@ impl Tools for OpenLensTools {
                 input_schema: json!({"type":"object","properties":proj}),
             },
             ToolSpec {
+                name: "insights",
+                description: "What to focus on: the ranked insight cards (evidence, cohort size, next step), paths to value, readiness and role gaps.",
+                input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"}}))}),
+            },
+            ToolSpec {
+                name: "kpi_report",
+                description: "Headline KPIs in one compact payload: users (DAU/WAU/MAU, stickiness), sessions, vitals, top features and roles, latest two releases. With `by` (role|account|plan|page|feature), also users, sessions, events, tasks and errors per value (30 days). Roles are 'role at event time'.",
+                input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"},"by":{"type":"string","enum":["role","account","plan","page","feature"]}}))}),
+            },
+            ToolSpec {
                 name: "board",
                 description: "The Focus board numbers (KPIs by role/environment/release, features, roles, role gaps, releases, vitals).",
                 input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"}}))}),
@@ -121,6 +131,23 @@ impl Tools for OpenLensTools {
                 name: "sql",
                 description: "Read-only SQL (DataFusion) on table `events`: uuid, event, distinct_id, session_id, timestamp, url, path, feature, role, account, plan, environment, release, properties (JSON text), date. Prune with `date >= 'YYYY-MM-DD'`. Max 10k rows.",
                 input_schema: json!({"type":"object","properties":with(json!({"query":{"type":"string"}})),"required":["query"]}),
+            },
+            ToolSpec {
+                name: "flags",
+                description: "The project's feature flags (key, enabled, rollout %, target roles and accounts).",
+                input_schema: json!({"type":"object","properties":proj}),
+            },
+            ToolSpec {
+                name: "flag_set",
+                description: "Create or update a flag: put a risky change behind openlens.isEnabled(key), start with a small rollout or one role, then widen it once the board shows its cohort is fine.",
+                input_schema: json!({"type":"object","properties":with(json!({
+                    "key":{"type":"string"},
+                    "enabled":{"type":"boolean"},
+                    "rollout":{"type":"integer","minimum":0,"maximum":100},
+                    "roles":{"type":"array","items":{"type":"string"}},
+                    "accounts":{"type":"array","items":{"type":"string"}},
+                    "description":{"type":"string"}
+                })),"required":["key"]}),
             },
             ToolSpec {
                 name: "login_link",
@@ -198,7 +225,23 @@ impl Tools for OpenLensTools {
                                     .collect::<Vec<_>>())
                             )
                         };
+                        let breakdown = match s(args, "by") {
+                            Some(by) => {
+                                let mut bq = q.clone();
+                                bq.push(format!("by={}", by.replace(['&', '#', '?', ' '], "")));
+                                let path = format!(
+                                    "/api/projects/{}/breakdown?{}",
+                                    project(args),
+                                    bq.join("&")
+                                );
+                                let (st, b) = c.call("GET", &path, None)?;
+                                ok_or(st, b)?
+                            }
+                            None => Value::Null,
+                        };
                         json!({
+                            "role_rule": "role at event time",
+                            "breakdown": breakdown,
                             "filters": v["filters"],
                             "users": v["users"],
                             "sessions": v["sessions"],
@@ -261,6 +304,35 @@ impl Tools for OpenLensTools {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_tool_call_handles_is_listed_for_agents() {
+        let dir = tempfile::tempdir().unwrap();
+        let client = Client::new(Some("http://localhost:1".into()), Some("t".into())).unwrap();
+        let tools = OpenLensTools::new(client, dir.path(), dir.path()).unwrap();
+        let listed: Vec<&str> = tools.list().iter().map(|t| t.name).collect();
+        // Parse the dispatch arms of `call` from this file, so a new arm
+        // without a ToolSpec fails here.
+        let src = include_str!("mcp.rs");
+        let body = &src[src.find("fn call(&self").unwrap()..src.find("#[cfg(test)]").unwrap()];
+        let mut checked = 0;
+        for line in body.lines().map(str::trim) {
+            if !line.ends_with("=> {") && !line.contains("\" =>") {
+                continue;
+            }
+            let arm = line.split("=>").next().unwrap_or("");
+            for name in arm.split('|').map(|n| n.trim().trim_matches('"')) {
+                if !name.is_empty() && name.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
+                    assert!(
+                        listed.contains(&name),
+                        "tool `{name}` is handled but not listed"
+                    );
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked >= 12, "parsed only {checked} dispatch names");
+    }
 
     #[test]
     fn files_outside_the_read_root_are_refused_even_when_they_exist() {

@@ -6,6 +6,7 @@ Start from the summaries and drill down only where something stands out. Every t
 | --- | --- | --- |
 | What should we focus on? | `insights`: ranked cards with evidence and next steps, plus paths to value | `sql` |
 | Headline KPIs by role, environment or release | `kpi_report` (optional `role`, `env`, `release`) | `board` (everything) |
+| Split by account, plan, page or feature | `kpi_report` with `by` (`role`, `account`, `plan`, `page`, `feature`) | `sql` |
 | Did the last release move the numbers? | `kpi_report`: `releases` holds the latest two | `kpi_report --release <name>` |
 | Is the wiring complete? | `verify` | `feature_map_lint` |
 | Anything else | `sql` (read-only DataFusion on `events`) | prune with `date >= 'YYYY-MM-DD'` |

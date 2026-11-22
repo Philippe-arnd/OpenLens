@@ -812,3 +812,47 @@ async fn replay_pages_list_play_and_lock_down() {
         StatusCode::OK
     );
 }
+
+#[tokio::test]
+async fn breakdown_splits_by_a_fixed_dimension_only() {
+    let h = harness();
+    post(&h, "/capture", batch(&h.key), false).await;
+    openlens_server::flush_now(&h.state).unwrap();
+    let body = |r: axum::response::Response| async move {
+        let b = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+        serde_json::from_slice::<serde_json::Value>(&b).unwrap()
+    };
+    let v = body(get(&h, "/api/projects/default/breakdown?by=role", None, true).await).await;
+    assert!(
+        v["role_rule"]
+            .as_str()
+            .unwrap()
+            .starts_with("role at event time")
+    );
+    assert!(
+        v["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["value"] == "owner")
+    );
+    let v = body(get(&h, "/api/projects/default/breakdown?by=page", None, true).await).await;
+    assert!(
+        v["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["value"] == "/")
+    );
+    // Anything else is refused, so `by` can never inject SQL.
+    let bad = get(
+        &h,
+        "/api/projects/default/breakdown?by=distinct_id;DROP",
+        None,
+        true,
+    )
+    .await;
+    assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+    let noauth = get(&h, "/api/projects/default/breakdown?by=role", None, false).await;
+    assert_eq!(noauth.status(), StatusCode::UNAUTHORIZED);
+}
