@@ -15,6 +15,7 @@ use serde_json::{Map, Value};
 mod errors;
 mod insights;
 mod pages;
+pub mod stats;
 mod tasks;
 pub use errors::{ErrorGroup, error_groups};
 pub use insights::{CohortStats, FlagCohort, Funnel, FunnelStep, Insight, Journey, Readiness};

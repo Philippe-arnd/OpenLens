@@ -499,7 +499,7 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
                     section.card.wide {
                         h2.violet { (icon("flag")) "Flags: with vs without" }
                         table.plain {
-                            thead { tr { th { "Flag" } th.num { "Users with / without" } th.num { "Avg session" } th.num { "Tasks / session" } th.num { "Sessions with errors" } } }
+                            thead { tr { th { "Flag" } th.num { "Users with / without" } th.num { "Avg session" } th.num { "Tasks / session" } th.num { "Sessions with errors" } th { "Confidence" } } }
                             tbody { @for c in &b.flag_cohorts {
                                 tr {
                                     th scope="row" { code { (c.flag) } }
@@ -507,6 +507,7 @@ pub fn board(p: &ProjectInfo<'_>, b: &Board, f: &Filters, host: &str) -> Markup 
                                     td.num { (duration(c.with.avg_secs)) " / " (duration(c.without.avg_secs)) }
                                     td.num { (format!("{:.2}", c.with.tasks_per_session)) " / " (format!("{:.2}", c.without.tasks_per_session)) }
                                     td.num { (pct(c.with.error_rate)) " / " (pct(c.without.error_rate)) }
+                                    td.small { (confidence(match (c.p_errors, c.p_tasks) { (Some(a), Some(b)) => Some(a.min(b)), (a, b) => a.or(b) })) }
                                 }
                             } }
                         }
@@ -856,6 +857,21 @@ fn feature_pulse(b: &Board, empty: bool) -> Markup {
                 }
                 p.muted.small { "Last 30 days. Adoption is the share of active users (MAU) who used the feature; completion is the share of them who reached its success event; task time runs from the first use to that event (within 30 minutes)." }
             }
+        }
+    }
+}
+
+/// A p-value in words: whether the difference can be trusted yet.
+fn confidence(p: Option<f64>) -> Markup {
+    match p {
+        None => {
+            html! { span.muted title="Fewer than 30 sessions on one side" { "too few sessions" } }
+        }
+        Some(p) if p < openlens_engine::stats::ALPHA => {
+            html! { strong title=(format!("p = {p:.3}")) { "significant" } }
+        }
+        Some(p) => {
+            html! { span.muted title=(format!("p = {p:.3}")) { "not yet (p = " (format!("{p:.2}")) ")" } }
         }
     }
 }

@@ -339,7 +339,7 @@ async fn a_flag_with_more_errors_shows_up_as_its_own_cohort() {
     let dir = tempfile::tempdir().unwrap();
     let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
     let mut evs = Vec::new();
-    for u in 0..40 {
+    for u in 0..120 {
         let flagged = u % 2 == 0;
         let user = format!("f{u}");
         let session = format!("fs{u}");
@@ -385,7 +385,8 @@ async fn a_flag_with_more_errors_shows_up_as_its_own_cohort() {
         .iter()
         .find(|c| c.flag == "new-editor")
         .expect("cohort");
-    assert_eq!(c.with.users, 20);
+    assert_eq!(c.with.users, 60);
+    assert!(c.p_errors.unwrap() < 0.05, "{c:?}");
     assert!(c.with.error_rate > c.without.error_rate);
     assert!(
         b.flag_cohorts.iter().all(|c| c.flag != "x') OR 1=1 --"),
