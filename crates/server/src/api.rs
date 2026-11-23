@@ -68,7 +68,10 @@ pub(crate) fn routes() -> Router<AppState> {
             "/api/projects/{project}/churn",
             get(crate::explore::api_churn),
         )
-        .route("/api/projects/{project}/goals", get(crate::goals::api))
+        .route(
+            "/api/projects/{project}/goals",
+            get(crate::goals::api).post(crate::goals::api_set),
+        )
         .route(
             "/api/projects/{project}/people/{who}/forget",
             axum::routing::delete(crate::privacy::api_forget),

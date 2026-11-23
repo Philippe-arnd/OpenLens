@@ -23,12 +23,15 @@ pub(crate) async fn compute(
     base: &str,
 ) -> Result<(openlens_engine::Digest, String), openlens_engine::EngineError> {
     let map = crate::load_map(state, &project.id).await;
-    let d = openlens_engine::digest(
+    let mut d = openlens_engine::digest(
         &state.query,
         &project.id,
         map.as_ref().map(|(m, v)| (m, *v)),
     )
     .await?;
+    let (at_risk, goals) = crate::goals::snapshot(state, &project.id);
+    d.goals = goals;
+    d.objectives_at_risk = at_risk;
     let md =
         openlens_engine::digest_markdown(&project.name, &format!("{base}/p/{}", project.id), &d);
     Ok((d, md))

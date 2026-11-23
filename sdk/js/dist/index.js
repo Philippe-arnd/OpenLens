@@ -234,11 +234,15 @@ function feature(key, props) {
   track("$feature", { ...props, $feature: key });
 }
 function loadFlags() {
-  var _a;
+  var _a, _b;
   if (!cfg || !origFetch) return;
   const q = new URLSearchParams({ key: cfg.key, distinct_id: (_a = state.uid) != null ? _a : state.anon });
   if (state.dims.role) q.set("role", state.dims.role);
   if (state.dims.account) q.set("account", state.dims.account);
+  if (state.dims.plan) q.set("plan", state.dims.plan);
+  for (const [k, v] of Object.entries((_b = state.dims.properties) != null ? _b : {}).slice(0, 20)) {
+    if (v !== void 0 && v !== null && v !== "") q.set(`p.${k.toLowerCase()}`, String(v).slice(0, 100));
+  }
   origFetch(`${cfg.host.replace(/\/$/, "")}/flags?${q}`).then((r) => r.ok ? r.json() : null).then((j) => {
     var _a2;
     if (Array.isArray(j == null ? void 0 : j.surveys)) activeSurveys = j.surveys;

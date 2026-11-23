@@ -76,8 +76,12 @@ module OpenLens
     end
 
     # Is a flag on for this user? false on any error.
-    def enabled?(flag, distinct_id, role: nil, account: nil)
-      q = { "key" => @key, "distinct_id" => distinct_id.to_s, "role" => role, "account" => account }.compact
+    # plan: and properties: feed the flag's rules (never stored).
+    def enabled?(flag, distinct_id, role: nil, account: nil, plan: nil, properties: {})
+      q = { "key" => @key, "distinct_id" => distinct_id.to_s, "role" => role, "account" => account, "plan" => plan }.compact
+      properties.first(20).each do |k, v|
+        q["p.#{k.to_s.downcase}"] = v.to_s unless v.nil? || v.to_s.empty?
+      end
       uri = URI("#{@host}/flags?#{URI.encode_www_form(q)}")
       res = http(uri) { |h| h.get(uri.request_uri) }
       flags = JSON.parse(res.body)["flags"]

@@ -21,7 +21,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Dict, Optional
 
 __all__ = ["OpenLens"]
 __version__ = "0.1.0"
@@ -88,13 +88,27 @@ class OpenLens:
         p = {k: v for k, v in (("$role", role), ("$account", account), ("$plan", plan)) if v}
         self.capture(distinct_id, "$identify", p)
 
-    def is_enabled(self, flag: str, distinct_id: str, role: Optional[str] = None, account: Optional[str] = None) -> bool:
-        """Is a flag on for this user? False on any error."""
+    def is_enabled(
+        self,
+        flag: str,
+        distinct_id: str,
+        role: Optional[str] = None,
+        account: Optional[str] = None,
+        plan: Optional[str] = None,
+        properties: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Is a flag on for this user? False on any error. `plan` and
+        `properties` feed the flag's rules (never stored)."""
         q = {"key": self.key, "distinct_id": str(distinct_id)}
         if role:
             q["role"] = role
         if account:
             q["account"] = account
+        if plan:
+            q["plan"] = plan
+        for k, v in list((properties or {}).items())[:20]:
+            if v is not None and v != "":
+                q[f"p.{str(k).lower()}"] = str(v).lower() if isinstance(v, bool) else str(v)
         try:
             url = f"{self.host}/flags?{urllib.parse.urlencode(q)}"
             with urllib.request.urlopen(url, timeout=self.timeout) as r:

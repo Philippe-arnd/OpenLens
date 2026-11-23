@@ -3286,3 +3286,208 @@ async fn map_health_finds_planted_defects_and_versions_keep_author_and_message()
             && !page.contains(" style="),
     );
 }
+
+#[tokio::test]
+async fn flag_rules_target_plan_and_custom_properties() {
+    let h = harness();
+    let resp = router(h.state.clone())
+        .oneshot(
+            Request::put("/api/projects/default/flags/pro-export")
+                .header("authorization", "Bearer adm_test")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"key":"pro-export","enabled":true,"rollout":100,"rules":[{"property":"plan","op":"in","values":["pro","team"]},{"property":"seats","op":"not_in","values":["1"]}]}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let flags = |q: &'static str| {
+        let (st, key) = (h.state.clone(), h.key.clone());
+        async move {
+            let resp = router(st)
+                .oneshot(
+                    Request::get(format!("/flags?key={key}&distinct_id=u1{q}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let v: serde_json::Value = serde_json::from_slice(
+                &axum::body::to_bytes(resp.into_body(), 1 << 20)
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            v["flags"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|f| f == "pro-export")
+        }
+    };
+    assert!(flags("&plan=pro&p.seats=12").await);
+    assert!(
+        flags("&p.plan=Team&p.seats=3").await,
+        "p.plan works too, any case"
+    );
+    assert!(!flags("&plan=free&p.seats=12").await);
+    assert!(!flags("&plan=pro&p.seats=1").await);
+    assert!(!flags("&plan=pro").await, "seats not sent: out");
+    // A bad rule is refused.
+    let resp = router(h.state.clone())
+        .oneshot(
+            Request::put("/api/projects/default/flags/bad")
+                .header("authorization", "Bearer adm_test")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"key":"bad","enabled":true,"rollout":100,"rules":[{"property":"Bad Key","op":"in","values":["x"]}]}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(resp.status().is_client_error());
+}
+
+#[tokio::test]
+async fn goals_part_two_guardrails_objectives_and_the_api() {
+    let h = harness();
+    let (status, _) = post(&h, "/capture", batch(&h.key), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    // A goal stored before #272 (no guardrails, no releases) still loads.
+    h.state
+        .meta
+        .set_project_setting(
+            "default",
+            "goals",
+            r#"[{"id":"old1","kpi":"error_rate","target":0.0,"up":false,"deadline":"2099-01-01","owner":"","baseline":0.0,"created":"2026-01-01"}]"#,
+        )
+        .unwrap();
+    let set = |body: serde_json::Value| {
+        let st = h.state.clone();
+        async move {
+            let resp = router(st)
+                .oneshot(
+                    Request::post("/api/projects/default/goals")
+                        .header("authorization", "Bearer adm_test")
+                        .header("content-type", "application/json")
+                        .body(Body::from(body.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let s = resp.status();
+            let v: serde_json::Value = serde_json::from_slice(
+                &axum::body::to_bytes(resp.into_body(), 1 << 20)
+                    .await
+                    .unwrap(),
+            )
+            .unwrap_or_default();
+            (s, v)
+        }
+    };
+    let deadline = (chrono::Utc::now() + chrono::Duration::days(60))
+        .format("%Y-%m-%d")
+        .to_string();
+    let (s, v) = set(serde_json::json!({
+        "kpi": "bounce_rate", "target": 0.1, "deadline": deadline,
+        "guardrails": [{"kpi": "avg_secs", "limit": 1000.0}, {"kpi": "error_rate"}]
+    }))
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["goal"]["guardrails"].as_array().unwrap().len(), 2);
+    let gid = v["goal"]["id"].as_str().unwrap().to_owned();
+    let (s, v) =
+        set(serde_json::json!({ "kpi": "bounce_rate", "target": 0.1, "releases": 3 })).await;
+    assert_eq!(
+        s,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "no releases seen yet: {v}"
+    );
+    let (s, _) =
+        set(serde_json::json!({ "kpi": "bounce_rate", "target": 3.0, "deadline": deadline })).await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "a share above 1");
+
+    let owner = login_cookie(&h).await;
+    let tomorrow = (chrono::Utc::now() + chrono::Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string();
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/objectives",
+            &owner,
+            &format!("title=Calmer+sessions&goal1={gid}&end={tomorrow}")
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/objectives",
+            &owner,
+            &format!("title=x&goal1=nope&end={tomorrow}")
+        )
+        .await,
+        StatusCode::BAD_REQUEST
+    );
+    let page = body_text(get(&h, "/p/default/goals", Some(&owner), false).await).await;
+    assert!(
+        page.contains("Calmer sessions")
+            && page.contains("guardrail breached")
+            && !page.contains(" style="),
+        "avg_secs is under its 1000 s floor"
+    );
+    // The period ends: the hourly pass archives it and alerts on the guardrail.
+    let mut objectives: serde_json::Value = serde_json::from_str(
+        &h.state
+            .meta
+            .project_setting("default", "objectives")
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    objectives[0]["end"] = serde_json::json!("2020-01-01");
+    h.state
+        .meta
+        .set_project_setting("default", "objectives", &objectives.to_string())
+        .unwrap();
+    openlens_server::alert_tick(&h.state, 3).await;
+    let objectives: serde_json::Value = serde_json::from_str(
+        &h.state
+            .meta
+            .project_setting("default", "objectives")
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        objectives[0]["archived"]["results"][0][0],
+        gid.as_str(),
+        "{objectives}"
+    );
+    let incidents = h.state.meta.incidents("default", 0).unwrap();
+    assert!(
+        incidents
+            .iter()
+            .any(|i| i.0 == format!("guardrail:{gid}:avg_secs")),
+        "{incidents:?}"
+    );
+    let api: serde_json::Value = serde_json::from_str(
+        &body_text(get(&h, "/api/projects/default/goals", None, true).await).await,
+    )
+    .unwrap();
+    assert_eq!(api["goals"].as_array().unwrap().len(), 2, "{api}");
+    assert!(
+        api["goals"][1]["guardrails"][0]["breached"] == true,
+        "{api}"
+    );
+    let page = body_text(get(&h, "/p/default/goals", Some(&owner), false).await).await;
+    assert!(page.contains("Past objectives"));
+    let digest = body_text(get(&h, "/api/projects/default/digest", None, true).await).await;
+    assert!(digest.contains("## Goals"), "{digest}");
+}

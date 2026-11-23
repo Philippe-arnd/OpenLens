@@ -1,8 +1,8 @@
 //! Feature flags: rules and deterministic rollout evaluation.
 //!
 //! A flag is on for a user when it is enabled, the user's canonical role
-//! and account pass its targeting, and the user falls inside the rollout
-//! percentage. The percentage bucket is a hash of `flag key + user id`, so a
+//! and account pass its targeting, every property rule matches (#279), and
+//! the user falls inside the rollout percentage. The percentage bucket is a hash of `flag key + user id`, so a
 //! user keeps the same answer across sessions and devices, and widening a
 //! rollout only adds users (nobody flips from on to off).
 //!
@@ -34,6 +34,135 @@ pub struct Flag {
     /// variants the flag is a plain on/off.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub variants: Vec<Variant>,
+    /// Property rules (#279): all must match. A rule on a property the
+    /// user did not send fails, for `in` and `not_in` alike.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rules: Vec<Rule>,
+}
+
+/// Most rules on a flag.
+pub const MAX_RULES: usize = 10;
+/// Most values in one rule.
+pub const MAX_RULE_VALUES: usize = 100;
+/// Longest property value accepted (rules and `/flags`).
+pub const MAX_VALUE_LEN: usize = 100;
+/// Most properties accepted on one `/flags` call.
+pub const MAX_PROPERTIES: usize = 20;
+
+/// `plan in pro, team` (#279).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Rule {
+    /// `plan`, `country`, `role`, `account`, or any key the app passes to
+    /// `identify`.
+    pub property: String,
+    /// `in` or `not_in`.
+    pub op: RuleOp,
+    /// Values compared without regard to case.
+    pub values: Vec<String>,
+}
+
+/// How a rule compares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleOp {
+    /// The property is one of the values.
+    In,
+    /// The property is set and is none of the values.
+    NotIn,
+}
+
+/// Is this a valid property key: 1–40 of `[a-z0-9_.$-]`?
+pub fn valid_property(k: &str) -> bool {
+    !k.is_empty()
+        && k.len() <= 40
+        && k.bytes().all(|b| {
+            b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'_' | b'.' | b'$' | b'-')
+        })
+}
+
+impl Rule {
+    /// Parse `plan in pro, team` or `country not in FR, DE`.
+    pub fn parse(s: &str) -> Result<Self, String> {
+        let s = s.trim();
+        let (property, op, rest) = if let Some((p, r)) = s.split_once(" not in ") {
+            (p, RuleOp::NotIn, r)
+        } else if let Some((p, r)) = s.split_once(" in ") {
+            (p, RuleOp::In, r)
+        } else {
+            return Err(format!(
+                "`{s}`: write `property in a, b` or `property not in a, b`"
+            ));
+        };
+        let r = Self {
+            property: property.trim().to_lowercase(),
+            op,
+            values: rest
+                .split(',')
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(str::to_owned)
+                .collect(),
+        };
+        r.check()?;
+        Ok(r)
+    }
+
+    fn check(&self) -> Result<(), String> {
+        if !valid_property(&self.property) {
+            return Err(format!(
+                "`{}`: properties are 1-40 chars of lowercase letters, digits, _ . $ or -",
+                self.property
+            ));
+        }
+        if self.values.is_empty() || self.values.len() > MAX_RULE_VALUES {
+            return Err(format!(
+                "`{}`: 1 to {MAX_RULE_VALUES} values",
+                self.property
+            ));
+        }
+        if self
+            .values
+            .iter()
+            .any(|v| v.trim().is_empty() || v.len() > MAX_VALUE_LEN)
+        {
+            return Err(format!(
+                "`{}`: values are 1-{MAX_VALUE_LEN} chars",
+                self.property
+            ));
+        }
+        Ok(())
+    }
+
+    /// Does the subject pass the rule?
+    pub fn matches(&self, s: &Subject<'_>) -> bool {
+        let value = match self.property.as_str() {
+            "role" => s.role,
+            "account" => s.account,
+            k => s
+                .properties
+                .iter()
+                .find(|(p, _)| p == k)
+                .map(|(_, v)| v.as_str()),
+        };
+        let Some(v) = value.map(str::trim).filter(|v| !v.is_empty()) else {
+            return false;
+        };
+        let hit = self.values.iter().any(|x| x.trim().eq_ignore_ascii_case(v));
+        match self.op {
+            RuleOp::In => hit,
+            RuleOp::NotIn => !hit,
+        }
+    }
+}
+
+impl std::fmt::Display for Rule {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let op = match self.op {
+            RuleOp::In => "in",
+            RuleOp::NotIn => "not in",
+        };
+        write!(f, "{} {op} {}", self.property, self.values.join(", "))
+    }
 }
 
 /// One arm of an experiment.
@@ -54,6 +183,8 @@ pub struct Subject<'a> {
     pub role: Option<&'a str>,
     /// Account, if known.
     pub account: Option<&'a str>,
+    /// Other properties (`plan`, `country`, anything from `identify`).
+    pub properties: &'a [(String, String)],
 }
 
 /// Bucket of a user for a flag, in 0..10_000 (0.01% steps).
@@ -77,6 +208,9 @@ impl Flag {
         if !self.roles.is_empty() && !s.role.is_some_and(|r| self.roles.iter().any(|x| x == r)) {
             return false;
         }
+        if !self.rules.iter().all(|r| r.matches(s)) {
+            return false;
+        }
         bucket(&self.key, s.distinct_id) < u32::from(self.rollout.min(100)) * 100
     }
 
@@ -98,6 +232,12 @@ impl Flag {
         }
         if self.description.len() > 500 || self.roles.len() > 50 || self.accounts.len() > 1000 {
             return Err("description ≤ 500 chars, ≤ 50 roles, ≤ 1000 accounts".into());
+        }
+        if self.rules.len() > MAX_RULES {
+            return Err(format!("at most {MAX_RULES} rules"));
+        }
+        for r in &self.rules {
+            r.check()?;
         }
         if !self.variants.is_empty() {
             if !(2..=6).contains(&self.variants.len()) {
@@ -340,6 +480,7 @@ pub mod survey {
                 distinct_id: "u1",
                 role: Some("admin"),
                 account: None,
+                properties: &[],
             };
             assert!(s().eligible(&who));
             assert!(
@@ -364,6 +505,7 @@ pub mod survey {
                         distinct_id: &format!("u{i}"),
                         role: None,
                         account: None,
+                        properties: &[],
                     })
                 })
                 .count();

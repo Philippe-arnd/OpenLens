@@ -20,7 +20,9 @@ test("batches events with key, release and role, and checks flags", async () => 
         res.end('{"accepted":3}');
       } else if (req.url.startsWith("/flags")) {
         const u = new URL(req.url, "http://x");
-        res.end(JSON.stringify({ flags: u.searchParams.get("role") === "admin" ? ["beta"] : [] }));
+        const flags = u.searchParams.get("role") === "admin" ? ["beta"] : [];
+        if (u.searchParams.get("plan") === "pro" && u.searchParams.get("p.seats") === "12") flags.push("pro-only");
+        res.end(JSON.stringify({ flags }));
       }
     });
   });
@@ -38,6 +40,8 @@ test("batches events with key, release and role, and checks flags", async () => 
   assert.equal(evs[2].properties.$feature, "export");
   assert.equal(await ol.isEnabled("beta", "u1", { role: "admin" }), true);
   assert.equal(await ol.isEnabled("beta", "u2", { role: "member" }), false);
+  assert.equal(await ol.isEnabled("pro-only", "u1", { plan: "pro", properties: { Seats: 12 } }), true);
+  assert.equal(await ol.isEnabled("pro-only", "u1", { plan: "free", properties: { seats: 12 } }), false);
   s.close();
 });
 

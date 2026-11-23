@@ -11,6 +11,7 @@ Start from the summaries and drill down only where something stands out. Every t
 | What did this user do (before churning, before an error)? | `user_timeline { distinct_id }`: role history, recordings, latest events | the replay link it returns |
 | What breaks, for whom? | `errors`: groups with users, roles, releases, places and the original source line | `user_timeline` of an affected user |
 | Is the wiring complete? | `verify` | `feature_map_lint` |
+| Where do our goals stand? | `goals`: status, guardrails, what moved each goal (releases and changes), objectives | `set_goal { kpi, target, deadline \| releases, guardrails }` |
 | Is the feature map any good? | `map_health`: score, findings with evidence and a YAML fix | `suggest_map_changes` (patches only) |
 | Every feature at a glance | `map_overview`: status, uses, users, success (30 days vs the 30 before), areas, adoption ladder | `feature_context { key }` |
 | Everything about one feature | `feature_context { key }`: definition, findings, users and success by role, top pages, ladder, area peers | `sql` |

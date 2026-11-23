@@ -23,6 +23,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         q = parse_qs(urlparse(self.path).query)
         flags = ["beta"] if q.get("role") == ["admin"] else []
+        if q.get("plan") == ["pro"] and q.get("p.seats") == ["12"] and q.get("p.trial") == ["true"]:
+            flags.append("pro-only")
         self.send_response(200)
         self.end_headers()
         self.wfile.write(json.dumps({"flags": flags}).encode())
@@ -45,6 +47,8 @@ class ClientTest(unittest.TestCase):
         self.assertEqual(body["batch"][1]["properties"]["$release"], "v9")
         self.assertTrue(ol.is_enabled("beta", "u1", role="admin"))
         self.assertFalse(ol.is_enabled("beta", "u2", role="member"))
+        self.assertTrue(ol.is_enabled("pro-only", "u1", plan="pro", properties={"Seats": 12, "trial": True}))
+        self.assertFalse(ol.is_enabled("pro-only", "u1", plan="free", properties={"seats": 12, "trial": True}))
         srv.shutdown()
 
     def test_never_raises_when_down(self):

@@ -80,6 +80,7 @@ pub(crate) async fn flag_page(
                 map.as_ref().map(|(m, _)| m),
                 &filters,
                 &f.key,
+                &f.variants.iter().map(|v| v.key.clone()).collect::<Vec<_>>(),
             )
             .await
             .unwrap_or_default()
@@ -110,6 +111,9 @@ pub(crate) struct FlagForm {
     accounts: String,
     #[serde(default)]
     variants: String,
+    /// One rule per line (#279).
+    #[serde(default)]
+    rules: String,
 }
 
 /// `control:50, short:50` → variants (empty: none).
@@ -153,6 +157,7 @@ pub(crate) async fn flag_save(
         roles: list(&f.roles),
         accounts: list(&f.accounts),
         variants: Vec::new(),
+        rules: Vec::new(),
     };
     let mut flag = flag;
     let variant_err = match parse_variants(&f.variants) {
@@ -161,6 +166,20 @@ pub(crate) async fn flag_save(
             None
         }
         Err(e) => Some(e),
+    };
+    let rules: Result<Vec<_>, String> = f
+        .rules
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(openlens_flags::Rule::parse)
+        .collect();
+    let variant_err = match rules {
+        Ok(r) => {
+            flag.rules = r;
+            variant_err
+        }
+        Err(e) => variant_err.or(Some(e)),
     };
     let existing = crate::flags::load(&state, &p.id).await;
     let renamed = !f.original.is_empty() && f.original != flag.key;

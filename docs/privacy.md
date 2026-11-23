@@ -4,6 +4,7 @@ What OpenLens stores, for how long, where, and what it never stores. Everything 
 
 ## Stored
 
+- **Flag properties** (#279): `plan`, `country` and the `properties` passed to `identify` go to `/flags` in the query string to evaluate rules (at most 20, 100 characters each). They are not stored by OpenLens, but proxies may log query strings: do not target on personal data.
 - **Events** sent by your app: name, user id (`distinct_id`), session id, time, page URL and path, feature, role, account, plan, environment, release, active flags and the properties you send. Page views also get the **country** (looked up from the address, which is then dropped), **device class, browser and OS** (parsed from the user agent, which is then dropped), and the **referrer's host** (never its path or query).
 - **Session recordings** (replays), with every input masked and the text of elements marked `data-openlens-mask` hidden.
 - **People:** role, account, plan, first and last seen; role history.

@@ -335,6 +335,10 @@ enum FlagsCmd {
         /// What the flag is for.
         #[arg(long, default_value = "")]
         description: String,
+        /// A property rule, repeatable, all must match: `plan in pro,team`,
+        /// `country not in FR`. A user who did not send the property is out.
+        #[arg(long = "rule")]
+        rules: Vec<String>,
     },
     /// Delete a flag.
     Delete {
@@ -940,14 +944,21 @@ fn run(cli: Cli) -> Result<bool, String> {
                     roles,
                     accounts,
                     description,
-                } => c.call(
-                    "PUT",
-                    &format!("/api/projects/{project}/flags/{key}"),
-                    Some(Body::Json(json!({
-                        "key": key, "enabled": !off, "rollout": rollout, "roles": roles,
-                        "accounts": accounts, "description": description,
-                    }))),
-                )?,
+                    rules,
+                } => {
+                    let rules = rules
+                        .iter()
+                        .map(|r| openlens_flags::Rule::parse(r))
+                        .collect::<Result<Vec<_>, String>>()?;
+                    c.call(
+                        "PUT",
+                        &format!("/api/projects/{project}/flags/{key}"),
+                        Some(Body::Json(json!({
+                            "key": key, "enabled": !off, "rollout": rollout, "roles": roles,
+                            "accounts": accounts, "description": description, "rules": rules,
+                        }))),
+                    )?
+                }
                 FlagsCmd::Delete { key, project } => c.call(
                     "DELETE",
                     &format!("/api/projects/{project}/flags/{key}"),

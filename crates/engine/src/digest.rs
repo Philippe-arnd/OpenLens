@@ -36,6 +36,11 @@ pub struct Digest {
     pub tasks: Vec<(String, Delta)>,
     /// The top insight cards of the board right now.
     pub insights: Vec<crate::Insight>,
+    /// Goals, one line each with its status (#272; set by the server from
+    /// the hourly goals pass).
+    pub goals: Vec<(String, String)>,
+    /// Objectives at risk or off track (#272).
+    pub objectives_at_risk: Vec<String>,
 }
 
 /// Compute the digest (production environment, all roles).
@@ -161,6 +166,15 @@ pub fn digest_markdown(project_name: &str, board_url: &str, d: &Digest) -> Strin
                 "- **{}** ({}). Next step: {}\n",
                 i.title, i.evidence, i.next_step
             ));
+        }
+    }
+    if !d.goals.is_empty() {
+        s.push_str("\n## Goals\n\n");
+        for o in &d.objectives_at_risk {
+            s.push_str(&format!("- **Objective at risk:** {o}\n"));
+        }
+        for (line, st) in &d.goals {
+            s.push_str(&format!("- {line} — **{st}**\n"));
         }
     }
     s.push_str(&format!("\nOpen the board: {board_url}\n"));

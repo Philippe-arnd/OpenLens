@@ -162,6 +162,7 @@ fn label(rule: &str) -> &'static str {
         "down" => "is down",
         "traffic" => "gets no traffic",
         r if r.starts_with("insight:") => "has a regression",
+        r if r.starts_with("guardrail:") => "has a goal guardrail breached",
         "cert" => "has a certificate about to expire",
         "cert_expired" => "has an expired certificate",
         "failing" => "has many failing requests",
@@ -339,7 +340,7 @@ pub(crate) async fn deliver(
 
 /// Open the rule's incident when `failing`, close it when not; announce
 /// it once it has lasted `wait` seconds, and announce its end if it was.
-async fn track(
+pub(crate) async fn track(
     state: &AppState,
     project: &str,
     name: &str,
@@ -434,6 +435,9 @@ pub(crate) async fn tick(state: &AppState, minute: u64) {
         }
         if s.regressions && minute % 60 == 1 {
             Box::pin(regressions(state, &p)).await;
+        }
+        if minute % 60 == 3 {
+            Box::pin(crate::goals::hourly(state, &p, s.regressions)).await;
         }
         if s.cert
             && minute % 60 == 2

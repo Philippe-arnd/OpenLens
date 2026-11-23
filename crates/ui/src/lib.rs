@@ -665,6 +665,9 @@ pub fn board(
                 p.muted { "What " (scope) " did lately in " strong { (f.environment) } ". " @if !shared() { a href={ "/p/" (p.id) "/digest" } { "This week vs last →" } " · " a href={ "/p/" (p.id) "/breakdown?by=role&env=" (url_enc(&f.environment)) } { "Break down →" } } }
             }
             @if let Some(d) = &b.app_down { @if !shared() { p.alert role="alert" { (icon("alert")) " " (d) " — " a href={ "/p/" (p.id) "/uptime" } { "Uptime" } } } }
+            @if !b.objectives_at_risk.is_empty() && !shared() {
+                p.notice role="status" { (icon("star")) " Objectives at risk: " (b.objectives_at_risk.join(" · ")) " — " a href={ "/p/" (p.id) "/goals" } { "Goals" } }
+            }
             (filter_bar(p.id, b, f, ""))
             (insight_cards(p.id, b, plain))
             section.tiles aria-label="Key numbers" {
@@ -1307,6 +1310,18 @@ fn map_health(h: &openlens_engine::MapHealth) -> Markup {
                 p.muted.small { "From the map's " code { "requires" } ": of the users of a feature, the share who went on to the one that requires it. Where most skip it, the requirement is probably wrong." }
             }
         }
+    }
+}
+
+/// One "vs baseline" cell of the variant readout.
+fn versus(baseline: bool, p: Option<f64>, significant: bool) -> Markup {
+    html! {
+        @if baseline { span.muted { "—" } }
+        @else { @match p {
+            None => span.muted { "too few" },
+            Some(p) if significant => { span.status.good { "differs" } " p=" (format!("{p:.3}")) },
+            Some(p) => { span.muted { "no clear difference" } " p=" (format!("{p:.3}")) },
+        } }
     }
 }
 
@@ -2222,6 +2237,42 @@ pub struct GoalRow {
     pub bad: bool,
     /// Days to the deadline.
     pub days_left: i64,
+    /// The status itself.
+    pub state: openlens_engine::goals::Status,
+    /// Its guardrails now (#272).
+    pub guards: Vec<GuardRow>,
+    /// Releases that moved the KPI most since the goal was set.
+    pub moves: Vec<openlens_engine::goals::Move>,
+    /// Changes in the period (flags, surveys, map, notes, alerts).
+    pub marks: Vec<Mark>,
+}
+
+/// A guardrail as shown.
+pub struct GuardRow {
+    /// KPI label.
+    pub label: String,
+    /// A share.
+    pub share: bool,
+    /// Value now.
+    pub current: Option<f64>,
+    /// The limit.
+    pub limit: f64,
+    /// Worse than the limit.
+    pub breached: bool,
+}
+
+/// An objective as shown (#272).
+pub struct ObjectiveRow {
+    /// As stored.
+    pub objective: openlens_engine::goals::Objective,
+    /// Its status (the worst key result).
+    pub status: String,
+    /// Reached or on track.
+    pub good: bool,
+    /// At risk or off track.
+    pub bad: bool,
+    /// Key results: (label, now, target, share, status).
+    pub results: Vec<(String, Option<f64>, f64, bool, String)>,
 }
 
 /// A KPI a goal can be set on, with its suggested target.
@@ -2294,9 +2345,18 @@ pub fn goals(
     p: &ProjectInfo<'_>,
     rows: &[GoalRow],
     choices: &[GoalChoice],
+    objectives: &[ObjectiveRow],
     admin: bool,
     deadline: &str,
 ) -> Markup {
+    let open: Vec<&ObjectiveRow> = objectives
+        .iter()
+        .filter(|o| o.objective.archived.is_none())
+        .collect();
+    let past: Vec<&ObjectiveRow> = objectives
+        .iter()
+        .filter(|o| o.objective.archived.is_some())
+        .collect();
     layout(
         "Goals",
         Some(p),
@@ -2305,6 +2365,25 @@ pub fn goals(
                 h1 { "Goals" }
                 p.muted { "Where we want each number to be, by when, and whether the trend gets there. Targets are suggested from the releases so far; one click sets them." }
             } }
+            @if !open.is_empty() {
+                section.card.wide {
+                    h2.sun { (icon("flag")) "Objectives" }
+                    @for o in &open {
+                        div.objective {
+                            p {
+                                strong { (o.objective.title) } " "
+                                span class={ "status " (if o.good { "good" } else if o.bad { "bad" } else { "warn" }) } { (o.status) }
+                                span.muted.small { " · until " (o.objective.end) }
+                            }
+                            ul.plain-list.small { @for (label, now, target, share, st) in &o.results {
+                                li { (label) ": " strong { (now.map_or_else(|| "—".into(), |c| kpi_fmt(c, *share))) } " → " (kpi_fmt(*target, *share)) " · " (st) }
+                            } }
+                            @if admin { form.inline method="post" action={ "/p/" (p.id) "/objectives/" (o.objective.id) "/delete" } { button.ghost type="submit" { "Remove" } } }
+                        }
+                    }
+                    p.muted.small { "An objective takes the status of its weakest key result, and is archived with the final values when its period ends." }
+                }
+            }
             @if rows.is_empty() { section.card.wide { p.muted { "No goal yet. Pick a KPI below: the suggested target is the best release so far or a 10% step, whichever is closer." } } }
             div.grid {
                 @for r in rows {
@@ -2326,6 +2405,26 @@ pub fn goals(
                         }
                         @if let Some(t) = travelled { div.meter-row { span.small.muted { "way travelled" } (meter(t)) span.small { (pct(t)) } } }
                         (goal_chart(r))
+                        @for gr in &r.guards {
+                            p.small {
+                                @if gr.breached { span.status.bad { "guardrail breached" } } @else { span.status.good { "guardrail ok" } }
+                                " " (gr.label) " " strong { (gr.current.map_or_else(|| "—".into(), |c| kpi_fmt(c, gr.share))) }
+                                span.muted { " (limit " (kpi_fmt(gr.limit, gr.share)) ")" }
+                            }
+                        }
+                        @if !r.moves.is_empty() || !r.marks.is_empty() {
+                            details {
+                                summary.small { "What moved it" }
+                                ul.plain-list.small {
+                                    @for m in &r.moves {
+                                        li { "Release " code { (m.release) } " (" (m.day) "): "
+                                            span class={ "status " (if m.good { "good" } else { "bad" }) } { (if m.delta > 0.0 { "+" } else { "−" }) (kpi_fmt(m.delta.abs(), r.share)) } }
+                                    }
+                                    @for m in &r.marks { li { span.muted { (m.day) } " " (m.text) } }
+                                }
+                            }
+                        }
+                        @if let Some(n) = g.releases { p.muted.small { "Deadline set as " (n) " releases from " (g.created) "." } }
                         @if !g.owner.is_empty() { p.muted.small { "Owner: " (g.owner) } }
                         @if admin {
                             form.inline method="post" action={ "/p/" (p.id) "/goals/" (g.id) "/delete" } { button.ghost type="submit" { "Remove" } }
@@ -2346,7 +2445,14 @@ pub fn goals(
                                     form.inline method="post" action={ "/p/" (p.id) "/goals" } {
                                         input type="hidden" name="kpi" value=(c.kpi);
                                         label { span.sr-only { "Target" } input type="number" name="target" step="any" min="0" value=(if c.share { format!("{:.1}", c.suggested * 100.0) } else { format!("{:.2}", c.suggested) }) aria-label={ "Target for " (c.label) }; @if c.share { "%" } }
-                                        label { span.sr-only { "Deadline" } input type="date" name="deadline" value=(deadline) required aria-label={ "Deadline for " (c.label) }; }
+                                        label { span.sr-only { "Deadline" } input type="date" name="deadline" value=(deadline) aria-label={ "Deadline for " (c.label) }; }
+                                        label { span.sr-only { "Or in releases" } input.narrow type="number" name="releases" min="1" max="50" placeholder="or N releases" aria-label={ "Or a deadline in releases for " (c.label) }; }
+                                        label { span.sr-only { "Guardrail" }
+                                            select name="guard1" aria-label={ "Guardrail for " (c.label) } {
+                                                option value="" { "no guardrail" }
+                                                @for o in choices.iter().filter(|o| o.kpi != c.kpi) { option value=(o.kpi) { "guard: " (o.label) } }
+                                            }
+                                        }
                                         label { span.sr-only { "Owner" } input type="text" name="owner" placeholder="owner" maxlength="80" aria-label={ "Owner of the goal on " (c.label) }; }
                                         button.soft type="submit" { "Set" }
                                     }
@@ -2354,7 +2460,40 @@ pub fn goals(
                             }
                         } }
                     } }
-                    p.muted.small { "The suggested target is filled in. Status: on track when the straight line through the releases reaches the target by the deadline, at risk when it misses by less than 10% of the target, not enough data under three releases." }
+                    p.muted.small { "The suggested target is filled in. Status: on track when the straight line through the releases (or the weeks, for KPIs without a per-release value) reaches the target by the deadline, at risk when it misses by less than 10% of the target, not enough data under three points. A deadline in releases uses the median time between releases so far. A guardrail is a KPI that must not get worse meanwhile: its limit is 5% worse than now, and a breach is an alert." }
+                }
+            }
+            @if admin && !rows.is_empty() {
+                section.card.wide {
+                    h2.sun { (icon("flag")) "Set an objective" }
+                    form.inline method="post" action={ "/p/" (p.id) "/objectives" } {
+                        label { span.sr-only { "Objective" } input type="text" name="title" required maxlength="140" placeholder="Make onboarding effortless" aria-label="Objective"; }
+                        @for (i, name) in ["goal1", "goal2", "goal3"].iter().enumerate() {
+                            label { span.sr-only { "Key result " (i + 1) }
+                                select name=(name) aria-label={ "Key result " (i + 1) } {
+                                    option value="" { (if i == 0 { "key result…" } else { "(optional)" }) }
+                                    @for r in rows { option value=(r.goal.id) { (r.label) " → " (kpi_fmt(r.goal.target, r.share)) } }
+                                }
+                            }
+                        }
+                        label { span.sr-only { "Until" } input type="date" name="end" value=(deadline) required aria-label="Period end"; }
+                        button.soft type="submit" { "Set" }
+                    }
+                }
+            }
+            @if !past.is_empty() {
+                section.card.wide {
+                    h2 { (icon("clock")) "Past objectives" }
+                    ul.plain-list.small { @for o in &past {
+                        @if let Some(a) = &o.objective.archived {
+                            li {
+                                strong { (o.objective.title) } " "
+                                span class={ "status " (if a.achieved { "good" } else { "bad" }) } { (if a.achieved { "achieved" } else { "missed" }) }
+                                span.muted { " · " (o.objective.start) " – " (o.objective.end) }
+                                @for (_, label, v, t, ok) in &a.results { br; (label) ": " (v.map_or_else(|| "—".into(), |x| format!("{x:.3}"))) " (target " (format!("{t:.3}")) ") " (if *ok { "✓" } else { "✗" }) }
+                            }
+                        }
+                    } }
                 }
             }
         },
@@ -2496,7 +2635,8 @@ pub fn flags(p: &ProjectInfo<'_>, flags: &[openlens_flags::Flag]) -> Markup {
                             tr {
                                 th scope="row" { a href={ "/p/" (p.id) "/flags-edit?key=" (f.key) } title="Edit" { code { (f.key) } } @if !f.description.is_empty() { br; span.muted.small { (f.description) } } }
                                 td.small { @if f.roles.is_empty() { "every role" } @else { (f.roles.join(", ")) }
-                                    @if !f.accounts.is_empty() { br; span.muted { "+ " (f.accounts.len()) " accounts" } } }
+                                    @if !f.accounts.is_empty() { br; span.muted { "+ " (f.accounts.len()) " accounts" } }
+                                    @for r in &f.rules { br; code { (r) } } }
                                 td { form.inline method="post" action={ "/p/" (p.id) "/flags/" (f.key) } {
                                     @if f.enabled { input type="hidden" name="enabled" value="on"; }
                                     input type="number" name="rollout" min="0" max="100" value=(f.rollout) aria-label={ "Rollout percentage of " (f.key) };
@@ -2534,6 +2674,7 @@ pub fn flag_edit(
         roles: Vec::new(),
         accounts: Vec::new(),
         variants: Vec::new(),
+        rules: Vec::new(),
     });
     let action = format!("/p/{}/flags-edit", p.id);
     let variants = f
@@ -2560,26 +2701,30 @@ pub fn flag_edit(
                     label { "Only roles " input type="text" name="roles" value=(f.roles.join(", ")) placeholder="every role"; }
                     label { "Always on for accounts " input type="text" name="accounts" value=(f.accounts.join(", ")) placeholder="none"; }
                     label.wide { "Variants (experiment) " input type="text" name="variants" value=(variants) placeholder="control:50, short:50"; }
+                    label.wide { "Only users whose properties match (one rule per line, all must match) "
+                        textarea name="rules" rows="3" spellcheck="false" placeholder="plan in pro, team\ncountry not in FR" { (f.rules.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n")) } }
                     label.check { input type="checkbox" name="enabled" checked[f.enabled]; " On" }
                     button type="submit" { (if new { "Create" } else { "Save" }) }
                 }
-                p.muted.small { "Roles are the feature map's canonical roles; lists are comma-separated. Users in the rollout keep their bucket when you raise it. Variants split the users who get the flag (weights add up to 100); the code reads " code { "openlens.variant(\"key\")" } " and events carry the variant." }
+                p.muted.small { "Roles are the feature map's canonical roles; lists are comma-separated. Users in the rollout keep their bucket when you raise it. Variants split the users who get the flag (weights add up to 100); the code reads " code { "openlens.variant(\"key\")" } " and events carry the variant. Rules test " code { "plan" } ", " code { "country" } " (from the address when the app does not send it), " code { "role" } ", " code { "account" } " or any property passed to " code { "identify" } "; a user who did not send the property does not get the flag." }
             }
             @if !readout.is_empty() {
                 section.card.wide {
                     h2.violet { (icon("funnel")) "Variants, last 30 days" }
                     div.table-scroll { table.plain {
-                        thead { tr { th { "Variant" } th.num { "Users" } th.num { "Reached value" } th.num { "Sessions with errors" } } }
+                        thead { tr { th { "Variant" } th.num { "Users" } th.num { "Reached value" } th { "vs baseline" } th.num { "Sessions with errors" } th { "vs baseline" } } }
                         tbody { @for r in readout {
                             tr {
-                                th scope="row" { code { (r.variant) } @if r.users < 20 { " " span.chip { "low sample" } } }
+                                th scope="row" { code { (r.variant) } @if r.baseline { " " span.chip { "baseline" } } @if r.users < 30 { " " span.chip { "low sample" } } }
                                 td.num { (compact(r.users)) }
                                 td.num { strong { (pct(r.value_rate)) } }
+                                td.small { (versus(r.baseline, r.value_p, r.value_significant())) }
                                 td.num { (pct(r.error_rate)) }
+                                td.small { (versus(r.baseline, r.error_p, r.error_significant())) }
                             }
                         } }
                     } }
-                    p.muted.small { "Reached value: a success event of the feature map (any feature use when none is declared). Compare arms with enough users before deciding." }
+                    p.muted.small { "Reached value: a success event of the feature map (any feature use when none is declared). Each arm is compared with the baseline (" code { "control" } ", else the first variant) with a two-proportion test; a difference counts when p is under " (readout.first().map_or(0.05, |r| r.alpha)) ", 0.05 shared by the arms compared (Bonferroni). Under 30 users or sessions: too few to tell." }
                 }
             }
             @if !new {
@@ -3190,6 +3335,15 @@ pub fn digest(p: &ProjectInfo<'_>, d: &openlens_engine::Digest, mailed: bool) ->
                 section.card.wide {
                     h2.violet { (icon("idea")) "What to focus on" }
                     ul { @for i in &d.insights { li { strong { (i.title) } " · " span.muted { (i.evidence) } br; span.small { "Next step: " (i.next_step) } } } }
+                }
+            }
+            @if !d.goals.is_empty() {
+                section.card.wide {
+                    h2.sun { (icon("star")) "Goals" }
+                    ul.plain-list {
+                        @for o in &d.objectives_at_risk { li { span.status.bad { "objective at risk" } " " (o) } }
+                        @for (line, st) in &d.goals { li { (line) " — " strong { (st) } } }
+                    }
                 }
             }
         },
