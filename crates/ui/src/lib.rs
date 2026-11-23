@@ -197,6 +197,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                             nav.side-nav aria-label="Project" {
                                 @for (href, glyph, label) in [
                                     ("", "board", "Focus board"),
+                                    ("/ask", "spark", "Ask"),
                                     ("/live", "pulse", "Live"),
                                     ("/uptime", "shield", "Uptime"),
                                     ("/events", "events", "Events"),
@@ -210,6 +211,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                                     ("/forms", "task", "Forms"),
                                     ("/churn", "ban", "Churn"),
                                     ("/goals", "star", "Goals"),
+                                    ("/tickets", "task", "Tickets"),
                                     ("/timeline", "clock", "Timeline"),
                                     ("/flows", "funnel", "Feature flow"),
                                     ("/features", "route", "Feature map"),
@@ -569,6 +571,7 @@ fn insight_cards(pid: &str, b: &Board, plain: &[(String, String)]) -> Markup {
                                 @if c.kind == "churn_point" {
                                     @if !shared() { p { a.button href={ "/p/" (pid) "/watch?churned_at=" (url_enc(&c.subject)) } { (icon("play")) "Watch a session that churned here" } } }
                                 }
+                                @if !shared() { p.small { a href={ "/p/" (pid) "/tickets/new?kind=insight&subject=" (url_enc(&format!("{}:{}", c.kind, c.subject))) } { "Create ticket →" } } }
                             }
                         }
                     }
@@ -1251,7 +1254,7 @@ pub fn line_diff<'a>(old: &'a str, new: &'a str) -> Vec<(char, &'a str)> {
 
 /// The measured health of the map (#240): score, findings with their fix,
 /// areas and the adoption ladder.
-fn map_health(h: &openlens_engine::MapHealth) -> Markup {
+fn map_health(pid: &str, h: &openlens_engine::MapHealth) -> Markup {
     let tone = if h.score >= 80 {
         "good"
     } else if h.score >= 50 {
@@ -1276,6 +1279,7 @@ fn map_health(h: &openlens_engine::MapHealth) -> Markup {
                         " " (f.message) br;
                         span.muted.small { (f.evidence) }
                         @if let Some(fix) = &f.fix { details { summary.small { "Suggested change" } pre.diff { (fix) } } }
+                        " " a.small href={ "/p/" (pid) "/tickets/new?kind=map&subject=" (url_enc(&format!("{}:{}", f.kind, f.feature.as_deref().unwrap_or("")))) } { "Create ticket →" }
                     }
                 } }
             }
@@ -1407,7 +1411,7 @@ pub fn feature_map(v: &MapView<'_>) -> Markup {
                     }
                 }
             }
-            @if let Some(h) = v.health { (map_health(h)) }
+            @if let Some(h) = v.health { (map_health(p.id, h)) }
             @if let Some(d) = &diff {
                 section.card.wide {
                     h2.sky { (icon("route")) "Changes against the stored map" }
@@ -1538,6 +1542,339 @@ fn bytes(n: u64) -> String {
         1_048_576..1_073_741_824 => format!("{:.1} MB", n as f64 / 1_048_576.0),
         _ => format!("{:.2} GB", n as f64 / 1_073_741_824.0),
     }
+}
+
+/// A drafted ticket (#245).
+pub struct TicketDraft<'a> {
+    /// Project.
+    pub p: &'a ProjectInfo<'a>,
+    /// Title.
+    pub title: &'a str,
+    /// Body, Markdown.
+    pub markdown: &'a str,
+    /// Finding kind.
+    pub kind: &'a str,
+    /// Finding subject.
+    pub subject: &'a str,
+    /// GitHub repository, when set.
+    pub repo: Option<String>,
+    /// The issue already open for this finding.
+    pub existing: Option<String>,
+    /// Admins file it.
+    pub admin: bool,
+}
+
+/// The ticket drafted from a finding: copy it, or open it on GitHub.
+pub fn ticket_draft(v: &TicketDraft<'_>) -> Markup {
+    let p = v.p;
+    layout(
+        "New ticket",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "New ticket" }
+                p.muted { "Prefilled for a person or a coding agent: the problem, the evidence, a hypothesis, the metric OpenLens will check after the release that ships it." }
+            } }
+            section.card.wide {
+                label for="t-title" { "Title" }
+                input #t-title type="text" readonly value=(v.title);
+                label for="t-body" { "Body (Markdown): select and copy" }
+                textarea #t-body rows="22" readonly spellcheck="false" { (v.markdown) }
+                @match (&v.repo, v.admin) {
+                    (Some(repo), true) => form.inline method="post" action={ "/p/" (p.id) "/tickets" } {
+                        input type="hidden" name="kind" value=(v.kind);
+                        input type="hidden" name="subject" value=(v.subject);
+                        button type="submit" { @if v.existing.is_some() { "Update the issue with these numbers" } @else { "Open an issue in " (repo) } }
+                        @if let Some(u) = &v.existing { " " a href=(u) { "Open issue" } }
+                    },
+                    (None, true) => p.muted.small { "To open issues directly, set the GitHub repository on " a href={ "/p/" (p.id) "/tickets" } { "Tickets" } "." },
+                    _ => p.muted.small { "An admin can open it as an issue." },
+                }
+            }
+        },
+    )
+}
+
+/// One ticket in the list.
+pub struct TicketRow {
+    /// Title.
+    pub title: String,
+    /// insight, error, goal or map.
+    pub kind: String,
+    /// Day created.
+    pub created: String,
+    /// The issue.
+    pub url: Option<String>,
+    /// The metric it should move.
+    pub metric: Option<String>,
+    /// The release that shipped it.
+    pub shipped_in: Option<String>,
+    /// (verdict, evidence) once measured.
+    pub outcome: Option<(String, String)>,
+}
+
+/// Tickets and the learning log (#245).
+pub fn tickets(
+    p: &ProjectInfo<'_>,
+    rows: &[TicketRow],
+    repo: &str,
+    connected: bool,
+    admin: bool,
+) -> Markup {
+    let measured: Vec<&TicketRow> = rows
+        .iter()
+        .filter(|r| r.outcome.as_ref().is_some_and(|o| o.0 != "no metric"))
+        .collect();
+    let improved = measured
+        .iter()
+        .filter(|r| r.outcome.as_ref().is_some_and(|o| o.0 == "improved"))
+        .count();
+    layout(
+        "Tickets",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "Tickets" }
+                p.muted { "From a finding to a ticket, a release, and the measured effect: OpenLens follows each issue to the release that ships it, measures its metric 14 days later and comments on the issue." }
+            } }
+            @if !measured.is_empty() {
+                section.tiles aria-label="Learning" {
+                    (tile("mint", "star", "Changes that moved their metric", &format!("{improved} of {}", measured.len()), "measured 14 days after their release"))
+                }
+            }
+            section.card.wide {
+                h2.violet { (icon("task")) "Tickets" }
+                @if rows.is_empty() { p.muted { "None yet. Use " em { "Create ticket" } " on an insight card, an error, a goal or a feature map finding." } }
+                @else {
+                    div.table-scroll { table.plain {
+                        thead { tr { th { "Ticket" } th { "From" } th { "Metric" } th { "Shipped in" } th { "Effect" } } }
+                        tbody { @for r in rows {
+                            tr {
+                                th scope="row" { @match &r.url { Some(u) => a href=(u) { (r.title) }, None => (r.title) } br; span.muted.small { (r.created) } }
+                                td { span.chip { (r.kind) } }
+                                td.small { (r.metric.as_deref().unwrap_or("—")) }
+                                td.small { @match &r.shipped_in { Some(s) => code { (s) }, None => span.muted { "not yet" } } }
+                                td.small { @match &r.outcome {
+                                    Some((w, ev)) => { span class={ "status " (match w.as_str() { "improved" => "good", "worse" => "bad", _ => "warn" }) } { (w) } br; span.muted { (ev) } },
+                                    None => span.muted { "waiting" },
+                                } }
+                            }
+                        } }
+                    } }
+                }
+            }
+            @if admin {
+                section.card.wide {
+                    h2.sky { (icon("code")) "GitHub" }
+                    form.settings method="post" action={ "/p/" (p.id) "/tickets/target" } {
+                        label { "Repository " input type="text" name="repo" value=(repo) placeholder="owner/name" maxlength="140"; }
+                        label { "Token " input type="password" name="token" autocomplete="off" placeholder=(if connected { "stored (leave empty to keep it)" } else { "fine-grained, Issues: read and write" }); }
+                        button type="submit" { "Save" }
+                    }
+                    p.muted.small { "The token is stored encrypted (or set " code { "OPENLENS_GITHUB_TOKEN" } ") and shared by every project. OpenLens only posts when you click, and comments on issues it opened. Without it, copy the drafted Markdown into any tracker." }
+                }
+            }
+        },
+    )
+}
+
+/// One question and its answer in Ask (#244), as kept: no raw tool results.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct AskTurn {
+    /// When (RFC 3339).
+    pub at: String,
+    /// The question.
+    pub question: String,
+    /// The answer.
+    pub answer: String,
+    /// (label, link or query) behind the answer.
+    #[serde(default)]
+    pub evidence: Vec<(String, String)>,
+    /// Tokens used.
+    #[serde(default)]
+    pub tokens: i64,
+    /// Of them, read from the provider's cache.
+    #[serde(default)]
+    pub cached: i64,
+    /// A change waiting for confirmation: (token, plain description).
+    #[serde(default)]
+    pub pending: Option<(String, String)>,
+}
+
+/// What the Ask page shows (#244).
+pub struct AskView<'a> {
+    /// Project.
+    pub p: &'a ProjectInfo<'a>,
+    /// Provider and model when Ask is on.
+    pub on: Option<String>,
+    /// My conversation, oldest first.
+    pub turns: &'a [AskTurn],
+    /// The page I came from.
+    pub from: Option<&'a str>,
+    /// An error to show.
+    pub error: Option<&'a str>,
+    /// Tokens used today in the project.
+    pub used: i64,
+    /// Daily budget.
+    pub budget: i64,
+    /// Admins confirm changes.
+    pub admin: bool,
+}
+
+/// Ask OpenLens (#244): the conversation and the question box.
+pub fn ask(v: &AskView<'_>) -> Markup {
+    let p = v.p;
+    let n = v.turns.len();
+    layout(
+        "Ask",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "Ask" }
+                p.muted { "Ask about this project in your words. The answer comes with the numbers and the pages behind it. Changes are only proposed: an admin confirms them." }
+            } }
+            @if let Some(e) = v.error { p.alert role="alert" { (e) } }
+            @match &v.on {
+                None => section.card.wide {
+                    p { "Ask is off. An admin turns it on in " a href="/settings/ai" { "Settings → AI" } ": an Anthropic key, or any OpenAI-compatible server (a LiteLLM proxy, OpenRouter, a local Ollama: then no data leaves your network)." }
+                },
+                Some(on) => {
+                    @for (i, t) in v.turns.iter().enumerate() {
+                        section.card.wide.turn id=[(i + 1 == n).then_some("last")] {
+                            p.question { strong { (t.question) } span.muted.small { " · " (t.at.get(..16).unwrap_or(&t.at).replace('T', " ")) } }
+                            div.answer {
+                                @for para in t.answer.split("\n\n") {
+                                    @let lines: Vec<&str> = para.lines().collect();
+                                    @if lines.iter().all(|l| l.trim_start().starts_with("- ")) && !lines.is_empty() {
+                                        ul { @for l in &lines { li { (l.trim_start().trim_start_matches("- ")) } } }
+                                    } @else if lines.iter().all(|l| l.starts_with("? ")) && !lines.is_empty() {
+                                        ul.follow { @for l in &lines { li { form.inline method="post" action={ "/p/" (p.id) "/ask" } {
+                                            input type="hidden" name="question" value=(l.trim_start_matches("? "));
+                                            button.ghost type="submit" { (l.trim_start_matches("? ")) }
+                                        } } } }
+                                    } @else {
+                                        p { @for (j, l) in lines.iter().enumerate() { @if j > 0 { br; } (l) } }
+                                    }
+                                }
+                            }
+                            @if let Some((token, desc)) = &t.pending {
+                                div.pending {
+                                    p { strong { "Proposed change" } }
+                                    pre.diff { ins { "+ " (desc) } }
+                                    @if v.admin {
+                                        form.inline method="post" action={ "/p/" (p.id) "/ask/confirm" } {
+                                            input type="hidden" name="token" value=(token);
+                                            button type="submit" { "Apply this change" }
+                                        }
+                                        span.muted.small { " Nothing changes until you click. The proposal expires in 30 minutes." }
+                                    } @else { p.muted.small { "An admin can apply it." } }
+                                }
+                            }
+                            @if !t.evidence.is_empty() {
+                                details { summary.small { "Evidence (" (t.evidence.len()) ")" }
+                                    ul.plain-list.small { @for (label, e) in &t.evidence {
+                                        li { @if e.starts_with('/') { a href=(e) { (label) } } @else { (label) ": " code { (e) } } }
+                                    } }
+                                }
+                            }
+                            p.muted.small { (t.tokens) " tokens" @if t.cached > 0 { ", " (t.cached) " from the cache" } }
+                        }
+                    }
+                    section.card.wide {
+                        form.sqlbox method="post" action={ "/p/" (p.id) "/ask" } {
+                            label for="ask-q" { "Your question" @if let Some(f) = v.from { span.muted.small { " · about " code { (f) } } } }
+                            textarea #ask-q name="question" rows="3" required maxlength="2000" placeholder="Why did writing drop in the last release?" {}
+                            @if let Some(f) = v.from { input type="hidden" name="from" value=(f); }
+                            div.actions {
+                                label.check { input type="checkbox" name="deep"; " Investigate deeply (main model)" }
+                                button type="submit" { "Ask" }
+                            }
+                        }
+                        p.muted.small {
+                            (on) " · today " (compact(v.used)) " of " (compact(v.budget)) " tokens · "
+                            a href={ "/p/" (p.id) "/ask/export.md" } { "Export" }
+                            @if v.admin { " · " a href={ "/p/" (p.id) "/ask/sent" } { "What is sent" } }
+                        }
+                        p.muted.small { "The model sees the project's aggregates and definitions, never event properties, replays or emails (unless an admin allows person-level detail). Your conversation is kept 30 days." }
+                        form.inline method="post" action={ "/p/" (p.id) "/ask/clear" } { button.ghost type="submit" { "Forget this conversation" } }
+                        @if v.admin {
+                            form.inline method="post" action={ "/p/" (p.id) "/ask/privacy" } {
+                                label.check { input type="checkbox" name="person_level"; " Allow person-level detail (user ids in SQL) for this project" }
+                                " " button.ghost type="submit" { "Save" }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    )
+}
+
+/// Settings → AI (#244).
+pub struct AiView<'a> {
+    /// Env vars set it (the form is read-only then).
+    pub from_env: bool,
+    /// What runs now.
+    pub active: Option<String>,
+    /// Stored values.
+    pub provider: String,
+    /// Stored base URL.
+    pub base_url: String,
+    /// Stored model.
+    pub model: String,
+    /// Stored fast model.
+    pub fast_model: String,
+    /// A key is stored (never shown).
+    pub key_set: bool,
+    /// Daily tokens per project.
+    pub budget: i64,
+    /// Notice.
+    pub notice: Option<&'a str>,
+    /// Error.
+    pub error: Option<&'a str>,
+}
+
+/// The AI settings page.
+pub fn ai_settings(v: &AiView<'_>) -> Markup {
+    layout(
+        "AI",
+        None,
+        html! {
+            div.heading { div {
+                h1 { "AI" }
+                p.muted { "The model behind Ask. One setting covers every mode: Anthropic, or any server that speaks the OpenAI Chat Completions API (OpenAI, a LiteLLM proxy, OpenRouter, Azure OpenAI, Mistral, vLLM, a local Ollama)." }
+            } }
+            @if let Some(n) = v.notice { p.notice role="status" { (n) } }
+            @if let Some(e) = v.error { p.alert role="alert" { (e) } }
+            section.card.wide {
+                h2.violet { (icon("spark")) "Model" }
+                p { "Now: " strong { (v.active.as_deref().unwrap_or("off")) } }
+                @if v.from_env {
+                    p.muted { "Set by the " code { "OPENLENS_LLM_*" } " environment variables, which win over this page." }
+                } @else {
+                    form.settings method="post" action="/settings/ai" {
+                        label { "Provider "
+                            select name="provider" {
+                                option value="off" selected[v.provider.is_empty()] { "off" }
+                                option value="anthropic" selected[v.provider == "anthropic"] { "Anthropic" }
+                                option value="openai-compatible" selected[v.provider == "openai-compatible"] { "OpenAI-compatible" }
+                            }
+                        }
+                        label { "Base URL " input type="url" name="base_url" value=(v.base_url) placeholder="http://litellm:4000/v1 or http://ollama:11434/v1" maxlength="300"; }
+                        label { "Model " input type="text" name="model" value=(v.model) placeholder="claude-opus-5-5" maxlength="120"; }
+                        label { "Fast model (optional) " input type="text" name="fast_model" value=(v.fast_model) placeholder="for short lookups" maxlength="120"; }
+                        label { "API key " input type="password" name="key" autocomplete="off" placeholder=(if v.key_set { "stored (leave empty to keep it)" } else { "none" }); }
+                        div.actions {
+                            button type="submit" name="action" value="save" { "Save" }
+                            button.soft type="submit" name="action" value="test" { "Test" }
+                            @if v.key_set { button.ghost type="submit" name="action" value="forget" { "Remove the key" } }
+                        }
+                    }
+                }
+                p.muted.small { "The key is stored encrypted and never shown again; it only travels in a header to the provider. Each project may use " (compact(v.budget)) " tokens a day (" code { "OPENLENS_LLM_DAILY_TOKENS" } "), and each person 30 questions an hour. See docs/ai.md for LiteLLM and Ollama." }
+            }
+        },
+    )
 }
 
 /// Settings → Storage and backups (#218).
@@ -2560,6 +2897,7 @@ pub fn goals(
                         }
                         @if let Some(n) = g.releases { p.muted.small { "Deadline set as " (n) " releases from " (g.created) "." } }
                         @if !g.owner.is_empty() { p.muted.small { "Owner: " (g.owner) } }
+                        @if !r.good { p.small { a href={ "/p/" (p.id) "/tickets/new?kind=goal&subject=" (g.id) } { "Create ticket →" } } }
                         @if admin {
                             form.inline method="post" action={ "/p/" (p.id) "/goals/" (g.id) "/delete" } { button.ghost type="submit" { "Remove" } }
                         }
@@ -3016,6 +3354,7 @@ pub fn errors(
                                 th scope="row" {
                                     span.mono { (g.sample.get(..160).unwrap_or(&g.sample)) }
                                     br;
+                                    a.small href={ "/p/" (p.id) "/tickets/new?kind=error&subject=" (url_enc(&g.fingerprint)) } { "Create ticket →" } br;
                                     @if let Some(Some(o)) = original.get(i) {
                                         span.small.mono title="Resolved with the release's source map" {
                                             (icon("route")) " " (o.source) ":" (o.line) @if let Some(n) = &o.name { " · " (n) }
@@ -3326,7 +3665,7 @@ pub fn projects(list: &[ProjectSummary], admin: bool) -> Markup {
         html! {
             div.heading {
                 div { h1 { "Projects" } p.muted { "One per app. Pick one to open its Focus board." } }
-                @if admin { a.button href="/users" { (icon("users")) "Team" } " " a.button href="/settings/storage" { (icon("layers")) "Storage and backups" } " " a.button href="/audit" { (icon("shield")) "Audit log" } }
+                @if admin { a.button href="/users" { (icon("users")) "Team" } " " a.button href="/settings/storage" { (icon("layers")) "Storage and backups" } " " a.button href="/settings/ai" { (icon("spark")) "AI" } " " a.button href="/audit" { (icon("shield")) "Audit log" } }
             }
             @if admin {
                 details.card.wide.new-project {

@@ -106,3 +106,18 @@ Append-only. Each entry: id, date, decision, why, consequences.
 - The churn page shows the cancels and the answers of the surveys triggered on that event.
 - Older servers refuse a map with the field, because the format is strict. Upgrade the server before pushing the map.
 
+## D-020 (2026-11-23, agent for #244) Ask runs server-side, without a script, and only proposes changes
+
+**Decision:** the AI chat is its own page, `/p/{id}/ask`. The page is server-rendered with a form: the answer arrives whole after the tool loop, with no streaming script. The model reads through server-side tools that return aggregates. It writes nothing itself: a change is a proposal that an admin applies with a single-use, server-issued token. Providers are `anthropic` or `openai-compatible`, configured by `OPENLENS_LLM_*` or Settings → AI, with the key sealed by the secret store from #218.
+
+**Why:**
+- The dashboard stays script-free under its strict CSP (D-013).
+- A prompt injection planted in event names cannot cause a write.
+- One OpenAI-compatible mode covers LiteLLM, OpenRouter, Azure, Mistral, vLLM and a local Ollama with no extra code.
+
+**Consequences:**
+- There is no live streaming. A long investigation (up to 4 tool rounds) takes as long as the model needs.
+- The tools live in the server (`ask.rs`) and call the same engine functions as the REST API. MCP keeps going through the REST API.
+- Person-level SQL is refused unless an admin allows it per project.
+- Each project has a daily token budget (`OPENLENS_LLM_DAILY_TOKENS`, 400,000 by default), and each person may ask 30 questions an hour.
+

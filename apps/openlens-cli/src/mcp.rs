@@ -145,6 +145,16 @@ impl Tools for OpenLensTools {
                 })),"required":["kpi","target"]}),
             },
             ToolSpec {
+                name: "create_ticket",
+                description: "Turn a finding into a ticket for the app's backlog: kind insight (subject '<card kind>:<card subject>'), error (subject = the error group fingerprint), goal (subject = goal id) or map (subject '<finding kind>:<feature>'). Returns the prefilled Markdown (problem, evidence, hypothesis, success metric, acceptance criteria); with to='github', opens the GitHub issue, or updates the one already open for that finding. OpenLens then measures the metric 14 days after the release that ships it and comments on the issue.",
+                input_schema: json!({"type":"object","properties":with(json!({"kind":{"type":"string","enum":["insight","error","goal","map"]},"subject":{"type":"string"},"to":{"type":"string","enum":["markdown","github"]}})),"required":["kind","subject"]}),
+            },
+            ToolSpec {
+                name: "tickets",
+                description: "Tickets made from findings, the release that shipped each, and the measured effect (improved / no effect / worse): the learning log.",
+                input_schema: json!({"type":"object","properties":proj}),
+            },
+            ToolSpec {
                 name: "verify",
                 description: "Wiring checklist: events arrive, users identified with a role, release tagged, map pushed, events per feature. Each failing check carries its fix.",
                 input_schema: json!({"type":"object","properties":proj}),
@@ -340,6 +350,26 @@ impl Tools for OpenLensTools {
                     "POST",
                     &format!("/api/projects/{}/goals", project(args)),
                     Some(Body::Json(body)),
+                )?;
+                ok_or(st, v)
+            }
+            "create_ticket" => {
+                let mut body = args.clone();
+                if let Some(o) = body.as_object_mut() {
+                    o.remove("project");
+                }
+                let (st, v) = c.call(
+                    "POST",
+                    &format!("/api/projects/{}/tickets", project(args)),
+                    Some(Body::Json(body)),
+                )?;
+                ok_or(st, v)
+            }
+            "tickets" => {
+                let (st, v) = c.call(
+                    "GET",
+                    &format!("/api/projects/{}/tickets", project(args)),
+                    None,
                 )?;
                 ok_or(st, v)
             }

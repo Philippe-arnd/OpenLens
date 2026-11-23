@@ -2560,6 +2560,7 @@ dependencies = [
  "openlens-meta",
  "openlens-query",
  "openlens-replay",
+ "serde",
  "serde_json",
 ]
 
