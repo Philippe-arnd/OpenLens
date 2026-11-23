@@ -97,6 +97,7 @@ pub(crate) fn forget_blocking(
         replays +=
             openlens_replay::erase(&state.data_dir, project, id).map_err(|e| e.to_string())?;
     }
+    state.boards.bump();
     Ok((ids.len(), events, replays))
 }
 

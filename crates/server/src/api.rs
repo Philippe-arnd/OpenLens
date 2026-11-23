@@ -372,8 +372,8 @@ async fn board(
         Err(r) => return *r,
     };
     let map = crate::load_map(&state, &p.id).await;
-    match openlens_engine::board(
-        &state.query,
+    match crate::boards::board(
+        &state,
         &p.id,
         &q.filters(&p.timezone),
         map.as_ref().map(|(m, v)| (m, *v)),

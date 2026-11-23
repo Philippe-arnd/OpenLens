@@ -96,6 +96,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 ### Fixed
 
 - **Ask's SQL without person-level detail runs on an aggregate-only view** (D-021): no ids, URLs, properties or people tables; people are counted with `count(DISTINCT user_key)`; groups of fewer than 5 people are left out.
+- **The board is computed once and shared** (#291): pages that show it reuse one result per project and filters until new data lands, concurrent requests wait for the same computation, and at most 2 boards are computed at once. A second visit answers from memory instead of recomputing for seconds.
 - **Page URLs are stored without their query string** (#290), as `docs/privacy.md` promised: the query and the fragment are dropped at capture, except the campaign tags `utm_*`, `ref` and `gclid`. URLs already stored are cleaned once at startup.
 - The churn page failed with a feature map pushed ("last place" query). It now works with and without a map.
 - **Going back a release right after an upgrade works again**: two starts in the same second named their upgrade copy the same, and the second refused to start. Copies now take the next free second. (The upgrade check waits between steps for releases up to v0.2.0.)

@@ -250,5 +250,6 @@ fn build_state() -> Result<openlens_server::AppState, String> {
         query: openlens_query::QueryEngine::new(&data_dir, openlens_query::Limits::default()),
         data_dir,
         admin_token: admin_token.into(),
+        boards: Default::default(),
     })
 }
