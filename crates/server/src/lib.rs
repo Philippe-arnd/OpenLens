@@ -5,6 +5,8 @@
 
 mod api;
 mod auth;
+pub mod backup;
+mod backups;
 mod capture;
 mod comments;
 mod digest;
@@ -17,7 +19,9 @@ mod oidc;
 mod replay;
 mod reword;
 mod s3;
+mod secrets;
 mod settings;
+mod storage;
 mod surveys;
 mod users;
 mod web;
@@ -210,6 +214,7 @@ pub async fn background(state: AppState) {
     tokio::spawn(update_check());
     let mut tick = tokio::time::interval(Duration::from_secs(2));
     let mut last_digest_check = std::time::Instant::now();
+    let mut last_backup_check = std::time::Instant::now();
     // First S3 copy a few minutes after start, then hourly.
     let mut last_s3_sync = std::time::Instant::now()
         .checked_sub(Duration::from_secs(3300))
@@ -223,18 +228,28 @@ pub async fn background(state: AppState) {
         let st = state.clone();
         let res =
             tokio::task::spawn_blocking(move || flush_and_compact(&st, &mut last_compact)).await;
-        if let Some(cfg) = s3::config()
-            && last_s3_sync.elapsed() >= Duration::from_secs(3600)
+        if last_s3_sync.elapsed() >= Duration::from_secs(3600)
+            && let Some((cfg, _)) = s3::configured(&state.meta, &state.data_dir)
         {
             last_s3_sync = std::time::Instant::now();
             let (root, meta) = (state.data_dir.clone(), state.meta.clone());
             let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-            match tokio::task::spawn_blocking(move || s3::sync(&cfg, &root, &meta, &today)).await {
+            match tokio::task::spawn_blocking(move || {
+                let r = s3::sync(&cfg, &root, &meta, &today);
+                s3::record(&meta, &r);
+                r
+            })
+            .await
+            {
                 Ok(Ok(0)) => {}
                 Ok(Ok(n)) => tracing::info!(objects = n, "copied to S3"),
                 Ok(Err(err)) => tracing::warn!(%err, "S3 copy failed; will retry next hour"),
                 Err(err) => tracing::warn!(%err, "S3 copy task crashed"),
             }
+        }
+        if last_backup_check.elapsed() >= Duration::from_secs(60) {
+            last_backup_check = std::time::Instant::now();
+            backups::tick(&state).await;
         }
         if last_digest_check.elapsed() >= Duration::from_secs(600) {
             last_digest_check = std::time::Instant::now();

@@ -79,7 +79,10 @@ pub fn run(src: &Path, dest: &Path) -> Result<usize, String> {
                 .map_err(|e| format!("meta.db: {e}"))?;
             return Ok(copied + 1);
         }
-        eprintln!("data changed during the copy (attempt {attempt}), starting over");
+        tracing::info!(
+            attempt,
+            "data changed during the backup copy, starting over"
+        );
         for t in TREES {
             let d = dest.join(t);
             if d.exists() {

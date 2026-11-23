@@ -2100,3 +2100,119 @@ async fn the_feature_map_is_read_checked_and_saved_from_the_dashboard() {
     let ro = body_text(get(&h, "/p/default/features", Some(&viewer), false).await).await;
     assert!(!ro.contains("<textarea"), "read-only for viewers");
 }
+
+#[tokio::test]
+async fn storage_and_backups_from_the_dashboard() {
+    let h = harness();
+    let owner = login_cookie(&h).await;
+    assert_eq!(
+        get(&h, "/settings/storage", Some(&owner), false)
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    let viewer = invite(
+        &h,
+        serde_json::json!({"email": "v@example.com", "role": "viewer"}),
+    )
+    .await;
+    assert_eq!(
+        get(&h, "/settings/storage", Some(&viewer), false)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        post_form(&h, "/settings/storage/backups/run", &viewer, "").await,
+        StatusCode::FORBIDDEN
+    );
+
+    // S3: the secret is sealed, never shown, kept when left empty.
+    assert_eq!(
+        post_form(
+            &h,
+            "/settings/storage/s3",
+            &owner,
+            "action=save&bucket=my-bucket&region=eu-west-1&endpoint=http%3A%2F%2F127.0.0.1%3A1&access_key=AKID&secret=TopSecret123"
+        )
+        .await,
+        StatusCode::OK
+    );
+    let sealed = h.state.meta.setting("s3:secret").unwrap().unwrap();
+    assert!(!sealed.contains("TopSecret123"));
+    let page = body_text(get(&h, "/settings/storage", Some(&owner), false).await).await;
+    assert!(page.contains("my-bucket") && !page.contains("TopSecret123"));
+    post_form(
+        &h,
+        "/settings/storage/s3",
+        &owner,
+        "action=save&bucket=my-bucket&access_key=AKID2&secret=",
+    )
+    .await;
+    assert_eq!(h.state.meta.setting("s3:secret").unwrap().unwrap(), sealed);
+    let test = router(h.state.clone())
+        .oneshot(
+            Request::post("/settings/storage/s3")
+                .header("cookie", &owner)
+                .header("origin", "http://localhost:8686")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("action=test"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(body_text(test).await.contains("Test failed"), "no S3 there");
+    post_form(&h, "/settings/storage/s3", &owner, "action=remove").await;
+    assert!(
+        h.state
+            .meta
+            .setting("s3:bucket")
+            .unwrap()
+            .is_none_or(|v| v.is_empty())
+    );
+
+    // Plan validation, then a manual backup that lands in the history.
+    let bad = body_text(
+        router(h.state.clone())
+            .oneshot(
+                Request::post("/settings/storage/backups")
+                    .header("cookie", &owner)
+                    .header("origin", "http://localhost:8686")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from("schedule=daily&hour=3&keep=0"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert!(bad.contains("keep 1 to 60"));
+    post_form(
+        &h,
+        "/settings/storage/backups",
+        &owner,
+        "schedule=daily&hour=3&weekday=1&keep=2",
+    )
+    .await;
+    assert_eq!(
+        post_form(&h, "/settings/storage/backups/run", &owner, "").await,
+        StatusCode::SEE_OTHER
+    );
+    for _ in 0..100 {
+        if h.state.meta.setting("backup:history").unwrap().is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let hist = h.state.meta.setting("backup:history").unwrap().unwrap();
+    assert!(hist.contains("\"ok\":true"), "{hist}");
+    let dl = get(
+        &h,
+        "/settings/storage/backups/latest.tar.gz",
+        Some(&owner),
+        false,
+    )
+    .await;
+    assert_eq!(dl.status(), StatusCode::OK);
+    assert_eq!(dl.headers()["content-type"], "application/gzip");
+}
