@@ -39,6 +39,9 @@ export interface Dimensions {
     plan?: string;
     /** The team's own account (staff, testers): left out of the board by default. */
     internal?: boolean;
+    /** Other properties flag rules can target (`seats`, `beta_tester`…): sent
+     * to `/flags` to decide, never stored on events. At most 20. */
+    properties?: Record<string, string | number | boolean>;
 }
 /** A micro-survey the server says this user may be asked (see survey.ts). */
 export interface SurveyDef {

@@ -3,7 +3,7 @@
 // Test helpers may unwrap: a failure here is a test failure.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use openlens_flags::{Flag, Subject, bucket, evaluate};
+use openlens_flags::{Flag, Rule, Subject, bucket, evaluate};
 
 fn flag(rollout: u8) -> Flag {
     Flag {
@@ -14,6 +14,7 @@ fn flag(rollout: u8) -> Flag {
         roles: vec![],
         accounts: vec![],
         variants: vec![],
+        rules: vec![],
     }
 }
 
@@ -79,23 +80,27 @@ fn targeting_by_role_and_account() {
     assert!(f.is_on(&Subject {
         distinct_id: "x",
         role: Some("admin"),
-        account: None
+        account: None,
+        properties: &[]
     }));
     assert!(!f.is_on(&Subject {
         distinct_id: "x",
         role: Some("member"),
-        account: None
+        account: None,
+        properties: &[]
     }));
     assert!(!f.is_on(&Subject {
         distinct_id: "x",
         role: None,
-        account: None
+        account: None,
+        properties: &[]
     }));
     assert!(
         f.is_on(&Subject {
             distinct_id: "x",
             role: Some("member"),
-            account: Some("acme")
+            account: Some("acme"),
+            properties: &[]
         }),
         "accounts bypass targeting"
     );
@@ -106,7 +111,8 @@ fn targeting_by_role_and_account() {
     assert!(!off.is_on(&Subject {
         distinct_id: "x",
         role: Some("admin"),
-        account: Some("acme")
+        account: Some("acme"),
+        properties: &[]
     }));
 }
 
@@ -212,4 +218,66 @@ fn variants_split_by_weight_and_stay_put_when_the_rollout_grows() {
         }),
         None
     );
+}
+
+#[test]
+fn property_rules_all_match_and_a_missing_property_fails() {
+    let f = Flag {
+        roles: vec!["admin".into()],
+        accounts: vec!["vip".into()],
+        rules: vec![
+            Rule::parse("plan in pro, Team").unwrap(),
+            Rule::parse("country not in FR").unwrap(),
+        ],
+        ..flag(100)
+    };
+    assert!(f.validate().is_ok());
+    let props = |plan: &str, country: &str| {
+        let mut v = Vec::new();
+        if !plan.is_empty() {
+            v.push(("plan".to_owned(), plan.to_owned()));
+        }
+        if !country.is_empty() {
+            v.push(("country".to_owned(), country.to_owned()));
+        }
+        v
+    };
+    let on = |role: &str, account: Option<&str>, p: &[(String, String)]| {
+        f.is_on(&Subject {
+            distinct_id: "u",
+            role: Some(role),
+            account,
+            properties: p,
+        })
+    };
+    assert!(on("admin", None, &props("team", "DE")), "case-insensitive");
+    assert!(!on("admin", None, &props("free", "DE")));
+    assert!(!on("admin", None, &props("pro", "fr")), "not in");
+    assert!(
+        !on("admin", None, &props("pro", "")),
+        "missing fails not_in too"
+    );
+    assert!(!on("member", None, &props("pro", "DE")), "AND with roles");
+    assert!(on("member", Some("vip"), &[]), "accounts still bypass");
+    let role_rule = Flag {
+        rules: vec![Rule::parse("account in acme").unwrap()],
+        ..flag(100)
+    };
+    assert!(role_rule.is_on(&Subject {
+        distinct_id: "u",
+        account: Some("acme"),
+        ..Subject::default()
+    }));
+    // Parsing and limits.
+    assert_eq!(f.rules[1].to_string(), "country not in FR");
+    assert!(Rule::parse("plan pro").is_err());
+    assert!(Rule::parse("Plan Name in x").is_err());
+    assert!(Rule::parse("plan in ").is_err());
+    let many = Flag {
+        rules: vec![Rule::parse("plan in pro").unwrap(); 11],
+        ..flag(100)
+    };
+    assert!(many.validate().is_err());
+    let json = serde_json::to_string(&f.rules[1]).unwrap();
+    assert!(json.contains("\"not_in\""), "{json}");
 }

@@ -128,6 +128,23 @@ impl Tools for OpenLensTools {
                 input_schema: json!({"type":"object","properties":with(json!({"limit":{"type":"integer","minimum":1,"maximum":50}}))}),
             },
             ToolSpec {
+                name: "goals",
+                description: "Goals on KPIs and objectives: value now, target, deadline, status (reached, on track, at risk, off track), guardrails and whether they are breached, what moved each goal (releases with their effect, flag/survey/map changes and notes since it was set), and suggested targets per KPI.",
+                input_schema: json!({"type":"object","properties":proj}),
+            },
+            ToolSpec {
+                name: "set_goal",
+                description: "Set a goal: a KPI key from `goals` suggestions (or success:<feature>), a target in KPI units (a share as 0-1), and a deadline (YYYY-MM-DD) or a number of releases. Optional guardrails: KPIs that must not get worse, with a limit (default 5% worse than now).",
+                input_schema: json!({"type":"object","properties":with(json!({
+                    "kpi":{"type":"string"},
+                    "target":{"type":"number"},
+                    "deadline":{"type":"string"},
+                    "releases":{"type":"integer","minimum":1,"maximum":50},
+                    "owner":{"type":"string"},
+                    "guardrails":{"type":"array","items":{"type":"object","properties":{"kpi":{"type":"string"},"limit":{"type":"number"}},"required":["kpi"]}}
+                })),"required":["kpi","target"]}),
+            },
+            ToolSpec {
                 name: "verify",
                 description: "Wiring checklist: events arrive, users identified with a role, release tagged, map pushed, events per feature. Each failing check carries its fix.",
                 input_schema: json!({"type":"object","properties":proj}),
@@ -169,7 +186,7 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "flags",
-                description: "The project's feature flags (key, enabled, rollout %, target roles and accounts).",
+                description: "The project's feature flags (key, enabled, rollout %, target roles and accounts, property rules, variants).",
                 input_schema: json!({"type":"object","properties":proj}),
             },
             ToolSpec {
@@ -181,7 +198,8 @@ impl Tools for OpenLensTools {
                     "rollout":{"type":"integer","minimum":0,"maximum":100},
                     "roles":{"type":"array","items":{"type":"string"}},
                     "accounts":{"type":"array","items":{"type":"string"}},
-                    "description":{"type":"string"}
+                    "description":{"type":"string"},
+                    "rules":{"type":"array","items":{"type":"string"},"description":"Property rules, all must match: 'plan in pro, team', 'country not in FR' (any identify() property; a user without it is out)"}
                 })),"required":["key"]}),
             },
             ToolSpec {
@@ -305,6 +323,26 @@ impl Tools for OpenLensTools {
                 )?;
                 ok_or(st, v)
             }
+            "goals" => {
+                let (st, v) = c.call(
+                    "GET",
+                    &format!("/api/projects/{}/goals", project(args)),
+                    None,
+                )?;
+                ok_or(st, v)
+            }
+            "set_goal" => {
+                let mut body = args.clone();
+                if let Some(o) = body.as_object_mut() {
+                    o.remove("project");
+                }
+                let (st, v) = c.call(
+                    "POST",
+                    &format!("/api/projects/{}/goals", project(args)),
+                    Some(Body::Json(body)),
+                )?;
+                ok_or(st, v)
+            }
             "verify" => crate::verify_report(c, &project(args)),
             "insights" | "kpi_report" | "board" => {
                 let mut q = Vec::new();
@@ -420,6 +458,17 @@ impl Tools for OpenLensTools {
                     "roles": args.get("roles").cloned().unwrap_or_else(|| json!([])),
                     "accounts": args.get("accounts").cloned().unwrap_or_else(|| json!([])),
                     "description": s(args, "description").unwrap_or_default(),
+                    "rules": args
+                        .get("rules")
+                        .and_then(Value::as_array)
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(Value::as_str)
+                                .map(openlens_flags::Rule::parse)
+                                .collect::<Result<Vec<_>, String>>()
+                        })
+                        .transpose()?
+                        .unwrap_or_default(),
                 });
                 let (st, v) = c.call(
                     "PUT",

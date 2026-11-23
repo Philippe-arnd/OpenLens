@@ -60,8 +60,44 @@ pub(crate) async fn save(state: &AppState, project: &str, f: &Flag) -> Result<()
         .map_err(|e| e.to_string())
 }
 
+/// Properties for flag rules (#279), from `p.<key>=<value>` in the query
+/// (and `plan`), capped in number and length; `country` comes from the
+/// caller's address when the app does not send one. Values are used to
+/// evaluate and never stored.
+pub(crate) fn properties(
+    q: &HashMap<String, String>,
+    headers: &HeaderMap,
+) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = q
+        .iter()
+        .filter_map(|(k, v)| {
+            let key = if k == "plan" {
+                k.as_str()
+            } else {
+                k.strip_prefix("p.")?
+            };
+            let key = key.to_lowercase();
+            let v = v.trim();
+            (openlens_flags::valid_property(&key)
+                && !v.is_empty()
+                && v.len() <= openlens_flags::MAX_VALUE_LEN)
+                .then(|| (key, v.to_owned()))
+        })
+        .collect();
+    out.sort();
+    out.dedup_by(|a, b| a.0 == b.0);
+    out.truncate(openlens_flags::MAX_PROPERTIES);
+    if !out.iter().any(|(k, _)| k == "country")
+        && let Some(c) = crate::audience::client_ip(headers).and_then(crate::audience::country)
+    {
+        out.push(("country".into(), c));
+    }
+    out
+}
+
 pub(crate) async fn public(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(q): Query<HashMap<String, String>>,
 ) -> Response {
     let cors = [
@@ -105,10 +141,12 @@ pub(crate) async fn public(
         (_, None) => None,
     };
     let flags = load(&state, &project.id).await;
+    let props = properties(&q, &headers);
     let subject = Subject {
         distinct_id: id,
         role,
         account: q.get("account").map(String::as_str),
+        properties: &props,
     };
     let on = openlens_flags::evaluate(&flags, &subject);
     let variants = openlens_flags::variants(&flags, &subject);

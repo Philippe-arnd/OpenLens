@@ -53,12 +53,17 @@ export class OpenLens {
     this.capture(distinctId, "$identify", p);
   }
 
-  /** Is a flag on for this user? Resolves to false on any error. */
+  /** Is a flag on for this user? Resolves to false on any error.
+   * `dims`: { role, account, plan, properties: { seats: 12, … } } for rules. */
   async isEnabled(flag, distinctId, dims = {}) {
     try {
       const q = new URLSearchParams({ key: this.key, distinct_id: String(distinctId) });
       if (dims.role) q.set("role", dims.role);
       if (dims.account) q.set("account", dims.account);
+      if (dims.plan) q.set("plan", dims.plan);
+      for (const [k, v] of Object.entries(dims.properties || {}).slice(0, 20)) {
+        if (v !== undefined && v !== null && v !== "") q.set(`p.${k.toLowerCase()}`, String(v));
+      }
       const r = await this.fetch(`${this.host}/flags?${q}`);
       if (!r.ok) return false;
       const j = await r.json();

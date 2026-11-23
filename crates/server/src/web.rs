@@ -125,6 +125,14 @@ pub(crate) fn routes() -> Router<AppState> {
             "/p/{project}/goals/{gid}/delete",
             post(crate::goals::delete),
         )
+        .route(
+            "/p/{project}/objectives",
+            post(crate::goals::create_objective),
+        )
+        .route(
+            "/p/{project}/objectives/{oid}/delete",
+            post(crate::goals::delete_objective),
+        )
         .route("/p/{project}/flows", get(crate::explore::flows))
         .route("/p/{project}/live", get(crate::explore::live))
         .route(
@@ -533,6 +541,7 @@ async fn board(
     let revenue = revenue.ok().flatten();
     let mut board = board;
     if let Ok(b) = board.as_mut() {
+        b.objectives_at_risk = crate::goals::snapshot(&state, &p.id).0;
         let st = crate::alerts::status(&state, &p.id);
         if st.state == "down" {
             b.app_down = st.open.first().map(|(rule, since, _)| {

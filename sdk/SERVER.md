@@ -18,6 +18,8 @@ const ol = new OpenLens({ host: process.env.OPENLENS_HOST, key: process.env.OPEN
 ol.identify(user.id, { role: user.role, account: user.orgId });
 ol.capture(user.id, "invoice_sent");
 if (await ol.isEnabled("new-billing", user.id, { role: user.role })) { /* … */ }
+// Flag rules on plan or other properties (never stored):
+await ol.isEnabled("pro-export", user.id, { plan: "pro", properties: { seats: 12 } });
 await ol.shutdown(); // on exit
 ```
 

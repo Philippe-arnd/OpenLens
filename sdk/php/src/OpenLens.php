@@ -92,13 +92,22 @@ final class OpenLens
         $this->capture($distinctId, '$identify', $p);
     }
 
-    /** Is a flag on for this user? false on any error. @param array{role?: string, account?: string} $traits */
+    /**
+     * Is a flag on for this user? false on any error. `plan` and
+     * `properties` feed the flag's rules (never stored).
+     * @param array{role?: string, account?: string, plan?: string, properties?: array<string, scalar>} $traits
+     */
     public function isEnabled(string $flag, string $distinctId, array $traits = []): bool
     {
         $q = ['key' => $this->key, 'distinct_id' => $distinctId];
-        foreach (['role', 'account'] as $t) {
+        foreach (['role', 'account', 'plan'] as $t) {
             if (isset($traits[$t]) && $traits[$t] !== '') {
                 $q[$t] = $traits[$t];
+            }
+        }
+        foreach (array_slice($traits['properties'] ?? [], 0, 20, true) as $k => $v) {
+            if ($v !== null && $v !== '') {
+                $q['p.' . strtolower((string) $k)] = is_bool($v) ? ($v ? 'true' : 'false') : (string) $v;
             }
         }
         try {

@@ -48,6 +48,8 @@ type Traits struct {
 	Role    string
 	Account string
 	Plan    string
+	// Properties feed flag rules (IsEnabled only, never stored).
+	Properties map[string]string
 }
 
 type event struct {
@@ -166,6 +168,17 @@ func (c *Client) IsEnabled(ctx context.Context, flag, distinctID string, t Trait
 	}
 	if t.Account != "" {
 		q.Set("account", t.Account)
+	}
+	if t.Plan != "" {
+		q.Set("plan", t.Plan)
+	}
+	n := 0
+	for k, v := range t.Properties {
+		if v == "" || n >= 20 {
+			continue
+		}
+		q.Set("p."+strings.ToLower(k), v)
+		n++
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.host+"/flags?"+q.Encode(), nil)
 	if err != nil {

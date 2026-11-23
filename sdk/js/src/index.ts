@@ -46,6 +46,9 @@ export interface Dimensions {
   plan?: string;
   /** The team's own account (staff, testers): left out of the board by default. */
   internal?: boolean;
+  /** Other properties flag rules can target (`seats`, `beta_tester`…): sent
+   * to `/flags` to decide, never stored on events. At most 20. */
+  properties?: Record<string, string | number | boolean>;
 }
 
 interface State {
@@ -248,6 +251,10 @@ function loadFlags(): void {
   const q = new URLSearchParams({ key: cfg.key, distinct_id: state.uid ?? state.anon });
   if (state.dims.role) q.set("role", state.dims.role);
   if (state.dims.account) q.set("account", state.dims.account);
+  if (state.dims.plan) q.set("plan", state.dims.plan);
+  for (const [k, v] of Object.entries(state.dims.properties ?? {}).slice(0, 20)) {
+    if (v !== undefined && v !== null && v !== "") q.set(`p.${k.toLowerCase()}`, String(v).slice(0, 100));
+  }
   origFetch(`${cfg.host.replace(/\/$/, "")}/flags?${q}`)
     .then((r) => (r.ok ? r.json() : null))
     .then((j: { flags?: string[]; variants?: Record<string, string>; surveys?: SurveyDef[] } | null) => {
