@@ -16,6 +16,11 @@ else
   case "$version" in *-*) section="Unreleased" ;; esac
   body=$(awk -v s="## [$section]" 'index($0, s) == 1 {on=1; next} on && /^## \[/ {exit} on {print}' CHANGELOG.md \
     | sed -e "s#](docs/#]($repo/blob/$tag/docs/#g" -e "s#](sdk/#]($repo/blob/$tag/sdk/#g")
+  # The release train tags main before the CHANGELOG names the version.
+  if [ -z "${body//[[:space:]]/}" ] && [ "$section" != Unreleased ]; then
+    body=$(awk 'index($0, "## [Unreleased]") == 1 {on=1; next} on && /^## \[/ {exit} on {print}' CHANGELOG.md \
+      | sed -e "s#](docs/#]($repo/blob/$tag/docs/#g" -e "s#](sdk/#]($repo/blob/$tag/sdk/#g")
+  fi
   [ -n "${body//[[:space:]]/}" ] || body="See the [CHANGELOG]($repo/blob/$tag/CHANGELOG.md)."
 fi
 printf '%s\n' "$body"

@@ -7,8 +7,9 @@ name: Release train
 # - the last nightly CI and image runs on main are green (the image run
 #   includes the upgrade check from the previous release);
 # - no open issue carries `release-blocker` or `release-hold`.
-# Then: move [Unreleased] to the new version, tag, publish (binaries, chart,
-# image, which redeploys Coolify), and move main to the next minor version.
+# Then: tag main, publish (binaries, chart, image, which redeploys Coolify),
+# and open a PR that names the version in the CHANGELOG and moves main to
+# the next minor version (main only takes PRs; it merges itself).
 # Hotfixes of an older minor stay manual (a release branch and a tag).
 on:
   schedule:
@@ -23,7 +24,8 @@ on:
 permissions:
   contents: write
   actions: write
-  issues: read
+  issues: write
+  pull-requests: write
 
 concurrency:
   group: release-train
@@ -72,21 +74,32 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           today=$(date -u +%Y-%m-%d)
           prev=$(git tag --list 'v*' --sort=-v:refname | grep -v -- - | head -1)
-          # 1. The changelog names the release; the tag points at that commit.
-          sed -i "s/^## \[Unreleased\]$/## [Unreleased]\n\n## [$V] - $today/" CHANGELOG.md
-          sed -i "s#^\[Unreleased\]: .*#[Unreleased]: https://github.com/$GITHUB_REPOSITORY/compare/$TAG...HEAD\n[$V]: https://github.com/$GITHUB_REPOSITORY/compare/$prev...$TAG#" CHANGELOG.md
-          git commit -qam "Release $TAG"
+          # 1. main is protected (PRs only); tags are not. Tag the tested
+          #    commit as it is: the notes read [Unreleased] (notes.sh).
           git tag -a "$TAG" -m "OpenLens $TAG"
-          git push origin HEAD:main "$TAG"
+          git push origin "$TAG"
           # 2. A tag pushed with this token starts no workflow: start them.
           gh workflow run publish.yml -f tag="$TAG"
           gh workflow run release.yml --ref "$TAG"
           gh workflow run k8s.yml --ref "$TAG"
-          # 3. main develops the next minor version (docs/development.md).
+          # 3. A PR names the release in the CHANGELOG and moves main to the
+          #    next minor version (docs/development.md), then merges itself.
           IFS=. read -r major minor _ <<< "$V"
           next="$major.$((minor + 1)).0"
+          sed -i "s/^## \[Unreleased\]$/## [Unreleased]\n\n## [$V] - $today/" CHANGELOG.md
+          sed -i "s#^\[Unreleased\]: .*#[Unreleased]: https://github.com/$GITHUB_REPOSITORY/compare/$TAG...HEAD\n[$V]: https://github.com/$GITHUB_REPOSITORY/compare/$prev...$TAG#" CHANGELOG.md
           sed -i "0,/^version = \"$V\"/s//version = \"$next\"/" Cargo.toml
           cargo update -w --offline -q || cargo update -w -q
-          git commit -qam "Develop $next"
-          git push origin HEAD:main
-          echo "::notice::released $TAG; main is now $next"
+          branch="release/develop-$next"
+          git checkout -q -b "$branch"
+          git commit -qam "Release $TAG, develop $next"
+          git push -q origin "$branch"
+          body="Names $TAG in the CHANGELOG and moves main to $next. Opened by the release train."
+          if url=$(gh pr create --base main --head "$branch" --title "Release $TAG, develop $next" --body "$body") \
+             && gh pr merge "$url" --merge --delete-branch; then
+            echo "::notice::released $TAG; main is now $next ($url)"
+          else
+            gh issue create --title "Release train: merge $branch" --label release-hold \
+              --body "$TAG is published, but the follow-up PR could not be opened or merged by the workflow token. Open and merge \`$branch\` (or allow GitHub Actions to create pull requests in Settings → Actions). The \`release-hold\` label stops the next train until then." || true
+            echo "::warning::released $TAG; open and merge $branch by hand"
+          fi
