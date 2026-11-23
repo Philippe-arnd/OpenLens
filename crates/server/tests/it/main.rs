@@ -2216,3 +2216,109 @@ async fn storage_and_backups_from_the_dashboard() {
     assert_eq!(dl.status(), StatusCode::OK);
     assert_eq!(dl.headers()["content-type"], "application/gzip");
 }
+
+#[tokio::test]
+async fn page_views_get_device_browser_and_os_but_never_the_address() {
+    let h = harness();
+    let body = serde_json::json!({
+        "key": h.key,
+        "batch": [
+            {"event": "$pageview", "distinct_id": "u1", "properties": {"$pathname": "/", "$country": "ZZ", "$lang": "fr-FR", "$sw": 390}},
+            {"event": "signup", "distinct_id": "u1"}
+        ]
+    })
+    .to_string();
+    let resp = router(h.state.clone())
+        .oneshot(
+            Request::post("/capture")
+                .header("content-type", "application/json")
+                .header("x-forwarded-for", "203.0.113.9")
+                .header("user-agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 Version/17.5 Mobile/15E148 Safari/604.1")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let r = h
+        .state
+        .query
+        .sql(
+            "default",
+            "SELECT event, properties FROM raw_events ORDER BY event",
+        )
+        .await
+        .unwrap();
+    let all = serde_json::to_string(&r.rows).unwrap();
+    assert!(!all.contains("203.0.113.9"), "no address stored");
+    assert!(!all.contains("ZZ"), "client-sent country replaced");
+    let pv = r.rows.iter().find(|x| x["event"] == "$pageview").unwrap()["properties"]
+        .as_str()
+        .unwrap();
+    assert!(
+        pv.contains(r#""$device":"phone""#)
+            && pv.contains(r#""$browser":"Safari""#)
+            && pv.contains(r#""$os":"iOS""#),
+        "{pv}"
+    );
+    let other = r.rows.iter().find(|x| x["event"] == "signup").unwrap()["properties"]
+        .as_str()
+        .unwrap();
+    assert!(!other.contains("$device"), "only page views are enriched");
+    let owner = login_cookie(&h).await;
+    let page = body_text(get(&h, "/p/default/audience", Some(&owner), false).await).await;
+    assert!(page.contains("phone") && page.contains("Safari") && !page.contains(" style="));
+}
+
+#[tokio::test]
+async fn the_feature_flow_page_and_api() {
+    let h = harness();
+    let body = serde_json::json!({
+        "key": h.key,
+        "batch": [
+            {"event": "$pageview", "distinct_id": "u1", "session_id": "s1", "properties": {"$pathname": "/", "$feature": "search"}},
+            {"event": "click", "distinct_id": "u1", "session_id": "s1", "properties": {"$feature": "cart"}}
+        ]
+    })
+    .to_string();
+    let (status, _) = post(&h, "/capture", body.into_bytes(), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let owner = login_cookie(&h).await;
+    for u in [
+        "/p/default/flows",
+        "/p/default/flows?to=success",
+        "/p/default/flows?from=cart",
+    ] {
+        let r = get(&h, u, Some(&owner), false).await;
+        assert_eq!(r.status(), StatusCode::OK, "{u}");
+        assert!(!body_text(r).await.contains(" style="));
+    }
+    let api = body_text(get(&h, "/api/projects/default/flows", None, true).await).await;
+    let v: serde_json::Value = serde_json::from_str(&api).unwrap();
+    assert!(v["sessions"].as_i64().unwrap() <= 1, "{api}");
+}
+
+#[tokio::test]
+async fn the_live_view_shows_who_is_here_and_refreshes() {
+    let h = harness();
+    let (status, _) = post(&h, "/capture", batch(&h.key), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let owner = login_cookie(&h).await;
+    let r = get(
+        &h,
+        "/p/default/live?env=production&x=evil",
+        Some(&owner),
+        false,
+    )
+    .await;
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(
+        r.headers()["refresh"],
+        "10;url=/p/default/live?env=production"
+    );
+    let html = body_text(r).await;
+    assert!(html.contains("Active now") && html.contains("$pageview") && !html.contains(" style="));
+}

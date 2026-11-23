@@ -24,6 +24,7 @@ hmac.workspace = true
 sha2.workspace = true
 hex.workspace = true
 ring.workspace = true
+maxminddb.workspace = true
 subtle.workspace = true
 axum.workspace = true
 tokio.workspace = true

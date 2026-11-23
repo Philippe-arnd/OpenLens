@@ -39,6 +39,7 @@ hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
 ring = "0.17"
+maxminddb = { version = "0.33", default-features = false }
 serde_norway = "0.9"
 ureq = { version = "3", features = ["json"] }
 lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "rustls-tls", "hostname"] }

@@ -218,6 +218,8 @@ pub(crate) async fn capture(
             ev.environment = BOT_ENVIRONMENT.to_owned();
         }
     }
+    crate::audience::init(&state.data_dir);
+    crate::audience::enrich(&mut normalized.events, &headers);
     let accepted = normalized.events.len();
     let rejected: Vec<_> = normalized
         .rejected
