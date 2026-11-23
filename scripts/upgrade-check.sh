@@ -70,6 +70,9 @@ CODE=$(api -o /dev/null -w '%{http_code}' "$B/api/projects/default/board")
 [ "$CODE" = 200 ] || fail "board gave $CODE"
 docker stop -t 20 "$NAME" > /dev/null && docker rm "$NAME" > /dev/null
 
+# Releases up to v0.2.0 name their upgrade copy after the second they
+# start, and refuse a name that exists: give them a fresh second.
+sleep 2
 echo "3. $OLD again (rollback)"
 start "$OLD"
 facts > /tmp/upgrade-rollback.txt

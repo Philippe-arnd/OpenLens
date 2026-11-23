@@ -114,7 +114,14 @@ pub fn rotate(
     if keep == 0 {
         return Err("--keep must be at least 1".into());
     }
-    let dest = into.join(stamp(now));
+    // Two starts in the same second (an upgrade, then a rollback) must not
+    // collide: take the next free second.
+    let mut at = now;
+    let mut dest = into.join(stamp(at));
+    while dest.exists() {
+        at += chrono::Duration::seconds(1);
+        dest = into.join(stamp(at));
+    }
     let n = run(src, &dest)?;
     let mut ours: Vec<PathBuf> = fs::read_dir(into)
         .map_err(|e| e.to_string())?
@@ -196,5 +203,20 @@ mod tests {
         );
         assert!(into.path().join("2026-11-23T03-17-00Z/meta.db").exists());
         assert!(rotate(src.path(), into.path(), 0, t0).is_err());
+    }
+
+    #[test]
+    fn two_copies_in_the_same_second_do_not_collide() {
+        let d = tempfile::tempdir().unwrap();
+        let data = d.path().join("data");
+        fs::create_dir_all(data.join("wal")).unwrap();
+        fs::write(data.join("wal/00001.jsonl"), b"{}\n").unwrap();
+        openlens_meta::Meta::open(&data.join("meta.db")).unwrap();
+        let into = d.path().join("up");
+        let now = chrono::Utc::now();
+        let (a, _, _) = rotate(&data, &into, 5, now).unwrap();
+        let (b, _, _) = rotate(&data, &into, 5, now).unwrap();
+        assert_ne!(a, b);
+        assert!(b.exists());
     }
 }
