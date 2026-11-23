@@ -153,6 +153,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                                 @for (href, glyph, label) in [
                                     ("", "board", "Focus board"),
                                     ("/live", "pulse", "Live"),
+                                    ("/uptime", "shield", "Uptime"),
                                     ("/events", "events", "Events"),
                                     ("/pages", "layers", "Pages"),
                                     ("/errors", "alert", "Errors"),
@@ -1693,6 +1694,90 @@ pub fn live(p: &ProjectInfo<'_>, f: &Filters, l: &openlens_engine::Live) -> Mark
     )
 }
 
+/// One check as shown: (time, ok, status, ms, error).
+pub type CheckRow = (String, bool, Option<i64>, Option<i64>, Option<String>);
+
+/// Uptime (#256): the app's state, availability, response times and
+/// incidents.
+pub struct UptimeView<'a> {
+    /// `up`, `down`, `unknown` or `off`.
+    pub state: &'a str,
+    /// Since when (a time, in the reader's zone).
+    pub since: Option<String>,
+    /// The probed URL, when the probe is on.
+    pub url: Option<String>,
+    /// Availability over 24 h and 7 days (share of good checks).
+    pub avail: (Option<f64>, Option<f64>),
+    /// p50 and p95 response time over 24 h, ms.
+    pub ms: (Option<i64>, Option<i64>),
+    /// (rule, start, end, length in minutes, cause), newest first.
+    pub incidents: Vec<(String, String, Option<String>, i64, String)>,
+    /// The last checks, newest first: (time, ok, status, ms, error).
+    pub last: Vec<CheckRow>,
+}
+
+/// The Uptime page.
+pub fn uptime(p: &ProjectInfo<'_>, v: &UptimeView<'_>) -> Markup {
+    let (cls, word) = match v.state {
+        "up" => ("good", "Up"),
+        "down" => ("bad", "Down"),
+        "off" => ("muted", "Not checked"),
+        _ => ("muted", "Waiting for the first check"),
+    };
+    layout(
+        "Uptime",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "Uptime" }
+                p { span class={ "status big " (cls) } { (word) } @if let Some(s) = &v.since { " since " (s) } }
+            } }
+            @if v.url.is_none() {
+                section.card.wide { p { "Set the app address in " a href={ "/p/" (p.id) "/settings#alerts" } { "Settings" } " and OpenLens checks it every minute. Without it, only the traffic tells (after four weeks of history)." } }
+            } @else {
+                section.tiles aria-label="Availability" {
+                    (tile("mint", "task", "Last 24 hours", &v.avail.0.map_or_else(|| "—".into(), |a| format!("{:.2}%", a * 100.0)), "available"))
+                    (tile("sky", "clock", "Last 7 days", &v.avail.1.map_or_else(|| "—".into(), |a| format!("{:.2}%", a * 100.0)), "available"))
+                    (tile("violet", "bolt", "Response time", &v.ms.0.map_or_else(|| "—".into(), |m| format!("{m} ms")), &v.ms.1.map_or_else(|| "p50, last 24 hours".into(), |m| format!("p50 · p95 {m} ms"))))
+                }
+                p.muted.small { "Checking " span.mono { (v.url.as_deref().unwrap_or("")) } " every minute. Down after two failed checks in a row (no answer, or HTTP 5xx)." }
+            }
+            section.card.wide {
+                h2.coral { (icon("alert")) "Incidents and alerts, last 30 days" }
+                @if v.incidents.is_empty() { p.muted { "None." } }
+                @else {
+                    div.table-scroll { table.plain {
+                        thead { tr { th { "What" } th { "Started" } th { "Ended" } th.num { "Length" } th { "Cause" } } }
+                        tbody { @for (rule, start, end, mins, cause) in &v.incidents {
+                            tr {
+                                td { span class={ "status " (if end.is_none() { "bad" } else { "muted" }) } { (match rule.as_str() {
+                                    "traffic" => "traffic stopped",
+                                    "down" => "down",
+                                    r if r.starts_with("error:") => "new error",
+                                    _ => "regression",
+                                }) } }
+                                td.small { (start) }
+                                td.small { @match end { Some(e) => (e), None => strong { "ongoing" } } }
+                                td.num { (mins) " min" }
+                                td.small { (cause) }
+                            }
+                        } }
+                    } }
+                }
+            }
+            @if !v.last.is_empty() {
+                section.card.wide {
+                    h2 { (icon("clock")) "Latest checks" }
+                    ul.plain-list.small { @for (t, ok, status, ms, err) in v.last.iter().take(15) {
+                        li { span class={ "status " (if *ok { "good" } else { "bad" }) } { (if *ok { "ok" } else { "failed" }) } " " (t)
+                            @if let Some(s) = status { " · HTTP " (s) } @if let Some(m) = ms { " · " (m) " ms" } @if let Some(e) = err { " · " span.muted { (e) } } }
+                    } }
+                }
+            }
+        },
+    )
+}
+
 /// Feature flags: switch on/off and change the rollout. Creating flags is
 /// done by agents (API/CLI/MCP) with the code that uses them.
 pub fn flags(p: &ProjectInfo<'_>, flags: &[openlens_flags::Flag]) -> Markup {
@@ -2571,6 +2656,31 @@ pub struct SettingsView<'a> {
     pub notice: Option<&'a str>,
     /// Yesterday, in the project's zone (default export day).
     pub yesterday: &'a str,
+    /// Alert settings (#256).
+    pub alerts: AlertsView,
+}
+
+/// A project's alert settings as the page shows them (#256).
+#[derive(Debug, Clone, Default)]
+pub struct AlertsView {
+    /// Probe and alert when down.
+    pub down: bool,
+    /// Minutes before announcing.
+    pub down_wait: u32,
+    /// Alert when traffic stops.
+    pub traffic: bool,
+    /// Alert on regressions and new errors.
+    pub regressions: bool,
+    /// Probe path.
+    pub health_path: String,
+    /// Email alerts.
+    pub email: bool,
+    /// Webhook URL.
+    pub webhook: String,
+    /// ntfy topic.
+    pub ntfy: String,
+    /// SMTP is configured.
+    pub smtp: bool,
 }
 
 /// A project's settings: name, app address, time zone, capture key and
@@ -2652,6 +2762,25 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
                         span { strong { "Feature map" } " " @match v.map_version { Some(n) => { "v" (n) }, None => "none" } }
                         @if v.map_version.is_none() { span.muted.small { " · push one with " code { "openlens-cli map push" } } }
                     }
+                }
+            }
+            section.card.wide #alerts {
+                h2.coral { (icon("bolt")) "Alerts" }
+                p.small { "Know when the app is down: OpenLens checks the app address every minute (" a href={ "/p/" (p.id) "/uptime" } { "Uptime" } "), notices when the traffic stops for much longer than usual (after four weeks of history), and, every hour, when the board finds a regression (a release or flag with more errors, pages turning slow) or a new error hits several users. One message when an incident starts, one when it ends." }
+                @if v.admin {
+                    form.settings method="post" action={ (base) "/alerts" } {
+                        label.check { input type="checkbox" name="down" checked[v.alerts.down]; " App down (needs the app address)" }
+                        label { "Announce after (min) " input type="number" name="down_wait" min="1" max="60" value=(v.alerts.down_wait); }
+                        label { "Health path " input type="text" name="health_path" value=(v.alerts.health_path) maxlength="200"; }
+                        label.check { input type="checkbox" name="traffic" checked[v.alerts.traffic]; " Traffic stopped" }
+                        label.check { input type="checkbox" name="regressions" checked[v.alerts.regressions]; " Regressions and new errors" }
+                        label.check { input type="checkbox" name="email" checked[v.alerts.email]; " Email" @if !v.alerts.smtp { span.muted { " (SMTP not set)" } } }
+                        label { "Webhook (Slack, Discord…) " input type="url" name="webhook" value=(v.alerts.webhook) placeholder="https://hooks.slack.com/…" maxlength="500"; }
+                        label { "ntfy topic " input type="text" name="ntfy" value=(v.alerts.ntfy) placeholder="my-app-alerts" maxlength="300"; }
+                        button type="submit" { "Save" }
+                    }
+                    form.inline method="post" action={ (base) "/alerts/test" } { button.soft type="submit" { "Send a test alert" } }
+                    p.muted.small { "Emails go to " code { "OPENLENS_ALERT_TO" } " (or the digest list, or the admins). ntfy: a topic on ntfy.sh, or a full https:// topic URL of your own server; install the ntfy app to get pushes on a phone." }
                 }
             }
             @if v.admin {

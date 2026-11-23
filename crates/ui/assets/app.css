@@ -420,3 +420,4 @@ svg.sankey .node { fill: var(--violet); }
 svg.sankey .node.ok { fill: var(--good); }
 svg.sankey .node.exit { fill: var(--bad); }
 svg.sankey .slabel { font-size: 12px; fill: var(--ink); paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }
+.status.big { font-size: 15px; padding: 3px 10px; border-radius: 999px; background: var(--line-2); }

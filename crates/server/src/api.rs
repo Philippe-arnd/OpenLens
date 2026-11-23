@@ -48,6 +48,10 @@ pub(crate) fn routes() -> Router<AppState> {
             "/api/projects/{project}/flows",
             get(crate::explore::api_flows),
         )
+        .route(
+            "/api/projects/{project}/status",
+            get(crate::settings::api_status),
+        )
         .route("/api/login-links", post(login_link))
         .route("/api/users", get(list_users))
         .route(

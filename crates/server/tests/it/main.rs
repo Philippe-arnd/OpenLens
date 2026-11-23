@@ -2322,3 +2322,97 @@ async fn the_live_view_shows_who_is_here_and_refreshes() {
     let html = body_text(r).await;
     assert!(html.contains("Active now") && html.contains("$pageview") && !html.contains(" style="));
 }
+
+#[tokio::test]
+async fn a_failing_probe_opens_one_incident_and_alerts_are_configurable() {
+    let h = harness();
+    let owner = login_cookie(&h).await;
+    // Bad settings are refused; good ones saved.
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/settings/alerts",
+            &owner,
+            "down=on&down_wait=2&health_path=%2Fhealthz&webhook=http%3A%2F%2Fx"
+        )
+        .await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/settings/alerts",
+            &owner,
+            "down=on&down_wait=2&health_path=%2Fhealthz&ntfy=ops-alerts"
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    // No email, webhook or reachable ntfy in tests: the test alert reports the failure.
+    let viewer = invite(
+        &h,
+        serde_json::json!({"email": "v@example.com", "role": "viewer"}),
+    )
+    .await;
+    assert_eq!(
+        post_form(&h, "/p/default/settings/alerts", &viewer, "down=on").await,
+        StatusCode::FORBIDDEN
+    );
+    // A private address is never probed: it counts as a failure, like a dead app.
+    h.state
+        .meta
+        .set_project_setting("default", "app_url", "http://127.0.0.1:9")
+        .unwrap();
+    openlens_server::alert_tick(&h.state, 1).await;
+    assert!(
+        h.state
+            .meta
+            .open_incident("default", "down")
+            .unwrap()
+            .is_none(),
+        "one failure is not down yet"
+    );
+    openlens_server::alert_tick(&h.state, 2).await;
+    let open = h.state.meta.open_incident("default", "down").unwrap();
+    assert!(
+        open.is_some_and(|(_, _, notified)| !notified),
+        "down, announced only after the wait"
+    );
+    openlens_server::alert_tick(&h.state, 3).await;
+    assert_eq!(
+        h.state.meta.incidents("default", 0).unwrap().len(),
+        1,
+        "no storm: one incident"
+    );
+    let api = body_text(get(&h, "/api/projects/default/status", None, true).await).await;
+    assert!(api.contains(r#""state":"down""#), "{api}");
+    let page = body_text(get(&h, "/p/default/uptime", Some(&owner), false).await).await;
+    assert!(page.contains("Down") && page.contains("/healthz") && !page.contains(" style="));
+    let s = body_text(get(&h, "/p/default/settings", Some(&owner), false).await).await;
+    assert!(s.contains("ops-alerts"));
+}
+
+#[tokio::test]
+async fn a_new_error_hitting_two_users_is_announced_once() {
+    let h = harness();
+    let body = serde_json::json!({
+        "key": h.key,
+        "batch": [
+            {"event": "$error", "distinct_id": "u1", "session_id": "s1", "properties": {"$message": "TypeError: x is undefined", "$pathname": "/"}},
+            {"event": "$error", "distinct_id": "u2", "session_id": "s2", "properties": {"$message": "TypeError: x is undefined", "$pathname": "/"}}
+        ]
+    })
+    .to_string();
+    let (status, _) = post(&h, "/capture", body.into_bytes(), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    openlens_server::alert_tick(&h.state, 1).await;
+    openlens_server::alert_tick(&h.state, 61).await;
+    let all = h.state.meta.incidents("default", 0).unwrap();
+    let errors: Vec<_> = all.iter().filter(|i| i.0.starts_with("error:")).collect();
+    assert_eq!(errors.len(), 1, "{all:?}");
+    assert!(
+        errors[0].3.contains("TypeError") && errors[0].2.is_some(),
+        "announced and closed at once"
+    );
+}

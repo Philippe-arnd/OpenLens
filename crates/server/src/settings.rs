@@ -104,6 +104,11 @@ pub(crate) async fn page(
         Some("saved") => Some("Saved."),
         Some("rotated") => Some("New capture key: update every app that sends events."),
         Some("created") => Some("Project created. Add the snippet below to the app."),
+        Some("alerts") => Some("Alert settings saved."),
+        Some("test") => Some("Test alert sent: check every channel."),
+        Some("test-none") => {
+            Some("No channel is set: add an email (SMTP), a webhook or an ntfy topic.")
+        }
         _ => None,
     };
     let host = crate::base_url(&headers);
@@ -126,6 +131,20 @@ pub(crate) async fn page(
                 admin: viewer.admin,
                 notice,
                 yesterday: &yesterday,
+                alerts: {
+                    let a = crate::alerts::Settings::load(&state.meta, &p.id);
+                    openlens_ui::AlertsView {
+                        down: a.down,
+                        down_wait: a.down_wait,
+                        traffic: a.traffic,
+                        regressions: a.regressions,
+                        health_path: a.health_path,
+                        email: a.email,
+                        webhook: a.webhook,
+                        ntfy: a.ntfy,
+                        smtp: crate::digest::login_mail().is_some(),
+                    }
+                },
             },
         ),
     )
@@ -338,4 +357,208 @@ pub(crate) async fn create(
         Ok(Err(_)) => oops("A project with that name already exists."),
         Err(_) => oops("Try again."),
     }
+}
+
+#[derive(Deserialize)]
+pub(crate) struct AlertsForm {
+    #[serde(default)]
+    down: Option<String>,
+    #[serde(default)]
+    down_wait: Option<u32>,
+    #[serde(default)]
+    traffic: Option<String>,
+    #[serde(default)]
+    regressions: Option<String>,
+    #[serde(default)]
+    health_path: String,
+    #[serde(default)]
+    email: Option<String>,
+    #[serde(default)]
+    webhook: String,
+    #[serde(default)]
+    ntfy: String,
+}
+
+/// `POST /p/{id}/settings/alerts` (#256).
+pub(crate) async fn alerts(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Form(f): Form<AlertsForm>,
+) -> Response {
+    if !crate::flags::same_origin(&headers) {
+        return refused();
+    }
+    if load(&state, &id).await.is_none() {
+        return oops("No such project.");
+    }
+    let path = f.health_path.trim();
+    let a = crate::alerts::Settings {
+        down: f.down.as_deref() == Some("on"),
+        down_wait: f.down_wait.unwrap_or(2),
+        traffic: f.traffic.as_deref() == Some("on"),
+        regressions: f.regressions.as_deref() == Some("on"),
+        health_path: if path.is_empty() {
+            "/".into()
+        } else {
+            path.to_owned()
+        },
+        email: f.email.as_deref() == Some("on"),
+        webhook: f.webhook.trim().to_owned(),
+        ntfy: f.ntfy.trim().to_owned(),
+    };
+    if let Err(e) = a.validate() {
+        return oops(&e);
+    }
+    match serde_json::to_string(&a) {
+        Ok(j) => {
+            let _ = state.meta.set_project_setting(&id, "alerts", &j);
+            Redirect::to(&format!("/p/{id}/settings?done=alerts#alerts")).into_response()
+        }
+        Err(e) => oops(&e.to_string()),
+    }
+}
+
+/// `POST /p/{id}/settings/alerts/test`: one message on every channel.
+pub(crate) async fn alerts_test(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    if !crate::flags::same_origin(&headers) {
+        return refused();
+    }
+    let Some(p) = load(&state, &id).await else {
+        return oops("No such project.");
+    };
+    let sent = crate::alerts::deliver(
+        &state,
+        &p.id,
+        &format!("🔔 Test alert for {}", p.name),
+        "This is a test from OpenLens: alerts reach you here.",
+        "test",
+        false,
+    )
+    .await;
+    if sent.is_empty() {
+        return Redirect::to(&format!("/p/{id}/settings?done=test-none#alerts")).into_response();
+    }
+    let failed: Vec<String> = sent
+        .iter()
+        .filter_map(|(ch, r)| r.as_ref().err().map(|e| format!("{ch}: {e}")))
+        .collect();
+    if failed.is_empty() {
+        Redirect::to(&format!("/p/{id}/settings?done=test#alerts")).into_response()
+    } else {
+        oops(&format!("Not delivered: {}", failed.join("; ")))
+    }
+}
+
+fn when(t: i64, tz: &str) -> String {
+    chrono::DateTime::from_timestamp(t, 0).map_or_else(String::new, |d| {
+        openlens_ui::local_time(&d.format("%Y-%m-%d %H:%M:%S").to_string(), tz, false)
+    })
+}
+
+/// `GET /p/{id}/uptime` (#256).
+pub(crate) async fn uptime(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    if !crate::auth::has_session(&state, &headers) {
+        return Redirect::to("/login").into_response();
+    }
+    let Some(p) = load(&state, &id).await else {
+        return html_page(
+            StatusCode::NOT_FOUND,
+            openlens_ui::message("Not found", "No such project."),
+        );
+    };
+    let tz = crate::auth::tz_for(&state, &headers, &p.timezone);
+    let now = chrono::Utc::now().timestamp();
+    let st = crate::alerts::status(&state, &p.id);
+    let settings = crate::alerts::Settings::load(&state.meta, &p.id);
+    let url = state
+        .meta
+        .project_setting(&p.id, "app_url")
+        .ok()
+        .flatten()
+        .filter(|_| settings.down)
+        .map(|o| format!("{o}{}", settings.health_path));
+    let week = state
+        .meta
+        .checks(&p.id, now - 7 * 86400)
+        .unwrap_or_default();
+    let day: Vec<_> = week.iter().filter(|c| c.0 >= now - 86400).collect();
+    let share = |v: &[&openlens_meta::Check]| {
+        (!v.is_empty()).then(|| v.iter().filter(|c| c.1).count() as f64 / v.len() as f64)
+    };
+    let mut ms: Vec<i64> = day.iter().filter_map(|c| c.3).collect();
+    ms.sort_unstable();
+    let pct = |q: f64| (!ms.is_empty()).then(|| ms[((ms.len() - 1) as f64 * q).round() as usize]);
+    let week_refs: Vec<_> = week.iter().collect();
+    let view = openlens_ui::UptimeView {
+        state: st.state,
+        since: st.since.map(|t| when(t, &tz)),
+        url,
+        avail: (share(&day), share(&week_refs)),
+        ms: (pct(0.5), pct(0.95)),
+        incidents: state
+            .meta
+            .incidents(&p.id, now - 30 * 86400)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(rule, start, end, cause, _)| {
+                let mins = (end.unwrap_or(now) - start).max(0) / 60;
+                (
+                    rule,
+                    when(start, &tz),
+                    end.map(|e| when(e, &tz)),
+                    mins,
+                    cause,
+                )
+            })
+            .collect(),
+        last: week
+            .iter()
+            .rev()
+            .take(15)
+            .map(|c| (when(c.0, &tz), c.1, c.2, c.3, c.4.clone()))
+            .collect(),
+    };
+    let info = openlens_ui::ProjectInfo {
+        id: &p.id,
+        name: &p.name,
+        key: &p.api_key,
+    };
+    let mut r = html_page(StatusCode::OK, openlens_ui::uptime(&info, &view));
+    if let Ok(v) = axum::http::HeaderValue::from_str(&format!("60;url=/p/{}/uptime", p.id)) {
+        r.headers_mut().insert(axum::http::header::REFRESH, v);
+    }
+    r
+}
+
+/// `GET /api/projects/{id}/status` (bearer): up, down, unknown or off,
+/// with open incidents (for agents around a deploy).
+pub(crate) async fn api_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    if !crate::auth::has_bearer(&state, &headers) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            axum::Json(serde_json::json!({"error": "admin bearer token required"})),
+        )
+            .into_response();
+    }
+    if load(&state, &id).await.is_none() {
+        return (
+            StatusCode::NOT_FOUND,
+            axum::Json(serde_json::json!({"error": "unknown project"})),
+        )
+            .into_response();
+    }
+    axum::Json(crate::alerts::status(&state, &id)).into_response()
 }
