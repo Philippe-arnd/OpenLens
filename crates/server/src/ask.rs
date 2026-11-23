@@ -90,7 +90,7 @@ fn tools() -> Vec<Tool> {
         },
         Tool {
             name: "sql",
-            description: "Read-only SQL (DataFusion) on table `events` (event, timestamp, path, feature, role, release, environment, date, session_id). Aggregate: GROUP BY or count/sum/avg; prune with date >= 'YYYY-MM-DD'. 20 rows shown.",
+            description: "Read-only SQL (DataFusion) on table `events` (event, timestamp, path, feature, role, plan, release, environment, flags, date). Count people with count(DISTINCT user_key) and sessions with count(DISTINCT session_key). Aggregate: GROUP BY or count/sum/avg; groups of fewer than 5 people are left out. Prune with date >= 'YYYY-MM-DD'. 20 rows shown.",
             schema: obj(json!({ "query": { "type": "string" } }), &["query"]),
         },
         Tool {
@@ -164,8 +164,9 @@ pub(crate) fn tsv(rows: &[Map<String, Value>]) -> String {
     out
 }
 
-/// Without person-level detail, SQL may count users but not list them,
-/// and never reads properties or URLs.
+/// A readable first check. Without person-level detail, the query then
+/// runs on an aggregate-only view ([`openlens_query::QueryEngine::sql_aggregate`]),
+/// which is what actually keeps people out.
 pub(crate) fn sql_allowed(query: &str, person_level: bool) -> Result<(), String> {
     let q = query
         .to_lowercase()
@@ -178,13 +179,10 @@ pub(crate) fn sql_allowed(query: &str, person_level: bool) -> Result<(), String>
     if person_level {
         return Ok(());
     }
-    let stripped = q
-        .replace("count(distinct distinct_id)", "")
-        .replace("count(distinct session_id)", "");
     for banned in ["distinct_id", "properties", "url", "account", "session_id"] {
-        if stripped.contains(banned) {
+        if q.contains(banned) {
             return Err(format!(
-                "`{banned}` is person-level: count it (count(DISTINCT …)) instead, or ask an admin to allow person-level detail for this project"
+                "`{banned}` is person-level: count people with count(DISTINCT user_key) instead, or ask an admin to allow person-level detail for this project"
             ));
         }
     }
@@ -196,6 +194,16 @@ pub(crate) fn sql_allowed(query: &str, person_level: bool) -> Result<(), String>
         return Err("aggregate the rows (GROUP BY, count, sum, avg)".into());
     }
     Ok(())
+}
+
+/// The project's secret for `user_key` (never shown, never sent).
+fn pseudonym_key(state: &AppState, project: &str) -> String {
+    state
+        .meta
+        .setting_or_init(&format!("project:{project}:ask_key"), || {
+            crate::cookieless::random_hex(32)
+        })
+        .unwrap_or_else(|_| crate::cookieless::random_hex(32))
 }
 
 fn person_level(state: &AppState, project: &str) -> bool {
@@ -425,8 +433,16 @@ async fn run_tool(
                 return (format!("refused: {e}"), None);
             }
             let src = openlens_engine::source(map.as_ref().map(|(m, _)| m));
-            let q2 = q.replacen(" events", &format!(" {src}"), 1);
-            match state.query.sql(&p.id, &q2).await {
+            let run = if person_level(state, &p.id) {
+                let full = format!(
+                    "(SELECT *, distinct_id AS user_key, session_id AS session_key FROM {src}) AS events"
+                );
+                Box::pin(state.query.sql_over(&p.id, &full, &q)).await
+            } else {
+                let key = pseudonym_key(state, &p.id);
+                Box::pin(state.query.sql_aggregate(&p.id, &src, key.as_bytes(), &q)).await
+            };
+            match run {
                 Ok(r) => (tsv(&r.rows), Some(("SQL".into(), q))),
                 Err(e) => (format!("error: {e}"), None),
             }
@@ -660,7 +676,7 @@ pub(crate) async fn answer(
         }
         let mut results = Vec::new();
         for c in &reply.calls {
-            let (out, ev) = run_tool(state, p, user, admin, c).await;
+            let (out, ev) = Box::pin(run_tool(state, p, user, admin, c)).await;
             match ev {
                 Some((label, d)) if label.starts_with("pending:") => {
                     pending = Some((label.trim_start_matches("pending:").to_owned(), d));
@@ -1025,7 +1041,7 @@ mod tests {
     fn sql_without_person_level_counts_but_does_not_list() {
         assert!(
             sql_allowed(
-                "SELECT feature, count(DISTINCT distinct_id) FROM events GROUP BY 1",
+                "SELECT feature, count(DISTINCT user_key) FROM events GROUP BY 1",
                 false
             )
             .is_ok()

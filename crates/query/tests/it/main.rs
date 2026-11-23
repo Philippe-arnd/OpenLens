@@ -241,3 +241,97 @@ async fn new_segments_are_seen_by_the_same_engine() {
     w.flush().unwrap();
     assert_eq!(count(q.clone()).await, Some(3));
 }
+
+#[tokio::test]
+async fn aggregate_sql_hides_people_and_small_groups() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let mut rows = Vec::new();
+    for i in 0..6 {
+        let mut e = ev("c", "member", 0);
+        e.uuid = format!("c-{i}");
+        e.distinct_id = format!("person-{i}");
+        e.session_id = Some(format!("s-{i}"));
+        e.feature = Some("export".into());
+        e.url = Some("https://app.test/x".into());
+        rows.push(e);
+    }
+    let mut lone = ev("c", "member", 0);
+    lone.uuid = "c-lone".into();
+    lone.distinct_id = "person-lone".into();
+    lone.feature = Some("rare".into());
+    rows.push(lone);
+    let mut identify = ev("c", "member", 0);
+    identify.uuid = "c-identify".into();
+    identify.event = "$identify".into();
+    identify.distinct_id = "person-0".into();
+    identify.properties = r#"{"$anon_distinct_id":"anon-0"}"#.into();
+    rows.push(identify);
+    w.append(&rows).unwrap();
+    w.flush().unwrap();
+    let q = QueryEngine::new(dir.path(), Limits::default());
+    let key = b"project key";
+
+    for leak in [
+        "SELECT *, count(*) OVER () FROM events LIMIT 5",
+        "SELECT count(*), array_agg(person) FROM persons",
+        "SELECT anon, person, count(*) FROM person_aliases GROUP BY 1, 2",
+        "SELECT distinct_id, count(*) FROM events GROUP BY 1",
+        "SELECT user_key FROM events",
+        "SELECT count(*), (SELECT min(user_key) FROM events) FROM events",
+        "SELECT count(*) FROM events UNION ALL SELECT count(*) FROM events",
+    ] {
+        assert!(
+            q.sql_aggregate("c", "events", key, leak).await.is_err(),
+            "{leak}"
+        );
+    }
+    // A group of one person is dropped, even when its key is chosen.
+    let per_user = q
+        .sql_aggregate(
+            "c",
+            "events",
+            key,
+            "SELECT user_key, count(*) AS n FROM events GROUP BY 1",
+        )
+        .await
+        .unwrap();
+    assert!(per_user.rows.is_empty());
+
+    let r = q
+        .sql_aggregate(
+            "c",
+            "events",
+            key,
+            "SELECT feature, count(DISTINCT user_key) AS users FROM events GROUP BY 1",
+        )
+        .await
+        .unwrap();
+    let text = serde_json::to_string(&r.rows).unwrap();
+    assert!(text.contains("export"));
+    assert!(!text.contains("rare") && !text.contains("person-"));
+    assert_eq!(r.columns, ["feature", "users"]);
+
+    // The feature map's projection is the `events` the query sees.
+    let mapped = "(SELECT event, timestamp, path, 'mapped' AS feature, role, plan, release, \
+                  environment, flags, date, distinct_id, session_id FROM events) AS events";
+    let r = q
+        .sql_aggregate(
+            "c",
+            mapped,
+            key,
+            "SELECT feature, count(*) AS n FROM events GROUP BY 1",
+        )
+        .await
+        .unwrap();
+    assert!(serde_json::to_string(&r.rows).unwrap().contains("mapped"));
+    let full = q
+        .sql_over("c", mapped, "SELECT DISTINCT feature FROM events")
+        .await
+        .unwrap();
+    assert!(
+        serde_json::to_string(&full.rows)
+            .unwrap()
+            .contains("mapped")
+    );
+}

@@ -25,6 +25,9 @@ use datafusion::execution::memory_pool::FairSpillPool;
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::prelude::{SQLOptions, SessionConfig, SessionContext};
 use futures::StreamExt;
+
+mod aggregate;
+pub use aggregate::MIN_USERS;
 use serde::Serialize;
 
 /// How long the anonymous-id table of a project is reused before it is
@@ -256,16 +259,7 @@ impl QueryEngine {
             .map_err(|e| QueryError::Storage(e.to_string()))?;
         std::fs::create_dir_all(&dir).map_err(|e| QueryError::Storage(e.to_string()))?;
 
-        let runtime = match &self.runtime {
-            Some(r) => r.clone(),
-            None => runtime_builder(self.limits.memory)
-                .build_arc()
-                .map_err(|e| QueryError::Storage(e.to_string()))?,
-        };
-        let config = SessionConfig::new()
-            .with_target_partitions(2)
-            .with_information_schema(false);
-        let ctx = SessionContext::new_with_config_rt(config, runtime);
+        let ctx = self.session()?;
 
         let url = ListingTableUrl::parse(format!("{}/", dir.display()))
             .map_err(|e| QueryError::Storage(e.to_string()))?;
@@ -333,70 +327,176 @@ impl QueryEngine {
 
     /// Run one read-only SQL query on `project`'s events.
     pub async fn sql(&self, project: &str, sql: &str) -> Result<QueryResult, QueryError> {
+        self.timed(
+            sql,
+            Box::pin(async {
+                let ctx = self.context(project).await?;
+                drain(plan(&ctx, sql).await?, self.limits.max_rows).await
+            }),
+        )
+        .await
+    }
+
+    /// Like [`QueryEngine::sql`], with `events` replaced by `source`, a
+    /// `SELECT` over `events` aliased `AS events` (the feature map's
+    /// projection, from `openlens_engine::source`).
+    pub async fn sql_over(
+        &self,
+        project: &str,
+        source: &str,
+        sql: &str,
+    ) -> Result<QueryResult, QueryError> {
+        self.timed(
+            sql,
+            Box::pin(async {
+                let ctx = self.context(project).await?;
+                if source != "events" {
+                    let view = ctx
+                        .sql(&format!("SELECT * FROM {source}"))
+                        .await
+                        .map_err(|e| QueryError::Storage(e.to_string()))?
+                        .into_view();
+                    ctx.deregister_table("events")
+                        .map_err(|e| QueryError::Storage(e.to_string()))?;
+                    ctx.register_table("events", view)
+                        .map_err(|e| QueryError::Storage(e.to_string()))?;
+                }
+                drain(plan(&ctx, sql).await?, self.limits.max_rows).await
+            }),
+        )
+        .await
+    }
+
+    /// Aggregate-only SQL (see the `aggregate` module): `events` has no
+    /// person-level column, people are counted with `user_key` (keyed by
+    /// `key`, one per project), the result must be an aggregate, and groups
+    /// of fewer than [`MIN_USERS`] people are dropped.
+    pub async fn sql_aggregate(
+        &self,
+        project: &str,
+        source: &str,
+        key: &[u8],
+        sql: &str,
+    ) -> Result<QueryResult, QueryError> {
+        self.timed(
+            sql,
+            Box::pin(async {
+                let full = self.context(project).await?;
+                full.register_udf(aggregate::pseudonym_udf(key.to_vec()));
+                let view = full
+                    .sql(&aggregate::view_sql(source))
+                    .await
+                    .map_err(|e| QueryError::Storage(e.to_string()))?
+                    .into_view();
+                let ctx = self.session()?;
+                ctx.register_table("events", view)
+                    .map_err(|e| QueryError::Storage(e.to_string()))?;
+                let (state, plan) = plan(&ctx, sql).await?.into_parts();
+                let plan = aggregate::guard(plan).map_err(QueryError::Rejected)?;
+                drain(
+                    datafusion::dataframe::DataFrame::new(state, plan),
+                    self.limits.max_rows,
+                )
+                .await
+            }),
+        )
+        .await
+    }
+
+    /// A context with the shared runtime and no table.
+    fn session(&self) -> Result<SessionContext, QueryError> {
+        let runtime = match &self.runtime {
+            Some(r) => r.clone(),
+            None => runtime_builder(self.limits.memory)
+                .build_arc()
+                .map_err(|e| QueryError::Storage(e.to_string()))?,
+        };
+        let config = SessionConfig::new()
+            .with_target_partitions(2)
+            .with_information_schema(false);
+        Ok(SessionContext::new_with_config_rt(config, runtime))
+    }
+
+    /// Apply the size check, the time limit and the debug log to a query.
+    async fn timed(
+        &self,
+        sql: &str,
+        run: impl std::future::Future<Output = Result<QueryResult, QueryError>>,
+    ) -> Result<QueryResult, QueryError> {
         if sql.len() > 20_000 {
             return Err(QueryError::Rejected("query is too long".into()));
         }
-        let limits = self.limits;
-        let run = async {
-            let ctx = self.context(project).await?;
-            let options = SQLOptions::new()
-                .with_allow_ddl(false)
-                .with_allow_dml(false)
-                .with_allow_statements(false);
-            let df = ctx
-                .sql_with_options(sql, options)
-                .await
-                .map_err(|e| QueryError::Rejected(e.to_string()))?;
-            let columns: Vec<String> = df
-                .schema()
-                .fields()
-                .iter()
-                .map(|f| f.name().clone())
-                .collect();
-            let mut stream = df
-                .execute_stream()
-                .await
-                .map_err(|e| QueryError::Rejected(e.to_string()))?;
-            let mut rows = Vec::new();
-            let mut truncated = false;
-            while let Some(batch) = stream.next().await {
-                let batch = batch.map_err(|e| QueryError::Rejected(e.to_string()))?;
-                let mut buf = Vec::new();
-                {
-                    let mut w = arrow::json::ArrayWriter::new(&mut buf);
-                    w.write(&batch)
-                        .map_err(|e| QueryError::Storage(e.to_string()))?;
-                    w.finish().map_err(|e| QueryError::Storage(e.to_string()))?;
-                }
-                let parsed: Vec<serde_json::Map<String, serde_json::Value>> = if buf.is_empty() {
-                    Vec::new()
-                } else {
-                    serde_json::from_slice(&buf).map_err(|e| QueryError::Storage(e.to_string()))?
-                };
-                for row in parsed {
-                    if rows.len() >= limits.max_rows {
-                        truncated = true;
-                        break;
-                    }
-                    rows.push(row);
-                }
-                if truncated {
-                    break;
-                }
-            }
-            Ok(QueryResult {
-                columns,
-                rows,
-                truncated,
-            })
-        };
+        let limit = self.limits.timeout;
         let started = Instant::now();
-        let out = match tokio::time::timeout(limits.timeout, run).await {
+        let out = match tokio::time::timeout(limit, run).await {
             Ok(r) => r,
-            Err(_) => Err(QueryError::Timeout(limits.timeout)),
+            Err(_) => Err(QueryError::Timeout(limit)),
         };
         // `RUST_LOG=openlens_query=debug` shows what each query costs.
         tracing::debug!(ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX), sql = %sql.chars().take(160).collect::<String>(), "query");
         out
     }
+}
+
+/// Plan read-only SQL: no DDL, DML or statements.
+async fn plan(
+    ctx: &SessionContext,
+    sql: &str,
+) -> Result<datafusion::dataframe::DataFrame, QueryError> {
+    let options = SQLOptions::new()
+        .with_allow_ddl(false)
+        .with_allow_dml(false)
+        .with_allow_statements(false);
+    ctx.sql_with_options(sql, options)
+        .await
+        .map_err(|e| QueryError::Rejected(e.to_string()))
+}
+
+/// Run a query and collect at most `max_rows` rows as JSON objects.
+async fn drain(
+    df: datafusion::dataframe::DataFrame,
+    max_rows: usize,
+) -> Result<QueryResult, QueryError> {
+    let columns: Vec<String> = df
+        .schema()
+        .fields()
+        .iter()
+        .map(|f| f.name().clone())
+        .collect();
+    let mut stream = df
+        .execute_stream()
+        .await
+        .map_err(|e| QueryError::Rejected(e.to_string()))?;
+    let mut rows = Vec::new();
+    let mut truncated = false;
+    while let Some(batch) = stream.next().await {
+        let batch = batch.map_err(|e| QueryError::Rejected(e.to_string()))?;
+        let mut buf = Vec::new();
+        {
+            let mut w = arrow::json::ArrayWriter::new(&mut buf);
+            w.write(&batch)
+                .map_err(|e| QueryError::Storage(e.to_string()))?;
+            w.finish().map_err(|e| QueryError::Storage(e.to_string()))?;
+        }
+        let parsed: Vec<serde_json::Map<String, serde_json::Value>> = if buf.is_empty() {
+            Vec::new()
+        } else {
+            serde_json::from_slice(&buf).map_err(|e| QueryError::Storage(e.to_string()))?
+        };
+        for row in parsed {
+            if rows.len() >= max_rows {
+                truncated = true;
+                break;
+            }
+            rows.push(row);
+        }
+        if truncated {
+            break;
+        }
+    }
+    Ok(QueryResult {
+        columns,
+        rows,
+        truncated,
+    })
 }

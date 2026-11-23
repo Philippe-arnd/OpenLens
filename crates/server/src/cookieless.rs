@@ -17,7 +17,7 @@ const SESSION_GAP: i64 = 30 * 60;
 
 static SESSIONS: Mutex<Option<HashMap<String, (String, i64)>>> = Mutex::new(None);
 
-fn random_hex(n: usize) -> String {
+pub(crate) fn random_hex(n: usize) -> String {
     let mut b = vec![0u8; n];
     let _ = SystemRandom::new().fill(&mut b);
     hex::encode(b)
