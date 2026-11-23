@@ -191,3 +191,37 @@ fn stored_query_strings_are_cleaned_once_and_rows_kept() {
     assert_eq!(clean_urls(dir.path(), "p").unwrap(), 0);
     assert_eq!(count_rows(dir.path(), "p").unwrap(), 2);
 }
+
+#[test]
+fn appends_go_on_while_a_taken_flush_is_written() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let t = Utc.with_ymd_and_hms(2026, 11, 21, 9, 30, 0).unwrap();
+    w.append(&[ev("p", t), ev("p", t)]).unwrap();
+    let pending = w.take().unwrap().unwrap();
+    // The writer is free: a new append lands in the fresh WAL.
+    w.append(&[ev("p", t)]).unwrap();
+    assert_eq!(pending.write().unwrap(), 2);
+    assert_eq!(count_rows(dir.path(), "p").unwrap(), 2);
+    drop(w);
+    // Restart: only the event appended after the take is replayed.
+    let (_w, recovered) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    assert_eq!(recovered, 1);
+    assert_eq!(count_rows(dir.path(), "p").unwrap(), 3);
+}
+
+#[test]
+fn a_failed_flush_write_is_retried_by_the_next_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let t = Utc.with_ymd_and_hms(2026, 11, 21, 9, 30, 0).unwrap();
+    w.append(&[ev("p", t)]).unwrap();
+    let pending = w.take().unwrap().unwrap();
+    w.restore(pending);
+    w.append(&[ev("p", t)]).unwrap();
+    assert_eq!(w.flush().unwrap(), 2);
+    drop(w);
+    let (_w, recovered) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    assert_eq!(recovered, 0, "both WAL files were removed");
+    assert_eq!(count_rows(dir.path(), "p").unwrap(), 2);
+}

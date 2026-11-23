@@ -69,6 +69,8 @@ pub struct AppState {
     pub query: openlens_query::QueryEngine,
     /// Board results shared across requests (#291).
     pub boards: boards::BoardCache,
+    /// Held while a flush writes Parquet, so flushes never overlap (#293).
+    pub flushing: Arc<Mutex<()>>,
 }
 
 /// Build the application router.
@@ -304,12 +306,29 @@ fn flush_and_compact(
     last_compact: &mut std::time::Instant,
 ) -> Result<std::time::Instant, String> {
     {
-        let mut w = state.writer.lock().map_err(|_| "writer lock poisoned")?;
-        if w.should_flush() {
-            let n = w.flush().map_err(|e| e.to_string())?;
-            tracing::debug!(n, "flushed events to parquet");
-            if n > 0 {
-                state.boards.bump();
+        // Only the hand-over runs under the writer lock: captures keep
+        // appending while the segments are written (#293).
+        let _flushing = state.flushing.lock().map_err(|_| "flush lock poisoned")?;
+        let pending = {
+            let mut w = state.writer.lock().map_err(|_| "writer lock poisoned")?;
+            if w.should_flush() {
+                w.take().map_err(|e| e.to_string())?
+            } else {
+                None
+            }
+        };
+        if let Some(pending) = pending {
+            match pending.write() {
+                Ok(n) => {
+                    tracing::debug!(n, "flushed events to parquet");
+                    state.boards.bump();
+                }
+                Err(e) => {
+                    if let Ok(mut w) = state.writer.lock() {
+                        w.restore(pending);
+                    }
+                    return Err(e.to_string());
+                }
             }
         }
     }
@@ -383,6 +402,7 @@ fn clean_stored_urls(state: &AppState, project: &str) {
 
 /// Flush everything still buffered (used on shutdown).
 pub fn flush_now(state: &AppState) -> Result<usize, String> {
+    let _flushing = state.flushing.lock().map_err(|_| "flush lock poisoned")?;
     let mut w = state.writer.lock().map_err(|_| "writer lock poisoned")?;
     let n = w.flush().map_err(|e| e.to_string())?;
     state.boards.bump();

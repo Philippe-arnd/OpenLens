@@ -251,5 +251,6 @@ fn build_state() -> Result<openlens_server::AppState, String> {
         data_dir,
         admin_token: admin_token.into(),
         boards: Default::default(),
+        flushing: Default::default(),
     })
 }

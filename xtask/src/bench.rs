@@ -84,11 +84,11 @@ fn post(conn: &mut BufReader<TcpStream>, host: &str, body: &str) -> Result<u16, 
 }
 
 pub(crate) fn bench(args: &[String]) -> Result<(), String> {
-    let usage = "usage: cargo xtask bench http://HOST:PORT KEY [secs=10] [conns=4] [batch=50]";
+    let usage = "usage: cargo xtask bench http://HOST:PORT KEY [secs=60] [conns=4] [batch=50]";
     let url = args.first().ok_or(usage)?;
     let key = args.get(1).ok_or(usage)?.clone();
     let num = |i: usize, d: u64| args.get(i).and_then(|s| s.parse().ok()).unwrap_or(d);
-    let (secs, conns, batch) = (num(2, 10), num(3, 4) as usize, num(4, 50) as usize);
+    let (secs, conns, batch) = (num(2, 60), num(3, 4) as usize, num(4, 50) as usize);
     let host = url
         .strip_prefix("http://")
         .ok_or("only http:// targets (a local server)")?
@@ -143,7 +143,7 @@ pub(crate) fn bench(args: &[String]) -> Result<(), String> {
             "batch": batch,
             "connections": conns,
             "seconds": secs,
-            "latency_ms": { "p50": p(0.5), "p95": p(0.95), "p99": p(0.99) },
+            "latency_ms": { "p50": p(0.5), "p95": p(0.95), "p99": p(0.99), "p99_9": p(0.999), "max": p(1.0) },
         })
     );
     if failed > 0 {
