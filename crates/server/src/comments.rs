@@ -46,12 +46,6 @@ pub(crate) async fn add(
     Path((project, session)): Path<(String, String)>,
     Form(f): Form<NewComment>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return html_page(
-            StatusCode::FORBIDDEN,
-            openlens_ui::message("Refused", "Cross-site form."),
-        );
-    }
     let Some(v) = auth::viewer(&state, &headers) else {
         return Redirect::to("/login").into_response();
     };
@@ -86,12 +80,6 @@ pub(crate) async fn delete(
     headers: HeaderMap,
     Path((project, session, id)): Path<(String, String, i64)>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return html_page(
-            StatusCode::FORBIDDEN,
-            openlens_ui::message("Refused", "Cross-site form."),
-        );
-    }
     let Some(v) = auth::viewer(&state, &headers) else {
         return Redirect::to("/login").into_response();
     };

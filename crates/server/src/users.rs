@@ -10,13 +10,6 @@ use crate::AppState;
 use crate::auth;
 use crate::web::html_page;
 
-fn refused() -> Response {
-    html_page(
-        StatusCode::FORBIDDEN,
-        openlens_ui::message("Refused", "Cross-site form."),
-    )
-}
-
 fn oops(msg: &str) -> Response {
     html_page(
         StatusCode::BAD_REQUEST,
@@ -135,9 +128,6 @@ pub(crate) async fn invite(
     headers: HeaderMap,
     Form(f): Form<InviteForm>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return refused();
-    }
     let projects = projects_list(&f.projects);
     let meta = state.meta.clone();
     let res = tokio::task::spawn_blocking(move || {
@@ -215,9 +205,6 @@ pub(crate) async fn update(
     Path(id): Path<String>,
     Form(f): Form<UpdateForm>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return refused();
-    }
     let projects = projects_list(&f.projects);
     let meta = state.meta.clone();
     let pid = id.clone();
@@ -261,9 +248,6 @@ pub(crate) async fn action(
     Path((id, action)): Path<(String, String)>,
     Form(f): Form<ConfirmForm>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return refused();
-    }
     let Some(u) = load(&state, &id).await else {
         return oops("No such user.");
     };
@@ -371,9 +355,6 @@ pub(crate) async fn me_save(
     headers: HeaderMap,
     Form(f): Form<MeForm>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return refused();
-    }
     let Some(v) = auth::viewer(&state, &headers) else {
         return Redirect::to("/login").into_response();
     };

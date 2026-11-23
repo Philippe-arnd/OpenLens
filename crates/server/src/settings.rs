@@ -10,13 +10,6 @@ use serde::Deserialize;
 use crate::AppState;
 use crate::web::html_page;
 
-fn refused() -> Response {
-    html_page(
-        StatusCode::FORBIDDEN,
-        openlens_ui::message("Refused", "Cross-site form."),
-    )
-}
-
 fn oops(msg: &str) -> Response {
     html_page(
         StatusCode::BAD_REQUEST,
@@ -169,9 +162,6 @@ pub(crate) async fn save(
     Path(id): Path<String>,
     Form(f): Form<SaveForm>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return refused();
-    }
     let Ok(tz) = crate::api::check_timezone(&f.timezone) else {
         return oops("The time zone must be an IANA name like Europe/Paris.");
     };
@@ -232,9 +222,6 @@ pub(crate) async fn rotate(
     Path(id): Path<String>,
     Form(f): Form<ConfirmForm>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return refused();
-    }
     if f.confirm != "yes" {
         return oops("Tick the box: the old key stops working at once.");
     }
@@ -256,9 +243,6 @@ pub(crate) async fn delete(
     Path(id): Path<String>,
     Form(f): Form<ConfirmForm>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return refused();
-    }
     // The name, as the page asks (the id, as `delete-project --confirm`, works too).
     let typed = f.confirm.trim();
     let Some(p) = load(&state, &id).await else {
@@ -337,9 +321,6 @@ pub(crate) async fn create(
     headers: HeaderMap,
     Form(f): Form<NewForm>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return refused();
-    }
     match crate::auth::viewer(&state, &headers) {
         None => return Redirect::to("/login").into_response(),
         Some(v) if !v.admin => {
@@ -416,9 +397,6 @@ pub(crate) async fn alerts(
     Path(id): Path<String>,
     Form(f): Form<AlertsForm>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return refused();
-    }
     if load(&state, &id).await.is_none() {
         return oops("No such project.");
     }
@@ -460,14 +438,7 @@ pub(crate) async fn alerts(
 }
 
 /// `POST /p/{id}/settings/alerts/test`: one message on every channel.
-pub(crate) async fn alerts_test(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return refused();
-    }
+pub(crate) async fn alerts_test(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     let Some(p) = load(&state, &id).await else {
         return oops("No such project.");
     };

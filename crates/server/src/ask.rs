@@ -803,12 +803,6 @@ pub(crate) async fn ask(
     let Some(v) = auth::viewer(&state, &headers) else {
         return Redirect::to("/login").into_response();
     };
-    if !crate::flags::same_origin(&headers) {
-        return html_page(
-            StatusCode::FORBIDDEN,
-            openlens_ui::message("Refused", "Cross-site form."),
-        );
-    }
     let Some(p) = project(&state, &id).await else {
         return html_page(
             StatusCode::NOT_FOUND,
@@ -914,7 +908,7 @@ pub(crate) async fn confirm(
     let Some(v) = auth::viewer(&state, &headers) else {
         return Redirect::to("/login").into_response();
     };
-    if !v.admin || !crate::flags::same_origin(&headers) {
+    if !v.admin {
         return html_page(
             StatusCode::FORBIDDEN,
             openlens_ui::message("Refused", "Only admins apply changes."),
@@ -958,9 +952,7 @@ pub(crate) async fn clear(
     let Some(v) = auth::viewer(&state, &headers) else {
         return Redirect::to("/login").into_response();
     };
-    if crate::flags::same_origin(&headers) {
-        save_history(&state, &id, &v.id, &[]);
-    }
+    save_history(&state, &id, &v.id, &[]);
     Redirect::to(&format!("/p/{id}/ask")).into_response()
 }
 
@@ -1060,13 +1052,7 @@ mod tests {
     }
 }
 
-fn admin_guard(state: &AppState, headers: &HeaderMap, post: bool) -> Option<Response> {
-    if post && !crate::flags::same_origin(headers) {
-        return Some(html_page(
-            StatusCode::FORBIDDEN,
-            openlens_ui::message("Refused", "Cross-site form."),
-        ));
-    }
+fn admin_guard(state: &AppState, headers: &HeaderMap) -> Option<Response> {
     match auth::viewer(state, headers) {
         None => Some(Redirect::to("/login").into_response()),
         Some(v) if !v.admin => Some(html_page(
@@ -1110,7 +1096,7 @@ fn ai_view(state: &AppState, notice: Option<String>, error: Option<String>) -> R
 
 /// `GET /settings/ai` (admins).
 pub(crate) async fn ai_page(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Some(r) = admin_guard(&state, &headers, false) {
+    if let Some(r) = admin_guard(&state, &headers) {
         return r;
     }
     ai_view(&state, None, None)
@@ -1139,7 +1125,7 @@ pub(crate) async fn ai_save(
     headers: HeaderMap,
     Form(f): Form<AiForm>,
 ) -> Response {
-    if let Some(r) = admin_guard(&state, &headers, true) {
+    if let Some(r) = admin_guard(&state, &headers) {
         return r;
     }
     match f.action.as_str() {
@@ -1236,7 +1222,7 @@ pub(crate) async fn privacy(
     Path(id): Path<String>,
     Form(f): Form<PrivacyForm>,
 ) -> Response {
-    if let Some(r) = admin_guard(&state, &headers, true) {
+    if let Some(r) = admin_guard(&state, &headers) {
         return r;
     }
     let on = f.person_level.is_some();

@@ -12,13 +12,6 @@ use serde::Deserialize;
 use crate::AppState;
 use crate::web::html_page;
 
-fn refused() -> Response {
-    html_page(
-        StatusCode::FORBIDDEN,
-        openlens_ui::message("Refused", "Cross-site form."),
-    )
-}
-
 fn list(s: &str) -> Vec<String> {
     s.split(',')
         .map(|x| x.trim().to_owned())
@@ -146,9 +139,6 @@ pub(crate) async fn flag_save(
     Path(id): Path<String>,
     Form(f): Form<FlagForm>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return refused();
-    }
     let Some(p) = project(&state, &id).await else {
         return not_found();
     };
@@ -237,9 +227,6 @@ pub(crate) async fn flag_delete(
     Path((id, key)): Path<(String, String)>,
     Form(f): Form<ConfirmForm>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return refused();
-    }
     if f.confirm.trim() != key {
         return html_page(
             StatusCode::BAD_REQUEST,
@@ -303,9 +290,6 @@ pub(crate) async fn survey_save(
     Path(id): Path<String>,
     Form(f): Form<SurveyForm>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return refused();
-    }
     let Some(p) = project(&state, &id).await else {
         return not_found();
     };
@@ -364,9 +348,6 @@ pub(crate) async fn survey_delete(
     Path((id, key)): Path<(String, String)>,
     Form(f): Form<ConfirmForm>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return refused();
-    }
     if f.confirm.trim() != key {
         return html_page(
             StatusCode::BAD_REQUEST,

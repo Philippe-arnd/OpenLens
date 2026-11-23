@@ -504,12 +504,6 @@ async fn welcome_create(
     if let Some(r) = owner_only(&state, &headers) {
         return r;
     }
-    if !crate::flags::same_origin(&headers) {
-        return html(
-            StatusCode::FORBIDDEN,
-            openlens_ui::message("Refused", "Cross-site form."),
-        );
-    }
     let meta = state.meta.clone();
     match tokio::task::spawn_blocking(move || meta.upsert_user(&f.email, "admin", None)).await {
         Ok(Ok(u)) => {

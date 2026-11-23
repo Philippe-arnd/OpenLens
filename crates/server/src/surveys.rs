@@ -169,9 +169,6 @@ async fn page_update(
     if !auth::has_session(&state, &headers) {
         return Redirect::to("/login").into_response();
     }
-    if !crate::flags::same_origin(&headers) {
-        return err(StatusCode::FORBIDDEN, "cross-site request refused");
-    }
     let mut all = load(&state, &id).await;
     let Some(s) = all.iter_mut().find(|s| s.key == key) else {
         return err(StatusCode::NOT_FOUND, "no such survey");

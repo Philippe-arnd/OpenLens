@@ -12,13 +12,7 @@ use crate::AppState;
 use crate::auth;
 use crate::web::html_page;
 
-fn guard(state: &AppState, headers: &HeaderMap, post: bool) -> Option<Response> {
-    if post && !crate::flags::same_origin(headers) {
-        return Some(html_page(
-            StatusCode::FORBIDDEN,
-            openlens_ui::message("Refused", "Cross-site form."),
-        ));
-    }
+fn guard(state: &AppState, headers: &HeaderMap) -> Option<Response> {
     match auth::viewer(state, headers) {
         None => Some(Redirect::to("/login").into_response()),
         Some(v) if !v.admin => Some(html_page(
@@ -98,7 +92,7 @@ async fn render(state: &AppState, notice: Option<String>, error: Option<String>)
 
 /// `GET /settings/storage`.
 pub(crate) async fn page(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Some(r) = guard(&state, &headers, false) {
+    if let Some(r) = guard(&state, &headers) {
         return r;
     }
     render(&state, None, None).await
@@ -129,7 +123,7 @@ pub(crate) async fn s3(
     headers: HeaderMap,
     Form(f): Form<S3Form>,
 ) -> Response {
-    if let Some(r) = guard(&state, &headers, true) {
+    if let Some(r) = guard(&state, &headers) {
         return r;
     }
     if crate::s3::config().is_some() && f.action != "test" {
@@ -261,7 +255,7 @@ pub(crate) async fn plan(
     headers: HeaderMap,
     Form(f): Form<PlanForm>,
 ) -> Response {
-    if let Some(r) = guard(&state, &headers, true) {
+    if let Some(r) = guard(&state, &headers) {
         return r;
     }
     let p = crate::backups::Plan {
@@ -287,7 +281,7 @@ pub(crate) async fn plan(
 
 /// `POST /settings/storage/backups/run`: back up now (in the background).
 pub(crate) async fn run_now(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Some(r) = guard(&state, &headers, true) {
+    if let Some(r) = guard(&state, &headers) {
         return r;
     }
     if crate::backups::running() {
@@ -303,7 +297,7 @@ pub(crate) async fn run_now(State(state): State<AppState>, headers: HeaderMap) -
 
 /// `GET /settings/storage/backups/latest.tar.gz`.
 pub(crate) async fn latest(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Some(r) = guard(&state, &headers, false) {
+    if let Some(r) = guard(&state, &headers) {
         return r;
     }
     let st = state.clone();

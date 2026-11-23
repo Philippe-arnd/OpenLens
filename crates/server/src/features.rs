@@ -189,12 +189,6 @@ pub(crate) async fn edit(
     Path(id): Path<String>,
     Form(f): Form<EditForm>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return html_page(
-            StatusCode::FORBIDDEN,
-            openlens_ui::message("Refused", "Cross-site form."),
-        );
-    }
     let Some(p) = project(&state, &id).await else {
         return html_page(
             StatusCode::NOT_FOUND,
