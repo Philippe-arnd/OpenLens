@@ -2486,6 +2486,7 @@ dependencies = [
  "rand",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "sha2",
  "subtle",
  "tempfile",

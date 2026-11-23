@@ -233,9 +233,17 @@ fn filter_bar(project: &str, b: &Board, f: &Filters, action: &str) -> Markup {
     }
     html! {
         form.filters method="get" action={ "/p/" (project) (action) } aria-label="Filters" {
+            (filter_fields(&envs, b, f))
+            button type="submit" { "Apply" }
+        }
+    }
+}
+
+fn filter_fields(envs: &[String], b: &Board, f: &Filters) -> Markup {
+    html! {
             label { "Environment "
                 select name="env" {
-                    @for e in &envs { option value=(e) selected[*e == f.environment] { (e) } }
+                    @for e in envs { option value=(e) selected[*e == f.environment] { (e) } }
                 }
             }
             label { "Role "
@@ -255,8 +263,6 @@ fn filter_bar(project: &str, b: &Board, f: &Filters, action: &str) -> Markup {
                 }
             }
             label.check { input type="checkbox" name="internal" value="1" checked[f.internal]; " Include the team" }
-            button type="submit" { "Apply" }
-        }
     }
 }
 
@@ -518,8 +524,18 @@ pub fn board(
             (filter_bar(p.id, b, f, ""))
             (insight_cards(p.id, b, plain))
             section.tiles aria-label="Key numbers" {
-                (tile("violet", "users", "Daily active users", &compact(b.users.dau), &{
-                    let mut sub = format!("{} weekly · {} monthly", compact(b.users.wau), compact(b.users.mau));
+                (tile("violet", "users", "Daily active users", &{
+                    if b.users.known > 0 {
+                        format!("{} · {}", compact(b.users.dau), pct(b.users.dau_share()))
+                    } else {
+                        compact(b.users.dau)
+                    }
+                }, &{
+                    let mut sub = String::new();
+                    if b.users.known > 0 {
+                        sub.push_str(&format!("of {} known users (90 days) · ", compact(b.users.known)));
+                    }
+                    sub.push_str(&format!("{} weekly · {} monthly ({})", compact(b.users.wau), compact(b.users.mau), pct(b.users.mau_share())));
                     if b.users.resurrected > 0 {
                         sub.push_str(&format!(" · {} came back", compact(b.users.resurrected)));
                     }
@@ -665,23 +681,68 @@ pub fn board(
 }
 
 /// Recent events.
-pub fn events(p: &ProjectInfo<'_>, b: &Board, rows: &[EventRow], f: &Filters) -> Markup {
+pub fn events(
+    p: &ProjectInfo<'_>,
+    b: &Board,
+    rows: &[EventRow],
+    f: &Filters,
+    eq: &openlens_engine::EventQuery,
+    next: Option<&str>,
+) -> Markup {
+    let mut envs = b.environments.clone();
+    if !envs.iter().any(|e| e == "production") {
+        envs.insert(0, "production".into());
+    }
+    let sort = eq.sort.as_deref().unwrap_or("time");
+    let days = eq.days.unwrap_or(30);
     layout(
         "Events",
         Some(p),
         html! {
-            div.heading { h1 { "Recent events" } p.muted { "The latest 100, newest first." } }
-            (filter_bar(p.id, b, f, "/events"))
+            div.heading { h1 { "Events" } p.muted {
+                @match sort { "event" => "By event name", "person" => "By user", _ => "Newest first" }
+                ", last " (days) (if days == 1 { " day" } else { " days" }) ", 100 per page. Times in UTC."
+            } }
+            form.filters method="get" action={ "/p/" (p.id) "/events" } aria-label="Filters" {
+                (filter_fields(&envs, b, f))
+                label { "Family "
+                    select name="family" {
+                        option value="" { "All families" }
+                        @for (k, label, _) in openlens_engine::FAMILIES {
+                            option value=(k) selected[eq.family.as_deref() == Some(*k)] { (label) }
+                        }
+                    }
+                }
+                label { "Event " input type="text" name="event" value=[eq.event.as_deref()] placeholder="any" maxlength="200"; }
+                label { "User " input type="text" name="person" value=[eq.person.as_deref()] placeholder="any" maxlength="200"; }
+                label { "Page " input type="text" name="path" value=[eq.path.as_deref()] placeholder="/settings" maxlength="200"; }
+                label { "Period "
+                    select name="days" {
+                        @for (d, l) in [(1, "24 hours"), (7, "7 days"), (30, "30 days"), (90, "90 days")] {
+                            option value=(d) selected[days == d] { (l) }
+                        }
+                    }
+                }
+                label { "Sort "
+                    select name="sort" {
+                        option value="time" selected[sort == "time"] { "Newest first" }
+                        option value="event" selected[sort == "event"] { "Event name" }
+                        option value="person" selected[sort == "person"] { "User" }
+                    }
+                }
+                button type="submit" { "Apply" }
+            }
             section.card.wide {
-                @if rows.is_empty() { p.muted { "Nothing here yet." } }
+                @if rows.is_empty() { p.muted { "Nothing matches. Widen the period or clear a filter." } }
                 @else {
                     table.plain.events {
                         thead { tr { th { "When (UTC)" } th { "Event" } th { "User" } th { "Role" } th { "Page" } th { "Feature" } th { "Release" } th { span.sr-only { "Replay" } } } }
                         tbody { @for r in rows {
+                            @let fam = openlens_engine::family(&r.event);
                             tr {
                                 td.muted.mono { (r.timestamp.get(..19).unwrap_or(&r.timestamp)) }
-                                td { span.chip { (r.event) } }
-                                td.mono { (r.distinct_id) }
+                                td { span class={ "chip fam " (fam) } title=(family_label(fam)) { (icon(family_icon(fam))) span.sr-only { (family_label(fam)) ": " } (r.event) } }
+                                td.mono { a href={ "/p/" (p.id) "/events?person=" (url_enc(&r.distinct_id)) } title="This user's events" { (r.distinct_id) } }
                                 td { (r.role.as_deref().unwrap_or("—")) }
                                 td.mono { (r.path.as_deref().unwrap_or("—")) }
                                 td { (r.feature.as_deref().unwrap_or("—")) }
@@ -692,10 +753,33 @@ pub fn events(p: &ProjectInfo<'_>, b: &Board, rows: &[EventRow], f: &Filters) ->
                             }
                         } }
                     }
+                    @if let Some(n) = next { p { a.button href=(n) { "Older / next 100" (icon("right")) } } }
                 }
             }
         },
     )
+}
+
+fn family_icon(fam: &str) -> &'static str {
+    match fam {
+        "page" => "route",
+        "click" => "bolt",
+        "form" => "task",
+        "feature" => "star",
+        "identify" => "users",
+        "error" => "alert",
+        "vital" => "pulse",
+        "survey" => "idea",
+        "custom" => "spark",
+        _ => "events",
+    }
+}
+
+fn family_label(fam: &str) -> &'static str {
+    openlens_engine::FAMILIES
+        .iter()
+        .find(|(k, _, _)| *k == fam)
+        .map_or("Other", |(_, l, _)| l)
 }
 
 /// Feature flags: switch on/off and change the rollout. Creating flags is
@@ -1405,7 +1489,7 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
                     h2.coral { (icon("alert")) "Delete the project" }
                     p { "Removes its events, replays, source maps, people, flags, surveys and feature map. There is no undo (backups excepted)." }
                     form.inline method="post" action={ (base) "/delete" } {
-                        label { "Type " code { (p.id) } " to confirm " input type="text" name="confirm" required autocomplete="off"; }
+                        label { "Type " code { (p.name) } " to confirm " input type="text" name="confirm" required autocomplete="off"; }
                         button.danger type="submit" { "Delete forever" }
                     }
                 }

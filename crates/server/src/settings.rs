@@ -224,8 +224,13 @@ pub(crate) async fn delete(
     if !crate::flags::same_origin(&headers) {
         return refused();
     }
-    if f.confirm.trim() != id {
-        return oops("Type the project's id exactly to delete it.");
+    // The name, as the page asks (the id, as `delete-project --confirm`, works too).
+    let typed = f.confirm.trim();
+    let Some(p) = load(&state, &id).await else {
+        return oops("No such project.");
+    };
+    if typed.is_empty() || (typed != p.name && typed != p.id) {
+        return oops("Type the project's name exactly to delete it.");
     }
     let st = state.clone();
     let pid = id.clone();

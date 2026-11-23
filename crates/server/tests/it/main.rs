@@ -1634,11 +1634,17 @@ async fn project_settings_do_what_the_cli_does() {
     );
     assert!(h.state.meta.project("kanban").unwrap().is_some());
     assert_eq!(
-        post_form(&h, "/p/kanban/settings/delete", &owner, "confirm=Kanban").await,
+        post_form(
+            &h,
+            "/p/kanban/settings/delete",
+            &owner,
+            "confirm=kanban+app"
+        )
+        .await,
         StatusCode::BAD_REQUEST
     );
     assert_eq!(
-        post_form(&h, "/p/kanban/settings/delete", &owner, "confirm=kanban").await,
+        post_form(&h, "/p/kanban/settings/delete", &owner, "confirm=Kanban").await,
         StatusCode::SEE_OTHER
     );
     assert!(h.state.meta.project("kanban").unwrap().is_none());

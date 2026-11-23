@@ -336,3 +336,12 @@ details.new-project[open] summary { margin-bottom: 12px; }
 /* Surveys */
 form.inline { display: flex; gap: 12px; align-items: center; font-size: 13px; margin: 6px 0 10px; }
 form.inline input[type=number] { width: 64px; font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--surface); color: var(--ink); }
+
+/* Events: families (#217). Icon + name carry the family; the colour only echoes it. */
+.chip.fam { display: inline-flex; align-items: center; gap: 5px; }
+.chip.fam .icon { width: 13px; height: 13px; color: var(--muted); }
+.chip.fam.page .icon { color: var(--sky); } .chip.fam.click .icon { color: var(--violet); }
+.chip.fam.error .icon { color: var(--bad); } .chip.fam.custom .icon, .chip.fam.feature .icon { color: var(--good); }
+.chip.fam.identify .icon, .chip.fam.form .icon { color: var(--sun); }
+.filters input[type=text] { font: inherit; font-size: 13px; padding: 5px 8px; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--surface); color: var(--ink); width: 130px; }
+@media (max-width: 640px) { .filters input[type=text] { width: 100%; box-sizing: border-box; } }

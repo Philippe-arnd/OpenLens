@@ -439,11 +439,24 @@ async fn board(
     }
 }
 
+#[derive(Deserialize)]
+struct EventsQuery {
+    #[serde(flatten)]
+    f: FilterQuery,
+    family: Option<String>,
+    person: Option<String>,
+    path: Option<String>,
+    days: Option<String>,
+    sort: Option<String>,
+    before: Option<String>,
+    skip: Option<String>,
+}
+
 async fn events(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
-    Query(q): Query<FilterQuery>,
+    axum::extract::RawQuery(raw): axum::extract::RawQuery,
 ) -> Response {
     if !auth::has_session(&state, &headers) {
         return to_login();
@@ -454,44 +467,76 @@ async fn events(
             openlens_ui::message("Not found", "No such project."),
         );
     };
-    let f = q.filters(&p.timezone);
+    let raw = raw.unwrap_or_default();
+    let Ok(q) = serde_urlencoded::from_str::<EventsQuery>(&raw) else {
+        return html(
+            StatusCode::BAD_REQUEST,
+            openlens_ui::message("Can't show that", "Unreadable filters."),
+        );
+    };
+    let some = |v: &Option<String>| {
+        v.as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+    };
+    let f = q.f.filters(&p.timezone);
+    let eq = openlens_engine::EventQuery {
+        event: some(&q.f.event),
+        family: some(&q.family),
+        person: some(&q.person),
+        path: some(&q.path),
+        days: some(&q.days).and_then(|d| d.parse().ok()),
+        sort: some(&q.sort).filter(|s| s == "event" || s == "person"),
+        before: some(&q.before),
+        skip: some(&q.skip).and_then(|d| d.parse().ok()).unwrap_or(0),
+        limit: 100,
+    };
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
         name: &p.name,
         key: &p.api_key,
     };
     let map = crate::load_map(&state, &p.id).await;
-    let (b, rows) = futures_join(
-        &state,
-        &p.id,
-        &f,
-        map.as_ref().map(|(m, v)| (m, *v)),
-        q.event.as_deref(),
-    )
-    .await;
+    let (b, rows) = tokio::join!(
+        openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
+        openlens_engine::event_list(&state.query, &p.id, &f, map.as_ref().map(|(m, _)| m), &eq)
+    );
     match (b, rows) {
-        (Ok(b), Ok(rows)) => html(StatusCode::OK, openlens_ui::events(&info, &b, &rows, &f)),
+        (Ok(b), Ok(rows)) => {
+            // The next page keeps every filter: a cursor when newest first,
+            // an offset for the other sorts.
+            let next = (rows.len() == eq.limit).then(|| {
+                let kept: Vec<(String, String)> =
+                    serde_urlencoded::from_str::<Vec<(String, String)>>(&raw)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter(|(k, _)| k != "before" && k != "skip")
+                        .collect();
+                let mut kept = kept;
+                match eq.sort {
+                    Some(_) => kept.push(("skip".into(), (eq.skip + eq.limit).to_string())),
+                    None => kept.push((
+                        "before".into(),
+                        rows.last().map(|r| r.timestamp.clone()).unwrap_or_default(),
+                    )),
+                }
+                format!(
+                    "/p/{}/events?{}",
+                    p.id,
+                    serde_urlencoded::to_string(&kept).unwrap_or_default()
+                )
+            });
+            html(
+                StatusCode::OK,
+                openlens_ui::events(&info, &b, &rows, &f, &eq, next.as_deref()),
+            )
+        }
         (Err(e), _) | (_, Err(e)) => html(
             StatusCode::BAD_REQUEST,
             openlens_ui::message("Can't show that", &e.to_string()),
         ),
     }
-}
-
-async fn futures_join(
-    state: &AppState,
-    project: &str,
-    f: &openlens_engine::Filters,
-    map: Option<(&openlens_featuremap::FeatureMap, i64)>,
-    event: Option<&str>,
-) -> (
-    openlens_engine::Result<openlens_engine::Board>,
-    openlens_engine::Result<Vec<openlens_engine::EventRow>>,
-) {
-    tokio::join!(
-        openlens_engine::board(&state.query, project, f, map),
-        openlens_engine::recent_events(&state.query, project, f, map.map(|(m, _)| m), event, 100)
-    )
 }
 
 /// The page the user came from, as a same-origin path, else `/`. A path

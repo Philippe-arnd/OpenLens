@@ -151,6 +151,31 @@ pub struct Users {
     /// Visitors who were never identified, last 30 days (not in the user
     /// counts above).
     pub anonymous: i64,
+    /// Known users: identified users seen in the last 90 days, the
+    /// denominator of the active shares (docs/kpis.md).
+    pub known: i64,
+}
+
+impl Users {
+    /// Share of known users active in the last 24 h.
+    #[must_use]
+    pub fn dau_share(&self) -> f64 {
+        share(self.dau, self.known)
+    }
+
+    /// Share of known users active in the last 30 days.
+    #[must_use]
+    pub fn mau_share(&self) -> f64 {
+        share(self.mau, self.known)
+    }
+}
+
+fn share(n: i64, of: i64) -> f64 {
+    if of > 0 {
+        (n as f64 / of as f64).min(1.0)
+    } else {
+        0.0
+    }
 }
 
 /// Session numbers, last 7 days.
@@ -435,6 +460,9 @@ pub async fn board(
          count(DISTINCT CASE WHEN timestamp >= now() - INTERVAL '7 days' THEN distinct_id END) AS wau, \
          count(DISTINCT distinct_id) AS mau FROM {src} WHERE {w30} AND {ident}"
     );
+    let w90 = f.clause(90)?;
+    let known_sql =
+        format!("SELECT count(DISTINCT distinct_id) AS n FROM {src} WHERE {w90} AND {ident}");
     let anonymous_sql =
         format!("SELECT count(DISTINCT distinct_id) AS n FROM {src} WHERE {w30} AND NOT {ident}");
     let sessions_sql = format!(
@@ -523,6 +551,7 @@ pub async fn board(
         success,
         role_features,
         anonymous,
+        known,
     ) = futures::join!(
         q.sql(project, &users_sql),
         q.sql(project, &sessions_sql),
@@ -536,6 +565,7 @@ pub async fn board(
         q.sql(project, &success_sql),
         q.sql(project, &role_features_sql),
         q.sql(project, &anonymous_sql),
+        q.sql(project, &known_sql),
     );
 
     let mut b = Board {
@@ -554,6 +584,7 @@ pub async fn board(
             },
             resurrected: 0,
             anonymous: anonymous?.rows.first().map_or(0, |r| int(r, "n")),
+            known: known?.rows.first().map_or(0, |r| int(r, "n")),
         };
     }
     if let Some(r) = sessions?.rows.first() {
@@ -872,15 +903,133 @@ pub async fn recent_events(
     event: Option<&str>,
     limit: usize,
 ) -> Result<Vec<EventRow>> {
+    let eq = EventQuery {
+        event: event.map(str::to_owned),
+        limit,
+        ..EventQuery::default()
+    };
+    event_list(q, project, f, map, &eq).await
+}
+
+/// Event families, read at a glance on the events page (#217): the key,
+/// its label, and the event names in it. `custom` is every event the app
+/// names itself (no `$`), `other` the remaining `$` events.
+pub const FAMILIES: &[(&str, &str, &[&str])] = &[
+    ("page", "Page views", &["$pageview", "$scroll"]),
+    ("click", "Clicks", &["$click", "$rage"]),
+    ("form", "Forms", &["$submit"]),
+    ("feature", "Features", &["$feature"]),
+    ("identify", "Logins", &["$identify"]),
+    ("error", "Errors", &["$error", "$request_failed"]),
+    ("vital", "Web vitals", &["$vital"]),
+    ("survey", "Surveys", &["$survey"]),
+    ("custom", "App events", &[]),
+    ("other", "Other", &[]),
+];
+
+/// The family of an event name (a key of [`FAMILIES`]).
+#[must_use]
+pub fn family(event: &str) -> &'static str {
+    if !event.starts_with('$') {
+        return "custom";
+    }
+    FAMILIES
+        .iter()
+        .find(|(_, _, names)| names.contains(&event))
+        .map_or("other", |(k, _, _)| k)
+}
+
+/// How the events page lists events: filters, sort and position.
+#[derive(Debug, Clone, Default)]
+pub struct EventQuery {
+    /// One event name.
+    pub event: Option<String>,
+    /// A family key of [`FAMILIES`].
+    pub family: Option<String>,
+    /// One user (`distinct_id`).
+    pub person: Option<String>,
+    /// Text the page path contains.
+    pub path: Option<String>,
+    /// Days back (1 to 90; default 30).
+    pub days: Option<i64>,
+    /// `time` (newest first, default), `event` or `person`.
+    pub sort: Option<String>,
+    /// Newest-first cursor: only events strictly older than this timestamp.
+    pub before: Option<String>,
+    /// Rows to skip (event and person sorts; at most 2000).
+    pub skip: usize,
+    /// Rows to return (at most 200).
+    pub limit: usize,
+}
+
+/// Events matching an [`EventQuery`].
+pub async fn event_list(
+    q: &QueryEngine,
+    project: &str,
+    f: &Filters,
+    map: Option<&FeatureMap>,
+    eq: &EventQuery,
+) -> Result<Vec<EventRow>> {
     let src = source(map);
-    let mut w = f.clause(30)?;
-    if let Some(e) = event {
+    let mut w = f.clause(eq.days.unwrap_or(30).clamp(1, 90))?;
+    if let Some(e) = &eq.event {
         w.push_str(&format!(" AND event = {}", lit(e)?));
     }
+    if let Some(p) = &eq.person {
+        w.push_str(&format!(" AND distinct_id = {}", lit(p)?));
+    }
+    if let Some(p) = &eq.path {
+        w.push_str(&format!(" AND strpos(path, {}) > 0", lit(p)?));
+    }
+    if let Some(fam) = eq.family.as_deref() {
+        let known = |names: &[&str]| -> Result<String> {
+            Ok(names
+                .iter()
+                .map(|n| lit(n))
+                .collect::<Result<Vec<_>>>()?
+                .join(", "))
+        };
+        match fam {
+            "custom" => w.push_str(" AND event NOT LIKE '$%'"),
+            "other" => {
+                let all: Vec<&str> = FAMILIES
+                    .iter()
+                    .flat_map(|(_, _, n)| n.iter().copied())
+                    .collect();
+                w.push_str(&format!(
+                    " AND event LIKE '$%' AND event NOT IN ({})",
+                    known(&all)?
+                ));
+            }
+            k => match FAMILIES.iter().find(|(key, _, _)| *key == k) {
+                Some((_, _, names)) => w.push_str(&format!(" AND event IN ({})", known(names)?)),
+                None => return Err(EngineError::InvalidFilter("unknown event family")),
+            },
+        }
+    }
+    let order = match eq.sort.as_deref() {
+        Some("event") => "event, timestamp DESC",
+        Some("person") => "distinct_id, timestamp DESC",
+        _ => {
+            if let Some(b) = &eq.before {
+                w.push_str(&format!(" AND timestamp < CAST({} AS TIMESTAMP)", lit(b)?));
+            }
+            "timestamp DESC"
+        }
+    };
+    let skip = if eq
+        .sort
+        .as_deref()
+        .is_some_and(|s| s == "event" || s == "person")
+    {
+        eq.skip.min(2000)
+    } else {
+        0
+    };
     let sql = format!(
         "SELECT CAST(timestamp AS VARCHAR) AS ts, event, distinct_id, role, path, feature, release, session_id \
-         FROM {src} WHERE {w} ORDER BY timestamp DESC LIMIT {}",
-        limit.min(200)
+         FROM {src} WHERE {w} ORDER BY {order} LIMIT {} OFFSET {skip}",
+        eq.limit.clamp(1, 200)
     );
     let r = q.sql(project, &sql).await?;
     Ok(r.rows

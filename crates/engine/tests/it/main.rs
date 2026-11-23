@@ -4,7 +4,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use chrono::{Duration, Utc};
-use openlens_engine::{Filters, board, recent_events};
+use openlens_engine::{EventQuery, Filters, board, event_list, family, recent_events};
 use openlens_event::Event;
 use openlens_featuremap::parse;
 use openlens_query::{Limits, QueryEngine};
@@ -147,6 +147,102 @@ async fn recent_events_are_newest_first() {
         .unwrap();
     assert_eq!(rows.len(), 5);
     assert!(rows[0].timestamp >= rows[4].timestamp);
+}
+
+#[tokio::test]
+async fn events_filter_by_family_and_page_with_a_cursor() {
+    let (_d, q) = dataset();
+    let f = Filters::default();
+    let all = event_list(
+        &q,
+        "p",
+        &f,
+        None,
+        &EventQuery {
+            limit: 200,
+            ..EventQuery::default()
+        },
+    )
+    .await
+    .unwrap();
+    let clicks = event_list(
+        &q,
+        "p",
+        &f,
+        None,
+        &EventQuery {
+            family: Some("click".into()),
+            limit: 200,
+            ..EventQuery::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!clicks.is_empty() && clicks.len() < all.len());
+    assert!(clicks.iter().all(|r| family(&r.event) == "click"));
+    let first = event_list(
+        &q,
+        "p",
+        &f,
+        None,
+        &EventQuery {
+            limit: 3,
+            ..EventQuery::default()
+        },
+    )
+    .await
+    .unwrap();
+    let next = event_list(
+        &q,
+        "p",
+        &f,
+        None,
+        &EventQuery {
+            before: Some(first[2].timestamp.clone()),
+            limit: 3,
+            ..EventQuery::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert!(next.iter().all(|r| r.timestamp < first[2].timestamp));
+    let by_user = event_list(
+        &q,
+        "p",
+        &f,
+        None,
+        &EventQuery {
+            sort: Some("person".into()),
+            limit: 200,
+            ..EventQuery::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        by_user
+            .windows(2)
+            .all(|w| w[0].distinct_id <= w[1].distinct_id)
+    );
+    assert!(
+        event_list(
+            &q,
+            "p",
+            &f,
+            None,
+            &EventQuery {
+                family: Some("nope".into()),
+                limit: 5,
+                ..EventQuery::default()
+            }
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(family("signup_done"), "custom");
+    assert_eq!(family("$weird"), "other");
+    let b = board(&q, "p", &f, None).await.unwrap();
+    assert!(b.users.known >= b.users.mau && b.users.dau_share() <= 1.0);
 }
 
 #[tokio::test]

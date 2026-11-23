@@ -9,6 +9,9 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 - **Project settings page** (`/p/{id}/settings`, #219): rename, app address, time zone, capture key with install snippets, key rotation, a wiring check (what `openlens-cli verify` checks), a one-day NDJSON export, and deletion behind typing the project's id. **New project** on `/projects`. Everything agents do with the CLI is now doable from the browser.
 - **Project icons from the app's favicon** (#214): the server reads the icon the app's home page declares (or `/favicon.ico`) from the app address, set in settings or detected from pageviews. Only public addresses are fetched, 128 kB at most, images only; refreshed weekly. The project's initial stays as the fallback.
 
+- **Events page filters and families** (#217): an icon and a label per family (page views, clicks, forms, features, logins, errors, vitals, surveys, app events), filters on family, event, user, page and period next to environment, role and release, sorts by time, event or user, and a *next 100* link; all kept in the URL. A user's id links to their events.
+- **Active users as a share** (#217): the daily active users tile shows the share of known users (identified in the last 90 days), and the monthly share next to it (docs/kpis.md).
+
 ### Changed
 
 - The sidebar's project switch lost its arrow (#214), and gained *Settings*.
