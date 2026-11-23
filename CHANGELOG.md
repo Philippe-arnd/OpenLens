@@ -33,6 +33,10 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 - The sidebar's project switch lost its arrow (#214), and gained *Settings*.
 
+### Fixed
+
+- **Going back a release right after an upgrade works again**: two starts in the same second named their upgrade copy the same, and the second refused to start. Copies now take the next free second. (The upgrade check waits between steps for releases up to v0.2.0.)
+
 ## [0.2.0] - 2026-11-22
 
 ### Added
