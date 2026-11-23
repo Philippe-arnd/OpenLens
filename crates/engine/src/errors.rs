@@ -32,6 +32,8 @@ pub struct ErrorGroup {
     pub places: Vec<(String, i64)>,
     /// The session of the latest occurrence (links to its replay).
     pub last_session: Option<String>,
+    /// User of the latest occurrence (links to their profile).
+    pub last_user: Option<String>,
     /// The stack of the latest occurrence, as sent (minified).
     pub stack: Option<String>,
     /// The release of the latest occurrence (to pick its source maps).
@@ -62,6 +64,7 @@ pub async fn error_groups(
          count(DISTINCT session_id) AS sessions, CAST(min(timestamp) AS VARCHAR) AS first_seen, \
          CAST(max(timestamp) AS VARCHAR) AS last_seen, \
          last_value(session_id ORDER BY timestamp) AS last_session, \
+         last_value(distinct_id ORDER BY timestamp) AS last_user, \
          last_value(stack ORDER BY timestamp) AS stack, last_value(release ORDER BY timestamp) AS last_release FROM g GROUP BY fp ORDER BY users DESC, n DESC LIMIT 20"
     );
     let dims_sql = format!(
@@ -99,6 +102,7 @@ pub async fn error_groups(
                 first_seen: text(r, "first_seen").unwrap_or_default(),
                 last_seen: text(r, "last_seen").unwrap_or_default(),
                 last_session: text(r, "last_session"),
+                last_user: text(r, "last_user"),
                 // The stack is a JSON string body: undo its escapes.
                 stack: text(r, "stack")
                     .and_then(|s| serde_json::from_str(&format!("\"{s}\"")).ok()),

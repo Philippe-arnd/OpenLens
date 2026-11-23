@@ -157,6 +157,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                                     ("/replays", "play", "Replays"),
                                     ("/flags", "flag", "Flags"),
                                     ("/surveys", "idea", "Surveys"),
+                                    ("/features", "layers", "Feature map"),
                                     ("/digest", "mail", "Digest"),
                                     ("/settings", "gear", "Settings"),
                                 ] {
@@ -548,7 +549,7 @@ pub fn board(
         html! {
             div.heading {
                 h1 { "Focus board" }
-                p.muted { "What " (scope) " did lately in " strong { (f.environment) } ". " a href={ "/p/" (p.id) "/digest" } { "This week vs last →" } }
+                p.muted { "What " (scope) " did lately in " strong { (f.environment) } ". " a href={ "/p/" (p.id) "/digest" } { "This week vs last →" } " · " a href={ "/p/" (p.id) "/breakdown?by=role&env=" (url_enc(&f.environment)) } { "Break down →" } }
             }
             (filter_bar(p.id, b, f, ""))
             (insight_cards(p.id, b, plain))
@@ -771,7 +772,7 @@ pub fn events(
                             tr {
                                 td.muted.mono { (local_time(&r.timestamp, &f.tz, true)) }
                                 td { span class={ "chip fam " (fam) } title=(family_label(fam)) { (icon(family_icon(fam))) span.sr-only { (family_label(fam)) ": " } (r.event) } }
-                                td.mono { a href={ "/p/" (p.id) "/events?person=" (url_enc(&r.distinct_id)) } title="This user's events" { (r.distinct_id) } }
+                                td.mono { a href={ "/p/" (p.id) "/people/" (url_enc(&r.distinct_id)) } title="Profile" { (r.distinct_id) } }
                                 td { (r.role.as_deref().unwrap_or("—")) }
                                 td.mono { (r.path.as_deref().unwrap_or("—")) }
                                 td { (r.feature.as_deref().unwrap_or("—")) }
@@ -809,6 +810,418 @@ fn family_label(fam: &str) -> &'static str {
         .iter()
         .find(|(k, _, _)| *k == fam)
         .map_or("Other", |(_, l, _)| l)
+}
+
+/// A person's profile (#222): who they are, their role over time, their
+/// recordings, their latest events and errors.
+pub fn person(
+    p: &ProjectInfo<'_>,
+    who: &str,
+    person: Option<&openlens_meta::Person>,
+    roles: &[(String, String)],
+    replays: &[openlens_replay::Summary],
+    events: &[EventRow],
+    tz: &str,
+) -> Markup {
+    let errors: Vec<&EventRow> = events
+        .iter()
+        .filter(|e| openlens_engine::family(&e.event) == "error")
+        .collect();
+    let tf = |t: &str| local_time(t, tz, false);
+    layout(
+        "Person",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1.mono { (who) }
+                p.muted {
+                    @if let Some(x) = person {
+                        @if let Some(r) = &x.role { span.chip { (r) } " " }
+                        @if let Some(a) = &x.account { "account " strong { (a) } " · " }
+                        @if let Some(pl) = &x.plan { "plan " strong { (pl) } " · " }
+                        "first seen " (tf(&x.first_seen)) " · last login " (tf(&x.last_seen))
+                    } @else { "Never logged in (anonymous visitor)." }
+                    " · " a href={ "/p/" (p.id) "/events?person=" (url_enc(who)) "&days=90" } { "All their events →" }
+                }
+            } }
+            div.grid {
+                section.card {
+                    h2.violet { (icon("users")) "Role over time" }
+                    @if roles.is_empty() { p.muted.small { "No role sent yet." } }
+                    @else { ul.plain-list { @for (r, since) in roles { li { span.chip { (r) } " since " (tf(since)) } } } }
+                }
+                section.card {
+                    h2.sky { (icon("play")) "Recordings" }
+                    @if replays.is_empty() { p.muted.small { "No recorded session." } }
+                    @else { ul.plain-list { @for r in replays.iter().take(20) {
+                        li { a href={ "/p/" (p.id) "/replays/" (r.session_id) } { (icon("play")) " " (local_time(&r.started.format("%Y-%m-%d %H:%M:%S").to_string(), tz, false)) } " · " (duration((r.updated - r.started).num_seconds().max(0) as f64)) }
+                    } } }
+                }
+                section.card {
+                    h2.coral { (icon("alert")) "Errors" }
+                    @if errors.is_empty() { p.muted.small { "None in their latest events." } }
+                    @else { ul.plain-list { @for e in errors.iter().take(10) {
+                        li { (tf(&e.timestamp)) " · " span.mono { (e.path.as_deref().unwrap_or("—")) } @if let Some(r) = &e.release { " · " (r) }
+                            @if let Some(s) = &e.session_id { " " a.icon-link href={ "/p/" (p.id) "/replays/" (s) "?at=" (e.timestamp) } aria-label="Replay this moment" { (icon("play")) } } }
+                    } } }
+                    p.small { a href={ "/p/" (p.id) "/errors" } { "All errors →" } }
+                }
+            }
+            section.card.wide {
+                h2.mint { (icon("events")) "Latest events" }
+                @if events.is_empty() { p.muted { "No event in 90 days." } }
+                @else {
+                    div.table-scroll { table.plain.events {
+                        thead { tr { th { "When (" (tz_label(tz)) ")" } th { "Event" } th { "Page" } th { "Feature" } th { "Release" } th { span.sr-only { "Replay" } } } }
+                        tbody { @for r in events {
+                            @let fam = openlens_engine::family(&r.event);
+                            tr {
+                                td.muted.mono { (local_time(&r.timestamp, tz, true)) }
+                                td { span class={ "chip fam " (fam) } { (icon(family_icon(fam))) span.sr-only { (family_label(fam)) ": " } (r.event) } }
+                                td.mono { (r.path.as_deref().unwrap_or("—")) }
+                                td { (r.feature.as_deref().unwrap_or("—")) }
+                                td { (r.release.as_deref().unwrap_or("—")) }
+                                td { @if let Some(s) = &r.session_id {
+                                    a.icon-link href={ "/p/" (p.id) "/replays/" (s) "?at=" (r.timestamp) } title="Replay this moment" aria-label="Replay this moment" { (icon("play")) }
+                                } }
+                            }
+                        } }
+                    } }
+                }
+            }
+        },
+    )
+}
+
+/// The dimensions a breakdown can use, with their labels.
+pub const BREAKDOWNS: &[(&str, &str)] = &[
+    ("role", "Role"),
+    ("plan", "Plan"),
+    ("account", "Account"),
+    ("environment", "Environment"),
+    ("release", "Release"),
+    ("page", "Page"),
+    ("feature", "Feature"),
+];
+
+/// Users, sessions, tasks and errors broken down by one dimension (#222).
+pub fn breakdown(
+    p: &ProjectInfo<'_>,
+    b: &Board,
+    f: &Filters,
+    by: &str,
+    rows: &[openlens_engine::BreakdownRow],
+) -> Markup {
+    let label = BREAKDOWNS
+        .iter()
+        .find(|(k, _)| *k == by)
+        .map_or(by, |(_, l)| l);
+    let max = rows.iter().map(|r| r.users).max().unwrap_or(1).max(1) as f64;
+    layout(
+        "Breakdown",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "Break down by " (label.to_lowercase()) }
+                p.muted { "Last 30 days, " @if by == "environment" { "every environment" } @else { strong { (f.environment) } } ". Role: the one each event was sent with." }
+            } }
+            nav.tabs aria-label="Dimension" {
+                @for (k, l) in BREAKDOWNS {
+                    a href={ "/p/" (p.id) "/breakdown?by=" (k) "&env=" (url_enc(&f.environment)) } aria-current=[(*k == by).then_some("page")] { (l) }
+                }
+            }
+            (filter_bar(p.id, b, f, &format!("/breakdown?by={by}")))
+            section.card.wide {
+                @if rows.is_empty() { p.muted { "No data in this window." } }
+                @else {
+                    div.table-scroll { table.plain {
+                        thead { tr { th { (label) } th.num { "Users" } th { span.sr-only { "Share" } } th.num { "Sessions" } th.num { "Tasks" } th.num { "Errors" } th.num { "Events" } } }
+                        tbody { @for r in rows {
+                            tr {
+                                th scope="row" { @match &r.value { Some(v) => span.mono { (v) }, None => span.muted { "(none)" } } }
+                                td.num { strong { (compact(r.users)) } }
+                                td.meter { (meter(r.users as f64 / max)) }
+                                td.num { (compact(r.sessions)) }
+                                td.num { (compact(r.tasks)) }
+                                td.num { (compact(r.errors)) }
+                                td.num.muted { (compact(r.events)) }
+                            }
+                        } }
+                    } }
+                }
+            }
+        },
+    )
+}
+
+/// Read-only SQL for admins (#222): the schema, a query box, the result
+/// and a CSV download.
+pub fn sql(
+    p: &ProjectInfo<'_>,
+    query: &str,
+    res: Option<&openlens_query::QueryResult>,
+    error: Option<&str>,
+) -> Markup {
+    let cols = [
+        ("uuid", "text"),
+        ("event", "text"),
+        ("distinct_id", "text"),
+        ("session_id", "text"),
+        ("timestamp", "timestamp (UTC)"),
+        ("received_at", "timestamp"),
+        ("url", "text"),
+        ("path", "text"),
+        ("feature", "text"),
+        ("role", "text"),
+        ("account", "text"),
+        ("plan", "text"),
+        ("environment", "text"),
+        ("release", "text"),
+        ("flags", "JSON text"),
+        ("properties", "JSON text"),
+        ("date", "partition YYYY-MM-DD"),
+    ];
+    layout(
+        "SQL",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "SQL" }
+                p.muted { "Read-only, this project only, 10,000 rows and 15 s at most. Tables: " code { "events" } " (logins merged), " code { "raw_events" } ", " code { "persons" } "." }
+            } }
+            div.sql-layout {
+                details.card.schema open {
+                    summary { (icon("layers")) " events" }
+                    ul.plain-list.small { @for (c, t) in cols { li { code { (c) } " " span.muted { (t) } } } }
+                    p.muted.small { "Filter on " code { "date" } " first: it skips whole days of files." }
+                }
+                div {
+                    form.sqlbox method="post" action={ "/p/" (p.id) "/sql" } {
+                        label for="sql" { "Query" }
+                        textarea #sql name="sql" rows="6" required spellcheck="false" { (query) }
+                        div.actions {
+                            button type="submit" name="format" value="table" { "Run" }
+                            button.soft type="submit" name="format" value="csv" { "Download CSV" }
+                        }
+                    }
+                    @if let Some(e) = error { p.alert role="alert" { (e) } }
+                    @if let Some(r) = res {
+                        p.muted.small { (r.rows.len()) " rows" @if r.truncated { " · " strong { "cut at the limit" } } }
+                        div.table-scroll { table.plain.sqlres {
+                            thead { tr { @for c in &r.columns { th { (c) } } } }
+                            tbody { @for row in &r.rows { tr { @for c in &r.columns {
+                                td.mono.small { @match row.get(c) {
+                                    None | Some(serde_json::Value::Null) => span.muted { "null" },
+                                    Some(serde_json::Value::String(s)) => (s),
+                                    Some(v) => (v.to_string()),
+                                } }
+                            } } } }
+                        } }
+                    }
+                }
+            }
+        },
+    )
+}
+
+/// What the last 7 days say about a feature map (#221).
+#[derive(Debug, Default)]
+pub struct MapLive {
+    /// (feature, uses, users).
+    pub uses: Vec<(String, i64, i64)>,
+    /// (success event, hits).
+    pub success_hits: Vec<(String, i64)>,
+    /// Raw role values no role of the map matches.
+    pub unmapped_roles: Vec<String>,
+}
+
+/// Everything the feature map page shows.
+pub struct MapView<'a> {
+    /// Project.
+    pub p: &'a ProjectInfo<'a>,
+    /// The YAML shown in the editor.
+    pub yaml: &'a str,
+    /// The version shown (None for a draft).
+    pub version: Option<i64>,
+    /// The latest stored version.
+    pub latest: Option<i64>,
+    /// The parsed map, when valid.
+    pub map: Option<&'a openlens_featuremap::FeatureMap>,
+    /// Lint errors and warnings.
+    pub issues: &'a [openlens_featuremap::Issue],
+    /// Live status.
+    pub live: &'a MapLive,
+    /// (version, created_at, bytes), newest first.
+    pub history: &'a [(i64, String, i64)],
+    /// Admins edit.
+    pub admin: bool,
+    /// When checking a draft: the stored YAML to diff against.
+    pub draft: Option<&'a str>,
+    /// A notice to show.
+    pub notice: Option<&'a str>,
+}
+
+/// A line diff of two texts: (`' '` same, `'-'` removed, `'+'` added).
+/// Plain LCS, so bounded to 3000 lines a side (larger: whole replace).
+pub fn line_diff<'a>(old: &'a str, new: &'a str) -> Vec<(char, &'a str)> {
+    let a: Vec<&str> = old.lines().collect();
+    let b: Vec<&str> = new.lines().collect();
+    if a.len() > 3000 || b.len() > 3000 {
+        return a
+            .iter()
+            .map(|l| ('-', *l))
+            .chain(b.iter().map(|l| ('+', *l)))
+            .collect();
+    }
+    let (n, m) = (a.len(), b.len());
+    let mut t = vec![vec![0u16; m + 1]; n + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            t[i][j] = if a[i] == b[j] {
+                t[i + 1][j + 1].saturating_add(1)
+            } else {
+                t[i + 1][j].max(t[i][j + 1])
+            };
+        }
+    }
+    let (mut i, mut j, mut out) = (0, 0, Vec::new());
+    while i < n && j < m {
+        if a[i] == b[j] {
+            out.push((' ', a[i]));
+            i += 1;
+            j += 1;
+        } else if t[i + 1][j] >= t[i][j + 1] {
+            out.push(('-', a[i]));
+            i += 1;
+        } else {
+            out.push(('+', b[j]));
+            j += 1;
+        }
+    }
+    out.extend(a[i..].iter().map(|l| ('-', *l)));
+    out.extend(b[j..].iter().map(|l| ('+', *l)));
+    out
+}
+
+/// The feature map page (#221).
+pub fn feature_map(v: &MapView<'_>) -> Markup {
+    let p = v.p;
+    let errors = v.issues.iter().filter(|i| i.level == "error").count();
+    let uses = |k: &str| v.live.uses.iter().find(|(f, _, _)| f == k);
+    let hits = |e: &str| {
+        v.live
+            .success_hits
+            .iter()
+            .find(|(x, _)| x == e)
+            .map_or(0, |(_, n)| *n)
+    };
+    let diff = v.draft.map(|old| line_diff(old, v.yaml));
+    let changed = diff
+        .as_ref()
+        .is_some_and(|d| d.iter().any(|(c, _)| *c != ' '));
+    layout(
+        "Feature map",
+        Some(p),
+        html! {
+            div.heading {
+                div {
+                    h1 { "Feature map" }
+                    p.muted {
+                        @match (v.draft.is_some(), v.version, v.latest) {
+                            (true, _, _) => "Checking an edit, not saved yet.",
+                            (_, Some(n), Some(l)) if n != l => { "Version " (n) " (latest is " a href={ "/p/" (p.id) "/features" } { (l) } ")." },
+                            (_, Some(n), _) => { "Version " (n) ", used by every board." },
+                            _ => "None yet: agents push it with openlens-cli features push, or write it below.",
+                        }
+                    }
+                }
+                @if v.latest.is_some() {
+                    p { a.button href={ "/p/" (p.id) "/features/map.yaml" (v.version.map(|n| format!("?v={n}")).unwrap_or_default()) } { "YAML" }
+                        " " a.button href={ "/p/" (p.id) "/features/map.json" (v.version.map(|n| format!("?v={n}")).unwrap_or_default()) } { "JSON" } }
+                }
+            }
+            @if let Some(n) = v.notice { p.notice role="status" { (n) } }
+            @if !v.issues.is_empty() {
+                section.card.wide {
+                    h2.coral { (icon("alert")) (errors) " errors · " (v.issues.len() - errors) " warnings" }
+                    ul.plain-list { @for i in v.issues {
+                        li { span class={ "status " (if i.level == "error" { "bad" } else { "warn" }) } { (i.level) } " " code { (i.path) } " " (i.message) }
+                    } }
+                }
+            }
+            @if !v.live.unmapped_roles.is_empty() {
+                section.card.wide {
+                    h2.sun { (icon("gap")) "Roles sent that no role matches" }
+                    p { @for (i, r) in v.live.unmapped_roles.iter().enumerate() { @if i > 0 { ", " } code { (r) } } }
+                    p.muted.small { "Add them to a role's " code { "match" } " list, or they count apart on the board." }
+                }
+            }
+            @if let Some(m) = v.map {
+                section.card.wide {
+                    h2.violet { (icon("layers")) (m.features.len()) " features · " (m.roles.len()) " roles · churn after " (m.churn_days()) " days" }
+                    div.table-scroll { table.plain {
+                        thead { tr { th { "Feature" } th { "Entry" } th { "Success" } th.num { "Uses (7 d)" } th.num { "Users" } th { "Status" } } }
+                        tbody { @for f in &m.features {
+                            @let u = uses(&f.key);
+                            @let h = f.success.as_deref().map(hits);
+                            tr {
+                                th scope="row" { strong { (f.name) } br; code.small { (f.key) } @if let Some(o) = &f.owner { br; span.muted.small { (o) } } }
+                                td.small {
+                                    @for r in &f.entry.routes { code { (r) } " " }
+                                    @for s in &f.entry.selectors { code { (s) } " " }
+                                    @for c in &f.entry.calls { code { (c) } " " }
+                                }
+                                td.small { @match &f.success { Some(s) => { code { (s) } " · " (compact(h.unwrap_or(0))) } , None => span.muted { "—" } } }
+                                td.num { (compact(u.map_or(0, |x| x.1))) }
+                                td.num { (compact(u.map_or(0, |x| x.2))) }
+                                td { @if u.is_none() { span.status.bad { "not seen" } }
+                                     @else if h == Some(0) { span.status.warn { "no success" } }
+                                     @else { span.status.good { "live" } } }
+                            }
+                        } }
+                    } }
+                    @if !m.roles.is_empty() {
+                        p.small { "Roles: " @for (i, r) in m.roles.iter().enumerate() { @if i > 0 { " · " } strong { (r.key) } " ← " (r.matches.join(", ")) } }
+                    }
+                }
+            }
+            @if let Some(d) = &diff {
+                section.card.wide {
+                    h2.sky { (icon("route")) "Changes against the stored map" }
+                    @if !changed { p.muted { "No change." } }
+                    @else {
+                        pre.diff { @for (c, l) in d {
+                            @match c { '+' => { ins { "+ " (l) } }, '-' => { del { "- " (l) } }, _ => { span { "  " (l) } } }
+                            "\n"
+                        } }
+                    }
+                }
+            }
+            @if v.admin {
+                section.card.wide {
+                    h2.mint { (icon("code")) "Edit" }
+                    form.sqlbox method="post" action={ "/p/" (p.id) "/features" } {
+                        label for="map-yaml" { "openlens.features.yaml" }
+                        textarea #map-yaml name="yaml" rows="18" spellcheck="false" { (v.yaml) }
+                        div.actions {
+                            button.soft type="submit" name="action" value="check" { "Check and show changes" }
+                            button type="submit" name="action" value="save" { "Save as a new version" }
+                        }
+                    }
+                    p.muted.small { "Saving a map with errors is refused; warnings are kept. The app's own file stays the source of truth: copy a change back there, or agents will push theirs over it." }
+                }
+            }
+            @if !v.history.is_empty() {
+                section.card.wide {
+                    h2 { (icon("clock")) "History" }
+                    ul.plain-list.small { @for (n, at, bytes) in v.history {
+                        li { a href={ "/p/" (p.id) "/features?v=" (n) } { "Version " (n) } " · " (at.get(..16).unwrap_or(at).replace('T', " ")) " UTC · " (bytes) " bytes"
+                            @if Some(*n) == v.latest { " · " span.status.good { "current" } } }
+                    } }
+                }
+            }
+        },
+    )
 }
 
 /// Feature flags: switch on/off and change the rollout. Creating flags is
@@ -1063,6 +1476,7 @@ pub fn errors(
                                 td.small { (list(&g.releases)) }
                                 td.small { (list(&g.places)) }
                                 td.small.muted { (local_time(&g.last_seen, &f.tz, false)) }
+                                td.small { @if let Some(u) = &g.last_user { a.mono href={ "/p/" (p.id) "/people/" (url_enc(u)) } title="Who hit it last" { (u) } } }
                                 td { @if let Some(s) = &g.last_session {
                                     a.icon-link href={ "/p/" (p.id) "/replays/" (s) "?at=" (g.last_seen) } title="Replay the latest occurrence" aria-label="Replay the latest occurrence" { (icon("play")) }
                                 } }
@@ -1771,6 +2185,12 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
                     }
                 }
             }
+            @if v.admin {
+                section.card.wide {
+                    h2.violet { (icon("code")) "Explore the data" }
+                    p { a.button href={ "/p/" (p.id) "/sql" } { "Read-only SQL" } " " a.button href={ "/p/" (p.id) "/breakdown?by=role" } { "Break down" } }
+                }
+            }
             section.card.wide {
                 h2.sun { (icon("down")) "Export" }
                 form.inline method="get" action={ "/p/" (p.id) "/export" } {
@@ -1904,5 +2324,16 @@ mod tests {
             html.contains("72% of churned users were last seen in billing")
                 && !html.contains("Original:")
         );
+    }
+}
+
+#[cfg(test)]
+mod diff_tests {
+    #[test]
+    fn line_diff_keeps_common_lines() {
+        let d = super::line_diff("a\nb\nc\n", "a\nx\nc\nd\n");
+        let s: String = d.iter().map(|(c, l)| format!("{c}{l};")).collect();
+        assert_eq!(s, " a;-b;+x; c;+d;");
+        assert!(super::line_diff("", "").is_empty());
     }
 }

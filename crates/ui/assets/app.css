@@ -372,3 +372,21 @@ ol.comment-list li:target { background: color-mix(in srgb, var(--violet) var(--t
 form.comment-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
 form.comment-form label { flex-basis: 100%; font-size: 12.5px; color: var(--muted); }
 form.comment-form textarea { flex: 1 1 260px; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--surface); color: var(--ink); }
+
+/* Explorer (#222) */
+nav.tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 12px; }
+nav.tabs a { padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); font-size: 13px; }
+nav.tabs a[aria-current="page"] { background: var(--violet); border-color: var(--violet); color: var(--surface); }
+ul.plain-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; }
+.sql-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; align-items: start; }
+.sql-layout .schema summary { cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+form.sqlbox { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+form.sqlbox label { font-size: 12.5px; color: var(--muted); }
+form.sqlbox textarea { font-family: ui-monospace, monospace; font-size: 13px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--surface); color: var(--ink); }
+table.sqlres td { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 760px) { .sql-layout { grid-template-columns: 1fr; } .sql-layout .schema:not([open]) { padding-bottom: 12px; } }
+
+/* Feature map (#221) */
+pre.diff { font-size: 12.5px; background: var(--raised); border: 1px solid var(--line); border-radius: var(--radius-s); padding: 10px 12px; overflow-x: auto; max-height: 420px; }
+pre.diff ins { text-decoration: none; color: var(--good); background: color-mix(in srgb, var(--mint) var(--tint), transparent); }
+pre.diff del { text-decoration: none; color: var(--bad); background: color-mix(in srgb, var(--bad) var(--tint), transparent); }

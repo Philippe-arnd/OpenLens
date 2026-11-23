@@ -2529,8 +2529,10 @@ dependencies = [
  "maud",
  "openlens-engine",
  "openlens-errors",
+ "openlens-featuremap",
  "openlens-flags",
  "openlens-meta",
+ "openlens-query",
  "openlens-replay",
  "serde_json",
 ]

@@ -1006,6 +1006,32 @@ impl Meta {
         })
     }
 
+    /// Every stored version of a project's map, newest first:
+    /// `(version, created_at, size in bytes)` (#221).
+    pub fn feature_map_versions(&self, project: &str) -> Result<Vec<(i64, String, i64)>> {
+        self.with(|c| {
+            let mut st = c.prepare(
+                "SELECT version, created_at, length(yaml) FROM feature_maps WHERE project = ?1 ORDER BY version DESC LIMIT 50",
+            )?;
+            let rows = st
+                .query_map([project], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// One stored version of a project's map.
+    pub fn feature_map_version(&self, project: &str, version: i64) -> Result<Option<String>> {
+        self.with(|c| {
+            Ok(c.query_row(
+                "SELECT yaml FROM feature_maps WHERE project = ?1 AND version = ?2",
+                params![project, version],
+                |r| r.get(0),
+            )
+            .optional()?)
+        })
+    }
+
     /// Record an import chunk by content hash. Returns false when the same
     /// chunk was already imported (so re-running a backfill is a no-op).
     pub fn record_import(&self, project: &str, sha: &str, rows: i64) -> Result<bool> {
