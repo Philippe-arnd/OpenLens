@@ -2486,3 +2486,24 @@ async fn landings_get_a_channel_and_only_the_referrer_host_is_kept() {
         StatusCode::OK
     );
 }
+
+#[tokio::test]
+async fn the_churn_page_and_api() {
+    let h = harness();
+    let (status, _) = post(&h, "/capture", batch(&h.key), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let owner = login_cookie(&h).await;
+    let page = body_text(get(&h, "/p/default/churn", Some(&owner), false).await).await;
+    assert!(
+        page.contains("Churn rate")
+            && page.contains("How long they stay")
+            && !page.contains(" style=")
+    );
+    let api: serde_json::Value = serde_json::from_str(
+        &body_text(get(&h, "/api/projects/default/churn", None, true).await).await,
+    )
+    .unwrap();
+    assert_eq!(api["window"], 14);
+    assert_eq!(api["users"], 1);
+}

@@ -13,6 +13,7 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 
 mod acquisition;
+pub mod churn;
 mod digest;
 mod errors;
 pub mod flows;
@@ -21,6 +22,7 @@ mod pages;
 pub mod stats;
 mod tasks;
 pub use acquisition::{AcquisitionRow, Touch, acquisition};
+pub use churn::{AtRisk, ChurnReport, churn};
 pub use digest::{Delta, Digest, digest, digest_markdown};
 pub use errors::{ErrorGroup, error_groups};
 pub use flows::{Flow, FlowLink, FlowQuery, flows};
