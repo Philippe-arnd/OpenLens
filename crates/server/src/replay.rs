@@ -39,10 +39,17 @@ struct Chunk {
 /// `POST /r`: one chunk `{key?, session_id, distinct_id, seq, events: [...]}`.
 pub(crate) async fn ingest(
     State(state): State<AppState>,
+    peer: crate::capture::Peer,
     Query(query): Query<HashMap<String, String>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    if crate::capture::ip_limited(&peer, &headers) {
+        return crate::capture::too_many();
+    }
+    if let Some(r) = crate::capture::disk_full(&state) {
+        return r;
+    }
     let raw = match inflate(&headers, &body) {
         Ok(r) => r,
         Err(resp) => return *resp,

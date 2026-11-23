@@ -132,3 +132,11 @@ Append-only. Each entry: id, date, decision, why, consequences.
 - Small projects (fewer than 5 people in a group) get empty results from Ask's SQL; the other Ask tools still answer.
 - A query that renames `user_key` below the aggregate is refused rather than guessed.
 - With person-level detail allowed, `events` is the full table (with the feature map applied), and `user_key` and `session_key` are the ids themselves.
+
+## D-022 (2026-11-24, agent for the audit) Ingestion limits follow the connection, and stop on a full disk
+
+**Decision:** `/capture`, `/r` and `/flags` count each client by the address of its connection. `X-Forwarded-For` (last entry) or `X-Real-IP` is believed only when the connection comes from the host or a private network (loopback, RFC 1918, link-local, IPv6 unique local): the reverse proxy of Coolify, Compose or a cluster. Direct local traffic with no such header (a server SDK on the host, `xtask bench`) is not limited. The per-client check runs before the body is decompressed or parsed. Writes are refused with 503 and `Retry-After` when less than **5 %** of the data volume is free. Both rules are fixed (D-014).
+
+**Why:** the project key is public, and a limit that only applied to proxied traffic left a directly exposed server (`docker run -p`, a systemd binary) with none, while a client could pick a new address for every request by forging the header.
+
+**Consequences:** a proxy on a public address in front of OpenLens makes every client look like the proxy; put it on a private network, as every supported deployment does.

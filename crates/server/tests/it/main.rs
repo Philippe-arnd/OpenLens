@@ -4318,4 +4318,44 @@ async fn no_route_serves_someone_it_should_not() {
         }
     }
     assert!(leaks.is_empty(), "{leaks:#?}");
+
+async fn burst_from(h: &Harness, uri: &str, body: &str, peer: &str, forged: bool) -> usize {
+    let mut limited = 0;
+    for i in 0..700 {
+        let mut req = Request::post(uri)
+            .header("content-type", "application/json")
+            .header("x-openlens-key", h.key.as_str());
+        if forged {
+            req = req.header("x-forwarded-for", format!("198.51.100.{}", i % 250));
+        }
+        let mut req = req.body(Body::from(body.to_owned())).unwrap();
+        req.extensions_mut()
+            .insert(axum::extract::ConnectInfo::<std::net::SocketAddr>(
+                peer.parse().unwrap(),
+            ));
+        let r = router(h.state.clone()).oneshot(req).await.unwrap();
+        if r.status() == StatusCode::TOO_MANY_REQUESTS {
+            limited += 1;
+        }
+    }
+    limited
+}
+
+#[tokio::test]
+async fn direct_clients_are_rate_limited_whatever_headers_they_send() {
+    let h = harness();
+    // The client is counted before the body is read: an invalid body
+    // (answered at once) shows the limit without writing anything.
+    let ev = "not json";
+    assert!(burst_from(&h, "/capture", ev, "203.0.113.7:4000", false).await > 0);
+    assert!(
+        burst_from(&h, "/capture", ev, "203.0.113.8:4000", true).await > 0,
+        "a forged X-Forwarded-For does not hide a direct client"
+    );
+    assert!(burst_from(&h, "/r", ev, "203.0.113.9:4000", false).await > 0);
+    // Behind a private proxy, each forwarded client has its own budget.
+    assert_eq!(
+        burst_from(&h, "/capture", ev, "10.0.0.2:4000", true).await,
+        0
+    );
 }
