@@ -8,6 +8,7 @@ mod auth;
 mod capture;
 mod comments;
 mod digest;
+mod explore;
 mod flags;
 mod icon;
 mod manage;

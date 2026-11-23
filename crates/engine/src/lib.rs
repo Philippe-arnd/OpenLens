@@ -835,10 +835,20 @@ pub async fn breakdown(
         "plan" => "plan",
         "page" => "path",
         "feature" => "feature",
+        "environment" => "environment",
+        "release" => "release",
         _ => return Err(EngineError::InvalidFilter("by")),
     };
     let src = source(map);
-    let w = f.clause(30)?;
+    let mut w = f.clause(30)?;
+    // By environment: every environment, side by side.
+    if col == "environment" {
+        w = w.replacen(
+            &format!(" AND environment = {}", lit(&f.environment)?),
+            "",
+            1,
+        );
+    }
     let sql = format!(
         "SELECT {col} AS value, count(DISTINCT distinct_id) AS users, count(DISTINCT session_id) AS sessions, \
          count(*) AS events, sum(CASE WHEN feature IS NOT NULL THEN 1 ELSE 0 END) AS tasks, \

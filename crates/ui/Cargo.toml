@@ -12,6 +12,7 @@ publish.workspace = true
 openlens-engine = { path = "../engine" }
 openlens-flags = { path = "../flags" }
 openlens-replay = { path = "../replay" }
+openlens-query = { path = "../query" }
 openlens-errors = { path = "../errors" }
 openlens-meta = { path = "../meta" }
 chrono.workspace = true

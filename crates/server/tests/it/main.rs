@@ -1945,3 +1945,89 @@ async fn flags_and_surveys_are_managed_from_the_dashboard() {
     );
     assert!(h.state.meta.surveys("default").unwrap().is_empty());
 }
+
+async fn body_text(r: axum::response::Response) -> String {
+    String::from_utf8(
+        axum::body::to_bytes(r.into_body(), 1 << 22)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn people_breakdown_and_sql_pages() {
+    let h = harness();
+    let (status, _) = post(&h, "/capture", batch(&h.key), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let owner = login_cookie(&h).await;
+    let page = get(&h, "/p/default/people/u1", Some(&owner), false).await;
+    assert_eq!(page.status(), StatusCode::OK);
+    let html = body_text(page).await;
+    assert!(html.contains("$pageview") && html.contains("owner"));
+    assert!(!html.contains(" style="));
+    assert_eq!(
+        get(&h, "/p/default/people/nobody", Some(&owner), false)
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    for by in ["role", "environment", "release", "page"] {
+        let r = get(
+            &h,
+            &format!("/p/default/breakdown?by={by}"),
+            Some(&owner),
+            false,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::OK, "{by}");
+    }
+    assert_eq!(
+        get(&h, "/p/default/breakdown?by=nope", Some(&owner), false)
+            .await
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        get(&h, "/p/default/sql", Some(&owner), false)
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    let run = router(h.state.clone())
+        .oneshot(
+            Request::post("/p/default/sql")
+                .header("cookie", &owner)
+                .header("origin", "http://localhost:8686")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    "sql=SELECT+event%2C+count(*)+AS+n+FROM+events+GROUP+BY+event&format=csv",
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(run.status(), StatusCode::OK);
+    let csv = body_text(run).await;
+    assert!(
+        csv.starts_with("event,n\n") && csv.contains("$pageview,1"),
+        "{csv}"
+    );
+    let viewer = invite(
+        &h,
+        serde_json::json!({"email": "v@example.com", "role": "viewer"}),
+    )
+    .await;
+    assert_eq!(
+        get(&h, "/p/default/sql", Some(&viewer), false)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        post_form(&h, "/p/default/sql", &viewer, "sql=SELECT+1").await,
+        StatusCode::FORBIDDEN
+    );
+}

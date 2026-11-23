@@ -2531,6 +2531,7 @@ dependencies = [
  "openlens-errors",
  "openlens-flags",
  "openlens-meta",
+ "openlens-query",
  "openlens-replay",
  "serde_json",
 ]
