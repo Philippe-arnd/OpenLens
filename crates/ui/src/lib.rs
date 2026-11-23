@@ -1740,14 +1740,19 @@ pub fn uptime(p: &ProjectInfo<'_>, v: &UptimeView<'_>) -> Markup {
                 p.muted.small { "Checking " span.mono { (v.url.as_deref().unwrap_or("")) } " every minute. Down after two failed checks in a row (no answer, or HTTP 5xx)." }
             }
             section.card.wide {
-                h2.coral { (icon("alert")) "Incidents, last 30 days" }
+                h2.coral { (icon("alert")) "Incidents and alerts, last 30 days" }
                 @if v.incidents.is_empty() { p.muted { "None." } }
                 @else {
                     div.table-scroll { table.plain {
                         thead { tr { th { "What" } th { "Started" } th { "Ended" } th.num { "Length" } th { "Cause" } } }
                         tbody { @for (rule, start, end, mins, cause) in &v.incidents {
                             tr {
-                                td { span class={ "status " (if end.is_none() { "bad" } else { "muted" }) } { (if rule == "traffic" { "traffic stopped" } else { "down" }) } }
+                                td { span class={ "status " (if end.is_none() { "bad" } else { "muted" }) } { (match rule.as_str() {
+                                    "traffic" => "traffic stopped",
+                                    "down" => "down",
+                                    r if r.starts_with("error:") => "new error",
+                                    _ => "regression",
+                                }) } }
                                 td.small { (start) }
                                 td.small { @match end { Some(e) => (e), None => strong { "ongoing" } } }
                                 td.num { (mins) " min" }
@@ -2661,6 +2666,8 @@ pub struct AlertsView {
     pub down_wait: u32,
     /// Alert when traffic stops.
     pub traffic: bool,
+    /// Alert on regressions and new errors.
+    pub regressions: bool,
     /// Probe path.
     pub health_path: String,
     /// Email alerts.
@@ -2756,13 +2763,14 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
             }
             section.card.wide #alerts {
                 h2.coral { (icon("bolt")) "Alerts" }
-                p.small { "Know when the app is down: OpenLens checks the app address every minute (" a href={ "/p/" (p.id) "/uptime" } { "Uptime" } "), and notices when the traffic stops for much longer than usual (after four weeks of history). One message when an incident starts, one when it ends." }
+                p.small { "Know when the app is down: OpenLens checks the app address every minute (" a href={ "/p/" (p.id) "/uptime" } { "Uptime" } "), notices when the traffic stops for much longer than usual (after four weeks of history), and, every hour, when the board finds a regression (a release or flag with more errors, pages turning slow) or a new error hits several users. One message when an incident starts, one when it ends." }
                 @if v.admin {
                     form.settings method="post" action={ (base) "/alerts" } {
                         label.check { input type="checkbox" name="down" checked[v.alerts.down]; " App down (needs the app address)" }
                         label { "Announce after (min) " input type="number" name="down_wait" min="1" max="60" value=(v.alerts.down_wait); }
                         label { "Health path " input type="text" name="health_path" value=(v.alerts.health_path) maxlength="200"; }
                         label.check { input type="checkbox" name="traffic" checked[v.alerts.traffic]; " Traffic stopped" }
+                        label.check { input type="checkbox" name="regressions" checked[v.alerts.regressions]; " Regressions and new errors" }
                         label.check { input type="checkbox" name="email" checked[v.alerts.email]; " Email" @if !v.alerts.smtp { span.muted { " (SMTP not set)" } } }
                         label { "Webhook (Slack, Discord…) " input type="url" name="webhook" value=(v.alerts.webhook) placeholder="https://hooks.slack.com/…" maxlength="500"; }
                         label { "ntfy topic " input type="text" name="ntfy" value=(v.alerts.ntfy) placeholder="my-app-alerts" maxlength="300"; }

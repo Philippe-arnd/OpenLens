@@ -397,3 +397,9 @@ mod version_tests {
 pub async fn alert_tick(state: &AppState, minute: u64) {
     alerts::tick(state, minute).await;
 }
+
+/// A short stable id for a text (alert rule keys).
+pub(crate) fn short_hash(s: &str) -> String {
+    use sha2::Digest;
+    hex::encode(sha2::Sha256::digest(s.as_bytes()))[..12].to_owned()
+}

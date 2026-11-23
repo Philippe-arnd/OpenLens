@@ -2391,3 +2391,28 @@ async fn a_failing_probe_opens_one_incident_and_alerts_are_configurable() {
     let s = body_text(get(&h, "/p/default/settings", Some(&owner), false).await).await;
     assert!(s.contains("ops-alerts"));
 }
+
+#[tokio::test]
+async fn a_new_error_hitting_two_users_is_announced_once() {
+    let h = harness();
+    let body = serde_json::json!({
+        "key": h.key,
+        "batch": [
+            {"event": "$error", "distinct_id": "u1", "session_id": "s1", "properties": {"$message": "TypeError: x is undefined", "$pathname": "/"}},
+            {"event": "$error", "distinct_id": "u2", "session_id": "s2", "properties": {"$message": "TypeError: x is undefined", "$pathname": "/"}}
+        ]
+    })
+    .to_string();
+    let (status, _) = post(&h, "/capture", body.into_bytes(), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    openlens_server::alert_tick(&h.state, 1).await;
+    openlens_server::alert_tick(&h.state, 61).await;
+    let all = h.state.meta.incidents("default", 0).unwrap();
+    let errors: Vec<_> = all.iter().filter(|i| i.0.starts_with("error:")).collect();
+    assert_eq!(errors.len(), 1, "{all:?}");
+    assert!(
+        errors[0].3.contains("TypeError") && errors[0].2.is_some(),
+        "announced and closed at once"
+    );
+}

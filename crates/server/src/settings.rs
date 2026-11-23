@@ -137,6 +137,7 @@ pub(crate) async fn page(
                         down: a.down,
                         down_wait: a.down_wait,
                         traffic: a.traffic,
+                        regressions: a.regressions,
                         health_path: a.health_path,
                         email: a.email,
                         webhook: a.webhook,
@@ -367,6 +368,8 @@ pub(crate) struct AlertsForm {
     #[serde(default)]
     traffic: Option<String>,
     #[serde(default)]
+    regressions: Option<String>,
+    #[serde(default)]
     health_path: String,
     #[serde(default)]
     email: Option<String>,
@@ -394,6 +397,7 @@ pub(crate) async fn alerts(
         down: f.down.as_deref() == Some("on"),
         down_wait: f.down_wait.unwrap_or(2),
         traffic: f.traffic.as_deref() == Some("on"),
+        regressions: f.regressions.as_deref() == Some("on"),
         health_path: if path.is_empty() {
             "/".into()
         } else {

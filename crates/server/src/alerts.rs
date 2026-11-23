@@ -18,6 +18,9 @@ pub(crate) struct Settings {
     pub down_wait: u32,
     /// Alert when the traffic stops for much longer than usual.
     pub traffic: bool,
+    /// Alert on regressions the board finds (a release or flag with more
+    /// errors, pages turning slow) and on new error groups (#227).
+    pub regressions: bool,
     /// Path the probe asks for (default `/`).
     pub health_path: String,
     /// Email the alerts (when SMTP is set).
@@ -34,6 +37,7 @@ impl Default for Settings {
             down: true,
             down_wait: 2,
             traffic: true,
+            regressions: true,
             health_path: "/".into(),
             email: true,
             webhook: String::new(),
@@ -143,6 +147,7 @@ fn label(rule: &str) -> &'static str {
     match rule {
         "down" => "is down",
         "traffic" => "gets no traffic",
+        r if r.starts_with("insight:") => "has a regression",
         _ => "has a problem",
     }
 }
@@ -313,10 +318,118 @@ pub(crate) async fn tick(state: &AppState, minute: u64) {
                 .await;
             }
         }
+        if s.regressions && minute % 60 == 1 {
+            regressions(state, &p).await;
+        }
         if s.traffic && minute % 5 == 0 {
             if let Some((stopped, cause)) = traffic_stopped(state, &p.id).await {
                 track(state, &p.id, &p.name, "traffic", stopped, &cause, 0).await;
             }
+        }
+    }
+}
+
+/// Insight kinds that are alerts: something got worse.
+const REGRESSIONS: [&str; 3] = ["release_regression", "flag_regression", "slow_pages"];
+
+/// Hourly (#227): the board's regression cards become incidents (one
+/// message when one appears, one when it is gone), and a new error group
+/// hitting at least two users in the last hour is announced once.
+async fn regressions(state: &AppState, p: &openlens_meta::Project) {
+    let map = crate::load_map(state, &p.id).await;
+    let f = openlens_engine::Filters {
+        tz: p.timezone.clone(),
+        ..openlens_engine::Filters::default()
+    };
+    let Ok(board) =
+        openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))).await
+    else {
+        return;
+    };
+    if board.total_events == 0 {
+        return;
+    }
+    let now_cards: Vec<&openlens_engine::Insight> = board
+        .insights
+        .iter()
+        .filter(|i| REGRESSIONS.contains(&i.kind))
+        .collect();
+    for c in &now_cards {
+        let rule = format!("insight:{}:{}", c.kind, c.subject);
+        track(
+            state,
+            &p.id,
+            &p.name,
+            &rule,
+            true,
+            &format!("{} — {}. {}", c.title, c.evidence, c.next_step),
+            0,
+        )
+        .await;
+    }
+    // Cards that went away close their incident.
+    let since = chrono::Utc::now().timestamp() - 90 * 86400;
+    for (rule, _, end, cause, _) in state.meta.incidents(&p.id, since).unwrap_or_default() {
+        if end.is_none()
+            && rule.starts_with("insight:")
+            && !now_cards
+                .iter()
+                .any(|c| rule == format!("insight:{}:{}", c.kind, c.subject))
+        {
+            track(state, &p.id, &p.name, &rule, false, &cause, 0).await;
+        }
+    }
+    // New error groups: first seen in the last hour, two users or more.
+    let src = openlens_engine::source(map.as_ref().map(|(m, _)| m));
+    let Ok(groups) = openlens_engine::error_groups(&state.query, &p.id, &src, &f).await else {
+        return;
+    };
+    let hour_ago = (chrono::Utc::now() - chrono::Duration::hours(1))
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string();
+    for g in groups
+        .iter()
+        .filter(|g| g.users >= 2 && g.first_seen.replace('T', " ") >= hour_ago)
+    {
+        let rule = format!("error:{}", &crate::short_hash(&g.fingerprint));
+        if state
+            .meta
+            .open_incident(&p.id, &rule)
+            .ok()
+            .flatten()
+            .is_some()
+            || state
+                .meta
+                .incidents(&p.id, 0)
+                .unwrap_or_default()
+                .iter()
+                .any(|i| i.0 == rule)
+        {
+            continue;
+        }
+        let now = chrono::Utc::now().timestamp();
+        let cause = format!(
+            "{} — {} users, {} times{}",
+            g.sample,
+            g.users,
+            g.count,
+            g.last_release
+                .as_deref()
+                .map(|r| format!(", release {r}"))
+                .unwrap_or_default()
+        );
+        if let Ok(id) = state.meta.start_incident(&p.id, &rule, now, &cause) {
+            let _ = state.meta.incident_notified(id, now);
+            let _ = state.meta.end_incident(id, now);
+            deliver(
+                state,
+                &p.id,
+                &format!("🟠 {}: a new error", p.name),
+                &format!("{cause}\nSee Errors in OpenLens."),
+                &rule,
+                false,
+            )
+            .await;
         }
     }
 }
