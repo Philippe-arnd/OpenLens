@@ -81,6 +81,15 @@ async fn healthz_answers_ok_and_unknown_routes_do_not() {
         .await
         .unwrap();
     assert_eq!(ok.status(), StatusCode::OK);
+    let v = router(h.state.clone())
+        .oneshot(Request::get("/version").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(v.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_slice(&axum::body::to_bytes(v.into_body(), 1 << 16).await.unwrap())
+            .unwrap();
+    assert_eq!(body["version"], env!("CARGO_PKG_VERSION"));
     let missing = router(h.state.clone())
         .oneshot(Request::get("/nope").body(Body::empty()).unwrap())
         .await

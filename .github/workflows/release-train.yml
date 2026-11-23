@@ -82,6 +82,8 @@ jobs:
           gh workflow run publish.yml -f tag="$TAG"
           gh workflow run release.yml --ref "$TAG"
           gh workflow run k8s.yml --ref "$TAG"
+          # 2b. An hour later, check that every part landed (#258).
+          gh workflow run release-summary.yml -f tag="$TAG" -f wait_minutes=60 || true
           # 3. A PR names the release in the CHANGELOG and moves main to the
           #    next minor version (docs/development.md), then merges itself.
           IFS=. read -r major minor _ <<< "$V"

@@ -1,0 +1,44 @@
+name: Release summary
+
+# After a release (#258): one table saying whether every part of it landed:
+# the GitHub release and its assets, the publish, image and chart runs, the
+# image on GHCR, the site naming the version, and the reference instance on
+# the version (`/version`; set the OPENLENS_PROD_URL repository variable,
+# skipped without it). Started by the release train an hour after it tags,
+# or by hand. Posted as the run summary and on the release's PR.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (vX.Y.Z)"
+        required: true
+      wait_minutes:
+        description: "Wait before checking (the train sets 60)"
+        default: "0"
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+
+jobs:
+  summary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: wait
+        run: sleep $(( ${{ inputs.wait_minutes }} * 60 ))
+      - name: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          OPENLENS_PROD_URL: ${{ vars.OPENLENS_PROD_URL }}
+        run: |
+          set -uo pipefail
+          scripts/release/summary.sh "$TAG" > summary.md; status=$?
+          { echo "## Release $TAG"; echo; cat summary.md; } | tee -a "$GITHUB_STEP_SUMMARY"
+          pr=$(gh pr list --state all --search "Release $TAG in:title" --json number -q '.[0].number' || true)
+          if [ -n "$pr" ]; then
+            gh pr comment "$pr" --body-file <(echo "**Release summary for $TAG**"; echo; cat summary.md) || true
+          fi
+          exit $status
