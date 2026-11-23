@@ -77,6 +77,8 @@ await tab.click("#like-btn");
 // and a form inside it: typing then Enter submits it.
 await tab.fill("#invite-email", "x@example.com");
 await tab.press("#invite-email", "Enter");
+// Leaving the field sends a `$field` event (#232): name and time, never the value.
+await tab.locator("#invite-email").blur();
 await tab.evaluate(() => { setTimeout(() => { throw new Error("e2e boom"); }, 0); });
 await tab.waitForTimeout(200);
 await tab.evaluate(() => openlens.flush());
@@ -198,6 +200,10 @@ for (const [feature, text] of [["share", "Share"], ["like", "Like"]]) {
 const submits = sent.flatMap((b) => JSON.parse(b).batch).filter((e) => e.event === "$submit");
 if (!submits.some((e) => e.properties.$form === "invite" && e.properties.$feature === "invite")) {
   console.error("shadow DOM form submit not captured");
+  process.exit(1);
+}
+if (!sent.flatMap((b) => JSON.parse(b).batch).some((e) => e.event === "$field" && typeof e.properties.$ms === "number")) {
+  console.error("leaving a form field sent no $field event");
   process.exit(1);
 }
 if (sent.some((b) => b.includes("x@example.com"))) {

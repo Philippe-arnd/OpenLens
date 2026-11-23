@@ -105,6 +105,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/audit", get(crate::privacy::audit_page))
         .route("/p/{project}/breakdown", get(crate::explore::breakdown))
         .route("/p/{project}/audience", get(crate::explore::audience))
+        .route("/p/{project}/forms", get(crate::explore::forms))
         .route("/p/{project}/acquisition", get(crate::explore::acquisition))
         .route("/p/{project}/churn", get(crate::explore::churn))
         .route("/p/{project}/revenue", get(crate::explore::revenue))

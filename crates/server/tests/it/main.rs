@@ -2806,3 +2806,40 @@ async fn share_links_open_without_login_and_stop_when_revoked() {
         StatusCode::NOT_FOUND
     );
 }
+
+#[tokio::test]
+async fn forms_show_the_field_where_people_give_up() {
+    let h = harness();
+    let mut batch = Vec::new();
+    let t0 = chrono::Utc::now() - chrono::Duration::minutes(30);
+    let mut k = 0;
+    let mut at = || {
+        k += 1;
+        (t0 + chrono::Duration::seconds(k)).to_rfc3339()
+    };
+    for (s, fields, sent) in [
+        ("s1", vec!["email", "phone"], false),
+        ("s2", vec!["email", "phone"], false),
+        ("s3", vec!["email"], true),
+    ] {
+        for f in fields {
+            batch.push(serde_json::json!({"event": "$field", "distinct_id": s, "session_id": s, "timestamp": at(), "properties": {"$pathname": "/signup", "$form": "signup", "$field": f, "$ms": 1500, "$changed": true}}));
+        }
+        if sent {
+            batch.push(serde_json::json!({"event": "$submit", "distinct_id": s, "session_id": s, "timestamp": at(), "properties": {"$pathname": "/signup", "$form": "signup"}}));
+        }
+    }
+    let body = serde_json::json!({"key": h.key, "batch": batch}).to_string();
+    let (status, _) = post(&h, "/capture", body.into_bytes(), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let owner = login_cookie(&h).await;
+    let page = body_text(get(&h, "/p/default/forms", Some(&owner), false).await).await;
+    assert!(
+        page.contains("signup") && page.contains("66.7% abandoned") && !page.contains(" style="),
+        "{page}"
+    );
+    let phone = page.find(">phone<").unwrap();
+    let email = page.find(">email<").unwrap();
+    assert!(phone < email, "phone, where people leave, comes first");
+}

@@ -372,6 +372,42 @@ function autocapture() {
     track("$submit", { ...describe(form), $form: form.getAttribute("name") || form.id || void 0 });
   };
   document.addEventListener("submit", onSubmit, true);
+  const fields = /* @__PURE__ */ new WeakMap();
+  const fieldOf = (e) => {
+    const el = e.composedPath()[0];
+    if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)) return null;
+    if (el instanceof HTMLInputElement && ["password", "hidden", "submit", "button", "reset", "image", "file"].includes(el.type)) return null;
+    const form = el.form;
+    if (!form || lineage(el).some((x) => x.hasAttribute("data-openlens-ignore") || x.hasAttribute("data-openlens-mask"))) return null;
+    return { el, form };
+  };
+  document.addEventListener(
+    "focusin",
+    (e) => {
+      const f = fieldOf(e);
+      if (f) fields.set(f.el, { t: Date.now(), v: f.el.value });
+    },
+    true
+  );
+  document.addEventListener(
+    "focusout",
+    (e) => {
+      var _a, _b, _c;
+      const f = fieldOf(e);
+      const start = f && fields.get(f.el);
+      if (!f || !start) return;
+      fields.delete(f.el);
+      const label = (_c = (_b = (_a = f.el.labels) == null ? void 0 : _a[0]) == null ? void 0 : _b.textContent) == null ? void 0 : _c.trim();
+      const name = (f.el.getAttribute("name") || f.el.id || f.el.getAttribute("aria-label") || label || f.el.type || "field").slice(0, 60);
+      track("$field", {
+        $form: f.form.getAttribute("name") || f.form.id || void 0,
+        $field: name,
+        $ms: Math.min(Date.now() - start.t, 36e5),
+        $changed: f.el.value !== start.v
+      });
+    },
+    true
+  );
   const watched = /* @__PURE__ */ new WeakSet();
   const watch = (e) => {
     for (const n of e.composedPath()) {

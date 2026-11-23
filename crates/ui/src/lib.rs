@@ -207,6 +207,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                                     ("/surveys", "idea", "Surveys"),
                                     ("/audience", "globe", "Audience"),
                                     ("/acquisition", "route", "Acquisition"),
+                                    ("/forms", "task", "Forms"),
                                     ("/churn", "ban", "Churn"),
                                     ("/goals", "star", "Goals"),
                                     ("/flows", "funnel", "Feature flow"),
@@ -2252,6 +2253,53 @@ pub fn audit(rows: &[(String, String, Option<String>, String, String)]) -> Marku
                             tr { td.small.mono { (at) } td.small { (who) } td.small { (proj.as_deref().unwrap_or("—")) } td { span.chip { (act) } } td.small { (d) } }
                         } }
                     } }
+                }
+            }
+        },
+    )
+}
+
+/// Forms (#232): which field makes people give up.
+pub fn forms(
+    p: &ProjectInfo<'_>,
+    b: &Board,
+    f: &Filters,
+    list: &[openlens_engine::forms::FormStats],
+) -> Markup {
+    layout(
+        "Forms",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "Forms" }
+                p.muted { "Last 30 days, " strong { (f.environment) } ". A form starts when someone leaves one of its fields, and is abandoned when the session ends without sending it. Field values are never sent; passwords and masked fields send nothing." }
+            } }
+            (filter_bar(p.id, b, f, "/forms"))
+            @if list.is_empty() { section.card.wide { p.muted { "No form filled yet (SDK builds from 2026-11-23 on send field events)." } } }
+            @for fm in list {
+                section.card.wide {
+                    h2.violet { (icon("task")) span.mono { (fm.form) } span.muted.small { " · " (fm.path) } }
+                    p {
+                        strong { (compact(fm.starts)) } " started · " strong { (compact(fm.submits)) } " sent · "
+                        span class={ "status " (if fm.abandonment() > 0.5 { "bad" } else if fm.abandonment() > 0.25 { "warn" } else { "good" }) } { (pct(fm.abandonment())) " abandoned" }
+                        @if fm.submits > 0 { " · " (duration(fm.median_secs)) " to fill (median)" }
+                        @if fm.starts < 20 { " " span.chip title="Under 20 starts: the rates move a lot" { "low sample" } }
+                    }
+                    div.table-scroll { table.plain {
+                        thead { tr { th { "Field" } th.num { "Sessions" } th.num { "Last before leaving" } th { span.sr-only { "Share" } } th.num { "Came back to it" } th.num { "Time spent" } } }
+                        tbody { @for fl in &fm.fields {
+                            @let left = fl.last_before_leaving as f64 / (fm.starts - fm.submits).max(1) as f64;
+                            tr {
+                                th scope="row" { span.mono { (fl.name) } }
+                                td.num { (compact(fl.sessions)) }
+                                td.num { (compact(fl.last_before_leaving)) }
+                                td.meter { (meter(left)) }
+                                td.num { (compact(fl.revisited)) }
+                                td.num { (duration(fl.median_ms as f64 / 1000.0)) }
+                            }
+                        } }
+                    } }
+                    @if let Some(s) = &fm.abandoned_session { p.small { a href={ "/p/" (p.id) "/replays/" (s) } { (icon("play")) " Replay a session that gave up" } } }
                 }
             }
         },

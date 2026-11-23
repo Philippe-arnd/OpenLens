@@ -12,7 +12,7 @@ const axePath = createRequire(import.meta.url).resolve("axe-core/axe.min.js");
 
 const [server, token, out] = process.argv.slice(2);
 mkdirSync(out, { recursive: true });
-const pages = ["", "/events", "/pages", "/errors", "/replays", "/flags", "/surveys", "/digest", "/audience", "/flows", "/features", "/settings", "/breakdown?by=role"];
+const pages = ["", "/events", "/pages", "/errors", "/replays", "/flags", "/surveys", "/digest", "/audience", "/flows", "/features", "/settings", "/breakdown?by=role", "/acquisition", "/churn", "/live", "/uptime", "/goals", "/revenue", "/forms"];
 // Pages outside a project (the owner is an admin, so /users is allowed).
 const global = ["/projects", "/users", "/welcome"];
 
