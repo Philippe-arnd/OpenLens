@@ -3,6 +3,7 @@
 //!
 //! Layer: L4 (see `docs/architecture.md`).
 
+mod alerts;
 mod api;
 mod audience;
 mod auth;
@@ -216,6 +217,8 @@ pub async fn background(state: AppState) {
     let mut tick = tokio::time::interval(Duration::from_secs(2));
     let mut last_digest_check = std::time::Instant::now();
     let mut last_backup_check = std::time::Instant::now();
+    let mut last_alert_check = std::time::Instant::now();
+    let mut alert_minute: u64 = 0;
     // First S3 copy a few minutes after start, then hourly.
     let mut last_s3_sync = std::time::Instant::now()
         .checked_sub(Duration::from_secs(3300))
@@ -251,6 +254,13 @@ pub async fn background(state: AppState) {
         if last_backup_check.elapsed() >= Duration::from_secs(60) {
             last_backup_check = std::time::Instant::now();
             backups::tick(&state).await;
+        }
+        if last_alert_check.elapsed() >= Duration::from_secs(60) {
+            last_alert_check = std::time::Instant::now();
+            alert_minute += 1;
+            let (st, m) = (state.clone(), alert_minute);
+            // Probes can be slow: never hold up the flush loop.
+            tokio::spawn(async move { alerts::tick(&st, m).await });
         }
         if last_digest_check.elapsed() >= Duration::from_secs(600) {
             last_digest_check = std::time::Instant::now();
@@ -379,4 +389,11 @@ mod version_tests {
         assert_eq!(v("v0.2.0-261122-755dcee"), None);
         assert_eq!(v("nightly"), None);
     }
+}
+
+/// Run one alert pass now (tests and tools; the server runs it every
+/// minute by itself).
+#[doc(hidden)]
+pub async fn alert_tick(state: &AppState, minute: u64) {
+    alerts::tick(state, minute).await;
 }

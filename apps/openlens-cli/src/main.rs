@@ -138,6 +138,13 @@ enum Command {
         #[command(subcommand)]
         action: FlagsCmd,
     },
+    /// Is the app up? (`up`, `down`, `unknown`, `off`, with open incidents.)
+    /// Exits non-zero when down: handy right after a deploy.
+    Status {
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+    },
     /// How sessions move between features (Sankey data, last 30 days).
     Flows {
         /// Project id.
@@ -673,6 +680,12 @@ fn run(cli: Cli) -> Result<bool, String> {
                 &json!({ "rows": rows, "file": path.display().to_string(), "days_truncated": truncated }),
             );
             Ok(true)
+        }
+        Command::Status { project } => {
+            let (status, v) =
+                client()?.call("GET", &format!("/api/projects/{project}/status"), None)?;
+            out(&v);
+            Ok(status == 200 && v["state"] != "down")
         }
         Command::Flows {
             project,

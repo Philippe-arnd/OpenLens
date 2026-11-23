@@ -253,11 +253,18 @@ impl Resolver for PublicOnly {
 }
 
 fn agent() -> ureq::Agent {
+    public_agent("OpenLens icon fetcher", 6, true)
+}
+
+/// An HTTP client that only reaches public addresses (checked after DNS,
+/// on every redirect): for the icon fetcher, the uptime probe and alert
+/// webhooks, whose addresses come from settings or events.
+pub(crate) fn public_agent(ua: &str, secs: u64, status_as_error: bool) -> ureq::Agent {
     let config = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(6)))
+        .timeout_global(Some(Duration::from_secs(secs)))
         .max_redirects(3)
-        .user_agent("OpenLens icon fetcher")
-        .http_status_as_error(true)
+        .user_agent(ua)
+        .http_status_as_error(status_as_error)
         .build();
     ureq::Agent::with_parts(config, DefaultConnector::new(), PublicOnly::default())
 }
