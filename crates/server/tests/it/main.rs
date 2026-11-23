@@ -2635,3 +2635,82 @@ async fn goals_are_suggested_set_tracked_and_removed() {
     .unwrap();
     assert_eq!(api["goals"].as_array().unwrap().len(), 0);
 }
+
+#[tokio::test]
+async fn a_forgotten_person_is_gone_everywhere_and_stays_gone() {
+    let h = harness();
+    let body = serde_json::json!({
+        "key": h.key,
+        "batch": [
+            {"event": "$pageview", "distinct_id": "anon-1", "properties": {"$pathname": "/"}},
+            {"event": "$identify", "distinct_id": "ana", "properties": {"$anon_distinct_id": "anon-1", "$role": "admin"}},
+            {"event": "note_saved", "distinct_id": "ana"},
+            {"event": "note_saved", "distinct_id": "bo"}
+        ]
+    })
+    .to_string();
+    let (status, _) = post(&h, "/capture", body.into_bytes(), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let owner = login_cookie(&h).await;
+    let export =
+        body_text(get(&h, "/p/default/people/ana/export.json", Some(&owner), false).await).await;
+    assert!(
+        export.contains("note_saved") && export.contains("anon-1"),
+        "{export}"
+    );
+    assert_eq!(
+        post_form(&h, "/p/default/people/ana/forget", &owner, "confirm=bo").await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        post_form(&h, "/p/default/people/ana/forget", &owner, "confirm=ana").await,
+        StatusCode::OK
+    );
+    let n = |sql: &'static str| {
+        let q = h.state.query.clone();
+        async move {
+            q.sql("default", sql).await.unwrap().rows[0]["n"]
+                .as_i64()
+                .unwrap()
+        }
+    };
+    assert_eq!(
+        n("SELECT count(*) AS n FROM raw_events WHERE distinct_id IN ('ana', 'anon-1')").await,
+        0
+    );
+    assert_eq!(
+        n("SELECT count(*) AS n FROM raw_events WHERE distinct_id = 'bo'").await,
+        1,
+        "others untouched"
+    );
+    assert!(h.state.meta.person("default", "ana").unwrap().is_none());
+    // Anything they send later is dropped.
+    let again =
+        serde_json::json!({"key": h.key, "batch": [{"event": "note_saved", "distinct_id": "ana"}]})
+            .to_string();
+    post(&h, "/capture", again.into_bytes(), false).await;
+    openlens_server::flush_now(&h.state).unwrap();
+    assert_eq!(
+        n("SELECT count(*) AS n FROM raw_events WHERE distinct_id = 'ana'").await,
+        0
+    );
+    // The audit log has the export and the erasure; viewers can't see it.
+    let log = body_text(get(&h, "/audit", Some(&owner), false).await).await;
+    assert!(log.contains("person.forget") && log.contains("person.export"));
+    let viewer = invite(
+        &h,
+        serde_json::json!({"email": "v@example.com", "role": "viewer"}),
+    )
+    .await;
+    assert_eq!(
+        get(&h, "/audit", Some(&viewer), false).await.status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        post_form(&h, "/p/default/people/bo/forget", &viewer, "confirm=bo").await,
+        StatusCode::FORBIDDEN
+    );
+    let api = body_text(get(&h, "/api/audit", None, true).await).await;
+    assert!(api.contains("user.invite"));
+}

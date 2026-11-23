@@ -151,6 +151,20 @@ CREATE TABLE IF NOT EXISTS incidents (
   notified_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS incidents_project ON incidents (project, started_at);
+CREATE TABLE IF NOT EXISTS forgotten (
+  project TEXT NOT NULL,
+  distinct_id TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (project, distinct_id)
+);
+CREATE TABLE IF NOT EXISTS audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  at INTEGER NOT NULL,
+  actor TEXT NOT NULL,
+  project TEXT,
+  action TEXT NOT NULL,
+  detail TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   email TEXT NOT NULL UNIQUE,
@@ -246,6 +260,9 @@ fn user_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
         last_sign_in: r.get(8)?,
     })
 }
+
+/// One audit entry: `(at, actor, project, action, detail)` (#230).
+pub type AuditEntry = (i64, String, Option<String>, String, String);
 
 /// One uptime probe: `(at, ok, status, ms, error)` (#256).
 pub type Check = (i64, bool, Option<i64>, Option<i64>, Option<String>);
@@ -541,6 +558,7 @@ impl Meta {
                 "replay_comments",
                 "uptime_checks",
                 "incidents",
+                "forgotten",
             ] {
                 tx.execute(&format!("DELETE FROM {table} WHERE project = ?1"), [id])?;
             }
@@ -847,6 +865,83 @@ impl Meta {
             )?;
             let rows = st
                 .query_map(params![project, since], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// Forget people (#230): their events are rewritten out of the files
+    /// and new ones are dropped at capture. Also drops their person rows and
+    /// role history. The list stays (it is re-applied after a restore).
+    pub fn forget(&self, project: &str, ids: &[String]) -> Result<()> {
+        let now = Utc::now().timestamp();
+        self.with(|c| {
+            let tx = c.unchecked_transaction()?;
+            for id in ids {
+                tx.execute(
+                    "INSERT OR REPLACE INTO forgotten (project, distinct_id, at) VALUES (?1, ?2, ?3)",
+                    params![project, id, now],
+                )?;
+                tx.execute("DELETE FROM persons WHERE project = ?1 AND distinct_id = ?2", params![project, id])?;
+                tx.execute("DELETE FROM role_history WHERE project = ?1 AND distinct_id = ?2", params![project, id])?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    /// Is this person forgotten?
+    pub fn is_forgotten(&self, project: &str, id: &str) -> Result<bool> {
+        self.with(|c| {
+            Ok(
+                c.prepare_cached(
+                    "SELECT 1 FROM forgotten WHERE project = ?1 AND distinct_id = ?2",
+                )?
+                .exists(params![project, id])?,
+            )
+        })
+    }
+
+    /// People forgotten since `since` (Unix seconds).
+    pub fn forgotten_since(&self, project: &str, since: i64) -> Result<Vec<String>> {
+        self.with(|c| {
+            let mut st =
+                c.prepare("SELECT distinct_id FROM forgotten WHERE project = ?1 AND at >= ?2")?;
+            let rows = st
+                .query_map(params![project, since], |r| r.get(0))?
+                .collect::<rusqlite::Result<Vec<String>>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// Append to the audit log (#230). It has no delete.
+    pub fn audit(
+        &self,
+        actor: &str,
+        project: Option<&str>,
+        action: &str,
+        detail: &str,
+    ) -> Result<()> {
+        let detail: String = detail.chars().take(500).collect();
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO audit (at, actor, project, action, detail) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![Utc::now().timestamp(), actor, project, action, detail],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// The audit log, newest first: `(at, actor, project, action, detail)`.
+    pub fn audit_log(&self, limit: usize) -> Result<Vec<AuditEntry>> {
+        self.with(|c| {
+            let mut st = c.prepare(
+                "SELECT at, actor, project, action, detail FROM audit ORDER BY id DESC LIMIT ?1",
+            )?;
+            let rows = st
+                .query_map([i64::try_from(limit.min(1000)).unwrap_or(1000)], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+                })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
         })

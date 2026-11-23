@@ -218,6 +218,13 @@ pub(crate) async fn capture(
             ev.environment = BOT_ENVIRONMENT.to_owned();
         }
     }
+    // Forgotten people stay forgotten (#230).
+    normalized.events.retain(|e| {
+        !state
+            .meta
+            .is_forgotten(&e.project, &e.distinct_id)
+            .unwrap_or(false)
+    });
     crate::audience::init(&state.data_dir);
     crate::audience::enrich(&mut normalized.events, &headers);
     let accepted = normalized.events.len();

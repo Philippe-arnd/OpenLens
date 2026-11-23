@@ -840,6 +840,7 @@ pub fn person(
     replays: &[openlens_replay::Summary],
     events: &[EventRow],
     tz: &str,
+    admin: bool,
 ) -> Markup {
     let errors: Vec<&EventRow> = events
         .iter()
@@ -883,6 +884,17 @@ pub fn person(
                             @if let Some(s) = &e.session_id { " " a.icon-link href={ "/p/" (p.id) "/replays/" (s) "?at=" (e.timestamp) } aria-label="Replay this moment" { (icon("play")) } } }
                     } } }
                     p.small { a href={ "/p/" (p.id) "/errors" } { "All errors →" } }
+                }
+            }
+            @if admin {
+                section.card.wide.danger {
+                    h2.coral { (icon("shield")) "Privacy" }
+                    p { a.button href={ "/p/" (p.id) "/people/" (url_enc(who)) "/export.json" } { (icon("down")) "Export their data (JSON)" } }
+                    p.small { "Forgetting removes their events (and those of the anonymous ids linked to them), their recordings and their profile, now, and drops anything they send later. There is no undo." }
+                    form.inline method="post" action={ "/p/" (p.id) "/people/" (url_enc(who)) "/forget" } {
+                        label { "Type " code { (who) } " to confirm " input type="text" name="confirm" required autocomplete="off"; }
+                        button.danger type="submit" { "Forget this person" }
+                    }
                 }
             }
             section.card.wide {
@@ -2172,6 +2184,31 @@ pub fn goals(
     )
 }
 
+/// The audit log (#230): who changed what, newest first.
+pub fn audit(rows: &[(String, String, Option<String>, String, String)]) -> Markup {
+    layout(
+        "Audit log",
+        None,
+        html! {
+            div.heading { div {
+                h1 { "Audit log" }
+                p.muted { "Every admin action: users, keys, settings, flags, surveys, feature maps, storage, exports and erasures. It can't be edited or deleted." }
+            } }
+            section.card.wide {
+                @if rows.is_empty() { p.muted { "Nothing yet." } }
+                @else {
+                    div.table-scroll { table.plain {
+                        thead { tr { th { "When" } th { "Who" } th { "Project" } th { "Action" } th { "Detail" } } }
+                        tbody { @for (at, who, proj, act, d) in rows {
+                            tr { td.small.mono { (at) } td.small { (who) } td.small { (proj.as_deref().unwrap_or("—")) } td { span.chip { (act) } } td.small { (d) } }
+                        } }
+                    } }
+                }
+            }
+        },
+    )
+}
+
 /// Feature flags: switch on/off and change the rollout. Creating flags is
 /// done by agents (API/CLI/MCP) with the code that uses them.
 pub fn flags(p: &ProjectInfo<'_>, flags: &[openlens_flags::Flag]) -> Markup {
@@ -2718,7 +2755,7 @@ pub fn projects(list: &[ProjectSummary], admin: bool) -> Markup {
         html! {
             div.heading {
                 div { h1 { "Projects" } p.muted { "One per app. Pick one to open its Focus board." } }
-                @if admin { a.button href="/users" { (icon("users")) "Team" } " " a.button href="/settings/storage" { (icon("layers")) "Storage and backups" } }
+                @if admin { a.button href="/users" { (icon("users")) "Team" } " " a.button href="/settings/storage" { (icon("layers")) "Storage and backups" } " " a.button href="/audit" { (icon("shield")) "Audit log" } }
             }
             @if admin {
                 details.card.wide.new-project {

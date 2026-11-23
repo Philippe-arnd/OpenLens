@@ -965,6 +965,11 @@ pub async fn live(
     })
 }
 
+/// A string as a SQL literal (quotes doubled; control characters refused).
+pub fn sql_literal(s: &str) -> Result<String> {
+    lit(s)
+}
+
 /// Who the users are, from page views of the last 30 days (#225): distinct
 /// users per country, device class, browser, OS, language and screen
 /// width bucket. A user seen in two countries counts in both.

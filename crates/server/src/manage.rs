@@ -138,6 +138,7 @@ pub(crate) async fn flag_save(
         let (pid, old) = (p.id.clone(), f.original.clone());
         let _ = tokio::task::spawn_blocking(move || meta.delete_flag(&pid, &old)).await;
     }
+    crate::privacy::audit(&state, &headers, Some(&p.id), "flag.save", &flag.key);
     Redirect::to(&format!("/p/{}/flags", p.id)).into_response()
 }
 
@@ -166,6 +167,7 @@ pub(crate) async fn flag_delete(
     let meta = state.meta.clone();
     let pid = id.clone();
     let _ = tokio::task::spawn_blocking(move || meta.delete_flag(&pid, &key)).await;
+    crate::privacy::audit(&state, &headers, Some(&id), "flag.delete", "");
     Redirect::to(&format!("/p/{id}/flags")).into_response()
 }
 
@@ -268,6 +270,7 @@ pub(crate) async fn survey_save(
         let (pid, old) = (p.id.clone(), f.original.clone());
         let _ = tokio::task::spawn_blocking(move || meta.delete_survey(&pid, &old)).await;
     }
+    crate::privacy::audit(&state, &headers, Some(&p.id), "survey.save", &s.key);
     Redirect::to(&format!("/p/{}/surveys", p.id)).into_response()
 }
 
@@ -291,5 +294,6 @@ pub(crate) async fn survey_delete(
     let meta = state.meta.clone();
     let pid = id.clone();
     let _ = tokio::task::spawn_blocking(move || meta.delete_survey(&pid, &key)).await;
+    crate::privacy::audit(&state, &headers, Some(&id), "survey.delete", "");
     Redirect::to(&format!("/p/{id}/surveys")).into_response()
 }

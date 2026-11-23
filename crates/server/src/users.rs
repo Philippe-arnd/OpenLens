@@ -162,6 +162,7 @@ pub(crate) async fn invite(
     match res {
         Ok(Ok((email, t))) => {
             let link = format!("{}/l/{t}", crate::base_url(&headers));
+            crate::privacy::audit(&state, &headers, None, "user.invite", &email);
             render(&state, Some((email, link)), "", None).await
         }
         Ok(Err(e)) => oops(&e.to_string()),
@@ -231,7 +232,16 @@ pub(crate) async fn update(
     })
     .await;
     match res {
-        Ok(Ok(Some(_))) => Redirect::to(&format!("/users/{id}")).into_response(),
+        Ok(Ok(Some(u))) => {
+            crate::privacy::audit(
+                &state,
+                &headers,
+                None,
+                "user.update",
+                &format!("{} ({})", u.email, u.role),
+            );
+            Redirect::to(&format!("/users/{id}")).into_response()
+        }
         Ok(Ok(None)) => oops("No such user."),
         Ok(Err(e)) => oops(&e.to_string()),
         Err(_) => oops("Try again."),
@@ -291,9 +301,19 @@ pub(crate) async fn action(
             .await;
             match res {
                 Ok(Ok(_)) if action == "delete" => {
+                    crate::privacy::audit(&state, &headers, None, "user.delete", &u.email);
                     Redirect::to("/users?done=removed").into_response()
                 }
-                Ok(Ok(_)) => Redirect::to(&back).into_response(),
+                Ok(Ok(_)) => {
+                    crate::privacy::audit(
+                        &state,
+                        &headers,
+                        None,
+                        &format!("user.{action}"),
+                        &u.email,
+                    );
+                    Redirect::to(&back).into_response()
+                }
                 Ok(Err(e)) => oops(&e.to_string()),
                 Err(_) => oops("Try again."),
             }

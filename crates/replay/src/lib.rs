@@ -222,6 +222,29 @@ pub fn list(root: &Path, project: &str, distinct_id: Option<&str>) -> Result<Vec
     Ok(out)
 }
 
+/// Delete every recording of one person (#230). Returns how many.
+pub fn erase(root: &Path, project: &str, distinct_id: &str) -> Result<usize> {
+    let dir = project_dir(root, project)?;
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Ok(0);
+    };
+    let mut n = 0;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(raw) = fs::read(path.join("info.json")) else {
+            continue;
+        };
+        let Ok(info) = serde_json::from_slice::<Info>(&raw) else {
+            continue;
+        };
+        if info.distinct_id == distinct_id {
+            fs::remove_dir_all(&path)?;
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
 /// Days a recording is kept after its last chunk. Fixed by design (D-015):
 /// replays are for looking at recent behaviour, and they are the bulk of
 /// the data.

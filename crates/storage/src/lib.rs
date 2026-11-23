@@ -445,6 +445,59 @@ fn compact_dir(dir: &Path, min_files: usize) -> Result<bool> {
     Ok(true)
 }
 
+/// Remove every event of these people from a project's files (#230,
+/// right to erasure): each day file holding one is rewritten without them.
+/// Returns the number of events removed. The WAL must be flushed first,
+/// and nothing else may rewrite the files meanwhile (the caller holds the
+/// maintenance lock).
+pub fn erase(root: &Path, project: &str, ids: &HashSet<String>) -> Result<usize> {
+    let pdir = project_dir(root, project)?;
+    if ids.is_empty() || !pdir.is_dir() {
+        return Ok(0);
+    }
+    let mut removed = 0;
+    for date in fs::read_dir(&pdir)? {
+        let date = date?.path();
+        if !date.is_dir() {
+            continue;
+        }
+        let files: Vec<PathBuf> = fs::read_dir(&date)?
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().is_some_and(|x| x == "parquet"))
+            .collect();
+        for f in files {
+            let reader = ParquetRecordBatchReaderBuilder::try_new(File::open(&f)?)?.build()?;
+            let mut kept = Vec::new();
+            let mut gone = 0;
+            for b in reader {
+                let b = b?;
+                let Some(col) = b
+                    .column_by_name("distinct_id")
+                    .and_then(|c| c.as_any().downcast_ref::<arrow::array::StringArray>())
+                else {
+                    kept.push(b);
+                    continue;
+                };
+                let keep: arrow::array::BooleanArray = (0..col.len())
+                    .map(|i| Some(col.is_null(i) || !ids.contains(col.value(i))))
+                    .collect();
+                gone += b.num_rows() - keep.true_count();
+                kept.push(arrow::compute::filter_record_batch(&b, &keep)?);
+            }
+            if gone == 0 {
+                continue;
+            }
+            removed += gone;
+            let merged = arrow::compute::concat_batches(&event_schema(), &kept)?;
+            if merged.num_rows() > 0 {
+                write_parquet(&date, &merged)?;
+            }
+            fs::remove_file(&f)?;
+        }
+    }
+    Ok(removed)
+}
+
 /// Keep the first row of each uuid (a resent event is stored once).
 fn unique_uuids(batch: &RecordBatch) -> Result<RecordBatch> {
     let Some(col) = batch

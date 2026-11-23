@@ -79,7 +79,16 @@ pub(crate) async fn person(
     };
     html_page(
         StatusCode::OK,
-        openlens_ui::person(&info, &who, person.as_ref(), &roles, &replays, &events, &tz),
+        openlens_ui::person(
+            &info,
+            &who,
+            person.as_ref(),
+            &roles,
+            &replays,
+            &events,
+            &tz,
+            auth::viewer(&state, &headers).is_some_and(|v| v.admin),
+        ),
     )
 }
 

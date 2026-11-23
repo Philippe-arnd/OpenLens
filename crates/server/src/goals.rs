@@ -205,7 +205,10 @@ pub(crate) async fn create(
         created: today.format("%Y-%m-%d").to_string(),
     });
     match save(&state.meta, &p.id, &all) {
-        Ok(()) => Redirect::to(&format!("/p/{}/goals", p.id)).into_response(),
+        Ok(()) => {
+            crate::privacy::audit(&state, &headers, Some(&p.id), "goal.set", "");
+            Redirect::to(&format!("/p/{}/goals", p.id)).into_response()
+        }
         Err(e) => oops(&e),
     }
 }
@@ -225,6 +228,7 @@ pub(crate) async fn delete(
     let mut all = load(&state.meta, &id);
     all.retain(|g| g.id != gid);
     let _ = save(&state.meta, &id, &all);
+    crate::privacy::audit(&state, &headers, Some(&id), "goal.remove", &gid);
     Redirect::to(&format!("/p/{id}/goals")).into_response()
 }
 

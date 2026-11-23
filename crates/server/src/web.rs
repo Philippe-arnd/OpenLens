@@ -88,6 +88,15 @@ pub(crate) fn routes() -> Router<AppState> {
             get(crate::features::download),
         )
         .route("/p/{project}/people/{who}", get(crate::explore::person))
+        .route(
+            "/p/{project}/people/{who}/forget",
+            post(crate::privacy::forget),
+        )
+        .route(
+            "/p/{project}/people/{who}/export.json",
+            get(crate::privacy::export),
+        )
+        .route("/audit", get(crate::privacy::audit_page))
         .route("/p/{project}/breakdown", get(crate::explore::breakdown))
         .route("/p/{project}/audience", get(crate::explore::audience))
         .route("/p/{project}/acquisition", get(crate::explore::acquisition))

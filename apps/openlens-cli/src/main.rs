@@ -689,7 +689,8 @@ fn run(cli: Cli) -> Result<bool, String> {
             Ok(true)
         }
         Command::Goals { project } => {
-            let (status, v) = client()?.call("GET", &format!("/api/projects/{project}/goals"), None)?;
+            let (status, v) =
+                client()?.call("GET", &format!("/api/projects/{project}/goals"), None)?;
             out(&v);
             Ok(status == 200)
         }
