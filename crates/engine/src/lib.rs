@@ -20,6 +20,7 @@ pub mod flows;
 pub mod forms;
 pub mod goals;
 mod insights;
+pub mod maphealth;
 mod pages;
 mod revenue;
 pub mod stats;
@@ -30,6 +31,7 @@ pub use digest::{Delta, Digest, digest, digest_markdown};
 pub use errors::{ErrorGroup, error_groups};
 pub use flows::{Flow, FlowLink, FlowQuery, flows};
 pub use insights::{CohortStats, FlagCohort, Funnel, FunnelStep, Insight, Journey, Readiness};
+pub use maphealth::{FeatureContext, MapHealth, feature_context, map_health};
 pub use pages::{
     ClickMap, Hotspot, MAP_COLUMNS, MAP_ROW, PageStats, SurveyResults, click_map, pages,
     sessions_on_path, survey_results,

@@ -34,6 +34,18 @@ pub(crate) fn routes() -> Router<AppState> {
             "/api/projects/{project}/feature-map",
             get(get_map).put(put_map),
         )
+        .route(
+            "/api/projects/{project}/feature-map/health",
+            get(crate::features::api_health),
+        )
+        .route(
+            "/api/projects/{project}/feature-map/versions",
+            get(crate::features::api_versions),
+        )
+        .route(
+            "/api/projects/{project}/feature-map/features/{key}",
+            get(crate::features::api_feature),
+        )
         .route("/api/feature-map/validate", post(validate_map))
         .route(
             "/api/projects/{project}/import",
@@ -589,13 +601,21 @@ async fn get_map(
     }
 }
 
-/// `PUT /api/projects/{id}/feature-map` with the YAML as the raw body.
-/// 422 with the issues when the map has errors; otherwise stored, and the
-/// warnings are returned so the agent can improve it.
+#[derive(Deserialize, Default)]
+struct PutMapQuery {
+    /// Why this version (`features push --message`), #240.
+    message: Option<String>,
+}
+
+/// `PUT /api/projects/{id}/feature-map[?message=…]` with the YAML as the
+/// raw body. 422 with the issues when the map has errors; otherwise stored
+/// (with who pushed it and why), and the warnings are returned so the
+/// agent can improve it.
 async fn put_map(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(project): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<PutMapQuery>,
     body: String,
 ) -> Response {
     if let Some(r) = guard(&state, &headers) {
@@ -613,9 +633,23 @@ async fn put_map(
         )
             .into_response();
     }
+    let mut issues = parsed.issues;
+    if let Some(next) = &parsed.map {
+        let prev = crate::load_map(&state, &p.id).await;
+        issues.extend(crate::features::rename_warnings(
+            prev.as_ref().map(|(m, _)| m),
+            next,
+        ));
+    }
     let meta = state.meta.clone();
     let project_id = p.id.clone();
-    match tokio::task::spawn_blocking(move || meta.save_feature_map(&p.id, &body)).await {
+    let author = crate::privacy::actor(&state, &headers);
+    let message = q.message.filter(|m| !m.trim().is_empty());
+    match tokio::task::spawn_blocking(move || {
+        meta.save_feature_map_by(&p.id, &body, Some(&author), message.as_deref())
+    })
+    .await
+    {
         Ok(Ok(version)) => {
             crate::privacy::audit(
                 &state,
@@ -624,8 +658,7 @@ async fn put_map(
                 "feature_map.save",
                 &format!("version {version} (api)"),
             );
-            Json(json!({ "stored": true, "version": version, "issues": parsed.issues }))
-                .into_response()
+            Json(json!({ "stored": true, "version": version, "issues": issues })).into_response()
         }
         _ => err(
             StatusCode::INTERNAL_SERVER_ERROR,

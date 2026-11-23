@@ -3137,3 +3137,152 @@ async fn quiet_hours_hold_non_urgent_alerts_and_down_shows_on_the_board() {
         "banner on the board"
     );
 }
+
+#[tokio::test]
+async fn map_health_finds_planted_defects_and_versions_keep_author_and_message() {
+    let h = harness();
+    let put = |uri: &'static str, body: &'static str| {
+        let st = h.state.clone();
+        async move {
+            let resp = router(st)
+                .oneshot(
+                    Request::put(uri)
+                        .header("authorization", "Bearer adm_test")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = resp.status();
+            let v: serde_json::Value = serde_json::from_slice(
+                &axum::body::to_bytes(resp.into_body(), 1 << 20)
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            (status, v)
+        }
+    };
+    let (status, _) = put(
+        "/api/projects/default/feature-map",
+        "features:\n  - key: docs\n    name: Docs\n    entry: { routes: ['/docs/*'] }\n",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, v) = put(
+        "/api/projects/default/feature-map?message=split%20docs%20and%20edit",
+        "features:\n  - key: reading\n    name: Reading\n    area: Docs\n    renamed_from: [docs, ghost]\n    success: doc_read\n    entry: { routes: ['/docs/*'] }\n  - key: edit\n    name: Edit\n    area: Docs\n    requires: [reading]\n    success: doc_saved\n    entry: { routes: ['/docs/:id/edit'] }\n  - key: gone\n    name: Gone\n    entry: { routes: ['/gone'] }\n",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert!(
+        v["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|i| i["path"] == "features[0].renamed_from[1]"),
+        "ghost was never a feature: {v}"
+    );
+    let mut events = vec![
+        serde_json::json!({"event": "$pageview", "distinct_id": "u1", "properties": {"$pathname": "/docs/1/edit"}}),
+    ];
+    for i in 0..5 {
+        events.push(serde_json::json!({"event": "$pageview", "distinct_id": format!("p{i}"), "properties": {"$pathname": format!("/billing/{i}")}}));
+        events.push(serde_json::json!({"event": "$click", "distinct_id": "u1", "properties": {"$pathname": "/docs/2", "$feature": "docs"}}));
+    }
+    let (status, _) = post(
+        &h,
+        "/capture",
+        serde_json::json!({ "key": h.key, "batch": events })
+            .to_string()
+            .into_bytes(),
+        false,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+
+    assert_eq!(
+        get(&h, "/api/projects/default/feature-map/health", None, false)
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let health: serde_json::Value = serde_json::from_str(
+        &body_text(get(&h, "/api/projects/default/feature-map/health", None, true).await).await,
+    )
+    .unwrap();
+    let kinds: Vec<&str> = health["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|f| f["kind"].as_str())
+        .collect();
+    for k in ["coverage", "overlap", "dead"] {
+        assert!(kinds.contains(&k), "{k} missing: {health}");
+    }
+    assert!(health["score"].as_u64().unwrap() < 100);
+    let reading = &health["features"][0];
+    assert_eq!(reading["key"], "reading");
+    assert!(
+        reading["uses"].as_i64().unwrap() >= 5,
+        "old `docs` tags count for `reading`: {health}"
+    );
+    assert!(
+        health["areas"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a["area"] == "Docs" && a["features"] == 2),
+        "{health}"
+    );
+    assert_eq!(health["ladder"][0]["to"], "edit");
+
+    let ctx: serde_json::Value = serde_json::from_str(
+        &body_text(
+            get(
+                &h,
+                "/api/projects/default/feature-map/features/docs",
+                None,
+                true,
+            )
+            .await,
+        )
+        .await,
+    )
+    .unwrap();
+    assert_eq!(
+        ctx["definition"]["key"], "reading",
+        "a former key finds the feature"
+    );
+    assert_eq!(ctx["required_by"][0], "edit");
+    assert_eq!(ctx["area_peers"][0], "edit");
+    assert_eq!(
+        get(
+            &h,
+            "/api/projects/default/feature-map/features/nope",
+            None,
+            true
+        )
+        .await
+        .status(),
+        StatusCode::NOT_FOUND
+    );
+
+    let versions: serde_json::Value = serde_json::from_str(
+        &body_text(get(&h, "/api/projects/default/feature-map/versions", None, true).await).await,
+    )
+    .unwrap();
+    assert_eq!(versions["versions"][0]["version"], 2);
+    assert_eq!(versions["versions"][0]["message"], "split docs and edit");
+    assert_eq!(versions["versions"][0]["author"], "api (admin token)");
+
+    let owner = login_cookie(&h).await;
+    let page = body_text(get(&h, "/p/default/features", Some(&owner), false).await).await;
+    assert!(
+        page.contains("Map health, last 30 days")
+            && page.contains("Adoption ladder")
+            && page.contains("split docs and edit")
+            && !page.contains(" style="),
+    );
+}

@@ -6,7 +6,7 @@ You are the agent that maintains a web app. Your goal is that the product manage
 
 **Available today:** `openlens-cli` (`init`, `features lint|push`, `import`, `verify`, `sourcemaps`, `flags`, `login-link`, `sql`, `guide`, `mcp`), the HTTP API below, the SDK and the dashboard. Everything below is available. Two small reference apps wired this way live in `examples/` (`notes-ssr`: script tag; `tasks-spa`: npm package).
 
-**MCP:** `openlens-cli mcp --automation-read-root <app repo> --automation-write-root <scratch dir>` speaks MCP over stdio. Its tools are `guide`, `projects`, `init`, `feature_map_lint`, `feature_map_push`, `verify`, `insights`, `kpi_report`, `board`, `errors`, `sql`, `flags`, `flag_set` and `login_link`, and it reads files only inside the read root.
+**MCP:** `openlens-cli mcp --automation-read-root <app repo> --automation-write-root <scratch dir>` speaks MCP over stdio. Its tools are `guide`, `projects`, `init`, `feature_map_lint`, `feature_map_push`, `map_health`, `map_overview`, `feature_context`, `suggest_map_changes`, `verify`, `insights`, `kpi_report`, `board`, `errors`, `sql`, `flags`, `flag_set` and `login_link`, and it reads files only inside the read root.
 
 `openlens-cli` reads `OPENLENS_SERVER` and `OPENLENS_TOKEN` (or `--server`/`--token`), prints JSON, and exits non-zero when something needs fixing. It is in the server image (`docker exec <container> openlens-cli …`), or `cargo install --git <repo> openlens-cli`.
 
@@ -32,7 +32,8 @@ API quick reference (send `Authorization: Bearer <admin token>` on every call):
    - `roles`: list every raw role value found in the code and map it to a canonical role.
    - `features`: list the main user-facing features from the routes and actions. Give each one its entry points and a **success event**: the moment the user got value, for example `entry_saved` or `invoice_sent`. Add `openlens.track("<success event>")` where that moment happens, if the app does not emit it already.
    - Add `data-feature="<key>"` to each feature's main controls.
-   - Run `openlens-cli features lint --src .` (offline: validates the map and checks that each feature's `data-feature`, route and success event exist in the code), then `openlens-cli features push --project <id>`. Commit the file: it is the source of truth.
+   - Run `openlens-cli features lint --src .` (offline: validates the map and checks that each feature's `data-feature`, route and success event exist in the code), then `openlens-cli features push --project <id> -m "<why>"`. Commit the file: it is the source of truth. See [Cutting features well](#cutting-features-well) for how big a feature should be.
+   - Once real usage arrives, `openlens-cli features lint --live --project <id>` measures the pushed map (see below); add `--min-score 70` to make CI fail when it degrades.
 5. **Backfill.** So the first login shows history, not an empty week, export from the app's database to one JSONL file:
    - **one line per user:**
      `{"type":"person","id":"42","role":"owner","account":"acme","plan":"pro","created_at":"2026-03-02T10:00:00Z","last_seen_at":"2026-11-20T08:12:00Z"}`
@@ -47,6 +48,28 @@ API quick reference (send `Authorization: Bearer <admin token>` on every call):
 8. **Flags (when shipping a change).** Put risky or experimental changes behind `openlens.isEnabled("<key>")`. Create the flag with `openlens-cli flags set <key> --rollout 10 [--roles admin]`, and widen it once the board shows its cohort is fine. Every event carries the user's active flags in `$flags`.
 8b. **Ask (optional).** To learn *why*, add a micro-survey right after a success event: `survey_set { key, question, kind: rating|yes_no|choice|text, trigger: "<success event>", sample: 10 }`. Keep it to one short question about the moment that just happened. Results are on the Surveys page and in `surveys`.
 9. **Hand over.** `openlens-cli login-link` returns a one-time link. Send it to the PM, together with a short note on what was wired and anything you could not do. To invite other people with limited access, use `openlens-cli login-link --email <email> --role viewer|admin [--projects <id,id>]`. Viewers can look but not change anything; admins also manage flags and the team (`/users`).
+
+## Cutting features well
+
+A feature is **one job a user comes to do**, small enough that its success event means the job is done, big enough that a PM would put it on a roadmap.
+
+- **Good:** `write-entry` (routes `/entries/new`, `/entries/:id/edit`, success `entry_saved`), `invite-teammate` (success `invite_sent`), `export-pdf` (success `pdf_downloaded`).
+- **Too big:** `editor` covering writing, sharing and exporting: its success rate mixes three jobs and moves for no clear reason. Split it, one success event each.
+- **Too small:** `click-bold-button`: a step, not a job. List it in the parent's `steps` instead.
+- **Not a feature:** `/settings/*` as a catch-all, the home page, the login page. Leave plumbing pages out, or group them in one `account` feature without a success event.
+- **Routes must not overlap**: `/docs/*` also matches `/docs/:id/edit`, and the first feature in the file wins. Make them disjoint, or put the narrower one first.
+
+Optional fields:
+
+| Field | Use it for |
+| --- | --- |
+| `area: Writing` | Group features (one level only). The map page and `map_overview` roll uses and users up by area. |
+| `requires: [write-entry]` | Features a user normally uses first. The **adoption ladder** shows how many go from one to the next, and the health check flags a requirement most users skip. Unknown keys and loops are refused. |
+| `renamed_from: [editor]` | Keep history across a rename: events still tagged with the old key count for the new one. A former key cannot still be a feature. |
+
+Older servers refuse maps with these fields (the format is strict): upgrade the server before pushing them.
+
+**Map health.** After a week of real traffic, run `openlens-cli features lint --live` (MCP `map_health`). It scores the pushed map out of 100 and lists findings ranked by impact, each with the numbers and a YAML change: pages and clicks no feature claims (with a suggested route and key), overlapping routes, dead features, success events that never fire or fire for every user (usually on entry, not on value), `data-feature` values the map does not declare, and `requires` usage contradicts. `suggest_map_changes` returns only the changes; nothing is applied until you edit the file and push it.
 
 ## Framework recipes
 

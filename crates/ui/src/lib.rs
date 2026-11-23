@@ -1192,8 +1192,10 @@ pub struct MapView<'a> {
     pub issues: &'a [openlens_featuremap::Issue],
     /// Live status.
     pub live: &'a MapLive,
-    /// (version, created_at, bytes), newest first.
-    pub history: &'a [(i64, String, i64)],
+    /// Stored versions, newest first.
+    pub history: &'a [openlens_meta::MapVersion],
+    /// Measured health (30 days), #240.
+    pub health: Option<&'a openlens_engine::MapHealth>,
     /// Admins edit.
     pub admin: bool,
     /// When checking a draft: the stored YAML to diff against.
@@ -1242,6 +1244,70 @@ pub fn line_diff<'a>(old: &'a str, new: &'a str) -> Vec<(char, &'a str)> {
     out.extend(a[i..].iter().map(|l| ('-', *l)));
     out.extend(b[j..].iter().map(|l| ('+', *l)));
     out
+}
+
+/// The measured health of the map (#240): score, findings with their fix,
+/// areas and the adoption ladder.
+fn map_health(h: &openlens_engine::MapHealth) -> Markup {
+    let tone = if h.score >= 80 {
+        "good"
+    } else if h.score >= 50 {
+        "warn"
+    } else {
+        "bad"
+    };
+    html! {
+        section.card.wide {
+            h2.mint { (icon("shield")) "Map health, last 30 days" }
+            p {
+                strong class={ "status " (tone) } { (h.score) " / 100" }
+                " · " (pct(h.coverage)) " of pages and clicks belong to a feature"
+                " · " (h.findings.len()) " findings"
+            }
+            @if h.findings.is_empty() {
+                p.muted { "Nothing to fix: every feature is used, its success fires and no route overlaps." }
+            } @else {
+                ul.plain-list { @for f in &h.findings {
+                    li {
+                        span class={ "status " (if f.level == "error" { "bad" } else { "warn" }) } { (f.kind.replace('_', " ")) }
+                        " " (f.message) br;
+                        span.muted.small { (f.evidence) }
+                        @if let Some(fix) = &f.fix { details { summary.small { "Suggested change" } pre.diff { (fix) } } }
+                    }
+                } }
+            }
+            p.muted.small { "Score: 100, minus up to 40 for pages and clicks no feature claims, 10 per error and 4 per warning. Agents read the same report with " code { "openlens-cli features lint --live" } "." }
+        }
+        @if !h.areas.is_empty() {
+            section.card {
+                h2.violet { (icon("layers")) "Areas" }
+                div.table-scroll { table.plain {
+                    thead { tr { th { "Area" } th.num { "Features" } th.num { "Uses (30 d)" } th.num { "Users" } } }
+                    tbody { @for a in &h.areas {
+                        tr { th scope="row" { (a.area) } td.num { (a.features) } td.num { (compact(a.uses)) } td.num { (compact(a.users)) } }
+                    } }
+                } }
+            }
+        }
+        @if !h.ladder.is_empty() {
+            section.card {
+                h2.sky { (icon("funnel")) "Adoption ladder" }
+                div.table-scroll { table.plain {
+                    thead { tr { th { "From" } th { "Then" } th.num { "Users" } th.num { "Went on" } th.num { "Skipped the first" } } }
+                    tbody { @for r in &h.ladder {
+                        tr {
+                            th scope="row" { code { (r.from) } }
+                            td { code { (r.to) } }
+                            td.num { (compact(r.from_users)) }
+                            td.num { strong { (pct(r.reached as f64 / r.from_users.max(1) as f64)) } }
+                            td.num { (compact(r.skipped)) }
+                        }
+                    } }
+                } }
+                p.muted.small { "From the map's " code { "requires" } ": of the users of a feature, the share who went on to the one that requires it. Where most skip it, the requirement is probably wrong." }
+            }
+        }
+    }
 }
 
 /// The feature map page (#221).
@@ -1326,6 +1392,7 @@ pub fn feature_map(v: &MapView<'_>) -> Markup {
                     }
                 }
             }
+            @if let Some(h) = v.health { (map_health(h)) }
             @if let Some(d) = &diff {
                 section.card.wide {
                     h2.sky { (icon("route")) "Changes against the stored map" }
@@ -1344,6 +1411,8 @@ pub fn feature_map(v: &MapView<'_>) -> Markup {
                     form.sqlbox method="post" action={ "/p/" (p.id) "/features" } {
                         label for="map-yaml" { "openlens.features.yaml" }
                         textarea #map-yaml name="yaml" rows="18" spellcheck="false" { (v.yaml) }
+                        label for="map-message" { "Why (kept with the version)" }
+                        input #map-message type="text" name="message" maxlength="500" placeholder="e.g. split export into PDF and CSV";
                         div.actions {
                             button.soft type="submit" name="action" value="check" { "Check and show changes" }
                             button type="submit" name="action" value="save" { "Save as a new version" }
@@ -1355,9 +1424,11 @@ pub fn feature_map(v: &MapView<'_>) -> Markup {
             @if !v.history.is_empty() {
                 section.card.wide {
                     h2 { (icon("clock")) "History" }
-                    ul.plain-list.small { @for (n, at, bytes) in v.history {
-                        li { a href={ "/p/" (p.id) "/features?v=" (n) } { "Version " (n) } " · " (at.get(..16).unwrap_or(at).replace('T', " ")) " UTC · " (bytes) " bytes"
-                            @if Some(*n) == v.latest { " · " span.status.good { "current" } } }
+                    ul.plain-list.small { @for h in v.history {
+                        li { a href={ "/p/" (p.id) "/features?v=" (h.version) } { "Version " (h.version) } " · " (h.created_at.get(..16).unwrap_or(&h.created_at).replace('T', " ")) " UTC · " (h.bytes) " bytes"
+                            @if let Some(a) = &h.author { " · " (a) }
+                            @if Some(h.version) == v.latest { " · " span.status.good { "current" } }
+                            @if let Some(m) = &h.message { br; span.muted { (m) } } }
                     } }
                 }
             }
