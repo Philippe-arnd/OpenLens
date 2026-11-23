@@ -2232,7 +2232,7 @@ async fn page_views_get_device_browser_and_os_but_never_the_address() {
         .oneshot(
             Request::post("/capture")
                 .header("content-type", "application/json")
-                .header("x-forwarded-for", "203.0.113.9")
+                .header("x-forwarded-for", "198.51.100.77")
                 .header("user-agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 Version/17.5 Mobile/15E148 Safari/604.1")
                 .body(Body::from(body))
                 .unwrap(),
@@ -2251,7 +2251,7 @@ async fn page_views_get_device_browser_and_os_but_never_the_address() {
         .await
         .unwrap();
     let all = serde_json::to_string(&r.rows).unwrap();
-    assert!(!all.contains("203.0.113.9"), "no address stored");
+    assert!(!all.contains("198.51.100.77"), "no address stored");
     assert!(!all.contains("ZZ"), "client-sent country replaced");
     let pv = r.rows.iter().find(|x| x["event"] == "$pageview").unwrap()["properties"]
         .as_str()
