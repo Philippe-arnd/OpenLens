@@ -5,6 +5,7 @@
 
 mod alerts;
 mod api;
+mod ask;
 mod audience;
 mod auth;
 pub mod backup;
@@ -18,6 +19,7 @@ mod features;
 mod flags;
 mod goals;
 mod icon;
+mod llm;
 mod manage;
 mod oidc;
 mod privacy;
@@ -29,6 +31,7 @@ mod settings;
 mod share;
 mod storage;
 mod surveys;
+mod tickets;
 mod timeline;
 mod tls;
 mod users;

@@ -713,6 +713,34 @@ pub(crate) struct ApiGuard {
     limit: Option<f64>,
 }
 
+/// Set a goal from the Ask chat once a person confirmed it (#244): the
+/// same checks as the page and the API.
+pub(crate) async fn set_confirmed(
+    state: &AppState,
+    p: &openlens_meta::Project,
+    kpi: &str,
+    target: f64,
+    deadline: &str,
+) -> Result<Goal, String> {
+    let ev = evaluate(state, p, &p.timezone).await?;
+    let mut all = load(&state.meta, &p.id);
+    let goal = build_goal(
+        &ev,
+        all.len(),
+        GoalInput {
+            kpi: kpi.to_owned(),
+            target,
+            deadline: Some(deadline.to_owned()),
+            releases: None,
+            owner: String::new(),
+            guards: Vec::new(),
+        },
+    )?;
+    all.push(goal.clone());
+    save(&state.meta, &p.id, &all)?;
+    Ok(goal)
+}
+
 /// `POST /api/projects/{id}/goals` (bearer, #272): set a goal, with the
 /// same checks as the page.
 pub(crate) async fn api_set(

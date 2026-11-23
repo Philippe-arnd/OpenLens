@@ -439,6 +439,9 @@ pub(crate) async fn tick(state: &AppState, minute: u64) {
         if minute % 60 == 3 {
             Box::pin(crate::goals::hourly(state, &p, s.regressions)).await;
         }
+        if minute % 60 == 4 {
+            Box::pin(crate::tickets::hourly(state, &p)).await;
+        }
         if s.cert
             && minute % 60 == 2
             && let Some(origin) = state.meta.project_setting(&p.id, "app_url").ok().flatten()

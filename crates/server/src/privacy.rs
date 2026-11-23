@@ -47,6 +47,29 @@ pub(crate) fn audit(
     }
 }
 
+/// Record an action done by a known user id (no request at hand).
+pub(crate) fn audit_as(
+    state: &AppState,
+    user: &str,
+    project: Option<&str>,
+    action: &str,
+    detail: &str,
+) {
+    let who = if user == auth::OWNER {
+        "owner".to_owned()
+    } else {
+        state
+            .meta
+            .user(user)
+            .ok()
+            .flatten()
+            .map_or_else(|| user.to_owned(), |u| u.email)
+    };
+    if let Err(e) = state.meta.audit(&who, project, action, detail) {
+        tracing::warn!(%e, action, "audit entry not written");
+    }
+}
+
 /// Forget a person and every anonymous id linked to them (blocking):
 /// tombstones, person rows, events rewritten out of the files, replays
 /// deleted. Returns (ids forgotten, events removed, recordings removed).

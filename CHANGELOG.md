@@ -6,6 +6,24 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Added
 
+- **From finding to ticket to measured effect** (#245, the DMAIC loop):
+  - **Create ticket:** a link on insight cards, error groups, goals not yet on track, and feature-map findings.
+  - **What the ticket holds:** the problem, the evidence, links, a hypothesis, a success metric with its target and check date, and acceptance criteria. It is written for a person or a coding agent.
+  - **Where it goes:** copy it as Markdown into any tracker, or open a GitHub issue labelled `openlens`. The repository and a token, stored encrypted, are set on the new **Tickets** page. There is one issue per finding: a second click comments fresh numbers on the open issue instead of opening another.
+  - **Follow-up:** each hour, OpenLens follows the issue until it is closed, finds the release that shipped it, and 14 days later measures the metric before and after. Shares get a significance test. It comments **improved**, **no effect** or **worse** on the issue.
+  - **Learning log:** the Tickets page counts the changes that moved their metric.
+  - **API and MCP:** `GET|POST /api/projects/{id}/tickets`, and MCP `create_ticket` and `tickets`.
+  - **Control:** nothing is posted without a click or an admin call.
+
+- **Ask OpenLens** (#244, docs/ai.md, D-020): an AI chat on every project (**Ask** in the menu).
+  - **How it answers:** in your words, with the numbers behind each claim and links to the pages they come from. It knows the page you came from, and it suggests follow-up questions.
+  - **Read tools:** KPIs, insights, a feature's context, errors, goals, and aggregate-only SQL.
+  - **Changes:** setting a goal or switching or rolling out a flag is only a proposal. It is applied after an admin's click, through a single-use token from the server.
+  - **Providers:** `anthropic` (with prompt caching) or any `openai-compatible` server (OpenAI, a LiteLLM proxy, OpenRouter, Azure, Mistral, vLLM, a local Ollama). Configure it by `OPENLENS_LLM_*` or in **Settings → AI**, where the key is stored encrypted and a *Test* button checks it.
+  - **Data sent:** aggregates and definitions only; person-level detail must be allowed per project. *What is sent* shows the exact last request.
+  - **Limits:** a daily token budget per project and 30 questions an hour per person. Tokens and cache hits are shown under each answer.
+  - **History:** conversations are kept 30 days, can be exported to Markdown, and can be forgotten.
+
 - **Release process, part 2** (#258):
   - **Notes draft:** a Monday PR adds a draft of `docs/releases/vX.Y.Z.md` in the house template, built from the CHANGELOG. Merge it before the train to publish it as the notes.
   - **Screenshots PR:** lists the images that changed, with before and after links. Changes under 0.5% of pixels are ignored.

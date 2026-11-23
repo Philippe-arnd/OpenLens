@@ -82,6 +82,25 @@ pub(crate) fn routes() -> Router<AppState> {
             post(crate::settings::alerts_test),
         )
         .route("/p/{project}/uptime", get(crate::settings::uptime))
+        .route(
+            "/settings/ai",
+            get(crate::ask::ai_page).post(crate::ask::ai_save),
+        )
+        .route(
+            "/p/{project}/ask",
+            get(crate::ask::page).post(crate::ask::ask),
+        )
+        .route("/p/{project}/ask/confirm", post(crate::ask::confirm))
+        .route("/p/{project}/ask/clear", post(crate::ask::clear))
+        .route("/p/{project}/ask/privacy", post(crate::ask::privacy))
+        .route("/p/{project}/ask/sent", get(crate::ask::sent))
+        .route("/p/{project}/ask/export.md", get(crate::ask::export))
+        .route(
+            "/p/{project}/tickets",
+            get(crate::tickets::list).post(crate::tickets::create),
+        )
+        .route("/p/{project}/tickets/new", get(crate::tickets::new))
+        .route("/p/{project}/tickets/target", post(crate::tickets::target))
         .route("/settings/storage", get(crate::storage::page))
         .route("/settings/storage/s3", post(crate::storage::s3))
         .route("/settings/storage/backups", post(crate::storage::plan))
@@ -1398,6 +1417,7 @@ pub(crate) async fn access_layer(
             && !v.admin
             && !crate::comments::is_comment_path(&path)
             && !path.contains("/timeline")
+            && !(path.ends_with("/ask") || path.ends_with("/ask/clear"))
         {
             return html(
                 StatusCode::FORBIDDEN,
