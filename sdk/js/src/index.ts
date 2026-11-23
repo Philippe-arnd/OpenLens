@@ -315,7 +315,14 @@ function pageview(): void {
   if (lastPath) reportScroll();
   const first = lastPath === "";
   lastPath = path;
-  track("$pageview", first && document.referrer ? { $referrer: document.referrer } : {});
+  // The first view of a page load also says the language and screen width
+  // (#225; the server adds country, device, browser and OS, never the IP).
+  track(
+    "$pageview",
+    first
+      ? { ...(document.referrer ? { $referrer: document.referrer } : {}), $lang: navigator.language, $sw: screen.width }
+      : {},
+  );
 }
 
 /** `el` and its ancestors, crossing open shadow roots (web components):

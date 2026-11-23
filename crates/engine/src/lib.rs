@@ -837,6 +837,11 @@ pub async fn breakdown(
         "feature" => "feature",
         "environment" => "environment",
         "release" => "release",
+        // Audience (#225), from page views (other events carry none).
+        "country" => "regexp_match(properties, '\"\\$country\":\"([A-Z]{2})\"')[1]",
+        "device" => "regexp_match(properties, '\"\\$device\":\"([a-z]+)\"')[1]",
+        "browser" => "regexp_match(properties, '\"\\$browser\":\"([A-Za-z ]+)\"')[1]",
+        "os" => "regexp_match(properties, '\"\\$os\":\"([A-Za-z]+)\"')[1]",
         _ => return Err(EngineError::InvalidFilter("by")),
     };
     let src = source(map);
@@ -868,6 +873,90 @@ pub async fn breakdown(
             errors: int(r, "errors"),
         })
         .collect())
+}
+
+/// Who the users are, from page views of the last 30 days (#225): distinct
+/// users per country, device class, browser, OS, language and screen
+/// width bucket. A user seen in two countries counts in both.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct Audience {
+    /// (ISO country code, users).
+    pub countries: Vec<(String, i64)>,
+    /// (phone / tablet / desktop, users).
+    pub devices: Vec<(String, i64)>,
+    /// (browser, users).
+    pub browsers: Vec<(String, i64)>,
+    /// (OS, users).
+    pub os: Vec<(String, i64)>,
+    /// (language, users), the first part of `$lang` (`fr`, `en`).
+    pub languages: Vec<(String, i64)>,
+    /// (screen bucket, users).
+    pub screens: Vec<(String, i64)>,
+    /// Users with at least one page view in the window.
+    pub users: i64,
+}
+
+/// [`Audience`] for a project.
+pub async fn audience(
+    q: &QueryEngine,
+    project: &str,
+    map: Option<&FeatureMap>,
+    f: &Filters,
+) -> Result<Audience> {
+    let src = source(map);
+    let w = f.clause(30)?;
+    let prop = |k: &str, re: &str| format!("regexp_match(properties, '\"\\${k}\":\"({re})\"')[1]");
+    let one = |expr: String| {
+        format!(
+            "SELECT v, count(DISTINCT distinct_id) AS n FROM (SELECT {expr} AS v, distinct_id FROM {src} \
+             WHERE {w} AND event = '$pageview') WHERE v IS NOT NULL GROUP BY v ORDER BY n DESC LIMIT 60"
+        )
+    };
+    let screen = "CASE WHEN w < 600 THEN 'phone (< 600 px)' WHEN w < 1024 THEN 'tablet (600–1023)' \
+                  WHEN w < 1440 THEN 'laptop (1024–1439)' ELSE 'wide (≥ 1440)' END";
+    let screens = format!(
+        "SELECT v, count(DISTINCT distinct_id) AS n FROM (SELECT {screen} AS v, distinct_id FROM \
+         (SELECT CAST(regexp_match(properties, '\"\\$sw\":([0-9]+)')[1] AS BIGINT) AS w, distinct_id \
+          FROM {src} WHERE {w} AND event = '$pageview') WHERE w IS NOT NULL) GROUP BY v ORDER BY n DESC"
+    );
+    let total = format!(
+        "SELECT count(DISTINCT distinct_id) AS n FROM {src} WHERE {w} AND event = '$pageview'"
+    );
+    let langs = format!(
+        "lower(substr({}, 1, 2))",
+        prop("lang", "[A-Za-z]{2}[A-Za-z-]*")
+    );
+    let (qc, qd, qb, qo, ql) = (
+        one(prop("country", "[A-Z]{2}")),
+        one(prop("device", "[a-z]+")),
+        one(prop("browser", "[A-Za-z ]+")),
+        one(prop("os", "[A-Za-z]+")),
+        one(langs),
+    );
+    let (c, d, b, o, l, sc, t) = futures::join!(
+        q.sql(project, &qc),
+        q.sql(project, &qd),
+        q.sql(project, &qb),
+        q.sql(project, &qo),
+        q.sql(project, &ql),
+        q.sql(project, &screens),
+        q.sql(project, &total),
+    );
+    let rows = |r: openlens_query::QueryResult| -> Vec<(String, i64)> {
+        r.rows
+            .iter()
+            .filter_map(|x| Some((text(x, "v")?, int(x, "n"))))
+            .collect()
+    };
+    Ok(Audience {
+        countries: rows(c?),
+        devices: rows(d?),
+        browsers: rows(b?),
+        os: rows(o?),
+        languages: rows(l?),
+        screens: rows(sc?),
+        users: t?.rows.first().map_or(0, |r| int(r, "n")),
+    })
 }
 
 /// One person's latest events across every environment (at most 200),

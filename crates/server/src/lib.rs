@@ -4,6 +4,7 @@
 //! Layer: L4 (see `docs/architecture.md`).
 
 mod api;
+mod audience;
 mod auth;
 pub mod backup;
 mod backups;

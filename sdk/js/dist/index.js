@@ -291,7 +291,10 @@ function pageview() {
   if (lastPath) reportScroll();
   const first = lastPath === "";
   lastPath = path;
-  track("$pageview", first && document.referrer ? { $referrer: document.referrer } : {});
+  track(
+    "$pageview",
+    first ? { ...document.referrer ? { $referrer: document.referrer } : {}, $lang: navigator.language, $sw: screen.width } : {}
+  );
 }
 function lineage(el, path) {
   const from = path ? path.indexOf(el) : -1;

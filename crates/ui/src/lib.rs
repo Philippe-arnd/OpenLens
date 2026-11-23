@@ -10,6 +10,7 @@
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 
 mod icons;
+mod world;
 pub use icons::icon;
 use openlens_engine::{Board, EventRow, Filters};
 
@@ -157,7 +158,8 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                                     ("/replays", "play", "Replays"),
                                     ("/flags", "flag", "Flags"),
                                     ("/surveys", "idea", "Surveys"),
-                                    ("/features", "layers", "Feature map"),
+                                    ("/audience", "globe", "Audience"),
+                                    ("/features", "route", "Feature map"),
                                     ("/digest", "mail", "Digest"),
                                     ("/settings", "gear", "Settings"),
                                 ] {
@@ -902,6 +904,10 @@ pub const BREAKDOWNS: &[(&str, &str)] = &[
     ("release", "Release"),
     ("page", "Page"),
     ("feature", "Feature"),
+    ("country", "Country"),
+    ("device", "Device"),
+    ("browser", "Browser"),
+    ("os", "OS"),
 ];
 
 /// Users, sessions, tasks and errors broken down by one dimension (#222).
@@ -1404,6 +1410,90 @@ mv " (v.data_dir) " " (v.data_dir) ".old
 cp -a " (v.plan.folder) "/<copy> " (v.data_dir) "
 # start OpenLens" } }
                 p.muted.small { "From S3: download " code { "backups/<copy>.tar.gz" } ", " code { "tar xzf" } " it and use the folder inside. S3 secrets are not in backups: enter them again after a restore." }
+            }
+        },
+    )
+}
+
+/// Who the users are (#225): a world map of users per country, then
+/// devices, browsers, systems, languages and screens.
+pub fn audience(
+    p: &ProjectInfo<'_>,
+    b: &Board,
+    f: &Filters,
+    a: &openlens_engine::Audience,
+    geo: bool,
+) -> Markup {
+    let max = a.countries.iter().map(|c| c.1).max().unwrap_or(1).max(1) as f64;
+    let name = |iso: &str| -> String {
+        world::COUNTRIES
+            .iter()
+            .find(|c| c.0 == iso)
+            .map_or_else(|| iso.to_owned(), |c| c.1.to_owned())
+    };
+    let users = a.users.max(1) as f64;
+    // Five steps of one hue, on a square-root scale (a few big countries
+    // would leave everyone else pale on a linear one).
+    let step = |n: i64| -> u8 {
+        if n <= 0 {
+            0
+        } else {
+            1 + ((n as f64 / max).sqrt() * 4.0).min(4.0) as u8
+        }
+    };
+    let (w, h) = world::SIZE;
+    let list = |title: &str, glyph: &str, rows: &[(String, i64)], by: Option<&str>| {
+        html! {
+            section.card {
+                h2.violet { (icon(glyph)) (title) }
+                @if rows.is_empty() { p.muted.small { "Nothing yet." } }
+                @else {
+                    table.plain.bars { tbody { @for (v, n) in rows.iter().take(8) {
+                        tr {
+                            th scope="row" { (v) }
+                            td.meter { (meter(*n as f64 / users)) }
+                            td.num { (pct(*n as f64 / users)) }
+                        }
+                    } } }
+                    @if let Some(by) = by { p.small { a href={ "/p/" (p.id) "/breakdown?by=" (by) "&env=" (url_enc(&f.environment)) } { "Break down by " (title.to_lowercase()) " →" } } }
+                }
+            }
+        }
+    };
+    layout(
+        "Audience",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "Audience" }
+                p.muted { (compact(a.users)) " users with a page view in the last 30 days, in " strong { (f.environment) } ". IP addresses are used for the country and never stored." }
+            } }
+            (filter_bar(p.id, b, f, "/audience"))
+            section.card.wide {
+                h2.violet { (icon("globe")) "Where they are" }
+                @if !geo { p.small.muted { "The country database is not installed on this server (it ships in the Docker image; see the deploy guide), so countries are unknown." } }
+                svg.world viewBox={ "0 0 " (w) " " (h) } role="img" aria-label="Users per country (the table below has the numbers)" {
+                    @for (iso, cname, d) in world::COUNTRIES {
+                        @let n = a.countries.iter().find(|c| c.0 == *iso).map_or(0, |c| c.1);
+                        path class={ "c" (step(n)) } d=(d) { title { (cname) ": " (compact(n)) (if n == 1 { " user" } else { " users" }) } }
+                    }
+                }
+                div.legend-scale aria-hidden="true" { span { "fewer" } @for i in 1..=5u8 { i class={ "c" (i) } {} } span { "more users" } }
+                @if !a.countries.is_empty() {
+                    details.table-view {
+                        summary { "As a table" }
+                        table.plain { thead { tr { th { "Country" } th.num { "Users" } th.num { "Share" } } }
+                            tbody { @for (iso, n) in &a.countries { tr { th scope="row" { (name(iso)) " " span.muted.small { (iso) } } td.num { (compact(*n)) } td.num { (pct(*n as f64 / users)) } } } } }
+                    }
+                }
+                p.muted.small { "IP geolocation by " a href="https://db-ip.com" { "DB-IP" } " (CC BY 4.0). Map outlines: Natural Earth." }
+            }
+            div.grid {
+                (list("Devices", "board", &a.devices, Some("device")))
+                (list("Browsers", "globe", &a.browsers, Some("browser")))
+                (list("Systems", "layers", &a.os, Some("os")))
+                (list("Languages", "idea", &a.languages, None))
+                (list("Screens", "board", &a.screens, None))
             }
         },
     )
