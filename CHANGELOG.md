@@ -6,6 +6,21 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Added
 
+- **Churn, part 2** (#269): the churn page now shows why users leave and who came back.
+  - **Top reasons:** a ranked list, each reason with its numbers:
+    - features that users who stay tried in their first 14 days (only users old enough to have had those 14 days count, so a longer life does not bias it);
+    - friction on the last day (errors, rage clicks, failed requests, poor Web Vitals);
+    - the place they left from;
+    - the release they arrived on.
+  - **Survival by role.**
+  - **Win-back:** users who came back after churning, the release and feature they returned to, and how active they have been since.
+  - **Explicit cancel:** the feature map may declare `churn_event` (D-019). A user who sends it counts as churned at once, and the answers of surveys triggered on it show as the exit survey.
+  - **Users at risk:** admins can export them as CSV or JSON (audited, with CSV formulas neutralised). They can also turn the list into a flag that starts off, with a control group held out (`users` and `holdout` on flags). The churn page compares how active the nudged and held-out users were over the last 7 days.
+
+### Fixed
+
+- The churn page failed with a feature map pushed ("last place" query). It now works with and without a map.
+
 - **Goals, part 2** (#272):
   - **Statuses for every KPI:** DAU, MAU, stickiness and feature success rates now have weekly series, so their status is no longer stuck at "not enough data". Web Vitals (LCP, INP, CLS at p75) can be goals too.
   - **Guardrails:** a goal can have up to two KPIs that must not get worse. The default limit is 5% worse than now, and it can be edited through the API. A breach is shown in red and raised as an alert (through the regression alerts toggle), and the alert closes once the KPI recovers.

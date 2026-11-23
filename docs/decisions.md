@@ -94,3 +94,15 @@ Append-only. Each entry: id, date, decision, why, consequences.
 - The order is: the reader's zone (*My profile*, `/me`; the owner's is a setting), then `?tz=` on the API (`openlens-cli --tz` / `OPENLENS_TZ`), then the project's zone, then UTC.
 - Nothing is detected in the browser: the dashboard runs no script (strict CSP), and without a choice a reader sees what D-017 showed, so nothing changes by itself.
 - Caches stay valid: the board snapshot holds UTC rows, and buckets are computed per query.
+
+## D-019 (2026-11-23, agent for #269) An explicit cancel event, optional, in the feature map
+
+**Decision:** the feature map may declare `churn_event` (for example `subscription_cancelled`). A user who sends it counts as churned at once, without waiting for `churn_after_days`. Without it nothing changes.
+
+**Why:** an app that knows when someone cancels should not wait two weeks to count them, and a survey triggered on that event is the natural exit survey. It follows D-014: there is no new setting, only one more optional fact about the app, declared where the other facts already live.
+
+**Consequences:**
+- Churn rate, survival and at-risk lists treat a cancel as the end of a life, on the day it was sent.
+- The churn page shows the cancels and the answers of the surveys triggered on that event.
+- Older servers refuse a map with the field, because the format is strict. Upgrade the server before pushing the map.
+

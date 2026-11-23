@@ -2055,13 +2055,43 @@ pub fn acquisition(
     )
 }
 
+/// A flag made from the users at risk, and how its arms do (#269).
+pub struct Audience {
+    /// Flag key.
+    pub flag: String,
+    /// Switched on.
+    pub enabled: bool,
+    /// Listed users who get it.
+    pub treated: i64,
+    /// Of them, active in the last 7 days.
+    pub treated_active: i64,
+    /// Listed users held out (control).
+    pub held: i64,
+    /// Of them, active in the last 7 days.
+    pub held_active: i64,
+}
+
+/// What the churn page shows besides the report (#269).
+pub struct ChurnExtras {
+    /// Admins export and make audiences.
+    pub admin: bool,
+    /// The map's cancel event, if declared.
+    pub churn_event: Option<String>,
+    /// Answers of surveys shown on it.
+    pub exit: Vec<openlens_engine::SurveyResults>,
+    /// Flags made from the users at risk.
+    pub audiences: Vec<Audience>,
+}
+
 /// Churn (#247): how many leave, after how long, at which moment, with
-/// what friction, and who is at risk now.
+/// what friction, and who is at risk now; why they leave and who came
+/// back (#269).
 pub fn churn(
     p: &ProjectInfo<'_>,
     b: &Board,
     f: &Filters,
     c: &openlens_engine::ChurnReport,
+    x: &ChurnExtras,
 ) -> Markup {
     let rate = c.churned_recent as f64 / c.active_at_start.max(1) as f64;
     let net = c.new_recent + c.resurrected - c.churned_recent;
@@ -2112,7 +2142,85 @@ pub fn churn(
                 section.card {
                     h2.coral { (icon("alert")) "Friction before leaving" }
                     p { "On their last active day, " strong { (pct(c.errors_at_end.0)) } " of churned users hit an error, against " (pct(c.errors_at_end.1)) " of users who stayed." }
+                    @if !c.friction.is_empty() {
+                        div.table-scroll { table.plain {
+                            thead { tr { th { "On the last day" } th.num { "Churned" } th.num { "Stayed" } } }
+                            tbody { @for (k, ch, st) in &c.friction {
+                                tr { th scope="row" { (k) } td.num { strong { (pct(*ch)) } } td.num { (pct(*st)) } }
+                            } }
+                        } }
+                    }
                     p.small { a href={ "/p/" (p.id) "/errors" } { "Errors →" } " · " a href={ "/p/" (p.id) "/flows" } { "Feature flow (exits) →" } }
+                }
+            }
+            section.card.wide {
+                h2.coral { (icon("idea")) "Top reasons" }
+                @if c.reasons.is_empty() { p.muted { "No clear reason yet: each comparison needs at least 8 users on both sides, and a gap of 5 points or more." } }
+                @else {
+                    ol { @for r in &c.reasons { li { strong { (r.title) } br; span.muted.small { (r.evidence) } } } }
+                    p.muted.small { "Ranked by the gap between users who left and users who stayed. These are correlations: a feature people try early may be a sign of fit rather than its cause. Replay a churned session at the place named to check." }
+                }
+            }
+            @if !c.lift.is_empty() {
+                section.card.wide {
+                    h2.mint { (icon("star")) "Features tried in the first 14 days" }
+                    div.table-scroll { table.plain {
+                        thead { tr { th { "Feature" } th.num { "Tried it" } th.num { "Churned" } th.num { "Did not" } th.num { "Churned" } } }
+                        tbody { @for l in &c.lift {
+                            tr {
+                                th scope="row" { code { (l.feature) } }
+                                td.num { (compact(l.adopters)) } td.num { strong { (pct(l.churn_adopters)) } }
+                                td.num { (compact(l.non_adopters)) } td.num { (pct(l.churn_non)) }
+                            }
+                        } }
+                    } }
+                    p.muted.small { "Only users first seen 14 days ago or more, so everyone had the same time to try each feature (a user who stays longer has more time to try anything)." }
+                }
+            }
+            div.grid {
+                @if !c.by_release.is_empty() {
+                    section.card {
+                        h2.sky { (icon("release")) "By arrival release" }
+                        table.plain {
+                            thead { tr { th { "Release" } th.num { "Users" } th.num { "Churned" } } }
+                            tbody { @for (r, n, s) in &c.by_release { tr { th scope="row" { code { (r) } } td.num { (compact(*n)) } td.num { (pct(*s)) } } } }
+                        }
+                    }
+                }
+                @if !c.by_role.is_empty() {
+                    section.card {
+                        h2.violet { (icon("users")) "By role" }
+                        table.plain {
+                            thead { tr { th { "Role" } th.num { "Users" } th.num { "Still here at 30 days" } } }
+                            tbody { @for (r, n, s) in &c.by_role { tr { th scope="row" { (r) } td.num { (compact(*n)) } td.num { (pct(*s)) } } } }
+                        }
+                    }
+                }
+                section.card {
+                    h2.mint { (icon("auto")) "Who came back" }
+                    @if c.winback.users == 0 { p.muted { "Nobody came back after churning in the last 30 days." } }
+                    @else {
+                        p { strong { (c.winback.users) } " users came back in the last 30 days, active " (format!("{:.1}", c.winback.mean_active_days)) " days since on average." }
+                        p.small { "On release: " @for (i, (r, n)) in c.winback.by_release.iter().enumerate() { @if i > 0 { ", " } code { (r) } " (" (n) ")" } }
+                        p.small { "First used: " @for (i, (r, n)) in c.winback.by_feature.iter().enumerate() { @if i > 0 { ", " } code { (r) } " (" (n) ")" } }
+                    }
+                }
+            }
+            section.card.wide {
+                h2.sun { (icon("events")) "Exit survey" }
+                @match &x.churn_event {
+                    None => p.muted { "Declare the app's cancel event in the feature map (" code { "churn_event: subscription_cancelled" } "): users who send it count as churned at once, and a survey triggered on it becomes the exit survey shown here." },
+                    Some(ev) => {
+                        p.small { code { (ev) } " · " (c.cancelled) " users cancelled in the window." }
+                        @if x.exit.is_empty() { p.muted { "No survey is triggered on " code { (ev) } " yet: add one on the Surveys page to ask why they leave." } }
+                        @for s in &x.exit {
+                            p { strong { (s.key) } }
+                            ul.plain-list.small {
+                                @for (a, n) in &s.answers { li { (a) " · " (n) } }
+                                @for t in &s.latest_text { li.muted { "“" (t) "”" } }
+                            }
+                        }
+                    }
                 }
             }
             section.card.wide {
@@ -2152,6 +2260,32 @@ pub fn churn(
                         } }
                     } }
                     p.muted.small { "Open a profile to see their last sessions and replays. Win them back before the window closes." }
+                    @if x.admin {
+                        p.small {
+                            a.button href={ "/p/" (p.id) "/churn/at-risk.csv" } { "CSV" } " "
+                            a.button href={ "/p/" (p.id) "/churn/at-risk.json" } { "JSON" }
+                        }
+                        form.inline method="post" action={ "/p/" (p.id) "/churn/audience" } {
+                            label { "Make a flag for them, holding out " input.narrow type="number" name="holdout" min="0" max="50" value="20"; " % as a control group " }
+                            button.soft type="submit" { "Make the flag" }
+                        }
+                        p.muted.small { "The flag starts off and lists these users (frozen now). Put the nudge behind " code { "openlens.isEnabled(key)" } " and switch it on; the held-out users never get it, so you can compare." }
+                    }
+                }
+            }
+            @if !x.audiences.is_empty() {
+                section.card.wide {
+                    h2.violet { (icon("flag")) "Win-back flags" }
+                    div.table-scroll { table.plain {
+                        thead { tr { th { "Flag" } th.num { "Nudged" } th.num { "Active, last 7 days" } th.num { "Held out" } th.num { "Active, last 7 days" } } }
+                        tbody { @for a in &x.audiences {
+                            tr {
+                                th scope="row" { a href={ "/p/" (p.id) "/flags-edit?key=" (a.flag) } { code { (a.flag) } } @if !a.enabled { " " span.chip { "off" } } }
+                                td.num { (a.treated) } td.num { strong { (pct(a.treated_active as f64 / a.treated.max(1) as f64)) } }
+                                td.num { (a.held) } td.num { (pct(a.held_active as f64 / a.held.max(1) as f64)) }
+                            }
+                        } }
+                    } }
                 }
             }
         },
@@ -2675,6 +2809,8 @@ pub fn flag_edit(
         accounts: Vec::new(),
         variants: Vec::new(),
         rules: Vec::new(),
+        users: Vec::new(),
+        holdout: 0,
     });
     let action = format!("/p/{}/flags-edit", p.id);
     let variants = f
@@ -2703,6 +2839,8 @@ pub fn flag_edit(
                     label.wide { "Variants (experiment) " input type="text" name="variants" value=(variants) placeholder="control:50, short:50"; }
                     label.wide { "Only users whose properties match (one rule per line, all must match) "
                         textarea name="rules" rows="3" spellcheck="false" placeholder="plan in pro, team\ncountry not in FR" { (f.rules.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n")) } }
+                    label { "Holdout % " input type="number" name="holdout" min="0" max="50" value=(f.holdout); }
+                    @if !f.users.is_empty() { p.small.wide { "Only " strong { (f.users.len()) } " listed users (made from the churn page's users at risk); " (f.holdout) "% of them are kept off as a control group." } }
                     label.check { input type="checkbox" name="enabled" checked[f.enabled]; " On" }
                     button type="submit" { (if new { "Create" } else { "Save" }) }
                 }

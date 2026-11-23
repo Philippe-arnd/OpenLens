@@ -1,6 +1,7 @@
 # openlens.features.yaml: the feature map an app's agents maintain (draft, M2).
 version: 1
 churn_after_days: 14   # optional; the only tunable. Everything else has fixed definitions (docs/kpis.md).
+# churn_event: subscription_cancelled   # optional: an explicit cancel counts as churn at once (D-019)
 
 # Canonical roles, and the raw identify() values that map to them (first match wins).
 roles:

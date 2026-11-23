@@ -414,9 +414,9 @@ pub(crate) async fn churn(
     Path(id): Path<String>,
     axum::extract::RawQuery(raw): axum::extract::RawQuery,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
+    let Some(viewer) = auth::viewer(&state, &headers) else {
         return Redirect::to("/login").into_response();
-    }
+    };
     let Some(p) = project(&state, &id).await else {
         return not_found("No such project.");
     };
@@ -434,13 +434,248 @@ pub(crate) async fn churn(
         name: &p.name,
         key: &p.api_key,
     };
+    let churn_event = map.as_ref().and_then(|(m, _)| m.churn_event.clone());
+    let extras = openlens_ui::ChurnExtras {
+        admin: viewer.admin,
+        exit: exit_answers(&state, &p.id, churn_event.as_deref()).await,
+        audiences: audiences(&state, &p.id).await,
+        churn_event,
+    };
     match (b, c) {
-        (Ok(b), Ok(c)) => html_page(StatusCode::OK, openlens_ui::churn(&info, &b, &f, &c)),
+        (Ok(b), Ok(c)) => html_page(
+            StatusCode::OK,
+            openlens_ui::churn(&info, &b, &f, &c, &extras),
+        ),
         (Err(e), _) | (_, Err(e)) => html_page(
             StatusCode::BAD_REQUEST,
             openlens_ui::message("Can't show that", &e.to_string()),
         ),
     }
+}
+
+/// Answers of the surveys shown on the map's `churn_event` (an exit
+/// survey, #269).
+async fn exit_answers(
+    state: &AppState,
+    project: &str,
+    churn_event: Option<&str>,
+) -> Vec<openlens_engine::SurveyResults> {
+    let Some(ev) = churn_event else {
+        return Vec::new();
+    };
+    let keys: Vec<String> = crate::surveys::load(state, project)
+        .await
+        .into_iter()
+        .filter(|s| s.trigger == ev)
+        .map(|s| s.key)
+        .collect();
+    if keys.is_empty() {
+        return Vec::new();
+    }
+    crate::surveys::results(state, project)
+        .await
+        .into_iter()
+        .filter(|r| keys.contains(&r.key))
+        .collect()
+}
+
+/// Flags made from the users at risk (#269): how many of the treated and
+/// of the held-out users were active in the last 7 days.
+async fn audiences(state: &AppState, project: &str) -> Vec<openlens_ui::Audience> {
+    let mut out = Vec::new();
+    for f in crate::flags::load(state, project)
+        .await
+        .into_iter()
+        .filter(|f| !f.users.is_empty())
+        .take(5)
+    {
+        let ids: Vec<String> = f
+            .users
+            .iter()
+            .filter(|u| !u.contains('\'') && !u.contains('\\'))
+            .map(|u| format!("'{u}'"))
+            .collect();
+        let since = (chrono::Utc::now() - chrono::Duration::days(7)).format("%Y-%m-%d");
+        let sql = format!(
+            "SELECT DISTINCT distinct_id FROM events WHERE date >= '{since}' AND distinct_id IN ({})",
+            ids.join(", ")
+        );
+        let active: std::collections::HashSet<String> = state
+            .query
+            .sql(project, &sql)
+            .await
+            .map(|r| {
+                r.rows
+                    .iter()
+                    .filter_map(|x| {
+                        x.get("distinct_id")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_owned)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let (mut t, mut ta, mut h, mut ha) = (0i64, 0i64, 0i64, 0i64);
+        for u in &f.users {
+            let a = i64::from(active.contains(u));
+            if f.held_out(u) {
+                h += 1;
+                ha += a;
+            } else {
+                t += 1;
+                ta += a;
+            }
+        }
+        out.push(openlens_ui::Audience {
+            flag: f.key.clone(),
+            enabled: f.enabled,
+            treated: t,
+            treated_active: ta,
+            held: h,
+            held_active: ha,
+        });
+    }
+    out
+}
+
+/// `GET /p/{id}/churn/at-risk.csv` or `.json` (admins, #269): the users at
+/// risk now, for a CRM or a mailing.
+pub(crate) async fn at_risk_export(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((id, file)): Path<(String, String)>,
+) -> Response {
+    if !auth::viewer(&state, &headers).is_some_and(|v| v.admin) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let Some(p) = project(&state, &id).await else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let f = openlens_engine::Filters {
+        tz: p.timezone.clone(),
+        ..openlens_engine::Filters::default()
+    };
+    let map = crate::load_map(&state, &p.id).await;
+    let Ok(c) = openlens_engine::churn(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f).await
+    else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    crate::privacy::audit(
+        &state,
+        &headers,
+        Some(&p.id),
+        "churn.export",
+        &format!("{} users at risk ({file})", c.at_risk.len()),
+    );
+    let (body, mime) = match file.as_str() {
+        "at-risk.json" => (
+            serde_json::to_string_pretty(&c.at_risk).unwrap_or_default(),
+            "application/json",
+        ),
+        "at-risk.csv" => {
+            let cell = |s: &str| {
+                let s = if s.starts_with(['=', '+', '-', '@']) {
+                    format!("'{s}")
+                } else {
+                    s.to_owned()
+                };
+                if s.contains([',', '"', '\n', '\r']) {
+                    format!("\"{}\"", s.replace('"', "\"\""))
+                } else {
+                    s
+                }
+            };
+            let mut s =
+                String::from("distinct_id,role,last_day,idle_days,recent_days,before_days\n");
+            for a in &c.at_risk {
+                s.push_str(&format!(
+                    "{},{},{},{},{},{}\n",
+                    cell(&a.distinct_id),
+                    cell(a.role.as_deref().unwrap_or("")),
+                    a.last_day,
+                    a.idle_days,
+                    a.recent_days,
+                    a.before_days
+                ));
+            }
+            (s, "text/csv; charset=utf-8")
+        }
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let mut r = body.into_response();
+    let h = r.headers_mut();
+    if let Ok(v) = axum::http::HeaderValue::from_str(mime) {
+        h.insert(axum::http::header::CONTENT_TYPE, v);
+    }
+    if let Ok(v) = axum::http::HeaderValue::from_str(&format!(
+        "attachment; filename=\"openlens-{}-{file}\"",
+        p.id
+    )) {
+        h.insert(axum::http::header::CONTENT_DISPOSITION, v);
+    }
+    r
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct AudienceForm {
+    #[serde(default)]
+    holdout: Option<u8>,
+}
+
+/// `POST /p/{id}/churn/audience` (admins, #269): a flag, off, listing the
+/// users at risk now with a control group, for a win-back nudge behind
+/// `openlens.isEnabled(key)`.
+pub(crate) async fn make_audience(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    axum::extract::Form(form): axum::extract::Form<AudienceForm>,
+) -> Response {
+    if !crate::flags::same_origin(&headers) {
+        return html_page(
+            StatusCode::FORBIDDEN,
+            openlens_ui::message("Refused", "Cross-site form."),
+        );
+    }
+    let Some(p) = project(&state, &id).await else {
+        return not_found("No such project.");
+    };
+    let f = openlens_engine::Filters {
+        tz: p.timezone.clone(),
+        ..openlens_engine::Filters::default()
+    };
+    let map = crate::load_map(&state, &p.id).await;
+    let Ok(c) = openlens_engine::churn(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f).await
+    else {
+        return not_found("The churn report is unavailable.");
+    };
+    if c.at_risk.is_empty() {
+        return html_page(
+            StatusCode::BAD_REQUEST,
+            openlens_ui::message("Nobody at risk", "No user is at risk right now."),
+        );
+    }
+    let key = format!("win-back-{}", chrono::Utc::now().format("%y%m%d"));
+    let flag = openlens_flags::Flag {
+        key: key.clone(),
+        description: format!("Win-back nudge for {} users at risk", c.at_risk.len()),
+        enabled: false,
+        rollout: 100,
+        roles: Vec::new(),
+        accounts: Vec::new(),
+        variants: Vec::new(),
+        rules: Vec::new(),
+        users: c.at_risk.iter().map(|a| a.distinct_id.clone()).collect(),
+        holdout: form.holdout.unwrap_or(20).min(50),
+    };
+    if let Err(e) = crate::flags::save(&state, &p.id, &flag).await {
+        return html_page(
+            StatusCode::BAD_REQUEST,
+            openlens_ui::message("Can't make it", &e),
+        );
+    }
+    crate::privacy::audit(&state, &headers, Some(&p.id), "flag.save", &key);
+    Redirect::to(&format!("/p/{}/flags-edit?key={key}", p.id)).into_response()
 }
 
 /// `GET /api/projects/{id}/churn` (bearer): the same report as JSON.

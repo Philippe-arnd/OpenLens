@@ -29,6 +29,11 @@ pub struct FeatureMap {
     /// Days without activity after which a user counts as churned.
     #[serde(default)]
     pub churn_after_days: Option<u32>,
+    /// Optional (#269, D-019): the event an explicit cancel sends
+    /// (`subscription_cancelled`). A user who sends it counts as churned at
+    /// once, without waiting for the window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub churn_event: Option<String>,
     /// Canonical roles, in priority order (first match wins).
     #[serde(default)]
     pub roles: Vec<Role>,
@@ -210,6 +215,11 @@ pub fn validate(m: &FeatureMap) -> Vec<Issue> {
             "churn_after_days",
             "must be between 1 and 365 (default 14)",
         ));
+    }
+    if let Some(e) = &m.churn_event
+        && (e.trim().is_empty() || e.len() > 200)
+    {
+        v.push(err("churn_event", "event names are 1-200 characters"));
     }
     if let Some(r) = &m.revenue {
         let code = |c: &str| c.len() == 3 && c.bytes().all(|b| b.is_ascii_uppercase());

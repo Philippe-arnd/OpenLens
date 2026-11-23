@@ -38,7 +38,22 @@ pub struct Flag {
     /// user did not send fails, for `in` and `not_in` alike.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rules: Vec<Rule>,
+    /// Only these users (#269, e.g. the users at risk of churning, frozen
+    /// when the flag was made). Empty: everyone.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub users: Vec<String>,
+    /// Share of the eligible users kept off as a control group (0–50),
+    /// deterministic per user, so a nudge can be measured (#269).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub holdout: u8,
 }
+
+fn is_zero(v: &u8) -> bool {
+    *v == 0
+}
+
+/// Most users in a flag's list.
+pub const MAX_USERS: usize = 5000;
 
 /// Most rules on a flag.
 pub const MAX_RULES: usize = 10;
@@ -211,6 +226,12 @@ impl Flag {
         if !self.rules.iter().all(|r| r.matches(s)) {
             return false;
         }
+        if !self.users.is_empty() && !self.users.iter().any(|u| u == s.distinct_id) {
+            return false;
+        }
+        if self.held_out(s.distinct_id) {
+            return false;
+        }
         bucket(&self.key, s.distinct_id) < u32::from(self.rollout.min(100)) * 100
     }
 
@@ -232,6 +253,13 @@ impl Flag {
         }
         if self.description.len() > 500 || self.roles.len() > 50 || self.accounts.len() > 1000 {
             return Err("description ≤ 500 chars, ≤ 50 roles, ≤ 1000 accounts".into());
+        }
+        if self.users.len() > MAX_USERS || self.users.iter().any(|u| u.is_empty() || u.len() > 200)
+        {
+            return Err(format!("at most {MAX_USERS} users, ids of 1-200 chars"));
+        }
+        if self.holdout > 50 {
+            return Err("holdout is a percentage, 0-50".into());
         }
         if self.rules.len() > MAX_RULES {
             return Err(format!("at most {MAX_RULES} rules"));
@@ -275,6 +303,13 @@ impl Flag {
 }
 
 impl Flag {
+    /// Is this user in the control group the flag keeps off (#269)?
+    pub fn held_out(&self, distinct_id: &str) -> bool {
+        self.holdout > 0
+            && bucket(&format!("{}:holdout", self.key), distinct_id)
+                < u32::from(self.holdout.min(50)) * 100
+    }
+
     /// The variant this subject gets, when the flag is on and has variants.
     /// Independent of the rollout bucket, so raising the rollout keeps each
     /// user's variant.

@@ -15,6 +15,8 @@ fn flag(rollout: u8) -> Flag {
         accounts: vec![],
         variants: vec![],
         rules: vec![],
+        users: vec![],
+        holdout: 0,
     }
 }
 
@@ -280,4 +282,33 @@ fn property_rules_all_match_and_a_missing_property_fails() {
     assert!(many.validate().is_err());
     let json = serde_json::to_string(&f.rules[1]).unwrap();
     assert!(json.contains("\"not_in\""), "{json}");
+}
+
+#[test]
+fn a_user_list_with_a_holdout_keeps_a_stable_control_group() {
+    let users: Vec<String> = (0..1000).map(|i| format!("u{i}")).collect();
+    let f = Flag {
+        users: users.clone(),
+        holdout: 20,
+        ..flag(100)
+    };
+    assert!(f.validate().is_ok());
+    let on = |id: &str| {
+        f.is_on(&Subject {
+            distinct_id: id,
+            ..Subject::default()
+        })
+    };
+    assert!(!on("stranger"), "only listed users");
+    let treated = users.iter().filter(|u| on(u)).count();
+    assert!((720..880).contains(&treated), "{treated}");
+    assert!(users.iter().all(|u| on(u) != f.held_out(u)));
+    assert!(
+        Flag {
+            holdout: 60,
+            ..f.clone()
+        }
+        .validate()
+        .is_err()
+    );
 }

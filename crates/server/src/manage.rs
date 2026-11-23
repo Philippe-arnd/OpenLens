@@ -114,6 +114,9 @@ pub(crate) struct FlagForm {
     /// One rule per line (#279).
     #[serde(default)]
     rules: String,
+    /// Control group share, 0-50 (#269).
+    #[serde(default)]
+    holdout: Option<u8>,
 }
 
 /// `control:50, short:50` → variants (empty: none).
@@ -158,6 +161,8 @@ pub(crate) async fn flag_save(
         accounts: list(&f.accounts),
         variants: Vec::new(),
         rules: Vec::new(),
+        users: Vec::new(),
+        holdout: 0,
     };
     let mut flag = flag;
     let variant_err = match parse_variants(&f.variants) {
@@ -182,6 +187,11 @@ pub(crate) async fn flag_save(
         Err(e) => variant_err.or(Some(e)),
     };
     let existing = crate::flags::load(&state, &p.id).await;
+    // The user list comes from the churn page (#269): keep it on edit.
+    if let Some(old) = existing.iter().find(|x| x.key == f.original) {
+        flag.users.clone_from(&old.users);
+    }
+    flag.holdout = f.holdout.unwrap_or(0);
     let renamed = !f.original.is_empty() && f.original != flag.key;
     let err = if (f.original.is_empty() || renamed) && existing.iter().any(|x| x.key == flag.key) {
         Some(format!("A flag `{}` already exists.", flag.key))
