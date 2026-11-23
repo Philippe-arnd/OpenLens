@@ -664,6 +664,7 @@ pub fn board(
                 h1 { "Focus board" }
                 p.muted { "What " (scope) " did lately in " strong { (f.environment) } ". " @if !shared() { a href={ "/p/" (p.id) "/digest" } { "This week vs last →" } " · " a href={ "/p/" (p.id) "/breakdown?by=role&env=" (url_enc(&f.environment)) } { "Break down →" } } }
             }
+            @if let Some(d) = &b.app_down { @if !shared() { p.alert role="alert" { (icon("alert")) " " (d) " — " a href={ "/p/" (p.id) "/uptime" } { "Uptime" } } } }
             (filter_bar(p.id, b, f, ""))
             (insight_cards(p.id, b, plain))
             section.tiles aria-label="Key numbers" {
@@ -3320,6 +3321,12 @@ pub struct AlertsView {
     pub traffic: bool,
     /// Alert on regressions and new errors.
     pub regressions: bool,
+    /// Certificate expiry.
+    pub cert: bool,
+    /// Failing-requests spike.
+    pub failing: bool,
+    /// Quiet hours (start, end).
+    pub quiet: Option<(u8, u8)>,
     /// Probe path.
     pub health_path: String,
     /// Email alerts.
@@ -3423,13 +3430,17 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
                         label { "Health path " input type="text" name="health_path" value=(v.alerts.health_path) maxlength="200"; }
                         label.check { input type="checkbox" name="traffic" checked[v.alerts.traffic]; " Traffic stopped" }
                         label.check { input type="checkbox" name="regressions" checked[v.alerts.regressions]; " Regressions and new errors" }
+                        label.check { input type="checkbox" name="failing" checked[v.alerts.failing]; " Failing requests spike" }
+                        label.check { input type="checkbox" name="cert" checked[v.alerts.cert]; " Certificate expiring (14 days)" }
+                        label { "Quiet from (h) " input type="number" name="quiet_start" min="0" max="23" value=[v.alerts.quiet.map(|q| q.0)] placeholder="22"; }
+                        label { "to (h) " input type="number" name="quiet_end" min="0" max="23" value=[v.alerts.quiet.map(|q| q.1)] placeholder="7"; }
                         label.check { input type="checkbox" name="email" checked[v.alerts.email]; " Email" @if !v.alerts.smtp { span.muted { " (SMTP not set)" } } }
                         label { "Webhook (Slack, Discord…) " input type="url" name="webhook" value=(v.alerts.webhook) placeholder="https://hooks.slack.com/…" maxlength="500"; }
                         label { "ntfy topic " input type="text" name="ntfy" value=(v.alerts.ntfy) placeholder="my-app-alerts" maxlength="300"; }
                         button type="submit" { "Save" }
                     }
                     form.inline method="post" action={ (base) "/alerts/test" } { button.soft type="submit" { "Send a test alert" } }
-                    p.muted.small { "Emails go to " code { "OPENLENS_ALERT_TO" } " (or the digest list, or the admins). ntfy: a topic on ntfy.sh, or a full https:// topic URL of your own server; install the ntfy app to get pushes on a phone." }
+                    p.muted.small { "Emails go to " code { "OPENLENS_ALERT_TO" } " (or the digest list, or the admins). ntfy: a topic on ntfy.sh, or a full https:// topic URL of your own server; install the ntfy app to get pushes on a phone. Quiet hours (the project's time zone) hold non-urgent alerts until they end; " em { "down" } " and an expired certificate always go out. An incident that lasts is repeated at most once an hour." }
                 }
             }
             @if v.admin {

@@ -3066,3 +3066,74 @@ async fn experiment_flags_hand_out_variants_and_show_each_arm() {
         "{page}"
     );
 }
+
+#[tokio::test]
+async fn quiet_hours_hold_non_urgent_alerts_and_down_shows_on_the_board() {
+    use chrono::Timelike;
+    let h = harness();
+    let owner = login_cookie(&h).await;
+    let now = chrono::Utc::now().hour();
+    let (a, b) = (now, (now + 1) % 24);
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/settings/alerts",
+            &owner,
+            &format!(
+                "down=on&down_wait=2&health_path=%2F&regressions=on&quiet_start={a}&quiet_end={b}"
+            )
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    let body = serde_json::json!({
+        "key": h.key,
+        "batch": [
+            {"event": "$error", "distinct_id": "u1", "session_id": "s1", "properties": {"$message": "RangeError: boom", "$pathname": "/"}},
+            {"event": "$error", "distinct_id": "u2", "session_id": "s2", "properties": {"$message": "RangeError: boom", "$pathname": "/"}}
+        ]
+    })
+    .to_string();
+    let (status, _) = post(&h, "/capture", body.into_bytes(), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    openlens_server::alert_tick(&h.state, 1).await;
+    let queue = h
+        .state
+        .meta
+        .project_setting("default", "alert_queue")
+        .unwrap()
+        .unwrap_or_default();
+    assert!(
+        queue.contains("RangeError"),
+        "held during quiet hours: {queue}"
+    );
+    // Quiet hours off: the held alert goes out (nowhere to go here) and the queue empties.
+    post_form(
+        &h,
+        "/p/default/settings/alerts",
+        &owner,
+        "down=on&down_wait=2&health_path=%2F&regressions=on",
+    )
+    .await;
+    openlens_server::alert_tick(&h.state, 3).await;
+    assert!(
+        h.state
+            .meta
+            .project_setting("default", "alert_queue")
+            .unwrap()
+            .is_none_or(|q| q.is_empty())
+    );
+    // Two failed probes: the board says the app is down.
+    h.state
+        .meta
+        .set_project_setting("default", "app_url", "http://127.0.0.1:9")
+        .unwrap();
+    openlens_server::alert_tick(&h.state, 4).await;
+    openlens_server::alert_tick(&h.state, 6).await;
+    let board = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
+    assert!(
+        board.contains("The app is down since"),
+        "banner on the board"
+    );
+}

@@ -139,6 +139,9 @@ pub(crate) async fn page(
                         down_wait: a.down_wait,
                         traffic: a.traffic,
                         regressions: a.regressions,
+                        cert: a.cert,
+                        failing: a.failing,
+                        quiet: a.quiet,
                         health_path: a.health_path,
                         email: a.email,
                         webhook: a.webhook,
@@ -389,6 +392,14 @@ pub(crate) struct AlertsForm {
     #[serde(default)]
     regressions: Option<String>,
     #[serde(default)]
+    cert: Option<String>,
+    #[serde(default)]
+    failing: Option<String>,
+    #[serde(default)]
+    quiet_start: String,
+    #[serde(default)]
+    quiet_end: String,
+    #[serde(default)]
     health_path: String,
     #[serde(default)]
     email: Option<String>,
@@ -417,6 +428,15 @@ pub(crate) async fn alerts(
         down_wait: f.down_wait.unwrap_or(2),
         traffic: f.traffic.as_deref() == Some("on"),
         regressions: f.regressions.as_deref() == Some("on"),
+        cert: f.cert.as_deref() == Some("on"),
+        failing: f.failing.as_deref() == Some("on"),
+        quiet: match (
+            f.quiet_start.trim().parse::<u8>(),
+            f.quiet_end.trim().parse::<u8>(),
+        ) {
+            (Ok(a), Ok(b)) => Some((a, b)),
+            _ => None,
+        },
         health_path: if path.is_empty() {
             "/".into()
         } else {

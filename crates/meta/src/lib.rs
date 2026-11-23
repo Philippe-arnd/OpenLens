@@ -900,6 +900,19 @@ impl Meta {
         })
     }
 
+    /// When an incident was last announced (Unix seconds), if it was.
+    pub fn incident_last_notified(&self, id: i64) -> Result<Option<i64>> {
+        self.with(|c| {
+            Ok(c.query_row(
+                "SELECT notified_at FROM incidents WHERE id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten())
+        })
+    }
+
     /// Mark an incident as announced.
     pub fn incident_notified(&self, id: i64, at: i64) -> Result<()> {
         self.with(|c| {

@@ -30,6 +30,7 @@ mod share;
 mod storage;
 mod surveys;
 mod timeline;
+mod tls;
 mod users;
 mod web;
 
