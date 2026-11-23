@@ -41,12 +41,11 @@ OpenLens follows [SemVer](https://semver.org) and keeps a [CHANGELOG](../CHANGEL
 - no open issue is labelled `release-blocker` or `release-hold`.
 
 It then:
-1. moves `[Unreleased]` under the version and the date;
-2. tags it;
-3. starts the publish, image and chart workflows;
-4. sets `main` to the next minor version.
+1. tags `main` as it is (branch protection only takes PRs on `main`; tags are free), so the notes come from `[Unreleased]`;
+2. starts the publish, image and chart workflows;
+3. opens a PR that moves `[Unreleased]` under the version and the date and sets `main` to the next minor version, and merges it. If the workflow token may not open PRs (Settings → Actions → *Allow GitHub Actions to create pull requests*), it opens a `release-hold` issue instead, and the branch waits to be merged by hand.
 
-Run it by hand from the Actions tab: `dry_run` (on by default) only reports what it would do. Branch protection on `main` must let GitHub Actions push. A minor or major release can add `docs/releases/vX.Y.Z.md` before Tuesday, and its notes are used.
+Run it by hand from the Actions tab: `dry_run` (on by default) only reports what it would do. A minor or major release can add `docs/releases/vX.Y.Z.md` before Tuesday, and its notes are used.
 
 **A release (vX.Y.Z):** (by hand, for a hotfix or when the train is held)
 1. In a PR:
