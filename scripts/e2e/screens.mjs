@@ -92,7 +92,7 @@ for (const theme of ["light", "dark"]) {
       });
       problems.push(`${p} (phone, ${theme}): the page scrolls sideways by ${over}px: ${culprits}`);
     }
-    await pt.screenshot({ path: `${out}/phone${p.replace("/p/default", "").replace(/\//g, "-") || "-board"}-${theme}.png`, fullPage: true });
+    await pt.screenshot({ path: `${out}/phone${p.replace("/p/default", "").replace(/[\/?=]/g, "-") || "-board"}-${theme}.png`, fullPage: true });
   }
 }
 await phone.close();
