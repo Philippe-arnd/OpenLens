@@ -218,3 +218,36 @@ fn users_update_disable_and_keep_one_admin() {
     assert!(m.user(&v.id).unwrap().unwrap().last_sign_in.is_some());
     assert_eq!(m.revoke_links(&v.id).unwrap(), 1);
 }
+
+#[test]
+fn replay_comments_are_pinned_and_owned() {
+    let m = Meta::in_memory().unwrap();
+    let p = m.create_project("App", None).unwrap();
+    let c = m
+        .add_replay_comment(&p.id, "s1", 12_400, "u1", "ana", " form error here ")
+        .unwrap();
+    m.add_replay_comment(&p.id, "s1", 2_000, "u2", "bo", "first")
+        .unwrap();
+    assert!(
+        m.add_replay_comment(&p.id, "s1", 1, "u1", "ana", "  ")
+            .is_err()
+    );
+    assert!(
+        m.add_replay_comment(&p.id, "s1", 1, "u1", "ana", &"x".repeat(2001))
+            .is_err()
+    );
+    let l = m.replay_comments(&p.id, "s1").unwrap();
+    assert_eq!(
+        l.iter().map(|c| c.at_ms).collect::<Vec<_>>(),
+        vec![2_000, 12_400]
+    );
+    assert_eq!(l[1].body, "form error here");
+    assert_eq!(
+        m.replay_comment_counts(&p.id).unwrap(),
+        vec![("s1".to_owned(), 2)]
+    );
+    assert!(!m.delete_replay_comment(&p.id, c.id, "u2", false).unwrap());
+    assert!(m.delete_replay_comment(&p.id, c.id, "u1", false).unwrap());
+    assert!(m.delete_project(&p.id).unwrap());
+    assert!(m.replay_comments(&p.id, "s1").unwrap().is_empty());
+}

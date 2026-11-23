@@ -121,6 +121,17 @@ CREATE TABLE IF NOT EXISTS login_links (
   hash TEXT PRIMARY KEY,
   expires_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS replay_comments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project TEXT NOT NULL,
+  session TEXT NOT NULL,
+  at_ms INTEGER NOT NULL,
+  user_id TEXT NOT NULL,
+  author TEXT NOT NULL,
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS replay_comments_session ON replay_comments (project, session, at_ms);
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   email TEXT NOT NULL UNIQUE,
@@ -215,6 +226,25 @@ fn user_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
         disabled: r.get::<_, i64>(7)? != 0,
         last_sign_in: r.get(8)?,
     })
+}
+
+/// A comment pinned to a moment of a replay (#213).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ReplayComment {
+    /// Id (for links: `#c<id>`).
+    pub id: i64,
+    /// Session id.
+    pub session: String,
+    /// Position in the recording, milliseconds from its start.
+    pub at_ms: i64,
+    /// `owner` or the user's id.
+    pub user_id: String,
+    /// Who wrote it, as shown (email or "owner"; kept if the user leaves).
+    pub author: String,
+    /// Plain text, at most 2000 characters.
+    pub body: String,
+    /// When it was written (RFC 3339).
+    pub created_at: String,
 }
 
 /// Random lowercase alphanumeric string.
@@ -483,6 +513,7 @@ impl Meta {
                 "imports",
                 "flags",
                 "surveys",
+                "replay_comments",
             ] {
                 tx.execute(&format!("DELETE FROM {table} WHERE project = ?1"), [id])?;
             }
@@ -692,6 +723,97 @@ impl Meta {
                 .query_map([], user_from_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
+        })
+    }
+
+    /// Pin a comment to a moment of a replay. The body is plain text,
+    /// 1 to 2000 characters.
+    pub fn add_replay_comment(
+        &self,
+        project: &str,
+        session: &str,
+        at_ms: i64,
+        user_id: &str,
+        author: &str,
+        body: &str,
+    ) -> Result<ReplayComment> {
+        let body = body.trim();
+        if body.is_empty() || body.chars().count() > 2000 {
+            return Err(MetaError::Invalid("a comment is 1 to 2000 characters"));
+        }
+        if !(0..=7 * 24 * 3600 * 1000).contains(&at_ms) {
+            return Err(MetaError::Invalid("the time is outside the recording"));
+        }
+        let now = Utc::now().to_rfc3339();
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO replay_comments (project, session, at_ms, user_id, author, body, created_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![project, session, at_ms, user_id, author, body, now],
+            )?;
+            Ok(ReplayComment {
+                id: c.last_insert_rowid(),
+                session: session.to_owned(),
+                at_ms,
+                user_id: user_id.to_owned(),
+                author: author.to_owned(),
+                body: body.to_owned(),
+                created_at: now,
+            })
+        })
+    }
+
+    /// A replay's comments, in playback order.
+    pub fn replay_comments(&self, project: &str, session: &str) -> Result<Vec<ReplayComment>> {
+        self.with(|c| {
+            let mut st = c.prepare(
+                "SELECT id, session, at_ms, user_id, author, body, created_at FROM replay_comments \
+                 WHERE project = ?1 AND session = ?2 ORDER BY at_ms, id",
+            )?;
+            let rows = st
+                .query_map(params![project, session], |r| {
+                    Ok(ReplayComment {
+                        id: r.get(0)?,
+                        session: r.get(1)?,
+                        at_ms: r.get(2)?,
+                        user_id: r.get(3)?,
+                        author: r.get(4)?,
+                        body: r.get(5)?,
+                        created_at: r.get(6)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// Comments per session of a project.
+    pub fn replay_comment_counts(&self, project: &str) -> Result<Vec<(String, i64)>> {
+        self.with(|c| {
+            let mut st = c.prepare(
+                "SELECT session, count(*) FROM replay_comments WHERE project = ?1 GROUP BY session",
+            )?;
+            let rows = st
+                .query_map([project], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// Delete a comment if `user_id` wrote it or `admin`. Returns false when
+    /// there was nothing they may delete.
+    pub fn delete_replay_comment(
+        &self,
+        project: &str,
+        id: i64,
+        user_id: &str,
+        admin: bool,
+    ) -> Result<bool> {
+        self.with(|c| {
+            Ok(c.execute(
+                "DELETE FROM replay_comments WHERE project = ?1 AND id = ?2 AND (?4 OR user_id = ?3)",
+                params![project, id, user_id, admin],
+            )? == 1)
         })
     }
 

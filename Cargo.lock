@@ -2532,6 +2532,7 @@ dependencies = [
  "openlens-flags",
  "openlens-meta",
  "openlens-replay",
+ "serde_json",
 ]
 
 [[package]]

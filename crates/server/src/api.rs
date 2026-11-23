@@ -40,6 +40,10 @@ pub(crate) fn routes() -> Router<AppState> {
             post(import).layer(axum::extract::DefaultBodyLimit::max(IMPORT_MAX)),
         )
         .route("/api/projects/{project}/export", get(export))
+        .route(
+            "/api/projects/{project}/replays/{session}/comments",
+            get(crate::comments::api_list).post(crate::comments::api_add),
+        )
         .route("/api/login-links", post(login_link))
         .route("/api/users", get(list_users))
         .route(

@@ -965,6 +965,7 @@ pub fn replays(
     list: &[openlens_replay::Summary],
     who: Option<&str>,
     tz: &str,
+    comments: &[(String, i64)],
 ) -> Markup {
     layout(
         "Replays",
@@ -984,7 +985,7 @@ pub fn replays(
             } @else {
                 section.card.wide {
                     table.plain {
-                        thead { tr { th { "Started (" (tz_label(tz)) ")" } th { "User" } th.num { "Length" } th.num { "Size" } th { span.sr-only { "Play" } } } }
+                        thead { tr { th { "Started (" (tz_label(tz)) ")" } th { "User" } th.num { "Length" } th.num { "Size" } th.num { "Comments" } th { span.sr-only { "Play" } } } }
                         tbody { @for r in list {
                             @let started = tz.parse::<chrono_tz::Tz>().map_or_else(|_| r.started.format("%Y-%m-%d %H:%M").to_string(), |z| r.started.with_timezone(&z).format("%Y-%m-%d %H:%M").to_string());
                             @let secs = (r.updated - r.started).num_seconds().max(0) as f64;
@@ -993,6 +994,7 @@ pub fn replays(
                                 td.mono { a href={ "/p/" (p.id) "/replays?u=" (r.distinct_id) } { (r.distinct_id) } }
                                 td.num { (duration(secs)) }
                                 td.num.muted { (compact((r.bytes / 1024) as i64)) " kB" }
+                                td.num { @match comments.iter().find(|(s, _)| *s == r.session_id) { Some((_, n)) => { "💬 " (n) }, None => span.muted { "—" } } }
                                 td { a.button href={ "/p/" (p.id) "/replays/" (r.session_id) } { (icon("play")) "Play" } }
                             }
                         } }
@@ -1005,7 +1007,21 @@ pub fn replays(
 
 /// The replay player page. The player script (rrweb Replayer, MIT) is the
 /// only script the dashboard serves (D-011).
-pub fn player(p: &ProjectInfo<'_>, session: &str, who: Option<&str>, at: Option<&str>) -> Markup {
+pub fn player(
+    p: &ProjectInfo<'_>,
+    session: &str,
+    who: Option<&str>,
+    at: Option<&str>,
+    t: Option<u64>,
+    comments: &[openlens_meta::ReplayComment],
+    me: Option<(&str, bool)>,
+) -> Markup {
+    let base = format!("/p/{}/replays/{}", p.id, session);
+    let data: Vec<serde_json::Value> = comments
+        .iter()
+        .map(|c| serde_json::json!({ "id": c.id, "ms": c.at_ms, "body": c.body, "author": c.author }))
+        .collect();
+    let data = serde_json::Value::Array(data).to_string();
     layout(
         "Replay",
         Some(p),
@@ -1021,8 +1037,35 @@ pub fn player(p: &ProjectInfo<'_>, session: &str, who: Option<&str>, at: Option<
             }
             link rel="stylesheet" href="/assets/player.css";
             section.card.wide {
-                div #ol-player data-src={ "/p/" (p.id) "/replays/" (session) "/events.json" } data-timeline={ "/p/" (p.id) "/replays/" (session) "/timeline.json" } data-at=[at] {
+                div #ol-player data-src={ "/p/" (p.id) "/replays/" (session) "/events.json" } data-timeline={ "/p/" (p.id) "/replays/" (session) "/timeline.json" } data-at=[at] data-t=[t] data-comments=(data) {
                     p.muted { "Loading the recording…" }
+                }
+            }
+            section.card.wide.comments {
+                h2.violet { (icon("idea")) "Comments" span.muted.small { " · pinned to a moment" } }
+                @if comments.is_empty() { p.muted.small { "None yet. Pause where something happens and say what you see." } }
+                @else {
+                    ol.comment-list {
+                        @for c in comments {
+                            li id={ "c" (c.id) } {
+                                a.ol-c-at href={ (base) "?t=" (c.at_ms) "#c" (c.id) } { (duration(c.at_ms as f64 / 1000.0)) }
+                                " "
+                                span.comment-body { (c.body) }
+                                span.muted.small { " — " (c.author) " · " (c.created_at.get(..10).unwrap_or(&c.created_at)) }
+                                @if me.is_some_and(|(id, admin)| admin || id == c.user_id) {
+                                    form.inline method="post" action={ (base) "/comments/" (c.id) "/delete" } {
+                                        button.ghost type="submit" aria-label="Delete this comment" { "Delete" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                form #ol-comment.comment-form method="post" action={ (base) "/comments" } {
+                    input type="hidden" name="at" value=(t.unwrap_or(0));
+                    label for="ol-comment-body" { "Comment at the current moment" }
+                    textarea #ol-comment-body name="body" required maxlength="2000" rows="2" placeholder="The form error shows here" {}
+                    button type="submit" { "Add" }
                 }
             }
             script src="/assets/player.js" defer {}

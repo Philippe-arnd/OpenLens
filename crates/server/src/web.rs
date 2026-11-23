@@ -41,6 +41,14 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/p/{project}/replays", get(replays_page))
         .route("/p/{project}/replays/{session}", get(player_page))
         .route(
+            "/p/{project}/replays/{session}/comments",
+            post(crate::comments::add),
+        )
+        .route(
+            "/p/{project}/replays/{session}/comments/{id}/delete",
+            post(crate::comments::delete),
+        )
+        .route(
             "/p/{project}/replays/{session}/timeline.json",
             get(replay_timeline),
         )
@@ -762,6 +770,8 @@ async fn player_css() -> Response {
 struct ReplayQuery {
     u: Option<String>,
     at: Option<String>,
+    /// Playback position to open at, milliseconds (comment links).
+    t: Option<u64>,
 }
 
 async fn replays_page(
@@ -798,6 +808,7 @@ async fn replays_page(
                 &l,
                 q.u.as_deref(),
                 &auth::tz_for(&state, &headers, &p.timezone),
+                &state.meta.replay_comment_counts(&p.id).unwrap_or_default(),
             ),
         ),
         _ => html(
@@ -870,9 +881,26 @@ async fn player_page(
             && a.chars()
                 .all(|c| c.is_ascii_digit() || " -:.TZ".contains(c))
     });
+    let viewer = auth::viewer(&state, &headers);
+    let meta = state.meta.clone();
+    let (pid, sid) = (p.id.clone(), session.clone());
+    let comments = tokio::task::spawn_blocking(move || meta.replay_comments(&pid, &sid))
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or_default();
+    let me = viewer.as_ref().map(|v| (v.id.as_str(), v.admin));
     player_csp(html(
         StatusCode::OK,
-        openlens_ui::player(&info, &session, Some(&who), at.as_deref()),
+        openlens_ui::player(
+            &info,
+            &session,
+            Some(&who),
+            at.as_deref(),
+            q.t,
+            &comments,
+            me,
+        ),
     ))
 }
 
@@ -1227,7 +1255,10 @@ pub(crate) async fn access_layer(
                 openlens_ui::message("Not for you", "You do not have access to this project."),
             );
         }
-        if req.method() != axum::http::Method::GET && !v.admin {
+        if req.method() != axum::http::Method::GET
+            && !v.admin
+            && !crate::comments::is_comment_path(&path)
+        {
             return html(
                 StatusCode::FORBIDDEN,
                 openlens_ui::message(

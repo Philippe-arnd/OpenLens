@@ -6,6 +6,7 @@
 mod api;
 mod auth;
 mod capture;
+mod comments;
 mod digest;
 mod flags;
 mod icon;

@@ -1779,3 +1779,54 @@ async fn team_crud_and_the_viewer_time_zone() {
     );
     assert!(h.state.meta.user(&id).unwrap().is_none());
 }
+
+#[tokio::test]
+async fn viewers_comment_on_replays_and_delete_only_their_own() {
+    let h = harness();
+    let owner = login_cookie(&h).await;
+    let ana = invite(
+        &h,
+        serde_json::json!({"email": "ana@example.com", "role": "viewer"}),
+    )
+    .await;
+    let bo = invite(
+        &h,
+        serde_json::json!({"email": "bo@example.com", "role": "viewer"}),
+    )
+    .await;
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/replays/s1/comments",
+            &ana,
+            "at=12400&body=Form+error+here"
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    let c = h.state.meta.replay_comments("default", "s1").unwrap();
+    assert_eq!(
+        (c.len(), c[0].at_ms, c[0].author.as_str()),
+        (1, 12_400, "ana@example.com")
+    );
+    let path = format!("/p/default/replays/s1/comments/{}/delete", c[0].id);
+    assert_eq!(post_form(&h, &path, &bo, "").await, StatusCode::FORBIDDEN);
+    // Viewers still can't change anything else under the project.
+    assert_eq!(
+        post_form(&h, "/p/default/settings/rotate-key", &ana, "confirm=yes").await,
+        StatusCode::FORBIDDEN
+    );
+    let api = get(&h, "/api/projects/default/replays/s1/comments", None, true).await;
+    assert_eq!(api.status(), StatusCode::OK);
+    assert_eq!(
+        post_form(&h, &path, &owner, "").await,
+        StatusCode::SEE_OTHER
+    );
+    assert!(
+        h.state
+            .meta
+            .replay_comments("default", "s1")
+            .unwrap()
+            .is_empty()
+    );
+}

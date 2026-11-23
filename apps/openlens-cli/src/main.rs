@@ -138,6 +138,21 @@ enum Command {
         #[command(subcommand)]
         action: FlagsCmd,
     },
+    /// Comments pinned to moments of a replay: list them, or add one with
+    /// --at and --add.
+    Comments {
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+        /// Session id.
+        session: String,
+        /// Seconds into the recording (with --add).
+        #[arg(long, default_value_t = 0.0)]
+        at: f64,
+        /// Add this comment.
+        #[arg(long)]
+        add: Option<String>,
+    },
     /// The team: list, update, disable, enable or remove users (invite
     /// with `login-link --email`).
     Users {
@@ -646,6 +661,25 @@ fn run(cli: Cli) -> Result<bool, String> {
                 &json!({ "rows": rows, "file": path.display().to_string(), "days_truncated": truncated }),
             );
             Ok(true)
+        }
+        Command::Comments {
+            project,
+            session,
+            at,
+            add,
+        } => {
+            let c = client()?;
+            let path = format!("/api/projects/{project}/replays/{session}/comments");
+            let (status, v) = match add {
+                Some(body) => c.call(
+                    "POST",
+                    &path,
+                    Some(Body::Json(json!({ "at": at, "body": body }))),
+                )?,
+                None => c.call("GET", &path, None)?,
+            };
+            out(&v);
+            Ok(status == 200 || status == 201)
         }
         Command::Users { action } => {
             let c = client()?;

@@ -182,14 +182,26 @@ async function main(): Promise<void> {
   if (root.dataset.timeline) {
     items = await timeline(root.dataset.timeline, first0, total, marks, legend, log, (t) => go(t - 1000));
   }
+  items = items.concat(comments(root.dataset.comments, total, marks, (t) => go(t))).sort((a, b) => a.t - b.t);
+  for (const x of items) log.append(x.li);
   if (!items.length) {
     legend.hidden = true;
     log.hidden = true;
   }
+  // The comment form takes the moment the player is at (paused on focus).
+  const form = document.getElementById("ol-comment") as HTMLFormElement | null;
+  const atField = form?.querySelector<HTMLInputElement>("input[name=at]");
+  form?.querySelector("textarea")?.addEventListener("focus", () => {
+    if (playing) toggle();
+  });
+  form?.addEventListener("submit", () => {
+    if (atField) atField.value = String(Math.round(rep.getCurrentTime()));
+  });
 
   const at = root.dataset.at ? Date.parse(`${root.dataset.at.replace(" ", "T").slice(0, 23)}Z`) || 0 : 0;
   const first = (events[0] as { timestamp: number }).timestamp;
-  const offset = at > first ? Math.min(at - first - 3000, total) : 0;
+  const t0 = Number(root.dataset.t);
+  const offset = root.dataset.t && t0 >= 0 ? Math.min(t0, total) : at > first ? Math.min(at - first - 3000, total) : 0;
   rep.pause(Math.max(0, offset));
   fit();
   show();
@@ -280,6 +292,36 @@ async function timeline(
     legend.append(li);
   }
   return out;
+}
+
+/** Comments pinned to moments (#213): markers on the track and entries in
+ * the list, distinct from events. */
+function comments(
+  raw: string | undefined,
+  total: number,
+  marks: HTMLElement,
+  jump: (t: number) => void,
+): { t: number; li: HTMLLIElement }[] {
+  let list: { id: number; ms: number; body: string; author: string }[] = [];
+  try {
+    list = JSON.parse(raw ?? "[]");
+  } catch {
+    return [];
+  }
+  return list.map((c) => {
+    const t = Math.max(0, Math.min(total, c.ms));
+    const label = `${c.author}: ${c.body}`;
+    const b = el("button", { type: "button", class: "ol-mark k-note", title: `${fmt(t)} · ${label}`, "aria-label": `Comment at ${fmt(t)}, ${label}` });
+    b.style.left = `${total ? (t / total) * 100 : 0}%`;
+    b.addEventListener("click", () => jump(t));
+    marks.append(b);
+    const li = el("li", { class: "k-note" });
+    const go = el("button", { type: "button" });
+    go.append(el("span", { class: "ol-at" }, fmt(t)), el("span", { class: "ol-dot", "aria-hidden": "true" }), el("span", { class: "ol-what" }, `💬 ${label}`));
+    go.addEventListener("click", () => jump(t));
+    li.append(go);
+    return { t, li };
+  });
 }
 
 interface RecEvent {

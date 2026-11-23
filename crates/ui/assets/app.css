@@ -264,6 +264,7 @@ html[data-theme="dark"] #ol-player { --k-page: #3a86d8; --k-goal: #b8862a; --k-s
 #ol-player .ol-mark.k-error::before { left: 10px; top: 1px; width: 4px; height: 20px; border-radius: 2px; }
 #ol-player .ol-mark:hover::before, #ol-player .ol-mark:focus-visible::before { transform: scale(1.35); }
 #ol-player .k-page { --k: var(--k-page); } #ol-player .k-goal { --k: var(--k-goal); } #ol-player .k-submit { --k: var(--k-submit); }
+#ol-player .k-note { --k: var(--ink-2); } #ol-player .ol-mark.k-note::before { border-radius: 2px; transform: rotate(45deg); }
 #ol-player .k-click { --k: var(--k-click); } #ol-player .k-rage { --k: var(--k-rage); } #ol-player .k-error { --k: var(--k-error); }
 #ol-player .ol-dot { display: inline-block; flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--k); }
 #ol-player .k-error .ol-dot { width: 4px; height: 13px; border-radius: 2px; }
@@ -361,3 +362,13 @@ form.inline input[type=number] { width: 64px; font: inherit; padding: 4px 6px; b
 .status.muted { color: var(--muted); }
 div.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 div.actions form.inline { margin: 0; }
+
+/* Replay comments (#213) */
+ol.comment-list { list-style: none; padding: 0; margin: 0 0 12px; display: flex; flex-direction: column; gap: 8px; font-size: 13.5px; }
+ol.comment-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
+ol.comment-list li:target { background: color-mix(in srgb, var(--violet) var(--tint), transparent); border-radius: var(--radius-s); }
+.ol-c-at { font-variant-numeric: tabular-nums; font-weight: 600; }
+.comment-body { white-space: pre-wrap; }
+form.comment-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+form.comment-form label { flex-basis: 100%; font-size: 12.5px; color: var(--muted); }
+form.comment-form textarea { flex: 1 1 260px; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--surface); color: var(--ink); }
