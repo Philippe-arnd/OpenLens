@@ -283,10 +283,10 @@ pub(crate) async fn acquisition(
     let Ok(q) = serde_urlencoded::from_str::<AcqParams>(&raw.unwrap_or_default()) else {
         return not_found("Unreadable filters.");
     };
-    let by = match q.by.as_deref() {
-        Some(b @ ("source" | "campaign" | "referrer")) => b,
-        _ => "channel",
-    };
+    let by = ["source", "campaign", "referrer"]
+        .into_iter()
+        .find(|b| q.by.as_deref() == Some(*b))
+        .unwrap_or("channel");
     let last = q.touch.as_deref() == Some("last");
     let f = q.f.filters(&auth::tz_for(&state, &headers, &p.timezone));
     let map = crate::load_map(&state, &p.id).await;
