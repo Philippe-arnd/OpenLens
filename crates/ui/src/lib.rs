@@ -163,6 +163,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                                     ("/audience", "globe", "Audience"),
                                     ("/acquisition", "route", "Acquisition"),
                                     ("/churn", "ban", "Churn"),
+                                    ("/goals", "star", "Goals"),
                                     ("/flows", "funnel", "Feature flow"),
                                     ("/features", "route", "Feature map"),
                                     ("/digest", "mail", "Digest"),
@@ -507,6 +508,7 @@ pub fn board(
     f: &Filters,
     host: &str,
     plain: &[(String, String)],
+    revenue: Option<&openlens_engine::Revenue>,
 ) -> Markup {
     if b.total_events == 0 {
         return layout("Focus board", Some(p), empty(p, host));
@@ -606,6 +608,15 @@ pub fn board(
                                 }
                             } }
                         }
+                    }
+                }
+                @if let Some(r) = revenue {
+                    section.card {
+                        h2.mint { (icon("star")) "Revenue, last 30 days" }
+                        table.plain { tbody { @for m in &r.totals {
+                            tr { th scope="row" { (money(m.total, &m.currency)) } td.small.muted { (compact(m.payers)) " payers · " (money(m.per_active_user, &m.currency)) " per active user" } }
+                        } } }
+                        p.small { a href={ "/p/" (p.id) "/revenue" } { "By feature, role and release →" } }
                     }
                 }
                 (feature_pulse(b, feats.is_empty()))
@@ -821,6 +832,7 @@ fn family_label(fam: &str) -> &'static str {
 
 /// A person's profile (#222): who they are, their role over time, their
 /// recordings, their latest events and errors.
+#[allow(clippy::too_many_arguments)]
 pub fn person(
     p: &ProjectInfo<'_>,
     who: &str,
@@ -829,6 +841,7 @@ pub fn person(
     replays: &[openlens_replay::Summary],
     events: &[EventRow],
     tz: &str,
+    admin: bool,
 ) -> Markup {
     let errors: Vec<&EventRow> = events
         .iter()
@@ -872,6 +885,17 @@ pub fn person(
                             @if let Some(s) = &e.session_id { " " a.icon-link href={ "/p/" (p.id) "/replays/" (s) "?at=" (e.timestamp) } aria-label="Replay this moment" { (icon("play")) } } }
                     } } }
                     p.small { a href={ "/p/" (p.id) "/errors" } { "All errors →" } }
+                }
+            }
+            @if admin {
+                section.card.wide.danger {
+                    h2.coral { (icon("shield")) "Privacy" }
+                    p { a.button href={ "/p/" (p.id) "/people/" (url_enc(who)) "/export.json" } { (icon("down")) "Export their data (JSON)" } }
+                    p.small { "Forgetting removes their events (and those of the anonymous ids linked to them), their recordings and their profile, now, and drops anything they send later. There is no undo." }
+                    form.inline method="post" action={ "/p/" (p.id) "/people/" (url_enc(who)) "/forget" } {
+                        label { "Type " code { (who) } " to confirm " input type="text" name="confirm" required autocomplete="off"; }
+                        button.danger type="submit" { "Forget this person" }
+                    }
                 }
             }
             section.card.wide {
@@ -1943,6 +1967,249 @@ pub fn churn(
     )
 }
 
+/// An amount with its currency, rounded to the unit above 100.
+pub fn money(v: f64, cur: &str) -> String {
+    let n = if v.abs() >= 100.0 {
+        format!("{v:.0}")
+    } else {
+        format!("{v:.2}")
+    };
+    if cur == "?" { n } else { format!("{n} {cur}") }
+}
+
+/// Revenue on success events (#231).
+pub fn revenue(
+    p: &ProjectInfo<'_>,
+    b: &Board,
+    f: &Filters,
+    r: Option<&openlens_engine::Revenue>,
+) -> Markup {
+    let table = |title: &str, glyph: &str, rows: &[(String, String, f64)]| {
+        html! {
+            section.card {
+                h2.mint { (icon(glyph)) (title) }
+                table.plain { tbody { @for (k, c, v) in rows {
+                    tr { th scope="row" { span.mono { (k) } } td.num { (money(*v, c)) } }
+                } } }
+            }
+        }
+    };
+    layout(
+        "Revenue",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "Revenue" }
+                p.muted { "Amounts carried by success events (" code { "revenue" } " or " code { "value" } ", with an optional " code { "currency" } "), last 30 days, " strong { (f.environment) } "." }
+            } }
+            (filter_bar(p.id, b, f, "/revenue"))
+            @match r {
+                None => section.card.wide { p { "No success event carries an amount yet. Send one with the event, for example " code { "openlens.track(\"order_paid\", { revenue: 49, currency: \"EUR\" })" } ", and declare it as a feature's success event." } },
+                Some(r) => {
+                    section.tiles aria-label="Totals" {
+                        @for m in &r.totals {
+                            (tile("mint", "star", &format!("Revenue ({})", m.currency), &money(m.total, &m.currency), &format!("{} orders · {} payers · {} per active user", compact(m.orders), compact(m.payers), money(m.per_active_user, &m.currency))))
+                        }
+                    }
+                    @if r.totals.len() > 1 { p.muted.small { "Currencies are not summed. Set " code { "revenue: { currency: EUR, rates: { USD: 0.92 } }" } " in the feature map to show one total." } }
+                    @if r.converted { p.muted.small { "Converted into the display currency with the fixed rates of the feature map." } }
+                    div.grid {
+                        (table("By feature", "layers", &r.by_feature))
+                        (table("By role", "users", &r.by_role))
+                        (table("By release", "release", &r.by_release))
+                    }
+                }
+            }
+        },
+    )
+}
+
+/// A goal with where it stands (#235).
+pub struct GoalRow {
+    /// The stored goal.
+    pub goal: openlens_engine::goals::Goal,
+    /// KPI label.
+    pub label: String,
+    /// A share (shown as %).
+    pub share: bool,
+    /// Value now.
+    pub current: Option<f64>,
+    /// Projected value at the deadline.
+    pub projected: Option<f64>,
+    /// Per release (oldest first).
+    pub series: Vec<(String, f64)>,
+    /// Status label.
+    pub status: String,
+    /// Reached or on track.
+    pub good: bool,
+    /// Off track.
+    pub bad: bool,
+    /// Days to the deadline.
+    pub days_left: i64,
+}
+
+/// A KPI a goal can be set on, with its suggested target.
+pub struct GoalChoice {
+    /// Key.
+    pub kpi: String,
+    /// Label.
+    pub label: String,
+    /// Higher is better.
+    pub up: bool,
+    /// A share.
+    pub share: bool,
+    /// Value now.
+    pub current: f64,
+    /// Suggested target.
+    pub suggested: f64,
+}
+
+fn kpi_fmt(v: f64, share: bool) -> String {
+    if share {
+        pct(v)
+    } else if v.abs() >= 100.0 {
+        format!("{v:.0}")
+    } else {
+        format!("{v:.2}")
+    }
+}
+
+/// The KPI per release with the target as a line (one axis, SVG).
+fn goal_chart(r: &GoalRow) -> Markup {
+    let (w, h) = (320.0_f64, 90.0_f64);
+    let vals: Vec<f64> = r
+        .series
+        .iter()
+        .map(|x| x.1)
+        .chain([r.goal.target])
+        .chain(r.current)
+        .collect();
+    let max = vals.iter().copied().fold(f64::MIN, f64::max).max(1e-9);
+    let y = |v: f64| h - 6.0 - (v / max) * (h - 16.0);
+    let n = r.series.len().max(1);
+    let x = |i: usize| {
+        if n == 1 {
+            w / 2.0
+        } else {
+            8.0 + i as f64 * (w - 16.0) / (n - 1) as f64
+        }
+    };
+    let line: String = r
+        .series
+        .iter()
+        .enumerate()
+        .map(|(i, (_, v))| format!("{}{:.1} {:.1}", if i == 0 { "M" } else { "L" }, x(i), y(*v)))
+        .collect();
+    let ty = y(r.goal.target);
+    html! {
+        svg.goal-chart viewBox={ "0 0 " (w) " " (h) } role="img" aria-label={ (r.label) " per release, target " (kpi_fmt(r.goal.target, r.share)) } {
+            line.target x1="0" x2=(w) y1=(format!("{ty:.1}")) y2=(format!("{ty:.1}")) {}
+            text.tlabel x=(w - 4.0) y=(format!("{:.1}", ty - 3.0)) text-anchor="end" { "target " (kpi_fmt(r.goal.target, r.share)) }
+            @if r.series.len() > 1 { path.series d=(line) {} }
+            @for (i, (d, v)) in r.series.iter().enumerate() {
+                circle.dot cx=(format!("{:.1}", x(i))) cy=(format!("{:.1}", y(*v))) r="3.5" { title { (d) ": " (kpi_fmt(*v, r.share)) } }
+            }
+        }
+    }
+}
+
+/// Goals on KPIs (#235): target, gap, progress, trajectory.
+pub fn goals(
+    p: &ProjectInfo<'_>,
+    rows: &[GoalRow],
+    choices: &[GoalChoice],
+    admin: bool,
+    deadline: &str,
+) -> Markup {
+    layout(
+        "Goals",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "Goals" }
+                p.muted { "Where we want each number to be, by when, and whether the trend gets there. Targets are suggested from the releases so far; one click sets them." }
+            } }
+            @if rows.is_empty() { section.card.wide { p.muted { "No goal yet. Pick a KPI below: the suggested target is the best release so far or a 10% step, whichever is closer." } } }
+            div.grid {
+                @for r in rows {
+                    @let g = &r.goal;
+                    @let gap = r.current.map(|c| g.target - c);
+                    @let travelled = r.current.map(|c| { let total = g.target - g.baseline; if total.abs() < 1e-12 { 1.0 } else { ((c - g.baseline) / total).clamp(0.0, 1.0) } });
+                    section.card {
+                        h2.violet { (icon("star")) (r.label) }
+                        p {
+                            span class={ "status " (if r.good { "good" } else if r.bad { "bad" } else { "warn" }) } { (r.status) }
+                            " · target " strong { (kpi_fmt(g.target, r.share)) } " by " (g.deadline)
+                            @if r.days_left > 0 { span.muted { " (" (r.days_left) " days)" } }
+                        }
+                        p.small {
+                            "Now " strong { (r.current.map_or_else(|| "—".into(), |c| kpi_fmt(c, r.share))) }
+                            " · from " (kpi_fmt(g.baseline, r.share))
+                            @if let Some(gp) = gap { " · gap " (kpi_fmt(gp.abs(), r.share)) }
+                            @if let Some(pj) = r.projected { " · trend at the deadline " (kpi_fmt(pj, r.share)) }
+                        }
+                        @if let Some(t) = travelled { div.meter-row { span.small.muted { "way travelled" } (meter(t)) span.small { (pct(t)) } } }
+                        (goal_chart(r))
+                        @if !g.owner.is_empty() { p.muted.small { "Owner: " (g.owner) } }
+                        @if admin {
+                            form.inline method="post" action={ "/p/" (p.id) "/goals/" (g.id) "/delete" } { button.ghost type="submit" { "Remove" } }
+                        }
+                    }
+                }
+            }
+            @if admin && !choices.is_empty() {
+                section.card.wide {
+                    h2.mint { (icon("plus")) "Set a goal" }
+                    div.table-scroll { table.plain {
+                        thead { tr { th { "KPI" } th.num { "Now" } th { "Target" } th { "By" } th { "Owner" } th {} } }
+                        tbody { @for c in choices {
+                            tr {
+                                th scope="row" { (c.label) span.muted.small { " · " (if c.up { "higher is better" } else { "lower is better" }) } }
+                                td.num { (kpi_fmt(c.current, c.share)) }
+                                td colspan="4" {
+                                    form.inline method="post" action={ "/p/" (p.id) "/goals" } {
+                                        input type="hidden" name="kpi" value=(c.kpi);
+                                        label { span.sr-only { "Target" } input type="number" name="target" step="any" min="0" value=(if c.share { format!("{:.1}", c.suggested * 100.0) } else { format!("{:.2}", c.suggested) }) aria-label={ "Target for " (c.label) }; @if c.share { "%" } }
+                                        label { span.sr-only { "Deadline" } input type="date" name="deadline" value=(deadline) required aria-label={ "Deadline for " (c.label) }; }
+                                        label { span.sr-only { "Owner" } input type="text" name="owner" placeholder="owner" maxlength="80" aria-label={ "Owner of the goal on " (c.label) }; }
+                                        button.soft type="submit" { "Set" }
+                                    }
+                                }
+                            }
+                        } }
+                    } }
+                    p.muted.small { "The suggested target is filled in. Status: on track when the straight line through the releases reaches the target by the deadline, at risk when it misses by less than 10% of the target, not enough data under three releases." }
+                }
+            }
+        },
+    )
+}
+
+/// The audit log (#230): who changed what, newest first.
+pub fn audit(rows: &[(String, String, Option<String>, String, String)]) -> Markup {
+    layout(
+        "Audit log",
+        None,
+        html! {
+            div.heading { div {
+                h1 { "Audit log" }
+                p.muted { "Every admin action: users, keys, settings, flags, surveys, feature maps, storage, exports and erasures. It can't be edited or deleted." }
+            } }
+            section.card.wide {
+                @if rows.is_empty() { p.muted { "Nothing yet." } }
+                @else {
+                    div.table-scroll { table.plain {
+                        thead { tr { th { "When" } th { "Who" } th { "Project" } th { "Action" } th { "Detail" } } }
+                        tbody { @for (at, who, proj, act, d) in rows {
+                            tr { td.small.mono { (at) } td.small { (who) } td.small { (proj.as_deref().unwrap_or("—")) } td { span.chip { (act) } } td.small { (d) } }
+                        } }
+                    } }
+                }
+            }
+        },
+    )
+}
+
 /// Feature flags: switch on/off and change the rollout. Creating flags is
 /// done by agents (API/CLI/MCP) with the code that uses them.
 pub fn flags(p: &ProjectInfo<'_>, flags: &[openlens_flags::Flag]) -> Markup {
@@ -2489,7 +2756,7 @@ pub fn projects(list: &[ProjectSummary], admin: bool) -> Markup {
         html! {
             div.heading {
                 div { h1 { "Projects" } p.muted { "One per app. Pick one to open its Focus board." } }
-                @if admin { a.button href="/users" { (icon("users")) "Team" } " " a.button href="/settings/storage" { (icon("layers")) "Storage and backups" } }
+                @if admin { a.button href="/users" { (icon("users")) "Team" } " " a.button href="/settings/storage" { (icon("layers")) "Storage and backups" } " " a.button href="/audit" { (icon("shield")) "Audit log" } }
             }
             @if admin {
                 details.card.wide.new-project {
@@ -3078,11 +3345,11 @@ mod tests {
             "Most people who left (72%) were in billing last".to_owned(),
             "Check the billing page first.".to_owned(),
         )];
-        let html = render(board(&p, &b, &Filters::default(), "http://x", &plain));
+        let html = render(board(&p, &b, &Filters::default(), "http://x", &plain, None));
         assert!(html.contains("Most people who left (72%)"));
         assert!(html.contains("Original: 72% of churned users were last seen in billing"));
         assert!(html.contains("Check the billing page first."));
-        let html = render(board(&p, &b, &Filters::default(), "http://x", &[]));
+        let html = render(board(&p, &b, &Filters::default(), "http://x", &[], None));
         assert!(
             html.contains("72% of churned users were last seen in billing")
                 && !html.contains("Original:")

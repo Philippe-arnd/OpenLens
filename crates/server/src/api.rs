@@ -56,6 +56,12 @@ pub(crate) fn routes() -> Router<AppState> {
             "/api/projects/{project}/churn",
             get(crate::explore::api_churn),
         )
+        .route("/api/projects/{project}/goals", get(crate::goals::api))
+        .route(
+            "/api/projects/{project}/people/{who}/forget",
+            axum::routing::delete(crate::privacy::api_forget),
+        )
+        .route("/api/audit", get(crate::privacy::api_audit))
         .route("/api/login-links", post(login_link))
         .route("/api/users", get(list_users))
         .route(
@@ -190,9 +196,13 @@ async fn delete_project(
         );
     }
     let st = state.clone();
+    let pid = project.clone();
     let res = tokio::task::spawn_blocking(move || purge_project(&st, &project)).await;
     match res {
-        Ok(Ok(true)) => Json(json!({ "deleted": true })).into_response(),
+        Ok(Ok(true)) => {
+            crate::privacy::audit(&state, &headers, Some(&pid), "project.delete", "(api)");
+            Json(json!({ "deleted": true })).into_response()
+        }
         Ok(Ok(false)) => err(StatusCode::NOT_FOUND, "no such project"),
         Ok(Err(e)) => err(StatusCode::INTERNAL_SERVER_ERROR, &e),
         Err(_) => err(StatusCode::INTERNAL_SERVER_ERROR, "delete failed"),
@@ -399,12 +409,24 @@ async fn login_link(
     })
     .await;
     match res {
-        Ok(Ok((user, t))) => Json(json!({
-            "url": format!("{host}/l/{t}"),
-            "expires_in_days": 7,
-            "user": user,
-        }))
-        .into_response(),
+        Ok(Ok((user, t))) => {
+            let who = user
+                .as_ref()
+                .map_or_else(|| "owner".to_owned(), |u| u.email.clone());
+            crate::privacy::audit(
+                &state,
+                &headers,
+                None,
+                "user.invite",
+                &format!("login link for {who} (api)"),
+            );
+            Json(json!({
+                "url": format!("{host}/l/{t}"),
+                "expires_in_days": 7,
+                "user": user,
+            }))
+            .into_response()
+        }
         Ok(Err(openlens_meta::MetaError::Invalid(m))) => err(StatusCode::BAD_REQUEST, m),
         _ => err(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -438,8 +460,18 @@ async fn delete_user(
         return r;
     }
     let meta = state.meta.clone();
+    let who = id.clone();
     match tokio::task::spawn_blocking(move || meta.delete_user(&id)).await {
-        Ok(Ok(true)) => Json(json!({ "deleted": true })).into_response(),
+        Ok(Ok(true)) => {
+            crate::privacy::audit(
+                &state,
+                &headers,
+                None,
+                "user.delete",
+                &format!("{who} (api)"),
+            );
+            Json(json!({ "deleted": true })).into_response()
+        }
         Ok(Ok(false)) => err(StatusCode::NOT_FOUND, "no such user"),
         Ok(Err(openlens_meta::MetaError::Invalid(why))) => err(StatusCode::CONFLICT, why),
         _ => err(
@@ -506,7 +538,16 @@ async fn update_user(
     })
     .await;
     match res {
-        Ok(Ok(Some(u))) => Json(json!({ "user": u })).into_response(),
+        Ok(Ok(Some(u))) => {
+            crate::privacy::audit(
+                &state,
+                &headers,
+                None,
+                "user.update",
+                &format!("{} (api)", u.email),
+            );
+            Json(json!({ "user": u })).into_response()
+        }
         Ok(Ok(None)) => err(StatusCode::NOT_FOUND, "no such user"),
         Ok(Err(openlens_meta::MetaError::Invalid(why))) => err(StatusCode::CONFLICT, why),
         _ => err(
@@ -569,8 +610,16 @@ async fn put_map(
             .into_response();
     }
     let meta = state.meta.clone();
+    let project_id = p.id.clone();
     match tokio::task::spawn_blocking(move || meta.save_feature_map(&p.id, &body)).await {
         Ok(Ok(version)) => {
+            crate::privacy::audit(
+                &state,
+                &headers,
+                Some(&project_id),
+                "feature_map.save",
+                &format!("version {version} (api)"),
+            );
             Json(json!({ "stored": true, "version": version, "issues": parsed.issues }))
                 .into_response()
         }

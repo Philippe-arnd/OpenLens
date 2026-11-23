@@ -204,6 +204,13 @@ pub(crate) async fn edit(
                 } else {
                     v.to_string()
                 };
+                crate::privacy::audit(
+                    &state,
+                    &headers,
+                    Some(&p.id),
+                    "feature_map.save",
+                    &format!("version {v}"),
+                );
                 Redirect::to(&format!("/p/{}/features?done={done}", p.id)).into_response()
             }
             _ => html_page(

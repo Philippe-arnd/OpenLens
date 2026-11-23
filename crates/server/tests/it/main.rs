@@ -2507,3 +2507,210 @@ async fn the_churn_page_and_api() {
     assert_eq!(api["window"], 14);
     assert_eq!(api["users"], 1);
 }
+
+#[tokio::test]
+async fn revenue_shows_only_when_success_events_carry_amounts() {
+    let h = harness();
+    let owner = login_cookie(&h).await;
+    let (status, _) = post(&h, "/capture", batch(&h.key), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let board = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
+    assert!(
+        !board.contains("Revenue, last 30 days"),
+        "nothing changes without amounts"
+    );
+
+    h.state
+        .meta
+        .save_feature_map(
+            "default",
+            "revenue:\n  currency: EUR\n  rates: { USD: 0.9 }\nfeatures:\n  - key: checkout\n    name: Checkout\n    success: order_paid\n    entry: { routes: ['/checkout'] }\n",
+        )
+        .unwrap();
+    let body = serde_json::json!({
+        "key": h.key,
+        "batch": [
+            {"event": "order_paid", "distinct_id": "u1", "properties": {"revenue": 10, "currency": "EUR"}},
+            {"event": "order_paid", "distinct_id": "u2", "properties": {"value": 20.5, "currency": "usd"}},
+            {"event": "note_saved", "distinct_id": "u1", "properties": {"revenue": 999}},
+            {"event": "$vital", "distinct_id": "u1", "properties": {"$name": "LCP", "$value": 1234}}
+        ]
+    })
+    .to_string();
+    let (status, _) = post(&h, "/capture", body.into_bytes(), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let board = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
+    assert!(
+        board.contains("Revenue, last 30 days") && board.contains("28.45 EUR"),
+        "10 + 20.5 × 0.9, other events ignored"
+    );
+    let page = body_text(get(&h, "/p/default/revenue", Some(&owner), false).await).await;
+    assert!(page.contains("checkout") && page.contains("Converted") && !page.contains(" style="));
+}
+
+#[tokio::test]
+async fn goals_are_suggested_set_tracked_and_removed() {
+    let h = harness();
+    let (status, _) = post(&h, "/capture", batch(&h.key), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let owner = login_cookie(&h).await;
+    let page = body_text(get(&h, "/p/default/goals", Some(&owner), false).await).await;
+    assert!(
+        page.contains("Set a goal")
+            && page.contains("Sessions with errors")
+            && !page.contains(" style=")
+    );
+    let deadline = (chrono::Utc::now() + chrono::Duration::days(60))
+        .format("%Y-%m-%d")
+        .to_string();
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/goals",
+            &owner,
+            &format!("kpi=error_rate&target=150&deadline={deadline}")
+        )
+        .await,
+        StatusCode::BAD_REQUEST,
+        "a share above 100%"
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/goals",
+            &owner,
+            "kpi=error_rate&target=5&deadline=2020-01-01"
+        )
+        .await,
+        StatusCode::BAD_REQUEST,
+        "a past deadline"
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/goals",
+            &owner,
+            &format!("kpi=error_rate&target=5&deadline={deadline}&owner=Ana")
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    let viewer = invite(
+        &h,
+        serde_json::json!({"email": "v@example.com", "role": "viewer"}),
+    )
+    .await;
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/goals",
+            &viewer,
+            &format!("kpi=error_rate&target=5&deadline={deadline}")
+        )
+        .await,
+        StatusCode::FORBIDDEN
+    );
+    let api: serde_json::Value = serde_json::from_str(
+        &body_text(get(&h, "/api/projects/default/goals", None, true).await).await,
+    )
+    .unwrap();
+    let g = &api["goals"][0];
+    assert_eq!(g["goal"]["target"], 0.05);
+    assert_eq!(g["goal"]["owner"], "Ana");
+    assert!(
+        g["status"] == "reached" || g["status"] == "not enough data",
+        "{g}"
+    );
+    let id = g["goal"]["id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        post_form(&h, &format!("/p/default/goals/{id}/delete"), &owner, "").await,
+        StatusCode::SEE_OTHER
+    );
+    let api: serde_json::Value = serde_json::from_str(
+        &body_text(get(&h, "/api/projects/default/goals", None, true).await).await,
+    )
+    .unwrap();
+    assert_eq!(api["goals"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn a_forgotten_person_is_gone_everywhere_and_stays_gone() {
+    let h = harness();
+    let body = serde_json::json!({
+        "key": h.key,
+        "batch": [
+            {"event": "$pageview", "distinct_id": "anon-1", "properties": {"$pathname": "/"}},
+            {"event": "$identify", "distinct_id": "ana", "properties": {"$anon_distinct_id": "anon-1", "$role": "admin"}},
+            {"event": "note_saved", "distinct_id": "ana"},
+            {"event": "note_saved", "distinct_id": "bo"}
+        ]
+    })
+    .to_string();
+    let (status, _) = post(&h, "/capture", body.into_bytes(), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let owner = login_cookie(&h).await;
+    let export =
+        body_text(get(&h, "/p/default/people/ana/export.json", Some(&owner), false).await).await;
+    assert!(
+        export.contains("note_saved") && export.contains("anon-1"),
+        "{export}"
+    );
+    assert_eq!(
+        post_form(&h, "/p/default/people/ana/forget", &owner, "confirm=bo").await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        post_form(&h, "/p/default/people/ana/forget", &owner, "confirm=ana").await,
+        StatusCode::OK
+    );
+    let n = |sql: &'static str| {
+        let q = h.state.query.clone();
+        async move {
+            q.sql("default", sql).await.unwrap().rows[0]["n"]
+                .as_i64()
+                .unwrap()
+        }
+    };
+    assert_eq!(
+        n("SELECT count(*) AS n FROM raw_events WHERE distinct_id IN ('ana', 'anon-1')").await,
+        0
+    );
+    assert_eq!(
+        n("SELECT count(*) AS n FROM raw_events WHERE distinct_id = 'bo'").await,
+        1,
+        "others untouched"
+    );
+    assert!(h.state.meta.person("default", "ana").unwrap().is_none());
+    // Anything they send later is dropped.
+    let again =
+        serde_json::json!({"key": h.key, "batch": [{"event": "note_saved", "distinct_id": "ana"}]})
+            .to_string();
+    post(&h, "/capture", again.into_bytes(), false).await;
+    openlens_server::flush_now(&h.state).unwrap();
+    assert_eq!(
+        n("SELECT count(*) AS n FROM raw_events WHERE distinct_id = 'ana'").await,
+        0
+    );
+    // The audit log has the export and the erasure; viewers can't see it.
+    let log = body_text(get(&h, "/audit", Some(&owner), false).await).await;
+    assert!(log.contains("person.forget") && log.contains("person.export"));
+    let viewer = invite(
+        &h,
+        serde_json::json!({"email": "v@example.com", "role": "viewer"}),
+    )
+    .await;
+    assert_eq!(
+        get(&h, "/audit", Some(&viewer), false).await.status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        post_form(&h, "/p/default/people/bo/forget", &viewer, "confirm=bo").await,
+        StatusCode::FORBIDDEN
+    );
+    let api = body_text(get(&h, "/api/audit", None, true).await).await;
+    assert!(api.contains("user.invite"));
+}

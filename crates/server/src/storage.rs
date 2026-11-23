@@ -145,6 +145,7 @@ pub(crate) async fn s3(
             for k in crate::s3::KEYS {
                 let _ = state.meta.set_setting(&format!("s3:{k}"), "");
             }
+            crate::privacy::audit(&state, &headers, None, "storage.s3_remove", "");
             render(
                 &state,
                 Some("S3 destination removed. Local data is untouched.".into()),
@@ -235,6 +236,7 @@ pub(crate) async fn s3(
                     Err(e) => return render(&state, None, Some(e)).await,
                 }
             }
+            crate::privacy::audit(&state, &headers, None, "storage.s3_save", bucket);
             render(&state, Some("Saved. Use *Test the connection* to check it; the next copy runs within the hour.".into()), None).await
         }
     }
@@ -276,6 +278,7 @@ pub(crate) async fn plan(
     match serde_json::to_string(&p) {
         Ok(j) => {
             let _ = state.meta.set_setting("backup:plan", &j);
+            crate::privacy::audit(&state, &headers, None, "backup.plan", &p.schedule);
             render(&state, Some("Backup plan saved.".into()), None).await
         }
         Err(e) => render(&state, None, Some(e.to_string())).await,
@@ -294,6 +297,7 @@ pub(crate) async fn run_now(State(state): State<AppState>, headers: HeaderMap) -
     tokio::spawn(async move {
         let _ = tokio::task::spawn_blocking(move || crate::backups::run(&st, "manual")).await;
     });
+    crate::privacy::audit(&state, &headers, None, "backup.run", "");
     Redirect::to("/settings/storage").into_response()
 }
 

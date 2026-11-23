@@ -196,7 +196,16 @@ pub(crate) async fn save(
     })
     .await;
     match res {
-        Ok(Ok(Some(id))) => Redirect::to(&format!("/p/{id}/settings?done=saved")).into_response(),
+        Ok(Ok(Some(id))) => {
+            crate::privacy::audit(
+                &state,
+                &headers,
+                Some(&id),
+                "project.update",
+                "name, app address, time zone",
+            );
+            Redirect::to(&format!("/p/{id}/settings?done=saved")).into_response()
+        }
         Ok(Ok(None)) => html_page(
             StatusCode::NOT_FOUND,
             openlens_ui::message("Not found", "No such project."),
@@ -228,7 +237,10 @@ pub(crate) async fn rotate(
     let meta = state.meta.clone();
     let pid = id.clone();
     match tokio::task::spawn_blocking(move || meta.rotate_project_key(&pid)).await {
-        Ok(Ok(Some(_))) => Redirect::to(&format!("/p/{id}/settings?done=rotated")).into_response(),
+        Ok(Ok(Some(_))) => {
+            crate::privacy::audit(&state, &headers, Some(&id), "project.rotate_key", "");
+            Redirect::to(&format!("/p/{id}/settings?done=rotated")).into_response()
+        }
         _ => oops("No such project."),
     }
 }
@@ -260,7 +272,10 @@ pub(crate) async fn delete(
     })
     .await
     {
-        Ok(Ok(_)) => Redirect::to("/projects").into_response(),
+        Ok(Ok(_)) => {
+            crate::privacy::audit(&state, &headers, Some(&id), "project.delete", "");
+            Redirect::to("/projects").into_response()
+        }
         Ok(Err(e)) => oops(&e),
         Err(_) => oops("Try again."),
     }
@@ -353,7 +368,10 @@ pub(crate) async fn create(
     })
     .await
     {
-        Ok(Ok(id)) => Redirect::to(&format!("/p/{id}/settings?done=created")).into_response(),
+        Ok(Ok(id)) => {
+            crate::privacy::audit(&state, &headers, Some(&id), "project.create", "");
+            Redirect::to(&format!("/p/{id}/settings?done=created")).into_response()
+        }
         Ok(Err(_)) => oops("A project with that name already exists."),
         Err(_) => oops("Try again."),
     }
@@ -413,6 +431,7 @@ pub(crate) async fn alerts(
     match serde_json::to_string(&a) {
         Ok(j) => {
             let _ = state.meta.set_project_setting(&id, "alerts", &j);
+            crate::privacy::audit(&state, &headers, Some(&id), "alerts.update", "");
             Redirect::to(&format!("/p/{id}/settings?done=alerts#alerts")).into_response()
         }
         Err(e) => oops(&e.to_string()),

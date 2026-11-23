@@ -15,9 +15,11 @@ mod digest;
 mod explore;
 mod features;
 mod flags;
+mod goals;
 mod icon;
 mod manage;
 mod oidc;
+mod privacy;
 mod replay;
 mod reword;
 mod s3;
@@ -286,10 +288,25 @@ fn flush_and_compact(
         }
     }
     if last_compact.elapsed() >= Duration::from_secs(600) {
+        let _guard = privacy::MAINTENANCE
+            .lock()
+            .map_err(|_| "maintenance lock poisoned")?;
         for p in state.meta.projects().map_err(|e| e.to_string())? {
             let now = chrono::Utc::now();
             if let Err(err) = openlens_storage::compact(&state.data_dir, &p.id, now) {
                 tracing::warn!(project = %p.id, %err, "compaction failed");
+            }
+            // People forgotten lately: rewritten out again, in case a
+            // restore or a late flush brought rows back (#230).
+            let recent = state
+                .meta
+                .forgotten_since(&p.id, now.timestamp() - 2 * 86400)
+                .unwrap_or_default();
+            if !recent.is_empty() {
+                let ids: std::collections::HashSet<String> = recent.into_iter().collect();
+                if let Err(err) = openlens_storage::erase(&state.data_dir, &p.id, &ids) {
+                    tracing::warn!(project = %p.id, %err, "erasure re-apply failed");
+                }
             }
             match openlens_storage::prune(&state.data_dir, &p.id, now) {
                 Ok(0) => {}

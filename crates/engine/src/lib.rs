@@ -17,8 +17,10 @@ pub mod churn;
 mod digest;
 mod errors;
 pub mod flows;
+pub mod goals;
 mod insights;
 mod pages;
+mod revenue;
 pub mod stats;
 mod tasks;
 pub use acquisition::{AcquisitionRow, Touch, acquisition};
@@ -31,6 +33,7 @@ pub use pages::{
     ClickMap, Hotspot, MAP_COLUMNS, MAP_ROW, PageStats, SurveyResults, click_map, pages,
     sessions_on_path, survey_results,
 };
+pub use revenue::{Money, Revenue, revenue};
 pub use tasks::{RetentionRow, TaskTime};
 
 /// Engine errors.
@@ -960,6 +963,11 @@ pub async fn live(
         pages: rows(pa?),
         events: ev?,
     })
+}
+
+/// A string as a SQL literal (quotes doubled; control characters refused).
+pub fn sql_literal(s: &str) -> Result<String> {
+    lit(s)
 }
 
 /// Who the users are, from page views of the last 30 days (#225): distinct
