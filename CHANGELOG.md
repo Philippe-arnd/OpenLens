@@ -95,6 +95,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- **Flushes and compactions survive a power cut** (#292): the directory of each new segment, and the WAL directory, are synced before the WAL or the old segments are removed.
 - **Ask's SQL without person-level detail runs on an aggregate-only view** (D-021): no ids, URLs, properties or people tables; people are counted with `count(DISTINCT user_key)`; groups of fewer than 5 people are left out.
 - **Page URLs are stored without their query string** (#290), as `docs/privacy.md` promised: the query and the fragment are dropped at capture, except the campaign tags `utm_*`, `ref` and `gclid`. URLs already stored are cleaned once at startup.
 - The churn page failed with a feature map pushed ("last place" query). It now works with and without a map.

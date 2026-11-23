@@ -191,6 +191,7 @@ impl Writer {
         }
         let wal_seq = max_seq + 1;
         let (wal, wal_path) = open_wal(&wal_dir, wal_seq)?;
+        sync_dir(&wal_dir)?;
         Ok((
             Self {
                 recent: {
@@ -260,10 +261,12 @@ impl Writer {
         // Segments are durable: the WAL that covered them can go.
         let old = self.wal_path.clone();
         self.wal_seq += 1;
-        let (wal, path) = open_wal(&self.root.join("wal"), self.wal_seq)?;
+        let wal_dir = self.root.join("wal");
+        let (wal, path) = open_wal(&wal_dir, self.wal_seq)?;
         self.wal = wal;
         self.wal_path = path;
         fs::remove_file(old)?;
+        sync_dir(&wal_dir)?;
         Ok(n)
     }
 }
@@ -321,9 +324,26 @@ fn write_segments(root: &Path, events: &[Event]) -> Result<()> {
     Ok(())
 }
 
-/// Write a batch to `dir/<uuid-v7>.parquet` atomically (temp file + rename).
+/// Make a directory's entries durable: a `rename` or a removal survives a
+/// power cut only once its directory is synced (#292). No-op where
+/// directories cannot be opened as files (Windows).
+pub fn sync_dir(dir: &Path) -> Result<()> {
+    #[cfg(unix)]
+    File::open(dir)?.sync_all()?;
+    #[cfg(not(unix))]
+    let _ = dir;
+    Ok(())
+}
+
+/// Write a batch to `dir/<uuid-v7>.parquet` atomically (temp file + rename),
+/// durable on return: the file, its directory entry, and a directory just
+/// created in its parent.
 fn write_parquet(dir: &Path, batch: &RecordBatch) -> Result<PathBuf> {
+    let created = !dir.is_dir();
     fs::create_dir_all(dir)?;
+    if created && let Some(parent) = dir.parent() {
+        sync_dir(parent)?;
+    }
     let name = uuid::Uuid::now_v7().to_string();
     let tmp = dir.join(format!(".{name}.tmp"));
     let dst = dir.join(format!("{name}.parquet"));
@@ -336,6 +356,7 @@ fn write_parquet(dir: &Path, batch: &RecordBatch) -> Result<PathBuf> {
     let file = writer.into_inner()?;
     file.sync_all()?;
     fs::rename(&tmp, &dst)?;
+    sync_dir(dir)?;
     Ok(dst)
 }
 
@@ -438,10 +459,12 @@ fn compact_dir(dir: &Path, min_files: usize) -> Result<bool> {
     }
     let merged = arrow::compute::concat_batches(&event_schema(), &batches)?;
     let merged = unique_uuids(&merged)?;
+    // The merged segment is durable before the old ones go.
     write_parquet(dir, &merged)?;
     for f in files {
         fs::remove_file(f)?;
     }
+    sync_dir(dir)?;
     Ok(true)
 }
 
@@ -545,6 +568,7 @@ fn rewrite_files(
                 write_parquet(&date, &merged)?;
             }
             fs::remove_file(&file)?;
+            sync_dir(&date)?;
         }
     }
     Ok(total)
