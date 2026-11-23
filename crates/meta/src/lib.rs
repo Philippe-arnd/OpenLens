@@ -214,6 +214,21 @@ fn migrate(c: &Connection) -> rusqlite::Result<()> {
     if !has_tz {
         c.execute_batch("ALTER TABLE projects ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC'")?;
     }
+    // Feature map versions: who saved them and why (#240).
+    for (col, ddl) in [
+        ("author", "ALTER TABLE feature_maps ADD COLUMN author TEXT"),
+        (
+            "message",
+            "ALTER TABLE feature_maps ADD COLUMN message TEXT",
+        ),
+    ] {
+        let has: bool = c
+            .prepare("SELECT 1 FROM pragma_table_info('feature_maps') WHERE name = ?1")?
+            .exists([col])?;
+        if !has {
+            c.execute_batch(ddl)?;
+        }
+    }
     // Users: name, time zone, disabled, last sign-in (#215, #216).
     for (col, ddl) in [
         ("name", "ALTER TABLE users ADD COLUMN name TEXT"),
@@ -235,6 +250,21 @@ fn migrate(c: &Connection) -> rusqlite::Result<()> {
         }
     }
     Ok(())
+}
+
+/// One stored version of a feature map.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct MapVersion {
+    /// Version number.
+    pub version: i64,
+    /// When it was saved (RFC 3339).
+    pub created_at: String,
+    /// Size of the YAML.
+    pub bytes: i64,
+    /// Who saved it (an email, `owner` or `api (admin token)`).
+    pub author: Option<String>,
+    /// Why, as given with the push (`--message`).
+    pub message: Option<String>,
 }
 
 const USER_SELECT: &str = "SELECT id, email, role, projects, created_at, name, timezone, disabled, last_sign_in FROM users";
@@ -1419,6 +1449,17 @@ impl Meta {
     /// Store a new version of a project's feature map; returns the version.
     /// An identical map is not stored again (same version returned).
     pub fn save_feature_map(&self, project: &str, yaml: &str) -> Result<i64> {
+        self.save_feature_map_by(project, yaml, None, None)
+    }
+
+    /// [`Self::save_feature_map`], recording who saved it and why (#240).
+    pub fn save_feature_map_by(
+        &self,
+        project: &str,
+        yaml: &str,
+        author: Option<&str>,
+        message: Option<&str>,
+    ) -> Result<i64> {
         self.with(|c| {
             let latest: Option<(i64, String)> = c
                 .query_row(
@@ -1434,8 +1475,15 @@ impl Meta {
             }
             let version = latest.map_or(1, |(v, _)| v + 1);
             c.execute(
-                "INSERT INTO feature_maps (project, version, yaml, created_at) VALUES (?1, ?2, ?3, ?4)",
-                params![project, version, yaml, Utc::now().to_rfc3339()],
+                "INSERT INTO feature_maps (project, version, yaml, created_at, author, message) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    project,
+                    version,
+                    yaml,
+                    Utc::now().to_rfc3339(),
+                    author,
+                    message.map(|m| m.chars().take(500).collect::<String>())
+                ],
             )?;
             Ok(version)
         })
@@ -1453,15 +1501,22 @@ impl Meta {
         })
     }
 
-    /// Every stored version of a project's map, newest first:
-    /// `(version, created_at, size in bytes)` (#221).
-    pub fn feature_map_versions(&self, project: &str) -> Result<Vec<(i64, String, i64)>> {
+    /// Every stored version of a project's map, newest first (#221, #240).
+    pub fn feature_map_versions(&self, project: &str) -> Result<Vec<MapVersion>> {
         self.with(|c| {
             let mut st = c.prepare(
-                "SELECT version, created_at, length(yaml) FROM feature_maps WHERE project = ?1 ORDER BY version DESC LIMIT 50",
+                "SELECT version, created_at, length(yaml), author, message FROM feature_maps WHERE project = ?1 ORDER BY version DESC LIMIT 50",
             )?;
             let rows = st
-                .query_map([project], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                .query_map([project], |r| {
+                    Ok(MapVersion {
+                        version: r.get(0)?,
+                        created_at: r.get(1)?,
+                        bytes: r.get(2)?,
+                        author: r.get(3)?,
+                        message: r.get(4)?,
+                    })
+                })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
         })

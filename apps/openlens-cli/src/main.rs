@@ -356,6 +356,16 @@ enum FeaturesCmd {
         /// App source root to scan for data-feature attributes and routes.
         #[arg(long, default_value = ".")]
         src: PathBuf,
+        /// Also measure the pushed map on real usage (score, findings
+        /// with fixes, areas, adoption ladder): needs the server.
+        #[arg(long)]
+        live: bool,
+        /// Project id (with --live).
+        #[arg(long, default_value = "default")]
+        project: String,
+        /// With --live: fail (exit 1) below this score (0-100).
+        #[arg(long)]
+        min_score: Option<u8>,
     },
     /// Validate and upload the map (new version on the server).
     Push {
@@ -365,7 +375,32 @@ enum FeaturesCmd {
         /// Project id.
         #[arg(long, default_value = "default")]
         project: String,
+        /// Why this version (kept in the map's history).
+        #[arg(long, short)]
+        message: Option<String>,
     },
+    /// One feature in depth: definition, health, numbers by role, top
+    /// pages, adoption ladder (JSON).
+    Context {
+        /// Feature key (a former key works too).
+        key: String,
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+    },
+}
+
+/// Percent-encode a query value.
+fn query_value(v: &str) -> String {
+    v.bytes()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
+                (b as char).to_string()
+            } else {
+                format!("%{b:02X}")
+            }
+        })
+        .collect()
 }
 
 /// Plain HTTP is accepted only where the token never crosses the internet:
@@ -554,24 +589,67 @@ fn run(cli: Cli) -> Result<bool, String> {
             Ok(status == 200)
         }
         Command::Features {
-            action: FeaturesCmd::Lint { file, src },
+            action:
+                FeaturesCmd::Lint {
+                    file,
+                    src,
+                    live,
+                    project,
+                    min_score,
+                },
         } => {
             let text = std::fs::read_to_string(file)
                 .map_err(|e| format!("cannot read {}: {e}", file.display()))?;
-            let report = lint::lint(&text, src);
-            let ok = report["valid"] == true && report["errors"].as_u64() == Some(0);
+            let mut report = lint::lint(&text, src);
+            let mut ok = report["valid"] == true && report["errors"].as_u64() == Some(0);
+            if *live {
+                let (status, h) = client()?.call(
+                    "GET",
+                    &format!("/api/projects/{project}/feature-map/health"),
+                    None,
+                )?;
+                if status != 200 {
+                    ok = false;
+                } else if let Some(min) = min_score {
+                    ok &= h["score"].as_u64().unwrap_or(0) >= u64::from(*min);
+                }
+                report["live"] = h;
+            }
             out(&report);
             Ok(ok)
         }
         Command::Features {
-            action: FeaturesCmd::Push { file, project },
+            action:
+                FeaturesCmd::Push {
+                    file,
+                    project,
+                    message,
+                },
         } => {
             let text = std::fs::read_to_string(file)
                 .map_err(|e| format!("cannot read {}: {e}", file.display()))?;
+            let q = message
+                .as_deref()
+                .map(|m| format!("?message={}", query_value(m)))
+                .unwrap_or_default();
             let (status, v) = client()?.call(
                 "PUT",
-                &format!("/api/projects/{project}/feature-map"),
+                &format!("/api/projects/{project}/feature-map{q}"),
                 Some(Body::Text(text)),
+            )?;
+            out(&v);
+            Ok(status == 200)
+        }
+        Command::Features {
+            action: FeaturesCmd::Context { key, project },
+        } => {
+            let (status, v) = client()?.call(
+                "GET",
+                &format!(
+                    "/api/projects/{project}/feature-map/features/{}",
+                    query_value(key)
+                ),
+                None,
             )?;
             out(&v);
             Ok(status == 200)

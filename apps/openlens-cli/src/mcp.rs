@@ -108,6 +108,26 @@ impl Tools for OpenLensTools {
                 input_schema: json!({"type":"object","properties":with(json!({"file":{"type":"string"}})),"required":["file"]}),
             },
             ToolSpec {
+                name: "map_health",
+                description: "How good the pushed feature map is, measured on 30 days of usage: a score out of 100, findings ranked by impact (pages no feature claims, overlapping routes, dead features, success events that never fire or fire on every use, data-feature values not declared, requires contradicted by usage), each with evidence and a YAML fix.",
+                input_schema: json!({"type":"object","properties":proj}),
+            },
+            ToolSpec {
+                name: "map_overview",
+                description: "Every feature with its area, status and numbers (uses, users, users who reached success; 30 days vs the 30 before), the roll-up by area and the adoption ladder. Start here, then feature_context for one feature.",
+                input_schema: json!({"type":"object","properties":proj}),
+            },
+            ToolSpec {
+                name: "feature_context",
+                description: "One feature in depth: its definition (area, requires, renamed_from), health and findings, users and success by role, top pages, the ladder rungs it is on, features that require it and its area peers.",
+                input_schema: json!({"type":"object","properties":with(json!({"key":{"type":"string"}})),"required":["key"]}),
+            },
+            ToolSpec {
+                name: "suggest_map_changes",
+                description: "Changes to make to openlens.features.yaml, ranked by impact, each with its evidence and a YAML patch. Nothing is applied: edit the file, then feature_map_push.",
+                input_schema: json!({"type":"object","properties":with(json!({"limit":{"type":"integer","minimum":1,"maximum":50}}))}),
+            },
+            ToolSpec {
                 name: "verify",
                 description: "Wiring checklist: events arrive, users identified with a role, release tagged, map pushed, events per feature. Each failing check carries its fix.",
                 input_schema: json!({"type":"object","properties":proj}),
@@ -237,6 +257,51 @@ impl Tools for OpenLensTools {
                     "PUT",
                     &format!("/api/projects/{}/feature-map", project(args)),
                     Some(Body::Text(text)),
+                )?;
+                ok_or(st, v)
+            }
+            "map_health" | "map_overview" | "suggest_map_changes" => {
+                let (st, v) = c.call(
+                    "GET",
+                    &format!("/api/projects/{}/feature-map/health", project(args)),
+                    None,
+                )?;
+                let v = ok_or(st, v)?;
+                Ok(match name {
+                    "map_overview" => json!({
+                        "score": v["score"],
+                        "coverage": v["coverage"],
+                        "features": v["features"],
+                        "areas": v["areas"],
+                        "ladder": v["ladder"],
+                    }),
+                    "suggest_map_changes" => {
+                        let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(10);
+                        let limit = usize::try_from(limit.clamp(1, 50)).unwrap_or(10);
+                        let picks: Vec<Value> = v["findings"]
+                            .as_array()
+                            .map(|a| {
+                                a.iter()
+                                    .filter(|f| !f["fix"].is_null())
+                                    .take(limit)
+                                    .map(|f| json!({ "change": f["message"], "evidence": f["evidence"], "patch": f["fix"], "feature": f["feature"], "impact": f["impact"] }))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        json!({ "score": v["score"], "suggestions": picks, "apply": "edit openlens.features.yaml, then feature_map_push" })
+                    }
+                    _ => v,
+                })
+            }
+            "feature_context" => {
+                let key = s(args, "key").ok_or("key is required")?;
+                if !openlens_featuremap::valid_key(&key) {
+                    return Err(format!("`{key}` is not a feature key"));
+                }
+                let (st, v) = c.call(
+                    "GET",
+                    &format!("/api/projects/{}/feature-map/features/{key}", project(args)),
+                    None,
                 )?;
                 ok_or(st, v)
             }

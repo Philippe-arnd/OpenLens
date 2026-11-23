@@ -91,6 +91,18 @@ pub struct Feature {
     /// Event that means "the user got value".
     #[serde(default)]
     pub success: Option<String>,
+    /// Optional group shown on the board and the map (one level, e.g.
+    /// `Writing`), #240.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub area: Option<String>,
+    /// Features a user normally uses before this one (keys), #240: the
+    /// adoption ladder and the map health check them against usage.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requires: Vec<String>,
+    /// Former keys of this feature (#240): events still tagged with an old
+    /// key count for this one, so a rename keeps the history.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub renamed_from: Vec<String>,
 }
 
 /// Entry points of a feature.
@@ -284,6 +296,22 @@ pub fn validate(m: &FeatureMap) -> Vec<Issue> {
             Some(s) if s.trim().is_empty() || s.len() > 200 => v.push(err(format!("{p}.success"), "event names are 1-200 characters")),
             _ => {}
         }
+        if let Some(a) = &f.area
+            && (a.trim().is_empty() || a.chars().count() > 60 || a.chars().any(char::is_control))
+        {
+            v.push(err(
+                format!("{p}.area"),
+                "an area is a short name (1-60 characters), one level: `Writing`, not `Writing/Editor`",
+            ));
+        }
+        for (j, old) in f.renamed_from.iter().enumerate() {
+            if !valid_key(old) {
+                v.push(err(
+                    format!("{p}.renamed_from[{j}]"),
+                    format!("`{old}` is not a valid key"),
+                ));
+            }
+        }
         if f.entry.routes.is_empty() && f.entry.selectors.is_empty() && f.entry.calls.is_empty() {
             v.push(warn(format!("{p}.entry"), format!("no entry point: add a route, or put data-feature=\"{}\" on the feature's main control", f.key)));
         }
@@ -297,7 +325,89 @@ pub fn validate(m: &FeatureMap) -> Vec<Issue> {
             }
         }
     }
+    relations(m, &keys, &mut v);
     v
+}
+
+/// `requires` and `renamed_from` across features: unknown keys, a feature
+/// requiring itself, cycles, and a former key still in use (#240).
+fn relations(m: &FeatureMap, keys: &std::collections::HashSet<String>, v: &mut Vec<Issue>) {
+    let mut former = std::collections::HashMap::new();
+    for (i, f) in m.features.iter().enumerate() {
+        let p = format!("features[{i}]");
+        for (j, r) in f.requires.iter().enumerate() {
+            if r == &f.key {
+                v.push(err(
+                    format!("{p}.requires[{j}]"),
+                    "a feature cannot require itself",
+                ));
+            } else if !keys.contains(r) {
+                v.push(err(
+                    format!("{p}.requires[{j}]"),
+                    format!("no feature `{r}`: list keys of features declared in this map"),
+                ));
+            }
+        }
+        for (j, old) in f.renamed_from.iter().enumerate() {
+            if keys.contains(old) {
+                v.push(err(
+                    format!("{p}.renamed_from[{j}]"),
+                    format!("`{old}` is still the key of a feature: a former key cannot be in use"),
+                ));
+            } else if let Some(other) = former.insert(old.clone(), f.key.clone()) {
+                v.push(err(
+                    format!("{p}.renamed_from[{j}]"),
+                    format!("`{old}` is already listed as a former key of `{other}`"),
+                ));
+            }
+        }
+    }
+    // Cycles: depth-first search over `requires`.
+    let idx: std::collections::HashMap<&str, usize> = m
+        .features
+        .iter()
+        .enumerate()
+        .map(|(i, f)| (f.key.as_str(), i))
+        .collect();
+    // 0 = unseen, 1 = on the stack, 2 = done.
+    let mut state = vec![0u8; m.features.len()];
+    for start in 0..m.features.len() {
+        if state[start] != 0 {
+            continue;
+        }
+        let mut stack = vec![(start, 0usize)];
+        state[start] = 1;
+        while let Some(&(node, next)) = stack.last() {
+            let f = &m.features[node];
+            if let Some(r) = f.requires.get(next) {
+                if let Some(top) = stack.last_mut() {
+                    top.1 += 1;
+                }
+                let Some(&t) = idx.get(r.as_str()) else {
+                    continue;
+                };
+                match state[t] {
+                    0 => {
+                        state[t] = 1;
+                        stack.push((t, 0));
+                    }
+                    1 if t != node => {
+                        v.push(err(
+                            format!("features[{t}].requires"),
+                            format!(
+                                "`requires` makes a loop through `{}` and `{}`: a ladder goes one way",
+                                m.features[t].key, f.key
+                            ),
+                        ));
+                    }
+                    _ => {}
+                }
+            } else {
+                state[node] = 2;
+                stack.pop();
+            }
+        }
+    }
 }
 
 /// Glob match with `*`, case-insensitive.
@@ -334,6 +444,24 @@ impl FeatureMap {
             .iter()
             .find(|r| r.matches.iter().any(|m| glob(m.trim(), raw.trim())))
             .map(|r| r.key.as_str())
+    }
+
+    /// Every feature whose routes match this path, in map order (the first
+    /// one wins; more than one is an overlap, #240).
+    pub fn features_for_path(&self, path: &str) -> Vec<&str> {
+        self.features
+            .iter()
+            .filter(|f| f.entry.routes.iter().any(|r| route_matches(r, path)))
+            .map(|f| f.key.as_str())
+            .collect()
+    }
+
+    /// The feature a key belongs to now: itself, or the feature that lists
+    /// it in `renamed_from`.
+    pub fn current_key<'a>(&'a self, key: &'a str) -> Option<&'a str> {
+        self.features.iter().find_map(|f| {
+            (f.key == key || f.renamed_from.iter().any(|o| o == key)).then_some(f.key.as_str())
+        })
     }
 
     /// Feature whose route matches this path.
@@ -384,7 +512,22 @@ impl FeatureMap {
     /// else the feature whose success event it is, else the first feature
     /// whose route matches `path`.
     pub fn feature_sql(&self) -> String {
-        let mut s = String::from("CASE WHEN feature IS NOT NULL THEN feature");
+        let mut s = String::from("CASE");
+        for f in &self.features {
+            if !f.renamed_from.is_empty() {
+                let olds: Vec<String> = f
+                    .renamed_from
+                    .iter()
+                    .map(|o| format!("'{}'", sql_escape(o)))
+                    .collect();
+                s.push_str(&format!(
+                    " WHEN feature IN ({}) THEN '{}'",
+                    olds.join(", "),
+                    sql_escape(&f.key)
+                ));
+            }
+        }
+        s.push_str(" WHEN feature IS NOT NULL THEN feature");
         for f in &self.features {
             if let Some(ev) = &f.success {
                 s.push_str(&format!(

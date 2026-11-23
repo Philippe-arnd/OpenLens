@@ -86,3 +86,68 @@ fn sql_expressions_quote_hostile_values() {
     assert!(m.role_sql().contains("'o''brien'"));
     assert!(m.feature_sql().contains("regexp_like(path, '^/x/?$')"));
 }
+
+#[test]
+fn area_requires_and_renamed_from_are_validated() {
+    let ok = parse(
+        "features:\n  - key: write\n    name: Write\n    area: Writing\n    success: saved\n    renamed_from: [editor]\n    entry: {routes: [/write]}\n  - key: share\n    name: Share\n    area: Writing\n    requires: [write]\n    success: shared\n    entry: {routes: [/share/*]}\n",
+    );
+    assert!(ok.map.is_some(), "{:?}", ok.issues);
+    let m = ok.map.unwrap_or_default();
+    assert_eq!(m.current_key("editor"), Some("write"));
+    assert_eq!(m.current_key("share"), Some("share"));
+    assert_eq!(m.current_key("nope"), None);
+    assert!(
+        m.feature_sql()
+            .starts_with("CASE WHEN feature IN ('editor') THEN 'write'")
+    );
+    let bad = |src: &str, path: &str| {
+        let p = parse(src);
+        assert!(p.map.is_none(), "{src}");
+        assert!(
+            p.issues.iter().any(|i| i.path.starts_with(path)),
+            "{path}: {:?}",
+            p.issues
+        );
+    };
+    let base = "  - key: a\n    name: A\n    success: x\n";
+    bad(
+        &format!("features:\n{base}    requires: [ghost]\n"),
+        "features[0].requires[0]",
+    );
+    bad(
+        &format!("features:\n{base}    requires: [a]\n"),
+        "features[0].requires[0]",
+    );
+    bad(
+        &format!(
+            "features:\n{base}    requires: [b]\n  - key: b\n    name: B\n    requires: [c]\n  - key: c\n    name: C\n    requires: [a]\n"
+        ),
+        "features[",
+    );
+    bad(
+        &format!("features:\n{base}    area: \"\"\n"),
+        "features[0].area",
+    );
+    bad(
+        &format!("features:\n{base}  - key: b\n    name: B\n    renamed_from: [a]\n"),
+        "features[1].renamed_from[0]",
+    );
+    // A chain without a loop is fine.
+    let chain = parse(&format!(
+        "features:\n{base}  - key: b\n    name: B\n    requires: [a]\n  - key: c\n    name: C\n    requires: [a, b]\n"
+    ));
+    assert!(chain.map.is_some(), "{:?}", chain.issues);
+}
+
+#[test]
+fn overlapping_routes_are_all_listed() {
+    let m = parse(
+        "features:\n  - key: docs\n    name: Docs\n    entry: {routes: [/docs/*]}\n  - key: edit\n    name: Edit\n    entry: {routes: [/docs/:id/edit]}\n",
+    )
+    .map
+    .unwrap_or_default();
+    assert_eq!(m.features_for_path("/docs/7/edit"), vec!["docs", "edit"]);
+    assert_eq!(m.features_for_path("/docs/7"), vec!["docs"]);
+    assert!(m.features_for_path("/other").is_empty());
+}

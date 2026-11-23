@@ -131,6 +131,18 @@ pub(crate) async fn page(
     let parsed = openlens_featuremap::parse(&yaml);
     let live = live(&state, &p.id, parsed.map.as_ref()).await;
     let history = state.meta.feature_map_versions(&p.id).unwrap_or_default();
+    let health = match parsed.map.as_ref() {
+        Some(m) => {
+            let f = openlens_engine::Filters {
+                tz: p.timezone.clone(),
+                ..openlens_engine::Filters::default()
+            };
+            openlens_engine::map_health(&state.query, &p.id, m, &f)
+                .await
+                .ok()
+        }
+        None => None,
+    };
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
         name: &p.name,
@@ -151,6 +163,7 @@ pub(crate) async fn page(
             issues: &parsed.issues,
             live: &live,
             history: &history,
+            health: health.as_ref(),
             admin: v.admin,
             draft: None,
             notice: notice.as_deref(),
@@ -164,6 +177,9 @@ pub(crate) struct EditForm {
     /// `check` (lint + diff) or `save`.
     #[serde(default)]
     action: String,
+    /// Why (kept with the version).
+    #[serde(default)]
+    message: Option<String>,
 }
 
 /// `POST /p/{id}/features`: check (lint and diff) or save an edit (admins).
@@ -192,12 +208,23 @@ pub(crate) async fn edit(
         );
     }
     let yaml = f.yaml.replace("\r\n", "\n");
-    let parsed = openlens_featuremap::parse(&yaml);
+    let mut parsed = openlens_featuremap::parse(&yaml);
+    if let Some(next) = &parsed.map {
+        let prev = crate::load_map(&state, &p.id).await;
+        let w = rename_warnings(prev.as_ref().map(|(m, _)| m), next);
+        parsed.issues.extend(w);
+    }
     if f.action == "save" && parsed.map.is_some() {
         let meta = state.meta.clone();
         let (pid, y) = (p.id.clone(), yaml.clone());
         let before = state.meta.feature_map(&p.id).ok().flatten().map(|(v, _)| v);
-        return match tokio::task::spawn_blocking(move || meta.save_feature_map(&pid, &y)).await {
+        let author = crate::privacy::actor(&state, &headers);
+        let message = f.message.clone().filter(|m| !m.trim().is_empty());
+        return match tokio::task::spawn_blocking(move || {
+            meta.save_feature_map_by(&pid, &y, Some(&author), message.as_deref())
+        })
+        .await
+        {
             Ok(Ok(v)) => {
                 let done = if Some(v) == before {
                     "same".to_owned()
@@ -246,6 +273,7 @@ pub(crate) async fn edit(
             issues: &parsed.issues,
             live: &live,
             history: &history,
+            health: None,
             admin: true,
             draft: Some(&stored),
             notice: None,
@@ -297,4 +325,123 @@ pub(crate) async fn download(
         h.insert(header::CONTENT_DISPOSITION, v);
     }
     r
+}
+
+/// `renamed_from` keys that were not features of the previous version: kept
+/// (the app may have tagged them without declaring them), but flagged (#240).
+pub(crate) fn rename_warnings(
+    previous: Option<&openlens_featuremap::FeatureMap>,
+    next: &openlens_featuremap::FeatureMap,
+) -> Vec<openlens_featuremap::Issue> {
+    let Some(prev) = previous else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (i, f) in next.features.iter().enumerate() {
+        for (j, old) in f.renamed_from.iter().enumerate() {
+            if prev.current_key(old).is_none() {
+                out.push(openlens_featuremap::Issue {
+                    level: "warning",
+                    path: format!("features[{i}].renamed_from[{j}]"),
+                    message: format!(
+                        "`{old}` was not a feature of the previous version: fine if the app tagged it, otherwise remove it"
+                    ),
+                });
+            }
+        }
+    }
+    out
+}
+
+async fn api_guard(
+    state: &AppState,
+    headers: &HeaderMap,
+    id: &str,
+) -> Result<(openlens_meta::Project, openlens_featuremap::FeatureMap), Box<Response>> {
+    let bad = |s: StatusCode, m: &str| {
+        Box::new((s, axum::Json(serde_json::json!({ "error": m }))).into_response())
+    };
+    if !auth::has_bearer(state, headers) {
+        return Err(bad(StatusCode::UNAUTHORIZED, "admin bearer token required"));
+    }
+    let Some(p) = project(state, id).await else {
+        return Err(bad(StatusCode::NOT_FOUND, "unknown project"));
+    };
+    match crate::load_map(state, &p.id).await {
+        Some((m, _)) => Ok((p, m)),
+        None => Err(bad(
+            StatusCode::NOT_FOUND,
+            "no feature map yet: push one (openlens-cli features push)",
+        )),
+    }
+}
+
+/// `GET /api/projects/{id}/feature-map/health`: score, findings with fixes,
+/// per-feature numbers, areas and the adoption ladder (#240).
+pub(crate) async fn api_health(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(q): Query<crate::api::FilterQuery>,
+) -> Response {
+    let (p, m) = match api_guard(&state, &headers, &id).await {
+        Ok(x) => x,
+        Err(r) => return *r,
+    };
+    match openlens_engine::map_health(&state.query, &p.id, &m, &q.filters(&p.timezone)).await {
+        Ok(h) => axum::Json(h).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// `GET /api/projects/{id}/feature-map/features/{key}`: one feature in
+/// depth, for agents (#240).
+pub(crate) async fn api_feature(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((id, key)): Path<(String, String)>,
+    Query(q): Query<crate::api::FilterQuery>,
+) -> Response {
+    let (p, m) = match api_guard(&state, &headers, &id).await {
+        Ok(x) => x,
+        Err(r) => return *r,
+    };
+    match openlens_engine::feature_context(&state.query, &p.id, &m, &q.filters(&p.timezone), &key)
+        .await
+    {
+        Ok(Some(c)) => axum::Json(c).into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            axum::Json(serde_json::json!({ "error": format!("no feature `{key}` in the map") })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// `GET /api/projects/{id}/feature-map/versions`: who changed the map,
+/// when and why (#240).
+pub(crate) async fn api_versions(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    if !auth::has_bearer(&state, &headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let Some(p) = project(&state, &id).await else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    axum::Json(serde_json::json!({
+        "versions": state.meta.feature_map_versions(&p.id).unwrap_or_default()
+    }))
+    .into_response()
 }
