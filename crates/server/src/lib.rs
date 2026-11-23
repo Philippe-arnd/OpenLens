@@ -313,6 +313,7 @@ fn flush_and_compact(
             .map_err(|_| "maintenance lock poisoned")?;
         for p in state.meta.projects().map_err(|e| e.to_string())? {
             let now = chrono::Utc::now();
+            clean_stored_urls(state, &p.id);
             if let Err(err) = openlens_storage::compact(&state.data_dir, &p.id, now) {
                 tracing::warn!(project = %p.id, %err, "compaction failed");
             }
@@ -342,6 +343,34 @@ fn flush_and_compact(
         return Ok(std::time::Instant::now());
     }
     Ok(*last_compact)
+}
+
+/// One-off rewrite of the URLs stored before capture cleaned them (#290),
+/// recorded per project so it runs once. The caller holds the maintenance
+/// lock.
+fn clean_stored_urls(state: &AppState, project: &str) {
+    const DONE: &str = "urls_cleaned";
+    if state
+        .meta
+        .project_setting(project, DONE)
+        .ok()
+        .flatten()
+        .is_some()
+    {
+        return;
+    }
+    let run = flush_now(state).and_then(|_| {
+        openlens_storage::clean_urls(&state.data_dir, project).map_err(|e| e.to_string())
+    });
+    match run {
+        Ok(n) => {
+            tracing::info!(project, n, "query strings removed from stored URLs");
+            if let Err(err) = state.meta.set_project_setting(project, DONE, "1") {
+                tracing::warn!(project, %err, "URL cleaning not recorded");
+            }
+        }
+        Err(err) => tracing::warn!(project, %err, "URL cleaning failed"),
+    }
 }
 
 /// Flush everything still buffered (used on shutdown).

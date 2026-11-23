@@ -249,7 +249,7 @@ fn normalize_event(
             return Err(EventError::TooDeep);
         }
     }
-    let url = take_dim(&mut props, "$current_url")?;
+    let url = take_dim(&mut props, "$current_url")?.map(|u| clean_url(&u));
     let path = take_dim(&mut props, "$pathname")?;
     let feature = take_dim(&mut props, "$feature")?;
     let role = take_dim(&mut props, "$role")?;
@@ -323,6 +323,35 @@ fn clean_opt(
     match s.map(str::trim).filter(|s| !s.is_empty()) {
         Some(v) => bounded(v, max, field).map(|()| Some(v.to_owned())),
         None => Ok(None),
+    }
+}
+
+/// Query parameters kept in a stored page URL: campaign tags only.
+const KEPT_PARAMS: [&str; 2] = ["ref", "gclid"];
+
+/// A page URL as stored: no fragment, and no query parameter except
+/// campaign tags (`utm_*`, `ref`, `gclid`). Query strings carry reset tokens,
+/// magic links and e-mail addresses, which are never stored (docs/privacy.md).
+pub fn clean_url(url: &str) -> String {
+    let url = url.split('#').next().unwrap_or_default();
+    let Some((base, query)) = url.split_once('?') else {
+        return url.to_owned();
+    };
+    let kept: Vec<&str> = query
+        .split('&')
+        .filter(|kv| {
+            let key = kv
+                .split('=')
+                .next()
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            key.starts_with("utm_") || KEPT_PARAMS.contains(&key.as_str())
+        })
+        .collect();
+    if kept.is_empty() {
+        base.to_owned()
+    } else {
+        format!("{base}?{}", kept.join("&"))
     }
 }
 

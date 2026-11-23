@@ -6,7 +6,7 @@
 
 use chrono::{Duration, TimeZone, Utc};
 use openlens_event::Event;
-use openlens_storage::{FlushPolicy, Writer, compact, count_rows, valid_project};
+use openlens_storage::{FlushPolicy, Writer, clean_urls, compact, count_rows, valid_project};
 
 fn ev(project: &str, ts: chrono::DateTime<Utc>) -> Event {
     Event {
@@ -174,4 +174,20 @@ fn a_resent_batch_is_stored_once() {
         2,
         "compaction keeps one of each"
     );
+}
+
+#[test]
+fn stored_query_strings_are_cleaned_once_and_rows_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let t = Utc.with_ymd_and_hms(2026, 11, 21, 9, 30, 0).unwrap();
+    let mut dirty = ev("p", t);
+    dirty.url = Some("https://app.test/reset?token=SECRET123".into());
+    let mut clean = ev("p", t);
+    clean.url = Some("https://app.test/".into());
+    w.append(&[dirty, clean]).unwrap();
+    w.flush().unwrap();
+    assert!(clean_urls(dir.path(), "p").unwrap() > 0);
+    assert_eq!(clean_urls(dir.path(), "p").unwrap(), 0);
+    assert_eq!(count_rows(dir.path(), "p").unwrap(), 2);
 }

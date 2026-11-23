@@ -451,11 +451,73 @@ fn compact_dir(dir: &Path, min_files: usize) -> Result<bool> {
 /// and nothing else may rewrite the files meanwhile (the caller holds the
 /// maintenance lock).
 pub fn erase(root: &Path, project: &str, ids: &HashSet<String>) -> Result<usize> {
-    let pdir = project_dir(root, project)?;
-    if ids.is_empty() || !pdir.is_dir() {
+    if ids.is_empty() {
         return Ok(0);
     }
-    let mut removed = 0;
+    rewrite_files(root, project, |b| {
+        let Some(col) = b
+            .column_by_name("distinct_id")
+            .and_then(|c| c.as_any().downcast_ref::<arrow::array::StringArray>())
+        else {
+            return Ok((b.clone(), 0));
+        };
+        let keep: arrow::array::BooleanArray = (0..col.len())
+            .map(|i| Some(col.is_null(i) || !ids.contains(col.value(i))))
+            .collect();
+        let gone = b.num_rows() - keep.true_count();
+        Ok((arrow::compute::filter_record_batch(b, &keep)?, gone))
+    })
+}
+
+/// Clean the page URL of every stored event with
+/// [`openlens_event::clean_url`] (#290): files written before URLs were
+/// cleaned at capture still hold query strings. Returns the number of
+/// URLs changed. Same preconditions as [`erase`].
+pub fn clean_urls(root: &Path, project: &str) -> Result<usize> {
+    rewrite_files(root, project, |b| {
+        let Some((idx, col)) = b.schema().index_of("url").ok().and_then(|i| {
+            b.column(i)
+                .as_any()
+                .downcast_ref::<arrow::array::StringArray>()
+                .map(|c| (i, c.clone()))
+        }) else {
+            return Ok((b.clone(), 0));
+        };
+        let mut changed = 0;
+        let cleaned: arrow::array::StringArray = col
+            .iter()
+            .map(|v| {
+                v.map(|u| {
+                    let c = openlens_event::clean_url(u);
+                    if c != u {
+                        changed += 1;
+                    }
+                    c
+                })
+            })
+            .collect();
+        if changed == 0 {
+            return Ok((b.clone(), 0));
+        }
+        let mut cols = b.columns().to_vec();
+        cols[idx] = Arc::new(cleaned) as ArrayRef;
+        Ok((RecordBatch::try_new(b.schema(), cols)?, changed))
+    })
+}
+
+/// Rewrite each day file of a project through `f`, which returns the new
+/// batch and how many rows it changed. A file is rewritten only when
+/// something changed, and deleted when nothing is left. Returns the total.
+fn rewrite_files(
+    root: &Path,
+    project: &str,
+    mut f: impl FnMut(&RecordBatch) -> Result<(RecordBatch, usize)>,
+) -> Result<usize> {
+    let pdir = project_dir(root, project)?;
+    if !pdir.is_dir() {
+        return Ok(0);
+    }
+    let mut total = 0;
     for date in fs::read_dir(&pdir)? {
         let date = date?.path();
         if !date.is_dir() {
@@ -465,37 +527,27 @@ pub fn erase(root: &Path, project: &str, ids: &HashSet<String>) -> Result<usize>
             .filter_map(|e| e.ok().map(|e| e.path()))
             .filter(|p| p.extension().is_some_and(|x| x == "parquet"))
             .collect();
-        for f in files {
-            let reader = ParquetRecordBatchReaderBuilder::try_new(File::open(&f)?)?.build()?;
-            let mut kept = Vec::new();
-            let mut gone = 0;
+        for file in files {
+            let reader = ParquetRecordBatchReaderBuilder::try_new(File::open(&file)?)?.build()?;
+            let mut out = Vec::new();
+            let mut changed = 0;
             for b in reader {
-                let b = b?;
-                let Some(col) = b
-                    .column_by_name("distinct_id")
-                    .and_then(|c| c.as_any().downcast_ref::<arrow::array::StringArray>())
-                else {
-                    kept.push(b);
-                    continue;
-                };
-                let keep: arrow::array::BooleanArray = (0..col.len())
-                    .map(|i| Some(col.is_null(i) || !ids.contains(col.value(i))))
-                    .collect();
-                gone += b.num_rows() - keep.true_count();
-                kept.push(arrow::compute::filter_record_batch(&b, &keep)?);
+                let (nb, n) = f(&b?)?;
+                changed += n;
+                out.push(nb);
             }
-            if gone == 0 {
+            if changed == 0 {
                 continue;
             }
-            removed += gone;
-            let merged = arrow::compute::concat_batches(&event_schema(), &kept)?;
+            total += changed;
+            let merged = arrow::compute::concat_batches(&event_schema(), &out)?;
             if merged.num_rows() > 0 {
                 write_parquet(&date, &merged)?;
             }
-            fs::remove_file(&f)?;
+            fs::remove_file(&file)?;
         }
     }
-    Ok(removed)
+    Ok(total)
 }
 
 /// Keep the first row of each uuid (a resent event is stored once).

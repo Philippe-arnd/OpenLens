@@ -140,3 +140,21 @@ fn environment_defaults_to_production_and_aliases_fold() {
     assert_eq!(out.events[2].release.as_deref(), Some("v1.2.0"));
     assert!(!out.events[2].properties.contains("$release"));
 }
+
+#[test]
+fn stored_urls_drop_query_and_fragment_but_keep_campaign_tags() {
+    let now = Utc::now();
+    let url = "https://app.test/reset?token=SECRET123&utm_source=news&email=jean%40exemple.fr&gclid=g1#frag";
+    let batch = CaptureBatch {
+        batch: vec![raw("$pageview", json!({ "$current_url": url }))],
+        ..Default::default()
+    };
+    let out = normalize_batch("p", batch, now).unwrap();
+    let stored = out.events[0].url.clone().unwrap();
+    assert!(stored.starts_with("https://app.test/reset"));
+    for secret in ["SECRET123", "jean", "frag"] {
+        assert!(!stored.contains(secret), "{stored}");
+    }
+    assert!(stored.contains("utm_source=news") && stored.contains("gclid=g1"));
+    assert!(!out.events[0].properties.contains("SECRET123"));
+}
