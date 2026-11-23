@@ -177,6 +177,16 @@ CREATE TABLE IF NOT EXISTS share_links (
   created_at INTEGER NOT NULL,
   created_by TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS notes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project TEXT NOT NULL,
+  day TEXT NOT NULL,
+  author TEXT NOT NULL,
+  author_id TEXT NOT NULL,
+  body TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS notes_project ON notes (project, day);
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   email TEXT NOT NULL UNIQUE,
@@ -312,6 +322,9 @@ fn share_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ShareLink> {
 
 const SHARE_COLS: &str =
     "id, project, scope, environment, release, embed, expires_at, created_at, created_by";
+
+/// A timeline note: `(id, day, author, author_id, body)` (#267).
+pub type Note = (i64, String, String, String, String);
 
 /// One audit entry: `(at, actor, project, action, detail)` (#230).
 pub type AuditEntry = (i64, String, Option<String>, String, String);
@@ -612,6 +625,7 @@ impl Meta {
                 "incidents",
                 "forgotten",
                 "share_links",
+                "notes",
             ] {
                 tx.execute(&format!("DELETE FROM {table} WHERE project = ?1"), [id])?;
             }
@@ -1042,6 +1056,74 @@ impl Meta {
                 "DELETE FROM share_links WHERE project = ?1 AND id = ?2",
                 params![project, id],
             )? == 1)
+        })
+    }
+
+    /// Add a note to a project's timeline (#267): a day and 1–500 chars.
+    pub fn add_note(
+        &self,
+        project: &str,
+        day: &str,
+        author_id: &str,
+        author: &str,
+        body: &str,
+    ) -> Result<i64> {
+        let body = body.trim();
+        if body.is_empty() || body.chars().count() > 500 {
+            return Err(MetaError::Invalid("a note is 1 to 500 characters"));
+        }
+        if chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").is_err() {
+            return Err(MetaError::Invalid("the day is YYYY-MM-DD"));
+        }
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO notes (project, day, author, author_id, body, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![project, day, author, author_id, body, Utc::now().timestamp()],
+            )?;
+            Ok(c.last_insert_rowid())
+        })
+    }
+
+    /// Notes from `since` (YYYY-MM-DD) on, newest first:
+    /// `(id, day, author, author_id, body)`.
+    pub fn notes(&self, project: &str, since: &str) -> Result<Vec<Note>> {
+        self.with(|c| {
+            let mut st = c.prepare(
+                "SELECT id, day, author, author_id, body FROM notes WHERE project = ?1 AND day >= ?2 ORDER BY day DESC, id DESC LIMIT 500",
+            )?;
+            let rows = st
+                .query_map(params![project, since], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// Delete a note if `author_id` wrote it or `admin`.
+    pub fn delete_note(
+        &self,
+        project: &str,
+        id: i64,
+        author_id: &str,
+        admin: bool,
+    ) -> Result<bool> {
+        self.with(|c| {
+            Ok(c.execute(
+                "DELETE FROM notes WHERE project = ?1 AND id = ?2 AND (?4 OR author_id = ?3)",
+                params![project, id, author_id, admin],
+            )? == 1)
+        })
+    }
+
+    /// A project's audit entries since `since` (Unix seconds), oldest first.
+    pub fn project_audit(&self, project: &str, since: i64) -> Result<Vec<AuditEntry>> {
+        self.with(|c| {
+            let mut st = c.prepare(
+                "SELECT at, actor, project, action, detail FROM audit WHERE project = ?1 AND at >= ?2 ORDER BY id LIMIT 1000",
+            )?;
+            let rows = st
+                .query_map(params![project, since], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
         })
     }
 

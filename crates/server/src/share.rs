@@ -207,7 +207,7 @@ pub(crate) async fn view(
                 else {
                     return not_found();
                 };
-                openlens_ui::render_shared(|| openlens_ui::board(&info, &b, &f, "", &[], None))
+                openlens_ui::render_shared(|| openlens_ui::board(&info, &b, &f, "", &[], None, &[]))
             };
             let h = markup.into_string();
             if let Ok(mut c) = CACHE.lock() {

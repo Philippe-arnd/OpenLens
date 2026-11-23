@@ -104,21 +104,35 @@ function uuid() {
     return (c === "x" ? r : r & 3 | 8).toString(16);
   });
 }
+var memory = /* @__PURE__ */ new Map();
+var memStore = {
+  getItem: (k) => {
+    var _a;
+    return (_a = memory.get(k)) != null ? _a : null;
+  },
+  setItem: (k, v) => void memory.set(k, v),
+  removeItem: (k) => void memory.delete(k)
+};
+function store() {
+  return (cfg == null ? void 0 : cfg.cookieless) ? memStore : localStorage;
+}
+var COOKIELESS = "$cookieless";
 function storageKey() {
   var _a;
   return `openlens_${(_a = cfg == null ? void 0 : cfg.key) != null ? _a : ""}`;
 }
 function load() {
   try {
-    const raw = localStorage.getItem(storageKey());
+    const raw = store().getItem(storageKey());
     if (raw) return JSON.parse(raw);
   } catch {
   }
+  if (cfg == null ? void 0 : cfg.cookieless) return { anon: COOKIELESS, dims: {}, sid: COOKIELESS, last: 0 };
   return { anon: uuid(), dims: {}, sid: uuid(), last: 0 };
 }
 function refresh() {
   try {
-    const raw = localStorage.getItem(storageKey());
+    const raw = store().getItem(storageKey());
     if (raw) state = { ...state, ...JSON.parse(raw) };
   } catch {
   }
@@ -135,13 +149,13 @@ function isBot() {
 }
 function save() {
   try {
-    localStorage.setItem(storageKey(), JSON.stringify(state));
+    store().setItem(storageKey(), JSON.stringify(state));
   } catch {
   }
 }
 function touchSession(now) {
   const dayChanged = new Date(now).toISOString().slice(0, 10) !== new Date(state.last).toISOString().slice(0, 10);
-  if (!state.last || now - state.last > SESSION_GAP || dayChanged) state.sid = uuid();
+  if (!state.last || now - state.last > SESSION_GAP || dayChanged) state.sid = (cfg == null ? void 0 : cfg.cookieless) ? COOKIELESS : uuid();
   state.last = now;
 }
 function base() {
@@ -183,7 +197,7 @@ function maybeSurvey(event) {
   if (surveyOpen || consent !== "granted" || !cfg) return;
   const done = (k) => {
     try {
-      return localStorage.getItem(`${storageKey()}_survey_${k}`) === "1";
+      return store().getItem(`${storageKey()}_survey_${k}`) === "1";
     } catch {
       return true;
     }
@@ -193,7 +207,7 @@ function maybeSurvey(event) {
   surveyOpen = true;
   const close = (props) => {
     try {
-      localStorage.setItem(`${storageKey()}_survey_${s.key}`, "1");
+      store().setItem(`${storageKey()}_survey_${s.key}`, "1");
     } catch {
     }
     surveyOpen = false;
@@ -227,7 +241,7 @@ function loadFlags() {
     if (j == null ? void 0 : j.flags) {
       activeFlags = j.flags;
       try {
-        localStorage.setItem(`${storageKey()}_flags`, JSON.stringify(activeFlags));
+        store().setItem(`${storageKey()}_flags`, JSON.stringify(activeFlags));
       } catch {
       }
     }
@@ -256,7 +270,7 @@ function setConsent(granted) {
   if (!granted) queue = [];
   else {
     flush();
-    if ((cfg == null ? void 0 : cfg.replay) !== false) startReplay();
+    if ((cfg == null ? void 0 : cfg.replay) !== false && !(cfg == null ? void 0 : cfg.cookieless)) startReplay();
   }
 }
 function flush(beacon = false) {
@@ -482,7 +496,7 @@ function init(config) {
   origFetch = (_b = window.fetch) == null ? void 0 : _b.bind(window);
   state = load();
   try {
-    activeFlags = JSON.parse(localStorage.getItem(`${storageKey()}_flags`) || "[]");
+    activeFlags = JSON.parse(store().getItem(`${storageKey()}_flags`) || "[]");
   } catch {
     activeFlags = [];
   }
@@ -494,7 +508,7 @@ function init(config) {
     if (doc.prerendering) document.addEventListener("prerenderingchange", autocapture, { once: true });
     else autocapture();
   }
-  if (config.replay !== false && consent === "granted") startReplay();
+  if (config.replay !== false && !config.cookieless && consent === "granted") startReplay();
   timer = setInterval(() => flush(), 5e3);
   addEventListener("visibilitychange", () => document.visibilityState === "hidden" && flush(true));
   addEventListener("pagehide", () => flush(true));

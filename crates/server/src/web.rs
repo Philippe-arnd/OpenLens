@@ -59,6 +59,14 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/p/{project}/watch", get(watch_churned))
         .route("/p/{project}/heatmap", get(heatmap_page))
         .route("/p/{project}/icon", get(crate::icon::icon))
+        .route(
+            "/p/{project}/timeline",
+            get(crate::timeline::page).post(crate::timeline::add),
+        )
+        .route(
+            "/p/{project}/timeline/{nid}/delete",
+            post(crate::timeline::delete),
+        )
         .route("/p/{project}/settings/share", post(crate::share::create))
         .route(
             "/p/{project}/settings/share/{lid}/revoke",
@@ -523,6 +531,16 @@ async fn board(
         openlens_engine::revenue(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f)
     );
     let revenue = revenue.ok().flatten();
+    let releases: Vec<(String, String)> = board
+        .as_ref()
+        .map(|b| {
+            b.releases
+                .iter()
+                .map(|r| (r.release.clone(), r.first_seen.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let marks = crate::timeline::collect(&state, &p.id, &releases, 14);
     match board {
         Ok(b) => html(
             StatusCode::OK,
@@ -537,6 +555,7 @@ async fn board(
                     .map(|p| (p.title, p.next_step))
                     .collect::<Vec<_>>(),
                 revenue.as_ref(),
+                &marks,
             ),
         ),
         Err(e) => html(
@@ -1343,6 +1362,7 @@ pub(crate) async fn access_layer(
         if req.method() != axum::http::Method::GET
             && !v.admin
             && !crate::comments::is_comment_path(&path)
+            && !path.contains("/timeline")
         {
             return html(
                 StatusCode::FORBIDDEN,
