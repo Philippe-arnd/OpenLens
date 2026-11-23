@@ -1,0 +1,74 @@
+name: Screenshots
+
+# README and site images regenerated from the released UI (#246): after
+# each stable release (and on demand), demo data, a real browser, first
+# screen at 1440×900 ×2 plus a phone; optimised with oxipng. A PR with the
+# new images is opened (and merges itself when it can), so the README, the
+# Pages site (#241) and the next notes show what was released.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: screenshots
+  cancel-in-progress: true
+
+jobs:
+  shots:
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: build
+        run: cargo build -p openlens -p xtask
+      - name: browser
+        working-directory: scripts/e2e
+        run: |
+          npm init -y > /dev/null
+          npm install --no-audit --no-fund playwright@1
+          npx playwright install --with-deps chromium
+          sudo apt-get install -y -qq oxipng || true
+      - name: take
+        run: |
+          ./target/debug/xtask demo $RUNNER_TEMP/demo
+          OPENLENS_DATA_DIR=$RUNNER_TEMP/demo OPENLENS_ADDR=127.0.0.1:8687 OPENLENS_ADMIN_TOKEN=adm_ci \
+            ./target/debug/openlens > $RUNNER_TEMP/demo.log 2>&1 &
+          for i in $(seq 1 30); do curl -fs localhost:8687/healthz && break; sleep 1; done
+          node scripts/e2e/readme-shots.mjs http://localhost:8687 adm_ci $RUNNER_TEMP/shots
+          if command -v oxipng > /dev/null; then oxipng -q -o 3 --strip safe $RUNNER_TEMP/shots/*.png; fi
+          cp $RUNNER_TEMP/shots/*.png docs/img/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: readme-shots
+          path: ${{ runner.temp }}/shots
+          retention-days: 30
+      - name: open a PR with the new images
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || 'main' }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- docs/img; then echo "::notice::screenshots unchanged"; exit 0; fi
+          git config user.name "openlens-release-train"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          branch="docs/screenshots-$TAG-$(date -u +%y%m%d%H%M)"
+          git checkout -q -b "$branch"
+          git add docs/img
+          git commit -qm "Screenshots of $TAG"
+          git push -q origin "$branch"
+          if url=$(gh pr create --base main --head "$branch" --title "Screenshots of $TAG" \
+                --body "README and site images regenerated from $TAG on demo data (\`scripts/e2e/readme-shots.mjs\`). The full set is the \`readme-shots\` artifact."); then
+            # A merge made with this token starts no workflow: rebuild Pages.
+            gh pr merge "$url" --merge --delete-branch && gh workflow run pages.yml \
+              || echo "::warning::$url waits for a merge"
+          else
+            echo "::warning::could not open the PR; the images are on $branch and in the artifact"
+          fi

@@ -18,7 +18,6 @@
 //! `openlens backup --into <dir> [--keep N]` names the copy after the UTC
 //! time and keeps the newest N (7 by default): for scheduled jobs.
 
-mod backup;
 mod upgrade;
 
 use std::process::ExitCode;
@@ -40,7 +39,10 @@ fn main() -> ExitCode {
                 );
                 return ExitCode::FAILURE;
             };
-            return match backup::run(std::path::Path::new(&data), std::path::Path::new(&dest)) {
+            return match openlens_server::backup::run(
+                std::path::Path::new(&data),
+                std::path::Path::new(&dest),
+            ) {
                 Ok(n) => {
                     println!("{{\"ok\":true,\"files\":{n},\"dest\":{dest:?}}}");
                     ExitCode::SUCCESS
@@ -81,7 +83,12 @@ fn backup_rotate(data: &str, args: &[String]) -> ExitCode {
         eprintln!("backup failed: {}: {e}", into.display());
         return ExitCode::FAILURE;
     }
-    match backup::rotate(std::path::Path::new(data), into, keep, chrono::Utc::now()) {
+    match openlens_server::backup::rotate(
+        std::path::Path::new(data),
+        into,
+        keep,
+        chrono::Utc::now(),
+    ) {
         Ok((dest, n, removed)) => {
             println!(
                 "{{\"ok\":true,\"files\":{n},\"dest\":{:?},\"removed\":{}}}",

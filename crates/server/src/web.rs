@@ -59,6 +59,17 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/p/{project}/watch", get(watch_churned))
         .route("/p/{project}/heatmap", get(heatmap_page))
         .route("/p/{project}/icon", get(crate::icon::icon))
+        .route("/settings/storage", get(crate::storage::page))
+        .route("/settings/storage/s3", post(crate::storage::s3))
+        .route("/settings/storage/backups", post(crate::storage::plan))
+        .route(
+            "/settings/storage/backups/run",
+            post(crate::storage::run_now),
+        )
+        .route(
+            "/settings/storage/backups/latest.tar.gz",
+            get(crate::storage::latest),
+        )
         .route(
             "/p/{project}/features",
             get(crate::features::page).post(crate::features::edit),

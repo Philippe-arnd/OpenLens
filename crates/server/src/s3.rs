@@ -47,6 +47,63 @@ pub(crate) fn config() -> Option<Config> {
     })
 }
 
+/// Settings saved from the dashboard (#218), used when no `OPENLENS_S3_*`
+/// variable is set. The secret is sealed ([`crate::secrets`]).
+pub(crate) const KEYS: [&str; 6] = [
+    "bucket",
+    "region",
+    "endpoint",
+    "prefix",
+    "access_key",
+    "secret",
+];
+
+/// Where the S3 settings come from: the environment wins over the
+/// dashboard (shown as read-only there).
+pub(crate) fn configured(
+    meta: &openlens_meta::Meta,
+    data_dir: &Path,
+) -> Option<(Config, &'static str)> {
+    if let Some(c) = config() {
+        return Some((c, "environment"));
+    }
+    let get = |k: &str| {
+        meta.setting(&format!("s3:{k}"))
+            .ok()
+            .flatten()
+            .filter(|v| !v.is_empty())
+    };
+    let secret = crate::secrets::open(data_dir, &get("secret")?).ok()?;
+    Some((
+        Config {
+            bucket: get("bucket")?,
+            access_key: get("access_key")?,
+            secret_key: secret,
+            region: get("region").unwrap_or_else(|| "us-east-1".into()),
+            endpoint: get("endpoint").map(|e| e.trim_end_matches('/').to_owned()),
+            prefix: get("prefix")
+                .map(|p| format!("{}/", p.trim_matches('/')))
+                .unwrap_or_default(),
+        },
+        "dashboard",
+    ))
+}
+
+/// Remember how the last copy went (shown on the Storage page).
+pub(crate) fn record(meta: &openlens_meta::Meta, result: &Result<usize, String>) {
+    let now = chrono::Utc::now().to_rfc3339();
+    match result {
+        Ok(n) => {
+            let _ = meta.set_setting("s3:last_ok", &now);
+            let _ = meta.set_setting("s3:last_objects", &n.to_string());
+            let _ = meta.set_setting("s3:last_error", "");
+        }
+        Err(e) => {
+            let _ = meta.set_setting("s3:last_error", &format!("{now} {e}"));
+        }
+    }
+}
+
 fn hmac(key: &[u8], msg: &str) -> Vec<u8> {
     match Hmac::<Sha256>::new_from_slice(key) {
         Ok(mut m) => {
@@ -77,12 +134,38 @@ fn uri_encode(s: &str, keep_slash: bool) -> String {
 /// The `Authorization` header for a request (SigV4, service `s3`).
 /// `headers` must include `host`, `x-amz-date` and `x-amz-content-sha256`;
 /// names lowercase.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn authorization(
     access_key: &str,
     secret_key: &str,
     region: &str,
     method: &str,
     path: &str,
+    headers: &[(&str, &str)],
+    payload_hash: &str,
+) -> String {
+    authorization_q(
+        access_key,
+        secret_key,
+        region,
+        method,
+        path,
+        "",
+        headers,
+        payload_hash,
+    )
+}
+
+/// [`authorization`] with a canonical query string (`a=1&b=2`, sorted,
+/// already encoded).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn authorization_q(
+    access_key: &str,
+    secret_key: &str,
+    region: &str,
+    method: &str,
+    path: &str,
+    query: &str,
     headers: &[(&str, &str)],
     payload_hash: &str,
 ) -> String {
@@ -100,7 +183,7 @@ pub(crate) fn authorization(
     let signed: Vec<&str> = hs.iter().map(|(k, _)| k.as_str()).collect();
     let signed = signed.join(";");
     let canonical = format!(
-        "{method}\n{}\n\n{canonical_headers}\n{signed}\n{payload_hash}",
+        "{method}\n{}\n{query}\n{canonical_headers}\n{signed}\n{payload_hash}",
         uri_encode(path, true)
     );
     let scope = format!("{day}/{region}/s3/aws4_request");
@@ -118,27 +201,50 @@ pub(crate) fn authorization(
     )
 }
 
-/// Upload one object.
-pub(crate) fn put(cfg: &Config, key: &str, body: &[u8]) -> Result<(), String> {
+/// One signed request: `(status, body)`. `key` is under the prefix;
+/// `query` pairs are sorted and encoded here.
+pub(crate) fn request(
+    cfg: &Config,
+    method: &str,
+    key: &str,
+    query: &[(&str, &str)],
+    body: &[u8],
+) -> Result<(u16, Vec<u8>), String> {
     let key = format!("{}{key}", cfg.prefix);
     let (base, host, path) = match &cfg.endpoint {
         Some(ep) => {
             let host = ep.split("://").nth(1).unwrap_or(ep).to_owned();
-            (ep.clone(), host, format!("/{}/{key}", cfg.bucket))
+            let path = if key.is_empty() {
+                format!("/{}", cfg.bucket)
+            } else {
+                format!("/{}/{key}", cfg.bucket)
+            };
+            (ep.clone(), host, path)
         }
         None => {
             let host = format!("{}.s3.{}.amazonaws.com", cfg.bucket, cfg.region);
             (format!("https://{host}"), host, format!("/{key}"))
         }
     };
+    let mut q: Vec<(String, String)> = query
+        .iter()
+        .map(|(k, v)| (uri_encode(k, false), uri_encode(v, false)))
+        .collect();
+    q.sort();
+    let qs = q
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join("&");
     let now = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
     let hash = sha_hex(body);
-    let auth = authorization(
+    let auth = authorization_q(
         &cfg.access_key,
         &cfg.secret_key,
         &cfg.region,
-        "PUT",
+        method,
         &path,
+        &qs,
         &[
             ("host", &host),
             ("x-amz-content-sha256", &hash),
@@ -146,13 +252,113 @@ pub(crate) fn put(cfg: &Config, key: &str, body: &[u8]) -> Result<(), String> {
         ],
         &hash,
     );
-    ureq::put(&format!("{base}{}", uri_encode(&path, true)))
-        .header("x-amz-date", &now)
-        .header("x-amz-content-sha256", &hash)
-        .header("authorization", &auth)
-        .send(body)
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+    let url = format!(
+        "{base}{}{}{qs}",
+        uri_encode(&path, true),
+        if qs.is_empty() { "" } else { "?" }
+    );
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(60)))
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let r = match method {
+        "PUT" => agent
+            .put(&url)
+            .header("x-amz-date", &now)
+            .header("x-amz-content-sha256", &hash)
+            .header("authorization", &auth)
+            .send(body),
+        "GET" => agent
+            .get(&url)
+            .header("x-amz-date", &now)
+            .header("x-amz-content-sha256", &hash)
+            .header("authorization", &auth)
+            .call(),
+        "DELETE" => agent
+            .delete(&url)
+            .header("x-amz-date", &now)
+            .header("x-amz-content-sha256", &hash)
+            .header("authorization", &auth)
+            .call(),
+        _ => return Err("unsupported method".into()),
+    };
+    let mut r = r.map_err(|e| e.to_string())?;
+    let status = r.status().as_u16();
+    let bytes = r
+        .body_mut()
+        .with_config()
+        .limit(16 * 1024 * 1024)
+        .read_to_vec()
+        .map_err(|e| e.to_string())?;
+    Ok((status, bytes))
+}
+
+fn ok(r: (u16, Vec<u8>), what: &str) -> Result<Vec<u8>, String> {
+    if (200..300).contains(&r.0) {
+        Ok(r.1)
+    } else {
+        let text = String::from_utf8_lossy(&r.1);
+        let code = text
+            .split("<Code>")
+            .nth(1)
+            .and_then(|t| t.split("</Code>").next())
+            .unwrap_or("");
+        Err(format!("{what}: HTTP {} {code}", r.0))
+    }
+}
+
+/// Upload one object.
+pub(crate) fn put(cfg: &Config, key: &str, body: &[u8]) -> Result<(), String> {
+    ok(request(cfg, "PUT", key, &[], body)?, "upload").map(|_| ())
+}
+
+/// Read one object.
+pub(crate) fn get(cfg: &Config, key: &str) -> Result<Vec<u8>, String> {
+    ok(request(cfg, "GET", key, &[], &[])?, "read")
+}
+
+/// Delete one object.
+pub(crate) fn delete(cfg: &Config, key: &str) -> Result<(), String> {
+    ok(request(cfg, "DELETE", key, &[], &[])?, "delete").map(|_| ())
+}
+
+/// Keys under `prefix` (below the configured prefix), at most 1000.
+pub(crate) fn list(cfg: &Config, prefix: &str) -> Result<Vec<String>, String> {
+    let full = format!("{}{prefix}", cfg.prefix);
+    let body = ok(
+        request(
+            cfg,
+            "GET",
+            "",
+            &[("list-type", "2"), ("prefix", &full)],
+            &[],
+        )?,
+        "list",
+    )?;
+    let text = String::from_utf8_lossy(&body);
+    Ok(text
+        .split("<Key>")
+        .skip(1)
+        .filter_map(|t| t.split("</Key>").next())
+        .map(|k| {
+            k.strip_prefix(&cfg.prefix)
+                .unwrap_or(k)
+                .replace("&amp;", "&")
+        })
+        .collect())
+}
+
+/// Put, read back and delete a probe object: are the settings right?
+pub(crate) fn test(cfg: &Config) -> Result<(), String> {
+    let key = format!(".openlens-probe-{}", chrono::Utc::now().timestamp());
+    put(cfg, &key, b"openlens")?;
+    let back = get(cfg, &key)?;
+    delete(cfg, &key)?;
+    if back != b"openlens" {
+        return Err("read back something else".into());
+    }
+    Ok(())
 }
 
 const MARK: &str = ".s3-uploaded";

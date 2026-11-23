@@ -1224,6 +1224,191 @@ pub fn feature_map(v: &MapView<'_>) -> Markup {
     )
 }
 
+/// The backup plan as the page shows it.
+pub struct BackupPlan {
+    /// `off`, `daily` or `weekly`.
+    pub schedule: String,
+    /// Hour, UTC.
+    pub hour: u8,
+    /// 1 (Monday) to 7.
+    pub weekday: u8,
+    /// Copies kept.
+    pub keep: usize,
+    /// Folder as set (empty: default).
+    pub dir: String,
+    /// Folder used.
+    pub folder: String,
+    /// Also to S3.
+    pub to_s3: bool,
+}
+
+/// One backup run.
+pub struct BackupRun {
+    /// When (RFC 3339).
+    pub at: String,
+    /// Succeeded.
+    pub ok: bool,
+    /// Files copied.
+    pub files: usize,
+    /// Size on disk.
+    pub bytes: u64,
+    /// Duration.
+    pub secs: f64,
+    /// Local copy.
+    pub dest: String,
+    /// S3 object, if uploaded.
+    pub s3: Option<String>,
+    /// Why it failed.
+    pub error: Option<String>,
+    /// `schedule` or `manual`.
+    pub how: String,
+}
+
+/// Everything Settings → Storage and backups shows (#218).
+pub struct StorageView {
+    /// The S3 settings come from `OPENLENS_S3_*` (read-only here).
+    pub from_env: bool,
+    /// Bucket.
+    pub bucket: Option<String>,
+    /// Region.
+    pub region: Option<String>,
+    /// Endpoint.
+    pub endpoint: Option<String>,
+    /// Prefix.
+    pub prefix: Option<String>,
+    /// Access key id.
+    pub access_key: Option<String>,
+    /// A secret is stored (never shown).
+    pub secret_set: bool,
+    /// The destination is usable (the secret opens).
+    pub secret_ok: bool,
+    /// Last good copy.
+    pub last_ok: Option<String>,
+    /// Objects in the last copy.
+    pub last_objects: Option<String>,
+    /// Last error.
+    pub last_error: Option<String>,
+    /// Backup plan.
+    pub plan: BackupPlan,
+    /// Newest first.
+    pub history: Vec<BackupRun>,
+    /// A backup runs now.
+    pub running: bool,
+    /// A local copy can be downloaded.
+    pub has_latest: bool,
+    /// The data folder.
+    pub data_dir: String,
+    /// After an action.
+    pub notice: Option<String>,
+    /// After a failed action.
+    pub error: Option<String>,
+}
+
+fn bytes(n: u64) -> String {
+    match n {
+        0..1024 => format!("{n} B"),
+        1024..1_048_576 => format!("{:.0} kB", n as f64 / 1024.0),
+        1_048_576..1_073_741_824 => format!("{:.1} MB", n as f64 / 1_048_576.0),
+        _ => format!("{:.2} GB", n as f64 / 1_073_741_824.0),
+    }
+}
+
+/// Settings → Storage and backups (#218).
+pub fn storage(v: &StorageView) -> Markup {
+    let ro = v.from_env;
+    let day = [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    ];
+    layout(
+        "Storage and backups",
+        None,
+        html! {
+            div.heading { div {
+                h1 { "Storage and backups" }
+                p.muted { "Local disk (" code { (v.data_dir) } ") is the source of truth. S3 keeps a second copy; backups are point-in-time copies you can restore." }
+            } }
+            @if let Some(n) = &v.notice { p.notice role="status" { (n) } }
+            @if let Some(e) = &v.error { p.alert role="alert" { (e) } }
+            section.card.wide {
+                h2.sky { (icon("layers")) "S3-compatible copy" }
+                @if ro { p.small { span.chip { "set by environment" } " The " code { "OPENLENS_S3_*" } " variables win; change them where the server runs." } }
+                form.settings method="post" action="/settings/storage/s3" {
+                    label { "Bucket " input type="text" name="bucket" value=[v.bucket.as_deref()] maxlength="63" disabled[ro] required; }
+                    label { "Region " input type="text" name="region" value=[v.region.as_deref()] placeholder="us-east-1" maxlength="40" disabled[ro]; }
+                    label { "Endpoint " input type="url" name="endpoint" value=[v.endpoint.as_deref()] placeholder="AWS: empty · R2, MinIO, Garage: https://…" maxlength="200" disabled[ro]; }
+                    label { "Prefix " input type="text" name="prefix" value=[v.prefix.as_deref()] placeholder="openlens" maxlength="100" disabled[ro]; }
+                    label { "Access key " input type="text" name="access_key" value=[v.access_key.as_deref()] maxlength="200" autocomplete="off" disabled[ro] required; }
+                    label { "Secret key " input type="password" name="secret" placeholder=(if v.secret_set { "stored · leave empty to keep" } else { "" }) maxlength="200" autocomplete="new-password" disabled[ro]; }
+                    @if !ro { button type="submit" name="action" value="save" { "Save" } }
+                    @if v.bucket.is_some() { button.soft type="submit" name="action" value="test" formnovalidate { "Test the connection" } }
+                    @if !ro && v.bucket.is_some() { button.ghost type="submit" name="action" value="remove" formnovalidate { "Remove" } }
+                }
+                @if v.secret_set && !v.secret_ok && !ro { p.alert role="alert" { "The stored secret can't be opened (the server's secret key changed, or the store was restored): enter it again." } }
+                p.small {
+                    @match &v.last_ok { Some(t) => { "Last copy " (t.get(..16).unwrap_or(t).replace('T', " ")) " UTC" @if let Some(n) = &v.last_objects { " · " (n) " objects" } }, None => span.muted { "No copy yet." } }
+                    @if let Some(e) = &v.last_error { br; span.status.bad { "Last error" } " " (e) }
+                }
+                p.muted.small { "Copied hourly: every closed day of events, and a daily snapshot of the metadata. The secret is stored sealed and never shown again." }
+            }
+            section.card.wide {
+                h2.mint { (icon("clock")) "Backups" }
+                form.settings method="post" action="/settings/storage/backups" {
+                    label { "When "
+                        select name="schedule" {
+                            @for (k, l) in [("off", "Off"), ("daily", "Every day"), ("weekly", "Every week")] {
+                                option value=(k) selected[v.plan.schedule == k] { (l) }
+                            }
+                        }
+                    }
+                    label { "At (UTC) " select name="hour" { @for h in 0u8..24 { option value=(h) selected[v.plan.hour == h] { (format!("{h:02}:00")) } } } }
+                    label { "On (weekly) " select name="weekday" { @for (i, d) in day.iter().enumerate() { option value=(i + 1) selected[usize::from(v.plan.weekday) == i + 1] { (d) } } } }
+                    label { "Keep " input type="number" name="keep" min="1" max="60" value=(v.plan.keep); }
+                    label { "Folder " input type="text" name="dir" value=(v.plan.dir) placeholder=(v.plan.folder) maxlength="300"; }
+                    label.check { input type="checkbox" name="to_s3" checked[v.plan.to_s3]; " Also to S3 (.tar.gz)" }
+                    button type="submit" { "Save" }
+                }
+                div.actions {
+                    form.inline method="post" action="/settings/storage/backups/run" {
+                        button type="submit" disabled[v.running] { (if v.running { "Backing up…" } else { "Back up now" }) }
+                    }
+                    @if v.has_latest { a.button href="/settings/storage/backups/latest.tar.gz" { (icon("down")) "Download the latest" } }
+                }
+                p.muted.small { "Each copy is consistent while the server runs and takes as much room as the data. Failures are emailed to admins when SMTP is set." }
+                @if !v.history.is_empty() {
+                    div.table-scroll { table.plain {
+                        thead { tr { th { "When (UTC)" } th { "Result" } th.num { "Size" } th.num { "Files" } th.num { "Took" } th { "Where" } } }
+                        tbody { @for r in &v.history {
+                            tr {
+                                td.small { (r.at.get(..16).unwrap_or(&r.at).replace('T', " ")) " " span.muted { (r.how) } }
+                                td { @if r.ok { span.status.good { "ok" } } @else { span.status.bad { "failed" } br; span.small { (r.error.as_deref().unwrap_or("")) } } }
+                                td.num { (bytes(r.bytes)) }
+                                td.num { (r.files) }
+                                td.num { (duration(r.secs)) }
+                                td.small.mono { (r.dest) @if let Some(k) = &r.s3 { br; "s3: " (k) } }
+                            }
+                        } }
+                    } }
+                }
+            }
+            section.card.wide {
+                h2.coral { (icon("shield")) "Restore" }
+                p { "Restoring replaces the data, so it is done with the server stopped:" }
+                pre.snippet { code { "# stop OpenLens, then
+mv " (v.data_dir) " " (v.data_dir) ".old
+cp -a " (v.plan.folder) "/<copy> " (v.data_dir) "
+# start OpenLens" } }
+                p.muted.small { "From S3: download " code { "backups/<copy>.tar.gz" } ", " code { "tar xzf" } " it and use the folder inside. S3 secrets are not in backups: enter them again after a restore." }
+            }
+        },
+    )
+}
+
 /// Feature flags: switch on/off and change the rollout. Creating flags is
 /// done by agents (API/CLI/MCP) with the code that uses them.
 pub fn flags(p: &ProjectInfo<'_>, flags: &[openlens_flags::Flag]) -> Markup {
@@ -1770,7 +1955,7 @@ pub fn projects(list: &[ProjectSummary], admin: bool) -> Markup {
         html! {
             div.heading {
                 div { h1 { "Projects" } p.muted { "One per app. Pick one to open its Focus board." } }
-                @if admin { a.button href="/users" { (icon("users")) "Team" } }
+                @if admin { a.button href="/users" { (icon("users")) "Team" } " " a.button href="/settings/storage" { (icon("layers")) "Storage and backups" } }
             }
             @if admin {
                 details.card.wide.new-project {

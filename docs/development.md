@@ -33,6 +33,8 @@ The healthcheck lives in `docker-compose.yml`, not in the Dockerfile, so Coolify
 
 ## Releasing
 
+Agents: the [`release` skill](../.claude/skills/release/SKILL.md) is the checklist (release now, hold, notes, hotfix, done, roll back).
+
 OpenLens follows [SemVer](https://semver.org) and keeps a [CHANGELOG](../CHANGELOG.md) in the Keep a Changelog format. Every merged change adds its line under `Unreleased`.
 
 **The release train** (`.github/workflows/release-train.yml`, #197) cuts stable releases by itself every Tuesday at 06:17 UTC. It releases the version in `Cargo.toml` when:
@@ -45,7 +47,7 @@ It then:
 2. starts the publish, image and chart workflows;
 3. opens a PR that moves `[Unreleased]` under the version and the date and sets `main` to the next minor version, and merges it. If the workflow token may not open PRs (Settings → Actions → *Allow GitHub Actions to create pull requests*), it opens a `release-hold` issue instead, and the branch waits to be merged by hand.
 
-Run it by hand from the Actions tab: `dry_run` (on by default) only reports what it would do. A minor or major release can add `docs/releases/vX.Y.Z.md` before Tuesday, and its notes are used.
+Run it by hand from the Actions tab: `dry_run` (on by default) only reports what it would do. After a stable release, **`screenshots.yml`** retakes the README and site images on demo data (`scripts/e2e/readme-shots.mjs`, 1440×900 ×2 and a phone, optimised with oxipng) and opens a PR with them, which merges itself and rebuilds Pages. Run it by hand to refresh them now. A minor or major release can add `docs/releases/vX.Y.Z.md` before Tuesday, and its notes are used.
 
 **A release (vX.Y.Z):** (by hand, for a hotfix or when the train is held)
 1. In a PR:

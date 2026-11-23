@@ -3,7 +3,8 @@
 # Local notebooks: never committed (docs/clean-room.md, "Captures")
 /plan
 /log
-.claude/
+.claude/*
+!.claude/skills/
 .env
 node_modules/
 scripts/e2e/node_modules/

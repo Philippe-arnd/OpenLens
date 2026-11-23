@@ -67,7 +67,7 @@ pub fn prepare(data: &Path, version: &str) -> Result<Outcome, String> {
         Some(from) => {
             let into = data.join("backups").join("upgrade");
             fs::create_dir_all(&into).map_err(|e| e.to_string())?;
-            let (dest, _, _) = crate::backup::rotate(data, &into, 1, chrono::Utc::now())
+            let (dest, _, _) = openlens_server::backup::rotate(data, &into, 1, chrono::Utc::now())
                 .map_err(|e| format!("backup before the upgrade failed, not starting: {e}"))?;
             Outcome::Upgraded {
                 from,
