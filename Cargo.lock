@@ -2360,6 +2360,7 @@ dependencies = [
 name = "openlens-cli"
 version = "0.3.0"
 dependencies = [
+ "chrono",
  "clap",
  "openlens-featuremap",
  "openlens-mcp",

@@ -5,6 +5,7 @@
 //! admin token come from `--server`/`--token` or `OPENLENS_SERVER` /
 //! `OPENLENS_TOKEN` (no config file, D-014).
 
+mod convert;
 mod lint;
 mod mcp;
 
@@ -112,6 +113,15 @@ enum Command {
         /// Event lines: {"event","distinct_id","timestamp","properties"}.
         #[arg(long)]
         file: PathBuf,
+        /// Another tool's per-event export: `csv` or `jsonl` with its own
+        /// column names (see --map). Without it, the file is OpenLens JSONL.
+        #[arg(long)]
+        format: Option<String>,
+        /// Columns of the export: `event=…,distinct_id=…,timestamp=…`, and
+        /// optionally `url=…,referrer=…,session_id=…`. Other columns become
+        /// properties.
+        #[arg(long, default_value = "")]
+        map: String,
     },
     /// Export raw events as JSONL, day by day, for deep analysis.
     Export {
@@ -620,9 +630,21 @@ fn run(cli: Cli) -> Result<bool, String> {
             out(&serde_json::json!({ "release": rel, "uploaded": ok, "failed": failed }));
             Ok(failed.is_empty() && !maps.is_empty())
         }
-        Command::Import { project, file } => {
-            let text = std::fs::read_to_string(file)
+        Command::Import {
+            project,
+            file,
+            format,
+            map,
+        } => {
+            let raw = std::fs::read_to_string(file)
                 .map_err(|e| format!("cannot read {}: {e}", file.display()))?;
+            let (text, conversion_errors) = match format {
+                Some(f) => {
+                    let (lines, errors) = convert::convert(&raw, f, &convert::mapping(map)?)?;
+                    (lines.join("\n"), errors)
+                }
+                None => (raw, Vec::new()),
+            };
             let c = client()?;
             let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
             let (mut events, mut persons, mut skipped, mut rejected) =
@@ -652,7 +674,9 @@ fn run(cli: Cli) -> Result<bool, String> {
             }
             out(
                 &json!({ "events": events, "persons": persons, "chunks_already_imported": skipped,
-                "rejected_sample": rejected }),
+                "rejected_sample": rejected,
+                "unreadable_rows": conversion_errors.len(),
+                "unreadable_sample": conversion_errors.iter().take(20).collect::<Vec<_>>() }),
             );
             Ok(true)
         }
