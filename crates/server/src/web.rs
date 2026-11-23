@@ -116,6 +116,14 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/p/{project}/forms", get(crate::explore::forms))
         .route("/p/{project}/acquisition", get(crate::explore::acquisition))
         .route("/p/{project}/churn", get(crate::explore::churn))
+        .route(
+            "/p/{project}/churn/audience",
+            post(crate::explore::make_audience),
+        )
+        .route(
+            "/p/{project}/churn/{file}",
+            get(crate::explore::at_risk_export),
+        )
         .route("/p/{project}/revenue", get(crate::explore::revenue))
         .route(
             "/p/{project}/goals",

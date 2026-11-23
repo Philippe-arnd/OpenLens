@@ -65,7 +65,10 @@ async fn project(state: &AppState, id: &str) -> Option<openlens_meta::Project> {
         .ok()?
 }
 
-async fn results(state: &AppState, project: &str) -> Vec<openlens_engine::SurveyResults> {
+pub(crate) async fn results(
+    state: &AppState,
+    project: &str,
+) -> Vec<openlens_engine::SurveyResults> {
     let map = crate::load_map(state, project).await;
     let src = openlens_engine::source(map.as_ref().map(|(m, _)| m));
     openlens_engine::survey_results(

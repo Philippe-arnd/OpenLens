@@ -407,6 +407,12 @@ pub async fn alert_tick(state: &AppState, minute: u64) {
     alerts::tick(state, minute).await;
 }
 
+/// A project's flags (tests and tools).
+#[doc(hidden)]
+pub async fn flags_for_tests(state: &AppState, project: &str) -> Vec<openlens_flags::Flag> {
+    flags::load(state, project).await
+}
+
 /// A short stable id for a text (alert rule keys).
 pub(crate) fn short_hash(s: &str) -> String {
     use sha2::Digest;

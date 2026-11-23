@@ -3491,3 +3491,75 @@ async fn goals_part_two_guardrails_objectives_and_the_api() {
     let digest = body_text(get(&h, "/api/projects/default/digest", None, true).await).await;
     assert!(digest.contains("## Goals"), "{digest}");
 }
+
+#[tokio::test]
+async fn churn_part_two_cancels_exports_and_win_back_flags() {
+    let h = harness();
+    h.state
+        .meta
+        .save_feature_map(
+            "default",
+            "churn_event: plan_cancelled\nfeatures:\n  - key: notes\n    name: Notes\n    success: note_saved\n    entry: { routes: ['/notes'] }\n",
+        )
+        .unwrap();
+    let ts = |days: i64| (chrono::Utc::now() - chrono::Duration::days(days)).to_rfc3339();
+    let mut batch = Vec::new();
+    // "=evil": quiet for 10 of 14 days and slowing down → at risk.
+    for d in [27, 26, 25, 20, 18, 10] {
+        batch.push(serde_json::json!({"event": "$pageview", "distinct_id": "=evil,\"x\"", "timestamp": ts(d), "properties": {"$pathname": "/notes"}}));
+    }
+    batch.push(serde_json::json!({"event": "$identify", "distinct_id": "=evil,\"x\"", "timestamp": ts(27), "properties": {"$role": "owner"}}));
+    // "quitter" cancels explicitly, yesterday.
+    batch.push(serde_json::json!({"event": "$identify", "distinct_id": "quitter", "timestamp": ts(3), "properties": {"$role": "owner"}}));
+    batch.push(serde_json::json!({"event": "$pageview", "distinct_id": "quitter", "timestamp": ts(2), "properties": {"$pathname": "/notes"}}));
+    batch.push(serde_json::json!({"event": "plan_cancelled", "distinct_id": "quitter", "timestamp": ts(1)}));
+    let (status, _) = post(
+        &h,
+        "/capture",
+        serde_json::json!({ "key": h.key, "batch": batch })
+            .to_string()
+            .into_bytes(),
+        false,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let api: serde_json::Value = serde_json::from_str(
+        &body_text(get(&h, "/api/projects/default/churn", None, true).await).await,
+    )
+    .unwrap();
+    assert_eq!(api["cancelled"], 1, "{api}");
+    assert_eq!(api["at_risk"][0]["distinct_id"], "=evil,\"x\"", "{api}");
+    let owner = login_cookie(&h).await;
+    let page = body_text(get(&h, "/p/default/churn", Some(&owner), false).await).await;
+    assert!(
+        page.contains("Top reasons")
+            && page.contains("Exit survey")
+            && page.contains("plan_cancelled")
+            && page.contains("Make the flag")
+            && !page.contains(" style="),
+    );
+    let csv = body_text(get(&h, "/p/default/churn/at-risk.csv", Some(&owner), false).await).await;
+    assert!(
+        csv.starts_with("distinct_id,role,") && csv.contains("\"'=evil,\"\"x\"\"\""),
+        "quoted, and no formula: {csv}"
+    );
+    assert_eq!(
+        get(&h, "/p/default/churn/at-risk.csv", None, false)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        post_form(&h, "/p/default/churn/audience", &owner, "holdout=30").await,
+        StatusCode::SEE_OTHER
+    );
+    let flags = openlens_server::flags_for_tests(&h.state, "default").await;
+    let f = flags
+        .iter()
+        .find(|f| f.key.starts_with("win-back-"))
+        .unwrap();
+    assert_eq!((f.enabled, f.holdout, f.users.len()), (false, 30, 1));
+    let page = body_text(get(&h, "/p/default/churn", Some(&owner), false).await).await;
+    assert!(page.contains("Win-back flags"));
+}

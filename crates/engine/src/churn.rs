@@ -1,7 +1,13 @@
 //! Churn as one section (#247), around the PM's questions: how many am I
 //! losing, after how long, at which moment, with what friction, and who is
 //! at risk now. A user has churned after `churn_after_days` without an
-//! event (docs/kpis.md). Last 90 days, identified users.
+//! event (docs/kpis.md), or at once when they send the map's
+//! `churn_event` (an explicit cancel, #269). Last 90 days, identified users.
+//!
+//! Part 2 (#269): why they leave (features adopted early by those who
+//! stay, friction on the last day, the release they arrived on, survival
+//! by role), the top reasons ranked with their evidence, and what brought
+//! back the users who returned.
 
 use std::collections::HashMap;
 
@@ -65,6 +71,195 @@ pub struct ChurnReport {
     pub at_risk: Vec<AtRisk>,
     /// Users counted.
     pub users: i64,
+    /// Features adopted in the first 14 days of life, with the churn of
+    /// adopters and non-adopters (correlation, not cause), biggest gap first.
+    pub lift: Vec<Lift>,
+    /// Friction on the last active day: (kind, share of churned users,
+    /// share of retained users).
+    pub friction: Vec<(String, f64, f64)>,
+    /// Churn by the release users arrived on: (release, users, churned share).
+    pub by_release: Vec<(String, i64, f64)>,
+    /// Survival by role: (role, users, share still active 30 days after
+    /// their first visit).
+    pub by_role: Vec<(String, i64, f64)>,
+    /// Users who sent the map's `churn_event` (counted as churned).
+    pub cancelled: i64,
+    /// The top reasons, ranked (at most 5).
+    pub reasons: Vec<Reason>,
+    /// Users who came back after churning, last 30 days.
+    pub winback: WinBack,
+}
+
+/// One feature's link with staying (#269).
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct Lift {
+    /// Feature key.
+    pub feature: String,
+    /// Users who used it in their first 14 days.
+    pub adopters: i64,
+    /// Users who did not.
+    pub non_adopters: i64,
+    /// Churned share of adopters.
+    pub churn_adopters: f64,
+    /// Churned share of non-adopters.
+    pub churn_non: f64,
+}
+
+/// A reason users leave, with the numbers behind it.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Reason {
+    /// `feature`, `friction`, `place` or `release`.
+    pub kind: &'static str,
+    /// In words.
+    pub title: String,
+    /// The numbers.
+    pub evidence: String,
+    /// Gap in churned share (or in share of churned vs retained): the rank.
+    pub weight: f64,
+}
+
+/// What brought churned users back (#269).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct WinBack {
+    /// Users back in the last 30 days after a gap longer than the window.
+    pub users: i64,
+    /// (release on the day they returned, users).
+    pub by_release: Vec<(String, i64)>,
+    /// (first feature used on the day they returned, users).
+    pub by_feature: Vec<(String, i64)>,
+    /// Mean active days since they returned.
+    pub mean_active_days: f64,
+}
+
+/// Below this many users on a side, a comparison is not shown.
+const MIN_SIDE: i64 = 8;
+/// Days of life in which adoption is measured.
+const EARLY_DAYS: i64 = 14;
+
+/// Rank features by how much less their early adopters churn (pure).
+/// `first`: user → first day; `gone`: user → churned; `adopted`: (user,
+/// feature, first use day). Only users first seen 14 days ago or more.
+#[must_use]
+pub fn lift(
+    first: &HashMap<String, NaiveDate>,
+    gone: &HashMap<String, bool>,
+    adopted: &[(String, String, NaiveDate)],
+    today: NaiveDate,
+) -> Vec<Lift> {
+    let eligible: Vec<&String> = first
+        .iter()
+        .filter(|(_, d)| (today - **d).num_days() >= EARLY_DAYS)
+        .map(|(u, _)| u)
+        .collect();
+    let mut early: HashMap<&str, std::collections::HashSet<&str>> = HashMap::new();
+    for (u, f, d) in adopted {
+        if let Some(f0) = first.get(u)
+            && (*d - *f0).num_days() < EARLY_DAYS
+        {
+            early.entry(f.as_str()).or_default().insert(u.as_str());
+        }
+    }
+    let mut out: Vec<Lift> = early
+        .into_iter()
+        .filter_map(|(feat, users)| {
+            let (mut a, mut ac, mut n, mut nc) = (0i64, 0i64, 0i64, 0i64);
+            for u in &eligible {
+                let g = gone.get(*u).copied().unwrap_or(false);
+                if users.contains(u.as_str()) {
+                    a += 1;
+                    ac += i64::from(g);
+                } else {
+                    n += 1;
+                    nc += i64::from(g);
+                }
+            }
+            (a >= MIN_SIDE && n >= MIN_SIDE).then(|| Lift {
+                feature: feat.to_owned(),
+                adopters: a,
+                non_adopters: n,
+                churn_adopters: ac as f64 / a as f64,
+                churn_non: nc as f64 / n as f64,
+            })
+        })
+        .collect();
+    out.sort_by(|x, y| {
+        (y.churn_non - y.churn_adopters)
+            .total_cmp(&(x.churn_non - x.churn_adopters))
+            .then(x.feature.cmp(&y.feature))
+    });
+    out.truncate(10);
+    out
+}
+
+/// The top reasons from the report's parts, ranked by weight (pure).
+#[must_use]
+pub fn reasons(r: &ChurnReport) -> Vec<Reason> {
+    let pct = |v: f64| format!("{:.0}%", v * 100.0);
+    let mut out = Vec::new();
+    for l in &r.lift {
+        let gap = l.churn_non - l.churn_adopters;
+        if gap >= 0.05 {
+            out.push(Reason {
+                kind: "feature",
+                title: format!("Users who don't try `{}` early leave more", l.feature),
+                evidence: format!(
+                    "{} of {} non-adopters churned vs {} of {} who used it in their first 14 days (correlation)",
+                    pct(l.churn_non),
+                    l.non_adopters,
+                    pct(l.churn_adopters),
+                    l.adopters
+                ),
+                weight: gap,
+            });
+        }
+    }
+    for (kind, c, k) in &r.friction {
+        if c - k >= 0.05 {
+            out.push(Reason {
+                kind: "friction",
+                title: format!("{kind} on their last day"),
+                evidence: format!(
+                    "{} of churned users vs {} of retained users",
+                    pct(*c),
+                    pct(*k)
+                ),
+                weight: c - k,
+            });
+        }
+    }
+    for (place, n, share, base) in &r.last_place {
+        if *n >= MIN_SIDE && share - base >= 0.1 {
+            out.push(Reason {
+                kind: "place",
+                title: format!("Many leave after `{place}`"),
+                evidence: format!(
+                    "last place of {} of churned users vs {} of retained users",
+                    pct(*share),
+                    pct(*base)
+                ),
+                weight: share - base,
+            });
+        }
+    }
+    let all: i64 = r.by_release.iter().map(|x| x.1).sum();
+    let mean = if all > 0 {
+        r.by_release.iter().map(|x| x.2 * x.1 as f64).sum::<f64>() / all as f64
+    } else {
+        0.0
+    };
+    for (rel, n, share) in &r.by_release {
+        if *n >= MIN_SIDE && share - mean >= 0.1 {
+            out.push(Reason {
+                kind: "release",
+                title: format!("Users who arrived on `{rel}` leave more"),
+                evidence: format!("{} of {n} churned, vs {} overall", pct(*share), pct(mean)),
+                weight: share - mean,
+            });
+        }
+    }
+    out.sort_by(|a, b| b.weight.total_cmp(&a.weight));
+    out.truncate(5);
+    out
 }
 
 fn day(s: &str) -> Option<NaiveDate> {
@@ -121,14 +316,39 @@ pub async fn churn(
         c2 = 2 * c
     );
     let days_sql = format!(
-        "SELECT distinct_id, date FROM {src} WHERE {w} AND {ident} AND {INTERACTION} \
+        "SELECT distinct_id, date, max(release) AS rel, min(feature) AS feat FROM {src} WHERE {w} AND {ident} AND {INTERACTION} \
          GROUP BY distinct_id, date ORDER BY distinct_id, date LIMIT 500000"
     );
+    let adopt_sql = format!(
+        "SELECT distinct_id, feature, CAST(min(timestamp) AS VARCHAR) AS t FROM {src} \
+         WHERE {w} AND {ident} AND feature IS NOT NULL GROUP BY distinct_id, feature LIMIT 500000"
+    );
+    let friction_sql = format!(
+        "WITH l AS (SELECT distinct_id, max(date) AS d FROM {src} WHERE {w} AND {ident} AND {INTERACTION} GROUP BY distinct_id) \
+         SELECT e.distinct_id, \
+                max(CASE WHEN e.event = '$click' AND e.properties LIKE '%\"$rage\":true%' THEN 1 ELSE 0 END) AS rage, \
+                max(CASE WHEN e.event = '$request_failed' THEN 1 ELSE 0 END) AS failed, \
+                max(CASE WHEN e.event = '$vital' AND e.properties LIKE '%\"$rating\":\"poor\"%' THEN 1 ELSE 0 END) AS slow \
+         FROM (SELECT distinct_id, event, properties, date FROM {src} WHERE {w}) e \
+         JOIN l ON e.distinct_id = l.distinct_id AND e.date = l.d GROUP BY e.distinct_id"
+    );
+    let release_sql = format!(
+        "SELECT distinct_id, first_value(release ORDER BY timestamp) AS rel FROM {src} \
+         WHERE {w} AND {ident} AND release IS NOT NULL GROUP BY distinct_id"
+    );
+    let cancel_sql = match map.and_then(|m| m.churn_event.as_deref()) {
+        Some(ev) => Some(format!(
+            "SELECT DISTINCT distinct_id FROM {src} WHERE {w} AND event = {}",
+            crate::lit(ev)?
+        )),
+        None => None,
+    };
     let last_sql = format!(
         "WITH l AS (SELECT distinct_id, max(timestamp) AS t FROM {src} WHERE {w} AND {ident} AND {INTERACTION} GROUP BY distinct_id) \
          SELECT e.distinct_id, max(coalesce(e.feature, e.path)) AS place, \
                 max(CASE WHEN ev.event = '$error' THEN 1 ELSE 0 END) AS err \
-         FROM {src} e JOIN l ON e.distinct_id = l.distinct_id AND e.timestamp = l.t \
+         FROM (SELECT distinct_id, timestamp, date, feature, path FROM {src} WHERE {w}) e \
+         JOIN l ON e.distinct_id = l.distinct_id AND e.timestamp = l.t \
          LEFT JOIN (SELECT distinct_id, event, date FROM {src} WHERE {w} AND event = '$error') ev \
            ON ev.distinct_id = e.distinct_id AND ev.date = e.date \
          GROUP BY e.distinct_id"
@@ -139,6 +359,21 @@ pub async fn churn(
         q.sql(project, &last_sql),
         crate::tasks::resurrected(q, project, &src, f, c),
     );
+    let (adopt, fr, rel) = futures::join!(
+        q.sql(project, &adopt_sql),
+        q.sql(project, &friction_sql),
+        q.sql(project, &release_sql),
+    );
+    let cancelled: std::collections::HashSet<String> = match &cancel_sql {
+        Some(sql) => q
+            .sql(project, sql)
+            .await?
+            .rows
+            .iter()
+            .filter_map(|r| text(r, "distinct_id"))
+            .collect(),
+        None => std::collections::HashSet::new(),
+    };
     let today = Utc::now().date_naive();
     let mut out = ChurnReport {
         window: c,
@@ -146,6 +381,8 @@ pub async fn churn(
         ..ChurnReport::default()
     };
     let mut churned: HashMap<String, bool> = HashMap::new();
+    let mut firsts: HashMap<String, NaiveDate> = HashMap::new();
+    let mut roles: HashMap<String, Vec<(i64, bool)>> = HashMap::new();
     let mut lives: Vec<(i64, bool)> = Vec::new();
     let mut weeks: HashMap<String, i64> = HashMap::new();
     let mut leave: HashMap<i64, i64> = HashMap::new();
@@ -160,10 +397,17 @@ pub async fn churn(
         };
         out.users += 1;
         let idle = (today - last).num_days();
-        let gone = idle > c;
+        let explicit = cancelled.contains(&id);
+        let gone = idle > c || explicit;
+        out.cancelled += i64::from(explicit);
         churned.insert(id.clone(), gone);
+        firsts.insert(id.clone(), first);
         let life = (last - first).num_days();
         lives.push((life, gone));
+        roles
+            .entry(text(r, "role").unwrap_or_else(|| "(none)".into()))
+            .or_default()
+            .push((life, gone));
         if first >= start {
             out.new_recent += 1;
         }
@@ -219,9 +463,13 @@ pub async fn churn(
             .find(|(_, s)| *s < 0.5)
             .map(|(d, _)| d)
     };
-    // Gaps between active days → a suggested window.
+    // Gaps between active days → a suggested window; returns after a gap
+    // longer than the window in the last 30 days → win-back.
     let mut gaps: Vec<i64> = Vec::new();
     let mut prev: Option<(String, NaiveDate)> = None;
+    let mut back: HashMap<String, (NaiveDate, Option<String>, Option<String>)> = HashMap::new();
+    let mut active_after: HashMap<String, i64> = HashMap::new();
+    let recent = today - chrono::Duration::days(30);
     for r in &d?.rows {
         let (Some(id), Some(dt)) = (
             text(r, "distinct_id"),
@@ -232,10 +480,114 @@ pub async fn churn(
         if let Some((pid, pd)) = &prev
             && *pid == id
         {
-            gaps.push((dt - *pd).num_days());
+            let gap = (dt - *pd).num_days();
+            gaps.push(gap);
+            if gap > c && dt >= recent {
+                back.insert(id.clone(), (dt, text(r, "rel"), text(r, "feat")));
+                active_after.insert(id.clone(), 0);
+            }
+        }
+        if let Some(n) = active_after.get_mut(&id) {
+            *n += 1;
         }
         prev = Some((id, dt));
     }
+    out.winback.users = back.len() as i64;
+    let mut wr: HashMap<String, i64> = HashMap::new();
+    let mut wf: HashMap<String, i64> = HashMap::new();
+    for (rel, feat) in back.values().map(|(_, r, f)| (r, f)) {
+        *wr.entry(rel.clone().unwrap_or_else(|| "(none)".into()))
+            .or_default() += 1;
+        *wf.entry(feat.clone().unwrap_or_else(|| "(page)".into()))
+            .or_default() += 1;
+    }
+    let top = |m: HashMap<String, i64>| {
+        let mut v: Vec<(String, i64)> = m.into_iter().collect();
+        v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        v.truncate(8);
+        v
+    };
+    out.winback.by_release = top(wr);
+    out.winback.by_feature = top(wf);
+    out.winback.mean_active_days = if active_after.is_empty() {
+        0.0
+    } else {
+        active_after.values().sum::<i64>() as f64 / active_after.len() as f64
+    };
+    // Why: early adoption, friction, arrival release, roles.
+    let adopted: Vec<(String, String, NaiveDate)> = adopt?
+        .rows
+        .iter()
+        .filter_map(|r| {
+            Some((
+                text(r, "distinct_id")?,
+                text(r, "feature")?,
+                text(r, "t").as_deref().and_then(day)?,
+            ))
+        })
+        .collect();
+    out.lift = lift(&firsts, &churned, &adopted, today);
+    let mut fc = [0i64; 3];
+    let mut fk = [0i64; 3];
+    let (mut nc, mut nk) = (0i64, 0i64);
+    for r in &fr?.rows {
+        let Some(g) = text(r, "distinct_id").and_then(|id| churned.get(&id).copied()) else {
+            continue;
+        };
+        let hits = [int(r, "rage"), int(r, "failed"), int(r, "slow")];
+        let (cnt, n) = if g {
+            (&mut fc, &mut nc)
+        } else {
+            (&mut fk, &mut nk)
+        };
+        *n += 1;
+        for (i, h) in hits.iter().enumerate() {
+            cnt[i] += i64::from(*h > 0);
+        }
+    }
+    if nc >= MIN_SIDE && nk >= MIN_SIDE {
+        for (i, kind) in [
+            "Rage clicks",
+            "Failed requests",
+            "Slow pages (poor Web Vitals)",
+        ]
+        .iter()
+        .enumerate()
+        {
+            out.friction.push((
+                (*kind).to_owned(),
+                fc[i] as f64 / nc as f64,
+                fk[i] as f64 / nk as f64,
+            ));
+        }
+    }
+    let mut rels: HashMap<String, (i64, i64)> = HashMap::new();
+    for r in &rel?.rows {
+        if let (Some(id), Some(rl)) = (text(r, "distinct_id"), text(r, "rel"))
+            && let Some(g) = churned.get(&id)
+        {
+            let e = rels.entry(rl).or_default();
+            e.0 += 1;
+            e.1 += i64::from(*g);
+        }
+    }
+    let mut br: Vec<(String, i64, f64)> = rels
+        .into_iter()
+        .map(|(k, (n, g))| (k, n, g as f64 / n.max(1) as f64))
+        .collect();
+    br.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    br.truncate(12);
+    out.by_release = br;
+    let mut rr: Vec<(String, i64, f64)> = roles
+        .into_iter()
+        .map(|(k, v)| {
+            let s30 = survival(&v, &[30]).first().map_or(1.0, |x| x.1);
+            (k, v.len() as i64, s30)
+        })
+        .collect();
+    rr.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    rr.truncate(12);
+    out.by_role = rr;
     if gaps.len() >= 50 {
         gaps.sort_unstable();
         let p90 = gaps[(gaps.len() - 1) * 9 / 10];
@@ -281,12 +633,75 @@ pub async fn churn(
         err_c as f64 / n_c.max(1) as f64,
         err_r as f64 / n_r.max(1) as f64,
     );
+    if n_c >= MIN_SIDE && n_r >= MIN_SIDE {
+        out.friction.insert(
+            0,
+            (
+                "Errors".to_owned(),
+                out.errors_at_end.0,
+                out.errors_at_end.1,
+            ),
+        );
+    }
+    out.reasons = reasons(&out);
     Ok(out)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::survival;
+    use super::*;
+
+    #[test]
+    fn early_adopters_who_stay_rank_their_feature_first() {
+        let today = NaiveDate::from_ymd_opt(2026, 11, 23).unwrap_or_default();
+        let start = today - chrono::Duration::days(60);
+        let mut first = HashMap::new();
+        let mut gone = HashMap::new();
+        let mut adopted = Vec::new();
+        for i in 0..40 {
+            let u = format!("u{i}");
+            first.insert(u.clone(), start);
+            // Half adopt `share` in week 1 and stay; the rest leave.
+            let keeps = i < 20;
+            gone.insert(u.clone(), !keeps);
+            if keeps {
+                adopted.push((
+                    u.clone(),
+                    "share".to_owned(),
+                    start + chrono::Duration::days(3),
+                ));
+            }
+            // Everyone uses `edit`, but late adoption does not count.
+            adopted.push((
+                u.clone(),
+                "edit".to_owned(),
+                start + chrono::Duration::days(if i % 2 == 0 { 2 } else { 30 }),
+            ));
+        }
+        // A user too young to judge is left out.
+        first.insert("new".into(), today - chrono::Duration::days(3));
+        let l = lift(&first, &gone, &adopted, today);
+        assert_eq!(l[0].feature, "share");
+        assert_eq!((l[0].adopters, l[0].non_adopters), (20, 20));
+        assert!((l[0].churn_non - 1.0).abs() < 1e-9 && l[0].churn_adopters < 1e-9);
+        let edit = l.iter().find(|x| x.feature == "edit").unwrap_or(&l[0]);
+        assert!(
+            (edit.churn_non - edit.churn_adopters).abs() < 1e-9,
+            "no lift for edit"
+        );
+        let r = ChurnReport {
+            lift: l,
+            friction: vec![
+                ("Rage clicks".into(), 0.4, 0.1),
+                ("Errors".into(), 0.1, 0.1),
+            ],
+            ..ChurnReport::default()
+        };
+        let rs = reasons(&r);
+        assert_eq!(rs[0].kind, "feature");
+        assert_eq!(rs[1].kind, "friction");
+        assert_eq!(rs.len(), 2);
+    }
 
     #[test]
     fn kaplan_meier_counts_recent_users_correctly() {
