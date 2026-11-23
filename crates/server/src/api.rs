@@ -410,8 +410,16 @@ async fn login_link(
     .await;
     match res {
         Ok(Ok((user, t))) => {
-            let who = user.as_ref().map_or_else(|| "owner".to_owned(), |u| u.email.clone());
-            crate::privacy::audit(&state, &headers, None, "user.invite", &format!("login link for {who} (api)"));
+            let who = user
+                .as_ref()
+                .map_or_else(|| "owner".to_owned(), |u| u.email.clone());
+            crate::privacy::audit(
+                &state,
+                &headers,
+                None,
+                "user.invite",
+                &format!("login link for {who} (api)"),
+            );
             Json(json!({
                 "url": format!("{host}/l/{t}"),
                 "expires_in_days": 7,

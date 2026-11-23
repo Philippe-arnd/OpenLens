@@ -832,6 +832,7 @@ fn family_label(fam: &str) -> &'static str {
 
 /// A person's profile (#222): who they are, their role over time, their
 /// recordings, their latest events and errors.
+#[allow(clippy::too_many_arguments)]
 pub fn person(
     p: &ProjectInfo<'_>,
     who: &str,
@@ -3344,11 +3345,11 @@ mod tests {
             "Most people who left (72%) were in billing last".to_owned(),
             "Check the billing page first.".to_owned(),
         )];
-        let html = render(board(&p, &b, &Filters::default(), "http://x", &plain));
+        let html = render(board(&p, &b, &Filters::default(), "http://x", &plain, None));
         assert!(html.contains("Most people who left (72%)"));
         assert!(html.contains("Original: 72% of churned users were last seen in billing"));
         assert!(html.contains("Check the billing page first."));
-        let html = render(board(&p, &b, &Filters::default(), "http://x", &[]));
+        let html = render(board(&p, &b, &Filters::default(), "http://x", &[], None));
         assert!(
             html.contains("72% of churned users were last seen in billing")
                 && !html.contains("Original:")
