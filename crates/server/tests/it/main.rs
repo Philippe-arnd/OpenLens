@@ -2714,3 +2714,95 @@ async fn a_forgotten_person_is_gone_everywhere_and_stays_gone() {
     let api = body_text(get(&h, "/api/audit", None, true).await).await;
     assert!(api.contains("user.invite"));
 }
+
+async fn post_form_body(h: &Harness, uri: &str, cookie: &str, body: &str) -> (StatusCode, String) {
+    let r = router(h.state.clone())
+        .oneshot(
+            Request::post(uri)
+                .header("cookie", cookie)
+                .header("origin", "http://localhost:8686")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(body.to_owned()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let s = r.status();
+    (s, body_text(r).await)
+}
+
+#[tokio::test]
+async fn share_links_open_without_login_and_stop_when_revoked() {
+    let h = harness();
+    let (status, _) = post(&h, "/capture", batch(&h.key), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let owner = login_cookie(&h).await;
+    let (s, page) = post_form_body(
+        &h,
+        "/p/default/settings/share",
+        &owner,
+        "scope=board&days=30&embed=https%3A%2F%2Fintranet.example.com",
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let token = page
+        .split("/s/")
+        .nth(1)
+        .unwrap()
+        .split([' ', '<', '&', '"'])
+        .next()
+        .unwrap()
+        .to_owned();
+    let view = get(&h, &format!("/s/{token}"), None, false).await;
+    assert_eq!(view.status(), StatusCode::OK);
+    let csp = view.headers()["content-security-policy"]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    assert!(
+        csp.contains("frame-ancestors https://intranet.example.com"),
+        "{csp}"
+    );
+    let html = body_text(view).await;
+    assert!(html.contains("Read-only view") && html.contains("Focus board"));
+    assert!(
+        !html.contains("action=\"/p/") && !html.contains("/watch?") && !html.contains(" style=")
+    );
+    assert_eq!(
+        get(&h, "/s/sh_nope", None, false).await.status(),
+        StatusCode::NOT_FOUND
+    );
+    let (s, _) = post_form_body(
+        &h,
+        "/p/default/settings/share",
+        &owner,
+        "scope=board&embed=http%3A%2F%2Fevil.example",
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "http origins refused");
+    let viewer = invite(
+        &h,
+        serde_json::json!({"email": "v@example.com", "role": "viewer"}),
+    )
+    .await;
+    assert_eq!(
+        post_form(&h, "/p/default/settings/share", &viewer, "scope=board").await,
+        StatusCode::FORBIDDEN
+    );
+    let id = h.state.meta.share_links("default").unwrap()[0].id.clone();
+    assert_eq!(
+        post_form(
+            &h,
+            &format!("/p/default/settings/share/{id}/revoke"),
+            &owner,
+            ""
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    assert_eq!(
+        get(&h, &format!("/s/{token}"), None, false).await.status(),
+        StatusCode::NOT_FOUND
+    );
+}

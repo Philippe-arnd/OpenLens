@@ -165,6 +165,18 @@ CREATE TABLE IF NOT EXISTS audit (
   action TEXT NOT NULL,
   detail TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS share_links (
+  hash TEXT PRIMARY KEY,
+  id TEXT NOT NULL UNIQUE,
+  project TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  environment TEXT NOT NULL,
+  release TEXT,
+  embed TEXT,
+  expires_at INTEGER,
+  created_at INTEGER NOT NULL,
+  created_by TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   email TEXT NOT NULL UNIQUE,
@@ -260,6 +272,46 @@ fn user_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
         last_sign_in: r.get(8)?,
     })
 }
+
+/// A read-only share link (#229). The token itself is never stored.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ShareLink {
+    /// Public id (to list and revoke).
+    pub id: String,
+    /// Project.
+    pub project: String,
+    /// `board` or `digest`.
+    pub scope: String,
+    /// Environment shown.
+    pub environment: String,
+    /// Release shown, if fixed.
+    pub release: Option<String>,
+    /// Origins allowed to embed it (space-separated), if any.
+    pub embed: Option<String>,
+    /// Expiry (Unix seconds), if any.
+    pub expires_at: Option<i64>,
+    /// Created (Unix seconds).
+    pub created_at: i64,
+    /// Who made it.
+    pub created_by: String,
+}
+
+fn share_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ShareLink> {
+    Ok(ShareLink {
+        id: r.get(0)?,
+        project: r.get(1)?,
+        scope: r.get(2)?,
+        environment: r.get(3)?,
+        release: r.get(4)?,
+        embed: r.get(5)?,
+        expires_at: r.get(6)?,
+        created_at: r.get(7)?,
+        created_by: r.get(8)?,
+    })
+}
+
+const SHARE_COLS: &str =
+    "id, project, scope, environment, release, embed, expires_at, created_at, created_by";
 
 /// One audit entry: `(at, actor, project, action, detail)` (#230).
 pub type AuditEntry = (i64, String, Option<String>, String, String);
@@ -559,6 +611,7 @@ impl Meta {
                 "uptime_checks",
                 "incidents",
                 "forgotten",
+                "share_links",
             ] {
                 tx.execute(&format!("DELETE FROM {table} WHERE project = ?1"), [id])?;
             }
@@ -911,6 +964,84 @@ impl Meta {
                 .query_map(params![project, since], |r| r.get(0))?
                 .collect::<rusqlite::Result<Vec<String>>>()?;
             Ok(rows)
+        })
+    }
+
+    /// Create a share link; returns `(link, token)`. At most 50 active
+    /// links per project.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_share_link(
+        &self,
+        project: &str,
+        scope: &str,
+        environment: &str,
+        release: Option<&str>,
+        embed: Option<&str>,
+        expires_at: Option<i64>,
+        created_by: &str,
+    ) -> Result<(ShareLink, String)> {
+        if scope != "board" && scope != "digest" {
+            return Err(MetaError::Invalid("scope must be board or digest"));
+        }
+        let now = Utc::now().timestamp();
+        let id = token(10);
+        let secret = format!("sh_{}", token(32));
+        self.with(|c| {
+            let active: i64 = c.query_row(
+                "SELECT count(*) FROM share_links WHERE project = ?1 AND (expires_at IS NULL OR expires_at > ?2)",
+                params![project, now],
+                |r| r.get(0),
+            )?;
+            if active >= 50 {
+                return Err(MetaError::Invalid("at most 50 active share links per project; revoke some"));
+            }
+            c.execute(
+                "INSERT INTO share_links (hash, id, project, scope, environment, release, embed, expires_at, created_at, created_by) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![sha256_hex(&secret), id, project, scope, environment, release, embed, expires_at, now, created_by],
+            )?;
+            let link = c.query_row(
+                &format!("SELECT {SHARE_COLS} FROM share_links WHERE id = ?1"),
+                [&id],
+                share_from_row,
+            )?;
+            Ok((link, secret))
+        })
+    }
+
+    /// The live share link a token opens (not expired, not revoked).
+    pub fn share_link(&self, token: &str) -> Result<Option<ShareLink>> {
+        let now = Utc::now().timestamp();
+        self.with(|c| {
+            Ok(c.query_row(
+                &format!("SELECT {SHARE_COLS} FROM share_links WHERE hash = ?1 AND (expires_at IS NULL OR expires_at > ?2)"),
+                params![sha256_hex(token), now],
+                share_from_row,
+            )
+            .optional()?)
+        })
+    }
+
+    /// A project's share links, newest first (expired ones too).
+    pub fn share_links(&self, project: &str) -> Result<Vec<ShareLink>> {
+        self.with(|c| {
+            let mut st = c.prepare(&format!(
+                "SELECT {SHARE_COLS} FROM share_links WHERE project = ?1 ORDER BY created_at DESC"
+            ))?;
+            let rows = st
+                .query_map([project], share_from_row)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// Revoke a share link (it stops working at once).
+    pub fn revoke_share_link(&self, project: &str, id: &str) -> Result<bool> {
+        self.with(|c| {
+            Ok(c.execute(
+                "DELETE FROM share_links WHERE project = ?1 AND id = ?2",
+                params![project, id],
+            )? == 1)
         })
     }
 
