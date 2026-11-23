@@ -2416,3 +2416,94 @@ async fn a_new_error_hitting_two_users_is_announced_once() {
         "announced and closed at once"
     );
 }
+
+#[tokio::test]
+async fn landings_get_a_channel_and_only_the_referrer_host_is_kept() {
+    let h = harness();
+    let body = serde_json::json!({
+        "key": h.key,
+        "batch": [
+            {"event": "$pageview", "distinct_id": "u1", "properties": {"$current_url": "https://app.example.com/", "$pathname": "/", "$lang": "en", "$referrer": "https://www.google.com/search?q=secret+words"}},
+            {"event": "$pageview", "distinct_id": "u2", "properties": {"$current_url": "https://app.example.com/?utm_source=news&utm_medium=email", "$pathname": "/", "$lang": "en", "$utm_source": "news", "$utm_medium": "email"}},
+            {"event": "$pageview", "distinct_id": "u3", "properties": {"$current_url": "https://app.example.com/", "$pathname": "/", "$lang": "en"}},
+            {"event": "$pageview", "distinct_id": "u3", "properties": {"$current_url": "https://app.example.com/b", "$pathname": "/b"}}
+        ]
+    })
+    .to_string();
+    let (status, _) = post(&h, "/capture", body.into_bytes(), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let r = h
+        .state
+        .query
+        .sql(
+            "default",
+            "SELECT distinct_id, properties FROM raw_events ORDER BY distinct_id, timestamp",
+        )
+        .await
+        .unwrap();
+    let all = serde_json::to_string(&r.rows).unwrap();
+    assert!(
+        !all.contains("secret"),
+        "the referrer's path and query are not kept"
+    );
+    assert!(
+        all.contains(r#"\"$ref_host\":\"google.com\""#)
+            && all.contains(r#"\"$channel\":\"search\""#),
+        "{all}"
+    );
+    assert!(
+        all.contains(r#"\"$channel\":\"email\""#) && all.contains(r#"\"$channel\":\"direct\""#)
+    );
+    assert_eq!(
+        all.matches("$channel").count(),
+        3,
+        "only the first view of a load"
+    );
+    let owner = login_cookie(&h).await;
+    let page = body_text(get(&h, "/p/default/acquisition", Some(&owner), false).await).await;
+    assert!(
+        page.contains("search")
+            && page.contains("email")
+            && page.contains("low sample")
+            && !page.contains(" style=")
+    );
+    assert_eq!(
+        get(
+            &h,
+            "/p/default/acquisition?by=source&touch=last",
+            Some(&owner),
+            false
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        get(&h, "/p/default/breakdown?by=channel", Some(&owner), false)
+            .await
+            .status(),
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn the_churn_page_and_api() {
+    let h = harness();
+    let (status, _) = post(&h, "/capture", batch(&h.key), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let owner = login_cookie(&h).await;
+    let page = body_text(get(&h, "/p/default/churn", Some(&owner), false).await).await;
+    assert!(
+        page.contains("Churn rate")
+            && page.contains("How long they stay")
+            && !page.contains(" style=")
+    );
+    let api: serde_json::Value = serde_json::from_str(
+        &body_text(get(&h, "/api/projects/default/churn", None, true).await).await,
+    )
+    .unwrap();
+    assert_eq!(api["window"], 14);
+    assert_eq!(api["users"], 1);
+}

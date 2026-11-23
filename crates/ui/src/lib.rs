@@ -161,6 +161,8 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                                     ("/flags", "flag", "Flags"),
                                     ("/surveys", "idea", "Surveys"),
                                     ("/audience", "globe", "Audience"),
+                                    ("/acquisition", "route", "Acquisition"),
+                                    ("/churn", "ban", "Churn"),
                                     ("/flows", "funnel", "Feature flow"),
                                     ("/features", "route", "Feature map"),
                                     ("/digest", "mail", "Digest"),
@@ -911,6 +913,7 @@ pub const BREAKDOWNS: &[(&str, &str)] = &[
     ("device", "Device"),
     ("browser", "Browser"),
     ("os", "OS"),
+    ("channel", "Channel"),
 ];
 
 /// Users, sessions, tasks and errors broken down by one dimension (#222).
@@ -1772,6 +1775,168 @@ pub fn uptime(p: &ProjectInfo<'_>, v: &UptimeView<'_>) -> Markup {
                         li { span class={ "status " (if *ok { "good" } else { "bad" }) } { (if *ok { "ok" } else { "failed" }) } " " (t)
                             @if let Some(s) = status { " · HTTP " (s) } @if let Some(m) = ms { " · " (m) " ms" } @if let Some(e) = err { " · " span.muted { (e) } } }
                     } }
+                }
+            }
+        },
+    )
+}
+
+/// Where users come from (#226), ranked by the share reaching the value
+/// moment, not by visits.
+pub fn acquisition(
+    p: &ProjectInfo<'_>,
+    b: &Board,
+    f: &Filters,
+    rows: &[openlens_engine::AcquisitionRow],
+    by: &str,
+    last: bool,
+) -> Markup {
+    let base = format!("/p/{}/acquisition", p.id);
+    let env = url_enc(&f.environment);
+    let dims = [
+        ("channel", "Channel"),
+        ("source", "Source"),
+        ("campaign", "Campaign"),
+        ("referrer", "Referrer"),
+    ];
+    let total: i64 = rows.iter().map(|r| r.users).sum();
+    layout(
+        "Acquisition",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "Where users come from" }
+                p.muted { "Last 90 days, " strong { (f.environment) } ", by " (if last { "last touch (direct visits don't count)" } else { "first touch" }) ". Ranked by the share that reaches the value moment, not by visits." }
+            } }
+            nav.tabs aria-label="Group by" {
+                @for (k, l) in dims {
+                    a href={ (base) "?by=" (k) "&touch=" (if last { "last" } else { "first" }) "&env=" (env) } aria-current=[(k == by).then_some("page")] { (l) }
+                }
+                " · "
+                a href={ (base) "?by=" (by) "&touch=first&env=" (env) } aria-current=[(!last).then_some("page")] { "First touch" }
+                a href={ (base) "?by=" (by) "&touch=last&env=" (env) } aria-current=[last.then_some("page")] { "Last touch" }
+            }
+            (filter_bar(p.id, b, f, &format!("/acquisition?by={by}&touch={}", if last { "last" } else { "first" })))
+            section.card.wide {
+                @if rows.is_empty() { p.muted { "No landing with a channel yet. The SDK sends the referrer and the campaign parameters on the first page view of a visit (SDK builds from 2026-11-23 on)." } }
+                @else {
+                    div.table-scroll { table.plain {
+                        thead { tr { th { (dims.iter().find(|d| d.0 == by).map_or("Channel", |d| d.1)) } th.num { "Users" } th.num { "Reached value" } th { span.sr-only { "Share" } } th.num { "Came back" } th.num { "Churned" } } }
+                        tbody { @for r in rows {
+                            tr {
+                                th scope="row" { span.mono { (r.value) } @if r.users < 20 { " " span.chip title="Under 20 users: the rates move a lot" { "low sample" } } }
+                                td.num { (compact(r.users)) span.muted.small { " · " (pct(r.users as f64 / total.max(1) as f64)) } }
+                                td.num { strong { (pct(r.value_rate())) } }
+                                td.meter { (meter(r.value_rate())) }
+                                td.num { (pct(r.returned as f64 / r.users.max(1) as f64)) }
+                                td.num { @if r.judged > 0 { (pct(r.churned as f64 / r.judged as f64)) } @else { span.muted { "—" } } }
+                            }
+                        } }
+                    } }
+                    p.muted.small { "Reached value: a success event of the feature map (any feature use when none is declared). Came back: active on two days or more. Churned: of the users first seen before the churn window, those inactive for longer than it now." }
+                }
+            }
+        },
+    )
+}
+
+/// Churn (#247): how many leave, after how long, at which moment, with
+/// what friction, and who is at risk now.
+pub fn churn(
+    p: &ProjectInfo<'_>,
+    b: &Board,
+    f: &Filters,
+    c: &openlens_engine::ChurnReport,
+) -> Markup {
+    let rate = c.churned_recent as f64 / c.active_at_start.max(1) as f64;
+    let net = c.new_recent + c.resurrected - c.churned_recent;
+    let leave_max = c.leave_week.iter().map(|x| x.1).max().unwrap_or(1).max(1) as f64;
+    layout(
+        "Churn",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "Churn" }
+                p.muted { "A user has churned after " strong { (c.window) " days" } " without using the app (" code { "churn_after_days" } " in the feature map). Last 90 days, " strong { (f.environment) } ", logged-in users." }
+            } }
+            @if let Some(s) = c.suggested {
+                @if s != c.window {
+                    p.notice { "Your users usually come back within " strong { (s) " days" } " (9 gaps out of 10 between active days are shorter): " code { "churn_after_days: " (s) } " would fit this app better. Nothing changes until the feature map says so." }
+                }
+            }
+            (filter_bar(p.id, b, f, "/churn"))
+            section.tiles aria-label="How many" {
+                (tile("coral", "ban", "Churn rate", &pct(rate), &format!("{} of {} users active {} days ago left", compact(c.churned_recent), compact(c.active_at_start), c.window)))
+                (tile("mint", "users", "Net change", &format!("{}{}", if net >= 0 { "+" } else { "" }, compact(net)), &format!("{} new + {} back − {} gone", compact(c.new_recent), compact(c.resurrected), compact(c.churned_recent))))
+                (tile("sun", "alert", "At risk now", &compact(c.at_risk.len() as i64), "quiet for over half the window, less active than before"))
+                (tile("violet", "clock", "Median lifetime", &c.median_days.map_or_else(|| "over 90 days".into(), |d| format!("{d} days")), "half the users are gone by then"))
+            }
+            div.grid {
+                section.card {
+                    h2.coral { (icon("ban")) "Churned per week" }
+                    @if c.by_week.is_empty() { p.muted.small { "Nobody has churned in the window." } }
+                    @else { (sparkline(&c.by_week)) p.muted.small { "Users whose last active day fell that week." } }
+                }
+                section.card {
+                    h2.violet { (icon("clock")) "How long they stay" }
+                    table.plain.bars { tbody { @for (d, s) in &c.survival {
+                        tr { th scope="row" { "day " (d) } td.meter { (meter(*s)) } td.num { (pct(*s)) } }
+                    } } }
+                    p.muted.small { "Share still active N days after their first visit (Kaplan–Meier: users who joined recently count only for the days they could have stayed)." }
+                }
+                section.card {
+                    h2.sun { (icon("route")) "When they leave" }
+                    @if c.leave_week.is_empty() { p.muted.small { "Nobody has churned yet." } }
+                    @else {
+                        table.plain.bars { tbody { @for (wk, n) in &c.leave_week {
+                            tr { th scope="row" { @if *wk >= 12 { "week 12+" } @else { "week " (wk + 1) } } td.meter { (meter(*n as f64 / leave_max)) } td.num { (compact(*n)) } }
+                        } } }
+                        p.muted.small { "Week of life in which churned users were last active. A spike in week 1 is onboarding; at the end of a trial, the trial." }
+                    }
+                }
+                section.card {
+                    h2.coral { (icon("alert")) "Friction before leaving" }
+                    p { "On their last active day, " strong { (pct(c.errors_at_end.0)) } " of churned users hit an error, against " (pct(c.errors_at_end.1)) " of users who stayed." }
+                    p.small { a href={ "/p/" (p.id) "/errors" } { "Errors →" } " · " a href={ "/p/" (p.id) "/flows" } { "Feature flow (exits) →" } }
+                }
+            }
+            section.card.wide {
+                h2.violet { (icon("layers")) "The last thing they did" }
+                @if c.last_place.is_empty() { p.muted { "Nobody has churned in the window." } }
+                @else {
+                    div.table-scroll { table.plain {
+                        thead { tr { th { "Feature or page" } th.num { "Churned users" } th.num { "Share" } th.num { "Users who stayed" } th {} } }
+                        tbody { @for (place, n, share, base) in &c.last_place {
+                            tr {
+                                th scope="row" { span.mono { (place) } }
+                                td.num { (compact(*n)) }
+                                td.num { strong { (pct(*share)) } }
+                                td.num { (pct(*base)) }
+                                td { @if *share > base * 1.5 && *n >= 3 { span.status.bad { "more than usual" } } }
+                            }
+                        } }
+                    } }
+                    p.muted.small { "Where churned users were last active, against where users who stayed were last seen. A place far above its usual share is where to look (and replay)." }
+                }
+            }
+            section.card.wide {
+                h2.sun { (icon("users")) "At risk now" }
+                @if c.at_risk.is_empty() { p.muted { "Nobody: active users keep their pace." } }
+                @else {
+                    div.table-scroll { table.plain {
+                        thead { tr { th { "User" } th { "Role" } th { "Last active" } th.num { "Quiet for" } th.num { "Active days, last window" } th.num { "Window before" } } }
+                        tbody { @for r in &c.at_risk {
+                            tr {
+                                td.mono { a href={ "/p/" (p.id) "/people/" (url_enc(&r.distinct_id)) } { (r.distinct_id) } }
+                                td { (r.role.as_deref().unwrap_or("—")) }
+                                td.small { (r.last_day) }
+                                td.num { (r.idle_days) " days" }
+                                td.num { (r.recent_days) }
+                                td.num { (r.before_days) }
+                            }
+                        } }
+                    } }
+                    p.muted.small { "Open a profile to see their last sessions and replays. Win them back before the window closes." }
                 }
             }
         },

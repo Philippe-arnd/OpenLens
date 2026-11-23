@@ -293,8 +293,17 @@ function pageview() {
   lastPath = path;
   track(
     "$pageview",
-    first ? { ...document.referrer ? { $referrer: document.referrer } : {}, $lang: navigator.language, $sw: screen.width } : {}
+    first ? { ...document.referrer ? { $referrer: document.referrer } : {}, ...utm(), $lang: navigator.language, $sw: screen.width } : {}
   );
+}
+function utm() {
+  const out = {};
+  const q = new URLSearchParams(location.search);
+  for (const k of ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "gclid", "fbclid", "msclkid"]) {
+    const v = q.get(k);
+    if (v) out["$" + k] = v.slice(0, 100);
+  }
+  return out;
 }
 function lineage(el, path) {
   const from = path ? path.indexOf(el) : -1;

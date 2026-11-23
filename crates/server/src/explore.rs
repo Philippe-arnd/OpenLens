@@ -259,6 +259,141 @@ pub(crate) fn csv(res: &openlens_query::QueryResult) -> String {
     out
 }
 
+#[derive(Deserialize)]
+pub(crate) struct AcqParams {
+    #[serde(flatten)]
+    f: FilterQuery,
+    by: Option<String>,
+    touch: Option<String>,
+}
+
+/// `GET /p/{id}/acquisition?by=channel|source|campaign|referrer&touch=first|last` (#226).
+pub(crate) async fn acquisition(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    axum::extract::RawQuery(raw): axum::extract::RawQuery,
+) -> Response {
+    if !auth::has_session(&state, &headers) {
+        return Redirect::to("/login").into_response();
+    }
+    let Some(p) = project(&state, &id).await else {
+        return not_found("No such project.");
+    };
+    let Ok(q) = serde_urlencoded::from_str::<AcqParams>(&raw.unwrap_or_default()) else {
+        return not_found("Unreadable filters.");
+    };
+    let by = ["source", "campaign", "referrer"]
+        .into_iter()
+        .find(|b| q.by.as_deref() == Some(*b))
+        .unwrap_or("channel");
+    let last = q.touch.as_deref() == Some("last");
+    let f = q.f.filters(&auth::tz_for(&state, &headers, &p.timezone));
+    let map = crate::load_map(&state, &p.id).await;
+    let touch = if last {
+        openlens_engine::Touch::Last
+    } else {
+        openlens_engine::Touch::First
+    };
+    let (b, rows) = tokio::join!(
+        openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
+        openlens_engine::acquisition(
+            &state.query,
+            &p.id,
+            map.as_ref().map(|(m, _)| m),
+            &f,
+            by,
+            touch
+        )
+    );
+    let info = openlens_ui::ProjectInfo {
+        id: &p.id,
+        name: &p.name,
+        key: &p.api_key,
+    };
+    match (b, rows) {
+        (Ok(b), Ok(rows)) => html_page(
+            StatusCode::OK,
+            openlens_ui::acquisition(&info, &b, &f, &rows, by, last),
+        ),
+        (Err(e), _) | (_, Err(e)) => html_page(
+            StatusCode::BAD_REQUEST,
+            openlens_ui::message("Can't show that", &e.to_string()),
+        ),
+    }
+}
+
+/// `GET /p/{id}/churn` (#247).
+pub(crate) async fn churn(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    axum::extract::RawQuery(raw): axum::extract::RawQuery,
+) -> Response {
+    if !auth::has_session(&state, &headers) {
+        return Redirect::to("/login").into_response();
+    }
+    let Some(p) = project(&state, &id).await else {
+        return not_found("No such project.");
+    };
+    let Ok(q) = serde_urlencoded::from_str::<FilterQuery>(&raw.unwrap_or_default()) else {
+        return not_found("Unreadable filters.");
+    };
+    let f = q.filters(&auth::tz_for(&state, &headers, &p.timezone));
+    let map = crate::load_map(&state, &p.id).await;
+    let (b, c) = tokio::join!(
+        openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
+        openlens_engine::churn(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f)
+    );
+    let info = openlens_ui::ProjectInfo {
+        id: &p.id,
+        name: &p.name,
+        key: &p.api_key,
+    };
+    match (b, c) {
+        (Ok(b), Ok(c)) => html_page(StatusCode::OK, openlens_ui::churn(&info, &b, &f, &c)),
+        (Err(e), _) | (_, Err(e)) => html_page(
+            StatusCode::BAD_REQUEST,
+            openlens_ui::message("Can't show that", &e.to_string()),
+        ),
+    }
+}
+
+/// `GET /api/projects/{id}/churn` (bearer): the same report as JSON.
+pub(crate) async fn api_churn(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    if !auth::has_bearer(&state, &headers) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            axum::Json(serde_json::json!({"error": "admin bearer token required"})),
+        )
+            .into_response();
+    }
+    let Some(p) = project(&state, &id).await else {
+        return (
+            StatusCode::NOT_FOUND,
+            axum::Json(serde_json::json!({"error": "unknown project"})),
+        )
+            .into_response();
+    };
+    let f = openlens_engine::Filters {
+        tz: p.timezone.clone(),
+        ..openlens_engine::Filters::default()
+    };
+    let map = crate::load_map(&state, &p.id).await;
+    match openlens_engine::churn(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f).await {
+        Ok(c) => axum::Json(c).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
 /// `GET /p/{id}/audience` (#225).
 pub(crate) async fn audience(
     State(state): State<AppState>,
