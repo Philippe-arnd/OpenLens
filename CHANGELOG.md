@@ -95,6 +95,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- **Project pages need a session** (#294): the flag and survey edit pages were readable without signing in. Every `/p/…` page now refuses anonymous visitors in one place (login redirect, or 401 for JSON and CSV), and a test walks every route of the router as an anonymous visitor, a viewer of another project and a viewer.
 - **One cross-site check for every dashboard form** (#294): a middleware refuses any state-changing request that the browser marks as cross-site (`Sec-Fetch-Site`), or whose `Origin` is another site, instead of a check repeated in each handler. Ingestion and the bearer API are not affected; clients that send neither header (curl, the CLI) are let through.
 - **Captures no longer wait for a flush** (#293): only the hand-over of the buffered events runs under the writer lock; the Parquet segments are written outside it, and a failed write is retried by the next flush. `xtask bench` reports p99.9 and the maximum latency, over 60 s by default.
 - **Flushes and compactions survive a power cut** (#292): the directory of each new segment, and the WAL directory, are synced before the WAL or the old segments are removed.

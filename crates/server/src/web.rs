@@ -1399,6 +1399,23 @@ pub(crate) async fn access_layer(
 ) -> Response {
     let path = req.uri().path().to_owned();
     let viewer = auth::viewer(&state, req.headers());
+    // Project pages need a session (or the bearer token): fail closed here
+    // rather than in each handler (#294). The icon is decided apart.
+    if viewer.is_none()
+        && path.starts_with("/p/")
+        && !path.ends_with("/icon")
+        && !auth::has_bearer(&state, req.headers())
+    {
+        // Data files (JSON, CSV) answer 401; pages send to the login.
+        let file = path
+            .rsplit('/')
+            .next()
+            .is_some_and(|last| last.contains('.'));
+        if file {
+            return (StatusCode::UNAUTHORIZED, "sign in first").into_response();
+        }
+        return to_login();
+    }
     if let (Some(v), Some(rest)) = (&viewer, path.strip_prefix("/p/")) {
         let project = rest.split('/').next().unwrap_or("");
         if !v.can_see(project) {

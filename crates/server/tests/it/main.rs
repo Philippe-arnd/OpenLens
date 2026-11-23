@@ -3559,7 +3559,7 @@ async fn churn_part_two_cancels_exports_and_win_back_flags() {
         get(&h, "/p/default/churn/at-risk.csv", None, false)
             .await
             .status(),
-        StatusCode::FORBIDDEN
+        StatusCode::UNAUTHORIZED
     );
     assert_eq!(
         post_form(&h, "/p/default/churn/audience", &owner, "holdout=30").await,
@@ -3973,4 +3973,349 @@ async fn the_board_is_computed_once_and_follows_new_data() {
         boards.computed() > before + 1,
         "new data triggers a recomputation"
     );
+}
+
+/// Who may reach a route (#294). The table must list every route of the
+/// router: [`every_route_is_in_the_access_table`] fails otherwise.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Access {
+    /// Anyone (ingestion, assets, login, share links).
+    Public,
+    /// The bearer API.
+    Api,
+    /// Any signed-in person.
+    Signed,
+    /// Admins only.
+    Admin,
+    /// A person who may see the project.
+    Read,
+    /// An admin who may see the project.
+    Write,
+    /// A person who may see the project, read-only roles included
+    /// (comments, notes, Ask).
+    Shared,
+}
+use Access::*;
+
+const ROUTES: &[(&str, &str, Access)] = &[
+    ("GET", "/api/projects", Api),
+    ("DELETE", "/api/projects/{project}", Api),
+    ("DELETE", "/api/projects/{project}/people/{who}/forget", Api),
+    ("DELETE", "/api/users/{id}", Api),
+    (
+        "PUT",
+        "/api/projects/{project}/sourcemaps/{release}/{bundle}",
+        Api,
+    ),
+    ("POST", "/api/projects", Api),
+    ("PATCH", "/api/projects/{project}", Api),
+    ("POST", "/api/projects/{project}/sql", Api),
+    ("GET", "/api/projects/{project}/board", Api),
+    ("GET", "/api/projects/{project}/errors", Api),
+    ("GET", "/api/projects/{project}/breakdown", Api),
+    ("GET", "/api/projects/{project}/people/{distinct_id}", Api),
+    ("GET", "/api/projects/{project}/feature-map", Api),
+    ("PUT", "/api/projects/{project}/feature-map", Api),
+    ("GET", "/api/projects/{project}/feature-map/health", Api),
+    ("GET", "/api/projects/{project}/feature-map/versions", Api),
+    (
+        "GET",
+        "/api/projects/{project}/feature-map/features/{key}",
+        Api,
+    ),
+    ("GET", "/api/projects/{project}/tickets", Api),
+    ("POST", "/api/projects/{project}/tickets", Api),
+    ("POST", "/api/feature-map/validate", Api),
+    ("POST", "/api/projects/{project}/import", Api),
+    ("GET", "/api/projects/{project}/export", Api),
+    (
+        "GET",
+        "/api/projects/{project}/replays/{session}/comments",
+        Api,
+    ),
+    (
+        "POST",
+        "/api/projects/{project}/replays/{session}/comments",
+        Api,
+    ),
+    ("GET", "/api/projects/{project}/flows", Api),
+    ("GET", "/api/projects/{project}/status", Api),
+    ("GET", "/api/projects/{project}/churn", Api),
+    ("GET", "/api/projects/{project}/goals", Api),
+    ("POST", "/api/projects/{project}/goals", Api),
+    ("GET", "/api/audit", Api),
+    ("GET", "/api/projects/{project}/timeline", Api),
+    ("POST", "/api/projects/{project}/timeline", Api),
+    ("POST", "/api/login-links", Api),
+    ("GET", "/api/users", Api),
+    ("PATCH", "/api/users/{id}", Api),
+    ("GET", "/api/projects/{project}/flags", Api),
+    ("DELETE", "/api/projects/{project}/flags/{key}", Api),
+    ("PUT", "/api/projects/{project}/flags/{key}", Api),
+    ("GET", "/p/{project}/flags", Read),
+    ("POST", "/p/{project}/flags/{key}", Write),
+    ("POST", "/capture", Public),
+    ("POST", "/e", Public),
+    ("GET", "/flags", Public),
+    ("POST", "/r", Public),
+    ("GET", "/healthz", Public),
+    ("GET", "/version", Public),
+    ("GET", "/c.js", Public),
+    ("GET", "/r.js", Public),
+    ("GET", "/s.js", Public),
+    ("GET", "/agents.md", Public),
+    ("GET", "/api/projects/{project}/digest", Api),
+    ("GET", "/oidc/start", Public),
+    ("GET", "/oidc/callback", Public),
+    ("GET", "/api/projects/{project}/replays", Api),
+    ("GET", "/api/projects/{project}/replays/{session}", Api),
+    ("GET", "/api/projects/{project}/surveys", Api),
+    ("DELETE", "/api/projects/{project}/surveys/{key}", Api),
+    ("PUT", "/api/projects/{project}/surveys/{key}", Api),
+    ("GET", "/p/{project}/surveys", Read),
+    ("POST", "/p/{project}/surveys/{key}", Write),
+    ("GET", "/", Signed),
+    ("GET", "/login", Public),
+    ("POST", "/login", Public),
+    ("POST", "/login/email", Public),
+    ("GET", "/projects", Signed),
+    ("POST", "/projects", Admin),
+    ("GET", "/welcome", Signed),
+    ("POST", "/welcome", Admin),
+    ("GET", "/users", Admin),
+    ("POST", "/users", Admin),
+    ("GET", "/users/{id}", Admin),
+    ("POST", "/users/{id}", Admin),
+    ("POST", "/users/{id}/{action}", Admin),
+    ("GET", "/me", Signed),
+    ("POST", "/me", Signed),
+    ("POST", "/logout", Signed),
+    ("GET", "/l/{token}", Public),
+    ("GET", "/p/{project}", Read),
+    ("GET", "/p/{project}/events", Read),
+    ("GET", "/p/{project}/errors", Read),
+    ("GET", "/p/{project}/pages", Read),
+    ("GET", "/p/{project}/replays", Read),
+    ("GET", "/p/{project}/replays/{session}", Read),
+    ("POST", "/p/{project}/replays/{session}/comments", Shared),
+    (
+        "POST",
+        "/p/{project}/replays/{session}/comments/{id}/delete",
+        Shared,
+    ),
+    ("GET", "/p/{project}/replays/{session}/timeline.json", Read),
+    ("GET", "/p/{project}/replays/{session}/events.json", Read),
+    ("GET", "/p/{project}/watch", Read),
+    ("GET", "/p/{project}/heatmap", Read),
+    // Shown on shared pages; decided in #294 part 4.
+    ("GET", "/p/{project}/icon", Public),
+    ("GET", "/p/{project}/timeline", Read),
+    ("POST", "/p/{project}/timeline", Shared),
+    ("POST", "/p/{project}/timeline/{nid}/delete", Shared),
+    ("POST", "/p/{project}/settings/share", Write),
+    ("POST", "/p/{project}/settings/share/{lid}/revoke", Write),
+    ("GET", "/s/{token}", Public),
+    ("POST", "/p/{project}/settings/alerts", Write),
+    ("POST", "/p/{project}/settings/alerts/test", Write),
+    ("GET", "/p/{project}/uptime", Read),
+    ("GET", "/settings/ai", Admin),
+    ("POST", "/settings/ai", Admin),
+    ("GET", "/p/{project}/ask", Read),
+    ("POST", "/p/{project}/ask", Shared),
+    ("POST", "/p/{project}/ask/confirm", Write),
+    ("POST", "/p/{project}/ask/clear", Shared),
+    ("POST", "/p/{project}/ask/privacy", Write),
+    ("GET", "/p/{project}/ask/sent", Read),
+    ("GET", "/p/{project}/ask/export.md", Read),
+    ("GET", "/p/{project}/tickets", Read),
+    ("POST", "/p/{project}/tickets", Write),
+    ("GET", "/p/{project}/tickets/new", Read),
+    ("POST", "/p/{project}/tickets/target", Write),
+    ("GET", "/settings/storage", Admin),
+    ("POST", "/settings/storage/s3", Admin),
+    ("POST", "/settings/storage/backups", Admin),
+    ("POST", "/settings/storage/backups/run", Admin),
+    ("GET", "/settings/storage/backups/latest.tar.gz", Admin),
+    ("GET", "/p/{project}/features", Read),
+    ("POST", "/p/{project}/features", Write),
+    ("GET", "/p/{project}/features/{file}", Read),
+    ("GET", "/p/{project}/people/{who}", Read),
+    ("POST", "/p/{project}/people/{who}/forget", Write),
+    ("GET", "/p/{project}/people/{who}/export.json", Read),
+    ("GET", "/audit", Admin),
+    ("GET", "/p/{project}/breakdown", Read),
+    ("GET", "/p/{project}/audience", Read),
+    ("GET", "/p/{project}/forms", Read),
+    ("GET", "/p/{project}/acquisition", Read),
+    ("GET", "/p/{project}/churn", Read),
+    ("POST", "/p/{project}/churn/audience", Write),
+    ("GET", "/p/{project}/churn/{file}", Read),
+    ("GET", "/p/{project}/revenue", Read),
+    ("GET", "/p/{project}/goals", Read),
+    ("POST", "/p/{project}/goals", Write),
+    ("POST", "/p/{project}/goals/{gid}/delete", Write),
+    ("POST", "/p/{project}/objectives", Write),
+    ("POST", "/p/{project}/objectives/{oid}/delete", Write),
+    ("GET", "/p/{project}/flows", Read),
+    ("GET", "/p/{project}/live", Read),
+    ("GET", "/p/{project}/sql", Read),
+    ("POST", "/p/{project}/sql", Write),
+    ("GET", "/p/{project}/flags-edit", Read),
+    ("POST", "/p/{project}/flags-edit", Write),
+    ("POST", "/p/{project}/flags/{key}/delete", Write),
+    ("GET", "/p/{project}/surveys-edit", Read),
+    ("POST", "/p/{project}/surveys-edit", Write),
+    ("POST", "/p/{project}/surveys/{key}/delete", Write),
+    ("GET", "/p/{project}/settings", Read),
+    ("POST", "/p/{project}/settings", Write),
+    ("POST", "/p/{project}/settings/rotate-key", Write),
+    ("POST", "/p/{project}/settings/delete", Write),
+    ("GET", "/p/{project}/export", Read),
+    ("GET", "/p/{project}/digest", Read),
+    ("GET", "/p/{project}/heatmap.json", Read),
+    ("GET", "/p/{project}/heatmap/overlay", Read),
+    ("GET", "/assets/player.js", Public),
+    ("GET", "/assets/player.css", Public),
+    ("GET", "/assets/app.css", Public),
+    ("GET", "/assets/favicon.svg", Public),
+    ("GET", "/favicon.ico", Public),
+    ("GET", "/theme/{mode}", Public),
+    ("GET", "/nav/{mode}", Public),
+];
+
+/// `(method, path)` of every `.route(…)` in the server's source.
+fn routes_in_source() -> std::collections::BTreeSet<(String, String)> {
+    let mut out = std::collections::BTreeSet::new();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let src = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+        let mut rest = src.as_str();
+        while let Some(i) = rest.find(".route(") {
+            rest = &rest[i + ".route(".len()..];
+            let Some(open) = rest.find('"') else { break };
+            let Some(len) = rest[open + 1..].find('"') else {
+                break;
+            };
+            let path = &rest[open + 1..open + 1 + len];
+            let (mut depth, mut end) = (1usize, 0usize);
+            for (j, c) in rest.char_indices() {
+                match c {
+                    '(' => depth += 1,
+                    ')' => depth -= 1,
+                    _ => {}
+                }
+                if depth == 0 {
+                    end = j;
+                    break;
+                }
+            }
+            let handlers = &rest[..end];
+            for m in ["get", "post", "put", "delete", "patch"] {
+                let call = format!("{m}(");
+                if handlers.match_indices(&call).any(|(k, _)| {
+                    k == 0
+                        || !handlers[..k]
+                            .chars()
+                            .last()
+                            .is_some_and(|c| c.is_alphanumeric() || c == '_')
+                }) {
+                    out.insert((m.to_uppercase(), path.to_owned()));
+                }
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn every_route_is_in_the_access_table() {
+    let table: std::collections::BTreeSet<(String, String)> = ROUTES
+        .iter()
+        .map(|(m, p, _)| ((*m).to_owned(), (*p).to_owned()))
+        .collect();
+    let source = routes_in_source();
+    let missing: Vec<_> = source.difference(&table).collect();
+    let stale: Vec<_> = table.difference(&source).collect();
+    assert!(
+        missing.is_empty() && stale.is_empty(),
+        "add to ROUTES: {missing:?}; remove from ROUTES: {stale:?}"
+    );
+}
+
+fn sample(path: &str) -> String {
+    path.split('/')
+        .map(|s| match s {
+            "{project}" => "default",
+            "{mode}" => "dark",
+            s if s.starts_with('{') => "x1",
+            s => s,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Whether the response refuses: a 4xx, or a redirect to the login page.
+async fn refused_as(
+    h: &Harness,
+    method: &str,
+    path: &str,
+    cookie: Option<&str>,
+) -> Result<(), String> {
+    let mut req = Request::builder()
+        .method(method)
+        .uri(sample(path))
+        .header("content-type", "application/x-www-form-urlencoded")
+        .header("sec-fetch-site", "same-origin");
+    if let Some(c) = cookie {
+        req = req.header("cookie", c);
+    }
+    let r = router(h.state.clone())
+        .oneshot(req.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let to = r
+        .headers()
+        .get("location")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let s = r.status();
+    if s.is_client_error() || (s.is_redirection() && to.starts_with("/login")) {
+        Ok(())
+    } else {
+        Err(format!("{s} {to}"))
+    }
+}
+
+#[tokio::test]
+async fn no_route_serves_someone_it_should_not() {
+    let h = harness();
+    let viewer = invite(
+        &h,
+        serde_json::json!({"email": "viewer@example.com", "role": "viewer", "projects": ["default"]}),
+    )
+    .await;
+    let outsider = invite(
+        &h,
+        serde_json::json!({"email": "out@example.com", "role": "viewer", "projects": ["elsewhere"]}),
+    )
+    .await;
+    let mut leaks = Vec::new();
+    for (method, path, access) in ROUTES {
+        let mut deny = Vec::new();
+        if !matches!(access, Public) {
+            deny.push(("anonymous", None));
+        }
+        if matches!(access, Read | Write | Shared) {
+            deny.push(("viewer of another project", Some(outsider.as_str())));
+        }
+        if matches!(access, Admin | Write) {
+            deny.push(("viewer", Some(viewer.as_str())));
+        }
+        for (who, cookie) in deny {
+            if let Err(got) = refused_as(&h, method, path, cookie).await {
+                leaks.push(format!("{method} {path} as {who}: {got}"));
+            }
+        }
+    }
+    assert!(leaks.is_empty(), "{leaks:#?}");
 }
