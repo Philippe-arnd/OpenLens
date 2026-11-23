@@ -21,6 +21,9 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 - **Flags and surveys managed from the dashboard** (#220): *New flag* / *New survey*, an edit page for every field (key, description, rollout, roles, accounts; question, answer kind, choices, trigger, sample, roles), renames, and deletion behind typing the key, with the models' own validation shown on the form. Admins only.
 
+- **People and data explorer** (#222): a person's profile (role over time, recordings, errors, latest events), linked from events and errors; a *Break down* page by role, plan, account, environment, release, page or feature; read-only SQL for admins with the schema, the API's limits and a CSV download.
+- **Feature map in the dashboard** (`/p/{id}/features`, #221): every feature with its entry, success event and live status (uses and users over 7 days, *not seen*, *no success*), lint errors and warnings, roles sent that no role matches, history of versions, YAML and JSON downloads. Admins edit the YAML, check it (lint and a diff against the stored map), then save it as a new version.
+
 ### Changed
 
 - The sidebar's project switch lost its arrow (#214), and gained *Settings*.

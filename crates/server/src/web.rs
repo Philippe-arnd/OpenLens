@@ -59,6 +59,14 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/p/{project}/watch", get(watch_churned))
         .route("/p/{project}/heatmap", get(heatmap_page))
         .route("/p/{project}/icon", get(crate::icon::icon))
+        .route(
+            "/p/{project}/features",
+            get(crate::features::page).post(crate::features::edit),
+        )
+        .route(
+            "/p/{project}/features/{file}",
+            get(crate::features::download),
+        )
         .route("/p/{project}/people/{who}", get(crate::explore::person))
         .route("/p/{project}/breakdown", get(crate::explore::breakdown))
         .route(

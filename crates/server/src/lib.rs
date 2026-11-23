@@ -9,6 +9,7 @@ mod capture;
 mod comments;
 mod digest;
 mod explore;
+mod features;
 mod flags;
 mod icon;
 mod manage;
