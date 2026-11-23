@@ -55,11 +55,15 @@ async function main(): Promise<void> {
   const skipLabel = el("label", { class: "ol-skip" });
   const skip = el("input", { type: "checkbox", checked: "" });
   skipLabel.append(skip, " skip idle");
-  bar.append(back, play, fwd, track, time, speed, skipLabel);
+  const zoom = el("button", { type: "button", class: "ol-zoom", "aria-pressed": "false", title: "Actual size (Z)" }, "1:1");
+  bar.append(back, play, fwd, track, time, speed, skipLabel, zoom);
+  const info = el("p", { class: "ol-info", "aria-live": "polite" });
   const legend = el("ul", { class: "ol-legend", "aria-label": "Event types" });
   const log = el("ol", { class: "ol-log", "aria-label": "Events in this session" });
   const help = el("p", { class: "ol-help" }, "Space play/pause · J/L ±10 s · ←/→ ±5 s · +/− speed · click an event to jump to it");
-  root.replaceChildren(stage, bar, legend, log, help);
+  const main = el("div", { class: "ol-main" });
+  main.append(stage, bar, info, legend, help);
+  root.replaceChildren(main, log);
 
   const rep = new Replayer(events, { root: stage, skipInactive: true, mouseTail: false, showWarning: false });
   const total = rep.getMetaData().totalTime;
@@ -119,6 +123,7 @@ async function main(): Promise<void> {
       ArrowRight: () => go(rep.getCurrentTime() + 5_000),
       "+": () => setSpeed(opts[Math.min(opts.length - 1, i + 1)] ?? "1"),
       "-": () => setSpeed(opts[Math.max(0, i - 1)] ?? "1"),
+      z: () => zoom.click(),
     };
     const f = keys[e.key];
     if (f) {
@@ -130,19 +135,42 @@ async function main(): Promise<void> {
   rep.on("finish", () => setPlaying(false));
   setInterval(show, 250);
 
-  // Fit the recorded viewport into the stage.
+  // Fit the recorded viewport into the room left on screen ("contain",
+  // up to 2×), so the whole page and the controls show without scrolling;
+  // the controls take the video's width. 1:1 shows actual size, scrolling
+  // inside the stage. Heatmaps fit the width only (the page is tall).
+  let actual = false;
+  const widthOnly = Boolean(root.dataset.heatmap);
   const fit = () => {
     const wrapper = stage.querySelector<HTMLElement>(".replayer-wrapper");
     const frame = stage.querySelector("iframe");
     if (!wrapper || !frame) return;
     const w = Number(frame.getAttribute("width")) || 1;
-    const scale = Math.min(1, stage.clientWidth / w);
+    const h = Number(frame.getAttribute("height")) || 600;
+    const room = main.clientWidth;
+    const below = bar.offsetHeight + info.offsetHeight + 24;
+    const top = Math.max(0, stage.getBoundingClientRect().top + scrollY);
+    const tall = Math.max(240, innerHeight - Math.min(top, innerHeight / 3) - below);
+    let scale = widthOnly ? Math.min(1, room / w) : Math.min(2, room / w, tall / h);
+    if (actual) scale = 1;
     wrapper.style.transform = `scale(${scale})`;
     wrapper.style.transformOrigin = "0 0";
-    stage.style.height = `${(Number(frame.getAttribute("height")) || 600) * scale}px`;
+    const shownW = Math.min(room, w * scale);
+    stage.style.width = `${shownW}px`;
+    stage.style.height = `${actual ? Math.min(h, tall) : h * scale}px`;
+    stage.style.overflow = actual ? "auto" : "hidden";
+    root.style.setProperty("--ol-w", `${Math.max(shownW, Math.min(room, 320))}px`);
+    const kind = w < 600 ? "Phone" : w < 1024 ? "Tablet" : "Desktop";
+    info.textContent = `${kind} · ${w}×${h} · ${Math.round(scale * 100)} %`;
   };
+  zoom.addEventListener("click", () => {
+    actual = !actual;
+    zoom.setAttribute("aria-pressed", String(actual));
+    fit();
+  });
   rep.on("resize", fit);
   addEventListener("resize", fit);
+  if (typeof ResizeObserver !== "undefined") new ResizeObserver(() => fit()).observe(root);
 
   // data-at is a UTC timestamp ("2026-11-22 01:22:01.1"): start 3 s before it.
   if (root.dataset.heatmap) {

@@ -15,6 +15,8 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 - **Times in the reader's time zone** (#215, D-018): *My profile* (`/me`) sets the zone each person reads times and days in; the project's zone stays the default (and the digests' zone). The API takes `?tz=`, the CLI `--tz` / `OPENLENS_TZ`.
 - **Team management** (#216): names, a status per user (active, invited with its expiry, expired, disabled), last sign-in, search, an edit page (name, email, role, projects; the id and sessions survive an email change), new login link or resent invitation, revoke, disable/enable sign-in (sessions end at once, also for SSO), and removal behind typing the email. The last admin can't be demoted, disabled or removed (the owner token always remains). `PATCH /api/users/{id}` and `openlens-cli users list|update|disable|enable|delete`.
 
+- **The replay player fits the screen** (#212): the recording is scaled to the room left on screen (contain, up to 2×), so a desktop session fits a phone and a phone session is readable on a wide screen; the controls and timeline take the video's width; a line shows the device kind, the recorded size and the zoom; *1:1* (or Z) shows actual size. The event list sits beside the video from 1024 px wide.
+
 ### Changed
 
 - The sidebar's project switch lost its arrow (#214), and gained *Settings*.
