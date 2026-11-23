@@ -76,6 +76,15 @@ pub struct Step {
     pub path: String,
 }
 
+/// Per form while folding: the stats, each field with its times, the
+/// fill times of sent forms, and the pages it was seen on.
+type Acc = (
+    FormStats,
+    HashMap<String, (FieldStats, Vec<i64>)>,
+    Vec<i64>,
+    HashMap<String, i64>,
+);
+
 /// Fold ordered steps into per-form stats. Pure (unit-tested).
 #[must_use]
 pub fn fold(steps: &[Step]) -> Vec<FormStats> {
@@ -98,15 +107,7 @@ pub fn fold(steps: &[Step]) -> Vec<FormStats> {
             None => v.submitted = true,
         }
     }
-    let mut forms: BTreeMap<
-        String,
-        (
-            FormStats,
-            HashMap<String, (FieldStats, Vec<i64>)>,
-            Vec<i64>,
-            HashMap<String, i64>,
-        ),
-    > = BTreeMap::new();
+    let mut forms: BTreeMap<String, Acc> = BTreeMap::new();
     for ((form, session), v) in visits {
         if v.fields.is_empty() {
             continue;
