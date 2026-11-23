@@ -92,14 +92,14 @@ pub(crate) fn resolve(
             e.session_id = Some(sid.clone());
         }
         // The daily id must never become a durable link to a login.
-        if e.event == "$identify" && e.properties.contains(PLACEHOLDER) {
-            if let Ok(serde_json::Value::Object(mut p)) =
+        if e.event == "$identify"
+            && e.properties.contains(PLACEHOLDER)
+            && let Ok(serde_json::Value::Object(mut p)) =
                 serde_json::from_str::<serde_json::Value>(&e.properties)
-            {
-                p.remove("$anon_distinct_id");
-                if let Ok(s) = serde_json::to_string(&serde_json::Value::Object(p)) {
-                    e.properties = s;
-                }
+        {
+            p.remove("$anon_distinct_id");
+            if let Ok(s) = serde_json::to_string(&serde_json::Value::Object(p)) {
+                e.properties = s;
             }
         }
     }
