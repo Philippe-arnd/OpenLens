@@ -966,6 +966,84 @@ pub async fn live(
     })
 }
 
+/// One arm of a flag's experiment (#252).
+#[derive(Debug, Clone, Serialize)]
+pub struct VariantRow {
+    /// Variant key.
+    pub variant: String,
+    /// Users who got it.
+    pub users: i64,
+    /// Share of them reaching a success event (any feature use without
+    /// success events).
+    pub value_rate: f64,
+    /// Share of their sessions with an error.
+    pub error_rate: f64,
+}
+
+/// The arms of a flag with variants, last 30 days, from `$variants`.
+pub async fn variant_readout(
+    q: &QueryEngine,
+    project: &str,
+    map: Option<&FeatureMap>,
+    f: &Filters,
+    flag: &str,
+) -> Result<Vec<VariantRow>> {
+    if flag.is_empty()
+        || !flag
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
+    {
+        return Err(EngineError::InvalidFilter("flag key"));
+    }
+    let src = source(map);
+    let w = f.clause(30)?;
+    let successes: Vec<String> = map
+        .map(|m| {
+            m.features
+                .iter()
+                .filter_map(|x| x.success.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    let ok = if successes.is_empty() {
+        "e.feature IS NOT NULL".to_owned()
+    } else {
+        format!(
+            "e.event IN ({})",
+            successes
+                .iter()
+                .map(|s| lit(s))
+                .collect::<Result<Vec<_>>>()?
+                .join(", ")
+        )
+    };
+    let sql = format!(
+        "WITH v AS (SELECT distinct_id, min(variant) AS variant FROM \
+           (SELECT distinct_id, regexp_match(properties, '\"\\$variants\":\"(?:[^\"]*,)?{flag}=([a-z0-9_-]+)')[1] AS variant FROM {src} WHERE {w}) \
+           WHERE variant IS NOT NULL GROUP BY distinct_id), \
+         e AS (SELECT distinct_id, session_id, event, feature FROM {src} WHERE {w}) \
+         SELECT v.variant, count(DISTINCT v.distinct_id) AS users, \
+                count(DISTINCT CASE WHEN {ok} THEN e.distinct_id END) AS reached, \
+                count(DISTINCT e.session_id) AS sessions, \
+                count(DISTINCT CASE WHEN e.event = '$error' THEN e.session_id END) AS err \
+         FROM v JOIN e ON v.distinct_id = e.distinct_id GROUP BY v.variant ORDER BY v.variant"
+    );
+    Ok(q.sql(project, &sql)
+        .await?
+        .rows
+        .iter()
+        .filter_map(|r| {
+            let users = int(r, "users");
+            Some(VariantRow {
+                variant: text(r, "variant")?,
+                users,
+                value_rate: int(r, "reached") as f64 / users.max(1) as f64,
+                error_rate: int(r, "err") as f64 / int(r, "sessions").max(1) as f64,
+            })
+        })
+        .collect())
+}
+
 /// A string as a SQL literal (quotes doubled; control characters refused).
 pub fn sql_literal(s: &str) -> Result<String> {
     lit(s)

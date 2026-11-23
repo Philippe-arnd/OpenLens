@@ -54,6 +54,9 @@ export declare function track(event: string, props?: Props): void;
 export declare function feature(key: string, props?: Props): void;
 /** Is a feature flag on for this user? Uses the last known answer (cached across page loads). */
 export declare function isEnabled(key: string): boolean;
+/** The variant of an experiment flag this user gets (null when the flag is
+ * off or has no variants). Events carry it, so arms can be compared. */
+export declare function variant(key: string): string | null;
 /** Identify the logged-in user and the dimensions OpenLens slices by. */
 export declare function identify(id: string, dims?: Dimensions): void;
 /** Forget the user (call on logout). A no-op while nobody is identified, so
@@ -73,6 +76,7 @@ declare const _default: {
     track: typeof track;
     feature: typeof feature;
     isEnabled: typeof isEnabled;
+    variant: typeof variant;
     reset: typeof reset;
     flush: typeof flush;
     setConsent: typeof setConsent;

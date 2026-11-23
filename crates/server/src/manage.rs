@@ -67,7 +67,29 @@ pub(crate) async fn flag_page(
         name: &p.name,
         key: &p.api_key,
     };
-    html_page(StatusCode::OK, openlens_ui::flag_edit(&info, current, None))
+    let readout = match current.filter(|f| !f.variants.is_empty()) {
+        Some(f) => {
+            let map = crate::load_map(&state, &p.id).await;
+            let filters = openlens_engine::Filters {
+                tz: p.timezone.clone(),
+                ..openlens_engine::Filters::default()
+            };
+            openlens_engine::variant_readout(
+                &state.query,
+                &p.id,
+                map.as_ref().map(|(m, _)| m),
+                &filters,
+                &f.key,
+            )
+            .await
+            .unwrap_or_default()
+        }
+        None => Vec::new(),
+    };
+    html_page(
+        StatusCode::OK,
+        openlens_ui::flag_edit(&info, current, None, &readout),
+    )
 }
 
 #[derive(Deserialize)]
@@ -86,6 +108,28 @@ pub(crate) struct FlagForm {
     roles: String,
     #[serde(default)]
     accounts: String,
+    #[serde(default)]
+    variants: String,
+}
+
+/// `control:50, short:50` → variants (empty: none).
+fn parse_variants(s: &str) -> Result<Vec<openlens_flags::Variant>, String> {
+    s.split(',')
+        .map(str::trim)
+        .filter(|x| !x.is_empty())
+        .map(|x| {
+            let (k, w) = x
+                .split_once(':')
+                .ok_or_else(|| format!("`{x}`: write key:weight"))?;
+            Ok(openlens_flags::Variant {
+                key: k.trim().to_owned(),
+                weight: w
+                    .trim()
+                    .parse()
+                    .map_err(|_| format!("`{x}`: the weight is a whole percentage"))?,
+            })
+        })
+        .collect()
 }
 
 /// `POST /p/{id}/flags-edit`: create or update; errors show on the form.
@@ -108,13 +152,22 @@ pub(crate) async fn flag_save(
         rollout: f.rollout.unwrap_or(0).min(100),
         roles: list(&f.roles),
         accounts: list(&f.accounts),
+        variants: Vec::new(),
+    };
+    let mut flag = flag;
+    let variant_err = match parse_variants(&f.variants) {
+        Ok(v) => {
+            flag.variants = v;
+            None
+        }
+        Err(e) => Some(e),
     };
     let existing = crate::flags::load(&state, &p.id).await;
     let renamed = !f.original.is_empty() && f.original != flag.key;
     let err = if (f.original.is_empty() || renamed) && existing.iter().any(|x| x.key == flag.key) {
         Some(format!("A flag `{}` already exists.", flag.key))
     } else {
-        flag.validate().err()
+        variant_err.or_else(|| flag.validate().err())
     };
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
@@ -124,13 +177,13 @@ pub(crate) async fn flag_save(
     if let Some(e) = err {
         return html_page(
             StatusCode::BAD_REQUEST,
-            openlens_ui::flag_edit(&info, Some(&flag), Some(&e)),
+            openlens_ui::flag_edit(&info, Some(&flag), Some(&e), &[]),
         );
     }
     if let Err(e) = crate::flags::save(&state, &p.id, &flag).await {
         return html_page(
             StatusCode::BAD_REQUEST,
-            openlens_ui::flag_edit(&info, Some(&flag), Some(&e)),
+            openlens_ui::flag_edit(&info, Some(&flag), Some(&e), &[]),
         );
     }
     if renamed {

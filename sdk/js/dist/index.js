@@ -95,6 +95,7 @@ var consent = "granted";
 var timer;
 var lastPath = "";
 var activeFlags = [];
+var activeVariants = {};
 var activeSurveys = [];
 var surveyOpen = false;
 function uuid() {
@@ -172,6 +173,8 @@ function base() {
   if (state.dims.plan) p.$plan = state.dims.plan;
   if (state.dims.internal) p.$internal = true;
   if (activeFlags.length) p.$flags = activeFlags.join(",");
+  const vs = Object.entries(activeVariants);
+  if (vs.length) p.$variants = vs.map(([k, v]) => `${k}=${v}`).join(",");
   return p;
 }
 function track(event, props) {
@@ -237,11 +240,14 @@ function loadFlags() {
   if (state.dims.role) q.set("role", state.dims.role);
   if (state.dims.account) q.set("account", state.dims.account);
   origFetch(`${cfg.host.replace(/\/$/, "")}/flags?${q}`).then((r) => r.ok ? r.json() : null).then((j) => {
+    var _a2;
     if (Array.isArray(j == null ? void 0 : j.surveys)) activeSurveys = j.surveys;
     if (j == null ? void 0 : j.flags) {
       activeFlags = j.flags;
+      activeVariants = (_a2 = j.variants) != null ? _a2 : {};
       try {
         store().setItem(`${storageKey()}_flags`, JSON.stringify(activeFlags));
+        store().setItem(`${storageKey()}_variants`, JSON.stringify(activeVariants));
       } catch {
       }
     }
@@ -249,6 +255,10 @@ function loadFlags() {
 }
 function isEnabled(key) {
   return activeFlags.includes(key);
+}
+function variant(key) {
+  var _a;
+  return (_a = activeVariants[key]) != null ? _a : null;
 }
 function identify(id, dims = {}) {
   if (!cfg || !id) return;
@@ -497,8 +507,10 @@ function init(config) {
   state = load();
   try {
     activeFlags = JSON.parse(store().getItem(`${storageKey()}_flags`) || "[]");
+    activeVariants = JSON.parse(store().getItem(`${storageKey()}_variants`) || "{}");
   } catch {
     activeFlags = [];
+    activeVariants = {};
   }
   if (isBot()) consent = "denied";
   if (consent === "denied") return;
@@ -539,7 +551,7 @@ function shutdown() {
   if (timer) clearInterval(timer);
   flush(true);
 }
-var index_default = { init, identify, track, feature, isEnabled, reset, flush, setConsent, shutdown };
+var index_default = { init, identify, track, feature, isEnabled, variant, reset, flush, setConsent, shutdown };
 export {
   index_default as default,
   feature,
@@ -550,5 +562,6 @@ export {
   reset,
   setConsent,
   shutdown,
-  track
+  track,
+  variant
 };

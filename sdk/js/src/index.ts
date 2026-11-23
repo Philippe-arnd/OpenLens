@@ -67,6 +67,7 @@ let consent: Config["consent"] = "granted";
 let timer: ReturnType<typeof setInterval> | undefined;
 let lastPath = "";
 let activeFlags: string[] = [];
+let activeVariants: Record<string, string> = {};
 
 /** A micro-survey the server says this user may be asked (see survey.ts). */
 export interface SurveyDef {
@@ -171,6 +172,8 @@ function base(): Props {
   if (state.dims.plan) p.$plan = state.dims.plan;
   if (state.dims.internal) p.$internal = true;
   if (activeFlags.length) p.$flags = activeFlags.join(",");
+  const vs = Object.entries(activeVariants);
+  if (vs.length) p.$variants = vs.map(([k, v]) => `${k}=${v}`).join(",");
   return p;
 }
 
@@ -247,12 +250,14 @@ function loadFlags(): void {
   if (state.dims.account) q.set("account", state.dims.account);
   origFetch(`${cfg.host.replace(/\/$/, "")}/flags?${q}`)
     .then((r) => (r.ok ? r.json() : null))
-    .then((j: { flags?: string[]; surveys?: SurveyDef[] } | null) => {
+    .then((j: { flags?: string[]; variants?: Record<string, string>; surveys?: SurveyDef[] } | null) => {
       if (Array.isArray(j?.surveys)) activeSurveys = j.surveys;
       if (j?.flags) {
         activeFlags = j.flags;
+        activeVariants = j.variants ?? {};
         try {
           store().setItem(`${storageKey()}_flags`, JSON.stringify(activeFlags));
+          store().setItem(`${storageKey()}_variants`, JSON.stringify(activeVariants));
         } catch {
           // memory only
         }
@@ -264,6 +269,12 @@ function loadFlags(): void {
 /** Is a feature flag on for this user? Uses the last known answer (cached across page loads). */
 export function isEnabled(key: string): boolean {
   return activeFlags.includes(key);
+}
+
+/** The variant of an experiment flag this user gets (null when the flag is
+ * off or has no variants). Events carry it, so arms can be compared. */
+export function variant(key: string): string | null {
+  return activeVariants[key] ?? null;
 }
 
 /** Identify the logged-in user and the dimensions OpenLens slices by. */
@@ -558,8 +569,10 @@ export function init(config: Config): void {
   state = load();
   try {
     activeFlags = JSON.parse(store().getItem(`${storageKey()}_flags`) || "[]") as string[];
+    activeVariants = JSON.parse(store().getItem(`${storageKey()}_variants`) || "{}") as Record<string, string>;
   } catch {
     activeFlags = [];
+    activeVariants = {};
   }
   if (isBot()) consent = "denied";
   if (consent === "denied") return;
@@ -603,4 +616,4 @@ export function shutdown(): void {
   flush(true);
 }
 
-export default { init, identify, track, feature, isEnabled, reset, flush, setConsent, shutdown };
+export default { init, identify, track, feature, isEnabled, variant, reset, flush, setConsent, shutdown };

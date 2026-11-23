@@ -44,7 +44,11 @@ pub fn mapping(spec: &str) -> Result<Mapping, String> {
             "url" => m.url = Some(v),
             "referrer" => m.referrer = Some(v),
             "session_id" | "session" => m.session_id = Some(v),
-            other => return Err(format!("`{other}`: map event, distinct_id, timestamp, url, referrer or session_id")),
+            other => {
+                return Err(format!(
+                    "`{other}`: map event, distinct_id, timestamp, url, referrer or session_id"
+                ));
+            }
         }
     }
     Ok(m)
@@ -93,9 +97,15 @@ fn event(m: &Mapping, rec: &Map<String, Value>) -> Result<String, String> {
         Some(Value::Null) | None => None,
         Some(v) => Some(v.to_string()),
     };
-    let ev = s(&m.event).filter(|v| !v.is_empty()).ok_or_else(|| format!("no `{}`", m.event))?;
-    let id = s(&m.distinct_id).filter(|v| !v.is_empty()).ok_or_else(|| format!("no `{}`", m.distinct_id))?;
-    let ts = s(&m.timestamp).filter(|v| !v.is_empty()).ok_or_else(|| format!("no `{}`", m.timestamp))?;
+    let ev = s(&m.event)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| format!("no `{}`", m.event))?;
+    let id = s(&m.distinct_id)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| format!("no `{}`", m.distinct_id))?;
+    let ts = s(&m.timestamp)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| format!("no `{}`", m.timestamp))?;
     // Unix seconds or milliseconds are accepted too.
     let ts = match ts.parse::<i64>() {
         Ok(n) => {
@@ -105,21 +115,46 @@ fn event(m: &Mapping, rec: &Map<String, Value>) -> Result<String, String> {
         Err(_) => ts,
     };
     let mut props = Map::new();
-    let used: Vec<&str> = [Some(m.event.as_str()), Some(m.distinct_id.as_str()), Some(m.timestamp.as_str()), m.url.as_deref(), m.referrer.as_deref(), m.session_id.as_deref()]
-        .into_iter()
-        .flatten()
-        .collect();
+    let used: Vec<&str> = [
+        Some(m.event.as_str()),
+        Some(m.distinct_id.as_str()),
+        Some(m.timestamp.as_str()),
+        m.url.as_deref(),
+        m.referrer.as_deref(),
+        m.session_id.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
     for (k, v) in rec {
         if !used.contains(&k.as_str()) && !v.is_null() && v != "" {
             props.insert(k.clone(), v.clone());
         }
     }
     if let Some(u) = m.url.as_ref().and_then(|k| s(k)) {
-        let path = u.split("://").nth(1).and_then(|r| r.find('/').map(|i| r[i..].to_owned())).unwrap_or_else(|| if u.starts_with('/') { u.clone() } else { "/".into() });
+        let path = u
+            .split("://")
+            .nth(1)
+            .and_then(|r| r.find('/').map(|i| r[i..].to_owned()))
+            .unwrap_or_else(|| {
+                if u.starts_with('/') {
+                    u.clone()
+                } else {
+                    "/".into()
+                }
+            });
         props.insert("$current_url".into(), Value::String(u));
-        props.insert("$pathname".into(), Value::String(path.split(['?', '#']).next().unwrap_or("/").to_owned()));
+        props.insert(
+            "$pathname".into(),
+            Value::String(path.split(['?', '#']).next().unwrap_or("/").to_owned()),
+        );
     }
-    if let Some(r) = m.referrer.as_ref().and_then(|k| s(k)).filter(|r| !r.is_empty()) {
+    if let Some(r) = m
+        .referrer
+        .as_ref()
+        .and_then(|k| s(k))
+        .filter(|r| !r.is_empty())
+    {
         props.insert("$referrer".into(), Value::String(r));
     }
     let mut line = json!({ "event": ev, "distinct_id": id, "timestamp": ts, "properties": props });
@@ -130,14 +165,23 @@ fn event(m: &Mapping, rec: &Map<String, Value>) -> Result<String, String> {
 }
 
 /// Convert an export to OpenLens import lines: `(lines, errors)`.
-pub fn convert(text: &str, format: &str, m: &Mapping) -> Result<(Vec<String>, Vec<String>), String> {
+pub fn convert(
+    text: &str,
+    format: &str,
+    m: &Mapping,
+) -> Result<(Vec<String>, Vec<String>), String> {
     let mut lines = Vec::new();
     let mut errors = Vec::new();
     match format {
         "csv" => {
             let rows = csv(text);
-            let Some((head, body)) = rows.split_first() else { return Ok((lines, errors)) };
-            let head: Vec<String> = head.iter().map(|h| h.trim().trim_start_matches('\u{feff}').to_owned()).collect();
+            let Some((head, body)) = rows.split_first() else {
+                return Ok((lines, errors));
+            };
+            let head: Vec<String> = head
+                .iter()
+                .map(|h| h.trim().trim_start_matches('\u{feff}').to_owned())
+                .collect();
             for (i, r) in body.iter().enumerate() {
                 let rec: Map<String, Value> = head
                     .iter()
@@ -151,7 +195,11 @@ pub fn convert(text: &str, format: &str, m: &Mapping) -> Result<(Vec<String>, Ve
             }
         }
         "jsonl" => {
-            for (i, l) in text.lines().enumerate().filter(|(_, l)| !l.trim().is_empty()) {
+            for (i, l) in text
+                .lines()
+                .enumerate()
+                .filter(|(_, l)| !l.trim().is_empty())
+            {
                 match serde_json::from_str::<Value>(l) {
                     Ok(Value::Object(rec)) => match event(m, &rec) {
                         Ok(line) => lines.push(line),
@@ -177,7 +225,10 @@ mod tests {
                     page_view,u1,1732350000,https://app.example.com/pricing?x=1,https://news.example.org/,pro,\"a, \"\"quoted\"\" note\"\n\
                     signup,u2,2026-11-20T10:00:00Z,/start,,free,\"two\nlines\"\n\
                     ,u3,2026-11-20T10:00:00Z,,,,\n";
-        let m = mapping("event=event_name,distinct_id=user_id,timestamp=time,url=page_url,referrer=ref").unwrap();
+        let m = mapping(
+            "event=event_name,distinct_id=user_id,timestamp=time,url=page_url,referrer=ref",
+        )
+        .unwrap();
         let (lines, errors) = convert(text, "csv", &m).unwrap();
         assert_eq!(lines.len(), 2);
         assert_eq!(errors, vec!["row 4: no `event_name`".to_owned()]);

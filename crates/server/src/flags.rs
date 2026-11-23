@@ -111,6 +111,7 @@ pub(crate) async fn public(
         account: q.get("account").map(String::as_str),
     };
     let on = openlens_flags::evaluate(&flags, &subject);
+    let variants = openlens_flags::variants(&flags, &subject);
     let all = crate::surveys::load(&state, &project.id).await;
     let surveys: Vec<_> = all
         .iter()
@@ -120,7 +121,7 @@ pub(crate) async fn public(
     (
         StatusCode::OK,
         cors,
-        Json(json!({ "flags": on, "surveys": surveys })),
+        Json(json!({ "flags": on, "variants": variants, "surveys": surveys })),
     )
         .into_response()
 }

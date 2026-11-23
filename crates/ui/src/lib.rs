@@ -2451,6 +2451,7 @@ pub fn flag_edit(
     p: &ProjectInfo<'_>,
     flag: Option<&openlens_flags::Flag>,
     error: Option<&str>,
+    readout: &[openlens_engine::VariantRow],
 ) -> Markup {
     let new = flag.is_none_or(|f| f.key.is_empty());
     let f = flag.cloned().unwrap_or(openlens_flags::Flag {
@@ -2460,8 +2461,15 @@ pub fn flag_edit(
         rollout: 0,
         roles: Vec::new(),
         accounts: Vec::new(),
+        variants: Vec::new(),
     });
     let action = format!("/p/{}/flags-edit", p.id);
+    let variants = f
+        .variants
+        .iter()
+        .map(|v| format!("{}:{}", v.key, v.weight))
+        .collect::<Vec<_>>()
+        .join(", ");
     layout(
         "Flags",
         Some(p),
@@ -2479,10 +2487,28 @@ pub fn flag_edit(
                     label { "Rollout % " input type="number" name="rollout" min="0" max="100" value=(f.rollout); }
                     label { "Only roles " input type="text" name="roles" value=(f.roles.join(", ")) placeholder="every role"; }
                     label { "Always on for accounts " input type="text" name="accounts" value=(f.accounts.join(", ")) placeholder="none"; }
+                    label.wide { "Variants (experiment) " input type="text" name="variants" value=(variants) placeholder="control:50, short:50"; }
                     label.check { input type="checkbox" name="enabled" checked[f.enabled]; " On" }
                     button type="submit" { (if new { "Create" } else { "Save" }) }
                 }
-                p.muted.small { "Roles are the feature map's canonical roles; lists are comma-separated. Users in the rollout keep their bucket when you raise it." }
+                p.muted.small { "Roles are the feature map's canonical roles; lists are comma-separated. Users in the rollout keep their bucket when you raise it. Variants split the users who get the flag (weights add up to 100); the code reads " code { "openlens.variant(\"key\")" } " and events carry the variant." }
+            }
+            @if !readout.is_empty() {
+                section.card.wide {
+                    h2.violet { (icon("funnel")) "Variants, last 30 days" }
+                    div.table-scroll { table.plain {
+                        thead { tr { th { "Variant" } th.num { "Users" } th.num { "Reached value" } th.num { "Sessions with errors" } } }
+                        tbody { @for r in readout {
+                            tr {
+                                th scope="row" { code { (r.variant) } @if r.users < 20 { " " span.chip { "low sample" } } }
+                                td.num { (compact(r.users)) }
+                                td.num { strong { (pct(r.value_rate)) } }
+                                td.num { (pct(r.error_rate)) }
+                            }
+                        } }
+                    } }
+                    p.muted.small { "Reached value: a success event of the feature map (any feature use when none is declared). Compare arms with enough users before deciding." }
+                }
             }
             @if !new {
                 section.card.wide.danger {
