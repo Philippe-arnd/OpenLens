@@ -2299,3 +2299,26 @@ async fn the_feature_flow_page_and_api() {
     let v: serde_json::Value = serde_json::from_str(&api).unwrap();
     assert!(v["sessions"].as_i64().unwrap() <= 1, "{api}");
 }
+
+#[tokio::test]
+async fn the_live_view_shows_who_is_here_and_refreshes() {
+    let h = harness();
+    let (status, _) = post(&h, "/capture", batch(&h.key), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let owner = login_cookie(&h).await;
+    let r = get(
+        &h,
+        "/p/default/live?env=production&x=evil",
+        Some(&owner),
+        false,
+    )
+    .await;
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(
+        r.headers()["refresh"],
+        "10;url=/p/default/live?env=production"
+    );
+    let html = body_text(r).await;
+    assert!(html.contains("Active now") && html.contains("$pageview") && !html.contains(" style="));
+}

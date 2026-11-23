@@ -419,3 +419,56 @@ pub(crate) async fn api_flows(
             .into_response(),
     }
 }
+
+/// `GET /p/{id}/live` (#228).
+pub(crate) async fn live(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    axum::extract::RawQuery(raw): axum::extract::RawQuery,
+) -> Response {
+    if !auth::has_session(&state, &headers) {
+        return Redirect::to("/login").into_response();
+    }
+    let Some(p) = project(&state, &id).await else {
+        return not_found("No such project.");
+    };
+    let raw = raw.unwrap_or_default();
+    let Ok(q) = serde_urlencoded::from_str::<FilterQuery>(&raw) else {
+        return not_found("Unreadable filters.");
+    };
+    let f = q.filters(&auth::tz_for(&state, &headers, &p.timezone));
+    let map = crate::load_map(&state, &p.id).await;
+    let info = openlens_ui::ProjectInfo {
+        id: &p.id,
+        name: &p.name,
+        key: &p.api_key,
+    };
+    // Keep the filters across refreshes (re-encoded, so nothing else rides along).
+    let keep = serde_urlencoded::from_str::<Vec<(String, String)>>(&raw)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(k, _)| ["env", "role", "release", "internal"].contains(&k.as_str()))
+        .collect::<Vec<_>>();
+    let query = if keep.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "?{}",
+            serde_urlencoded::to_string(&keep).unwrap_or_default()
+        )
+    };
+    match openlens_engine::live(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f).await {
+        Ok(l) => {
+            let mut r = html_page(StatusCode::OK, openlens_ui::live(&info, &f, &l));
+            if let Ok(v) = HeaderValue::from_str(&format!("10;url=/p/{}/live{query}", p.id)) {
+                r.headers_mut().insert(header::REFRESH, v);
+            }
+            r
+        }
+        Err(e) => html_page(
+            StatusCode::BAD_REQUEST,
+            openlens_ui::message("Can't show that", &e.to_string()),
+        ),
+    }
+}

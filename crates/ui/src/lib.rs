@@ -152,6 +152,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                             nav.side-nav aria-label="Project" {
                                 @for (href, glyph, label) in [
                                     ("", "board", "Focus board"),
+                                    ("/live", "pulse", "Live"),
                                     ("/events", "events", "Events"),
                                     ("/pages", "layers", "Pages"),
                                     ("/errors", "alert", "Errors"),
@@ -1630,6 +1631,62 @@ pub fn flows(
                             } }
                         }
                     }
+                }
+            }
+        },
+    )
+}
+
+/// Right now (#228): who is using the app, refreshed every 10 seconds by
+/// the browser (a `Refresh` header: no script).
+pub fn live(p: &ProjectInfo<'_>, f: &Filters, l: &openlens_engine::Live) -> Markup {
+    let list = |title: &str, glyph: &str, rows: &[(String, i64)]| {
+        html! {
+            section.card {
+                h2.violet { (icon(glyph)) (title) }
+                @if rows.is_empty() { p.muted.small { "Nothing in the last 30 minutes." } }
+                @else { table.plain { tbody { @for (v, n) in rows {
+                    tr { th scope="row" { span.mono { (v) } } td.num { (compact(*n)) } }
+                } } } }
+            }
+        }
+    };
+    layout(
+        "Live",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "Live" }
+                p.muted { "Last 30 minutes in " strong { (f.environment) } ". Refreshes every 10 seconds; events show up within the flush delay (a few seconds)." }
+            } }
+            section.tiles aria-label="Right now" {
+                (tile("violet", "users", "Active now", &compact(l.users_5m), "users, last 5 minutes"))
+                (tile("sky", "clock", "Last 30 minutes", &compact(l.users_30m), "users"))
+                (tile("coral", "alert", "Errors", &compact(l.errors_30m), "last 30 minutes"))
+            }
+            div.grid {
+                (list("Releases", "release", &l.releases))
+                (list("Roles", "users", &l.roles))
+                (list("Features", "star", &l.features))
+                (list("Pages", "route", &l.pages))
+            }
+            section.card.wide {
+                h2.mint { (icon("events")) "Latest events" }
+                @if l.events.is_empty() { p.muted { "Quiet." } }
+                @else {
+                    div.table-scroll { table.plain.events {
+                        thead { tr { th { "When (" (tz_label(&f.tz)) ")" } th { "Event" } th { "User" } th { "Page" } th { "Release" } } }
+                        tbody { @for r in &l.events {
+                            @let fam = openlens_engine::family(&r.event);
+                            tr {
+                                td.muted.mono { (local_time(&r.timestamp, &f.tz, true)) }
+                                td { span class={ "chip fam " (fam) } { (icon(family_icon(fam))) span.sr-only { (family_label(fam)) ": " } (r.event) } }
+                                td.mono { a href={ "/p/" (p.id) "/people/" (url_enc(&r.distinct_id)) } { (r.distinct_id) } }
+                                td.mono { (r.path.as_deref().unwrap_or("—")) }
+                                td { (r.release.as_deref().unwrap_or("—")) }
+                            }
+                        } }
+                    } }
                 }
             }
         },

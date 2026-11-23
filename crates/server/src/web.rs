@@ -82,6 +82,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/p/{project}/breakdown", get(crate::explore::breakdown))
         .route("/p/{project}/audience", get(crate::explore::audience))
         .route("/p/{project}/flows", get(crate::explore::flows))
+        .route("/p/{project}/live", get(crate::explore::live))
         .route(
             "/p/{project}/sql",
             get(crate::explore::sql_page).post(crate::explore::sql_run),

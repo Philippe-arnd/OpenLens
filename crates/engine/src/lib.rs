@@ -877,6 +877,86 @@ pub async fn breakdown(
         .collect())
 }
 
+/// Who is using the app right now (#228): users active in the last 5 and
+/// 30 minutes, and over 30 minutes the roles, releases, features, pages
+/// and errors, plus the latest events.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct Live {
+    /// Distinct users, last 5 minutes.
+    pub users_5m: i64,
+    /// Distinct users, last 30 minutes.
+    pub users_30m: i64,
+    /// Errors, last 30 minutes.
+    pub errors_30m: i64,
+    /// (role, users), last 30 minutes.
+    pub roles: Vec<(String, i64)>,
+    /// (release, users), last 30 minutes.
+    pub releases: Vec<(String, i64)>,
+    /// (feature, users), last 30 minutes.
+    pub features: Vec<(String, i64)>,
+    /// (page, users), last 30 minutes.
+    pub pages: Vec<(String, i64)>,
+    /// Latest events, newest first.
+    pub events: Vec<EventRow>,
+}
+
+/// [`Live`] for a project (the environment and team filters apply).
+pub async fn live(
+    q: &QueryEngine,
+    project: &str,
+    map: Option<&FeatureMap>,
+    f: &Filters,
+) -> Result<Live> {
+    let src = source(map);
+    let w = format!(
+        "{} AND timestamp >= now() - INTERVAL '30 minutes'",
+        f.clause(1)?
+    );
+    let head = format!(
+        "SELECT count(DISTINCT CASE WHEN timestamp >= now() - INTERVAL '5 minutes' THEN distinct_id END) AS u5, \
+         count(DISTINCT distinct_id) AS u30, sum(CASE WHEN event = '$error' THEN 1 ELSE 0 END) AS errors \
+         FROM {src} WHERE {w}"
+    );
+    let by = |col: &str| {
+        format!(
+            "SELECT {col} AS v, count(DISTINCT distinct_id) AS n FROM {src} WHERE {w} AND {col} IS NOT NULL \
+             GROUP BY {col} ORDER BY n DESC LIMIT 10"
+        )
+    };
+    let (qr, ql, qf, qp) = (by("role"), by("release"), by("feature"), by("path"));
+    let eq = EventQuery {
+        days: Some(1),
+        limit: 30,
+        ..EventQuery::default()
+    };
+    let (h, r, l, fe, pa, ev) = futures::join!(
+        q.sql(project, &head),
+        q.sql(project, &qr),
+        q.sql(project, &ql),
+        q.sql(project, &qf),
+        q.sql(project, &qp),
+        event_list(q, project, f, map, &eq),
+    );
+    let rows = |r: openlens_query::QueryResult| -> Vec<(String, i64)> {
+        r.rows
+            .iter()
+            .filter_map(|x| Some((text(x, "v")?, int(x, "n"))))
+            .collect()
+    };
+    let h = h?;
+    let top = h.rows.first();
+    Ok(Live {
+        users_5m: top.map_or(0, |r| int(r, "u5")),
+        users_30m: top.map_or(0, |r| int(r, "u30")),
+        errors_30m: top.map_or(0, |r| int(r, "errors")),
+        roles: rows(r?),
+        releases: rows(l?),
+        features: rows(fe?),
+        pages: rows(pa?),
+        events: ev?,
+    })
+}
+
 /// Who the users are, from page views of the last 30 days (#225): distinct
 /// users per country, device class, browser, OS, language and screen
 /// width bucket. A user seen in two countries counts in both.
