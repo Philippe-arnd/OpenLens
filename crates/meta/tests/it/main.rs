@@ -140,3 +140,28 @@ fn feature_maps_are_versioned_and_identical_pushes_are_no_ops() {
     assert_eq!(m.save_feature_map("p", "b").unwrap(), 2);
     assert_eq!(m.feature_map("p").unwrap().unwrap(), (2, "b".to_owned()));
 }
+
+#[test]
+fn projects_rename_rotate_and_drop_their_settings() {
+    let m = Meta::in_memory().unwrap();
+    let p = m.create_project("Journal", None).unwrap();
+    assert!(m.rename_project(&p.id, " Journal app ").unwrap());
+    assert!(m.rename_project(&p.id, "  ").is_err());
+    assert_eq!(m.project(&p.id).unwrap().unwrap().name, "Journal app");
+    let k = m.rotate_project_key(&p.id).unwrap().unwrap();
+    assert_ne!(k, p.api_key);
+    assert!(m.project_by_key(&p.api_key).unwrap().is_none());
+    assert_eq!(m.project_by_key(&k).unwrap().unwrap().id, p.id);
+    assert!(m.rotate_project_key("nope").unwrap().is_none());
+    m.set_project_setting(&p.id, "app_url", "https://x.example")
+        .unwrap();
+    assert_eq!(
+        m.project_setting(&p.id, "app_url").unwrap().as_deref(),
+        Some("https://x.example")
+    );
+    m.set_project_setting(&p.id, "app_url", "").unwrap();
+    assert!(m.project_setting(&p.id, "app_url").unwrap().is_none());
+    m.set_project_setting(&p.id, "icon", "x").unwrap();
+    assert!(m.delete_project(&p.id).unwrap());
+    assert!(m.project_setting(&p.id, "icon").unwrap().is_none());
+}

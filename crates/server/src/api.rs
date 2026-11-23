@@ -100,7 +100,7 @@ struct NewProject {
 }
 
 /// A valid IANA time zone name (`Europe/Paris`, `UTC`), or an error message.
-fn check_timezone(tz: &str) -> Result<String, &'static str> {
+pub(crate) fn check_timezone(tz: &str) -> Result<String, &'static str> {
     let tz = tz.trim();
     tz.parse::<chrono_tz::Tz>()
         .map(|_| tz.to_owned())
@@ -171,35 +171,7 @@ async fn delete_project(
         );
     }
     let st = state.clone();
-    let res = tokio::task::spawn_blocking(move || -> Result<bool, String> {
-        // Events still in the write-ahead log go to their files first, so
-        // nothing of this project is written back after the delete.
-        crate::flush_now(&st)?;
-        let existed = st
-            .meta
-            .delete_project(&project)
-            .map_err(|e| e.to_string())?;
-        if existed {
-            let mut dirs = vec![
-                st.data_dir
-                    .join("replay")
-                    .join(format!("project={project}")),
-                st.data_dir
-                    .join("sourcemaps")
-                    .join(format!("project={project}")),
-            ];
-            if let Ok(d) = openlens_storage::project_dir(&st.data_dir, &project) {
-                dirs.push(d);
-            }
-            for d in dirs {
-                if d.exists() {
-                    std::fs::remove_dir_all(&d).map_err(|e| e.to_string())?;
-                }
-            }
-        }
-        Ok(existed)
-    })
-    .await;
+    let res = tokio::task::spawn_blocking(move || purge_project(&st, &project)).await;
     match res {
         Ok(Ok(true)) => Json(json!({ "deleted": true })).into_response(),
         Ok(Ok(false)) => err(StatusCode::NOT_FOUND, "no such project"),
@@ -247,6 +219,34 @@ async fn create_project(
         Ok(Err(e)) => err(StatusCode::CONFLICT, &e.to_string()),
         Err(_) => err(StatusCode::INTERNAL_SERVER_ERROR, "metadata store unavailable"),
     }
+}
+
+/// Delete a project and every file of it (blocking): events, replays,
+/// source maps and its metadata. False when it did not exist.
+pub(crate) fn purge_project(st: &AppState, project: &str) -> Result<bool, String> {
+    // Events still in the write-ahead log go to their files first, so
+    // nothing of this project is written back after the delete.
+    crate::flush_now(st)?;
+    let existed = st.meta.delete_project(project).map_err(|e| e.to_string())?;
+    if existed {
+        let mut dirs = vec![
+            st.data_dir
+                .join("replay")
+                .join(format!("project={project}")),
+            st.data_dir
+                .join("sourcemaps")
+                .join(format!("project={project}")),
+        ];
+        if let Ok(d) = openlens_storage::project_dir(&st.data_dir, project) {
+            dirs.push(d);
+        }
+        for d in dirs {
+            if d.exists() {
+                std::fs::remove_dir_all(&d).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    Ok(existed)
 }
 
 #[derive(Deserialize)]
@@ -688,7 +688,12 @@ async fn export(
         Ok(p) => p,
         Err(r) => return *r,
     };
-    let d = q.date.as_bytes();
+    export_day(&state, &p.id, &q.date).await
+}
+
+/// One day of a project's events as NDJSON (`date` is YYYY-MM-DD).
+pub(crate) async fn export_day(state: &AppState, project: &str, date: &str) -> Response {
+    let d = date.as_bytes();
     let valid = d.len() == 10
         && d.iter().enumerate().all(|(i, c)| {
             if i == 4 || i == 7 {
@@ -711,9 +716,9 @@ async fn export(
     let sql = format!(
         "SELECT uuid, event, distinct_id, session_id, CAST(timestamp AS VARCHAR) AS timestamp, url, path, feature, \
          role, account, plan, environment, release, properties FROM events WHERE date = '{}' ORDER BY timestamp",
-        q.date
+        date
     );
-    match engine.sql(&p.id, &sql).await {
+    match engine.sql(project, &sql).await {
         Ok(res) => {
             let mut body = String::new();
             for row in &res.rows {

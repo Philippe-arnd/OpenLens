@@ -372,6 +372,52 @@ impl Meta {
         })
     }
 
+    /// Rename a project (its id, and so its storage, stays). False when it
+    /// does not exist.
+    pub fn rename_project(&self, id: &str, name: &str) -> Result<bool> {
+        let name = name.trim();
+        if name.is_empty() || name.chars().count() > 80 {
+            return Err(MetaError::Invalid("project name must be 1-80 characters"));
+        }
+        self.with(|c| {
+            Ok(c.execute(
+                "UPDATE projects SET name = ?2 WHERE id = ?1",
+                params![id, name],
+            )? > 0)
+        })
+    }
+
+    /// Give a project a new capture key; the old one stops working at once.
+    /// Returns the new key, or None when the project does not exist.
+    pub fn rotate_project_key(&self, id: &str) -> Result<Option<String>> {
+        let key = format!("pk_{}", token(24));
+        self.with(|c| {
+            Ok((c.execute(
+                "UPDATE projects SET api_key = ?2 WHERE id = ?1",
+                params![id, key],
+            )? > 0)
+                .then_some(key))
+        })
+    }
+
+    /// A per-project setting (`app_url`, `icon`, …), stored as
+    /// `project:<id>:<name>` so older releases ignore it.
+    pub fn project_setting(&self, id: &str, name: &str) -> Result<Option<String>> {
+        self.setting(&format!("project:{id}:{name}"))
+    }
+
+    /// Set a per-project setting; an empty value removes it.
+    pub fn set_project_setting(&self, id: &str, name: &str, value: &str) -> Result<()> {
+        let key = format!("project:{id}:{name}");
+        if value.is_empty() {
+            return self.with(|c| {
+                c.execute("DELETE FROM settings WHERE key = ?1", [key])?;
+                Ok(())
+            });
+        }
+        self.set_setting(&key, value)
+    }
+
     /// The project with this id.
     pub fn project(&self, id: &str) -> Result<Option<Project>> {
         Ok(self.projects()?.into_iter().find(|p| p.id == id))
@@ -402,6 +448,10 @@ impl Meta {
             ] {
                 tx.execute(&format!("DELETE FROM {table} WHERE project = ?1"), [id])?;
             }
+            tx.execute(
+                "DELETE FROM settings WHERE substr(key, 1, length(?1)) = ?1",
+                [format!("project:{id}:")],
+            )?;
             let n = tx.execute("DELETE FROM projects WHERE id = ?1", [id])?;
             tx.commit()?;
             Ok(n > 0)

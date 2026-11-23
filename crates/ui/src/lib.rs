@@ -117,9 +117,8 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                         }
                         @if let Some(p) = project {
                             a.switch href="/projects" title={ "Project: " (p.name) " (switch)" } {
-                                span.initial aria-hidden="true" { (p.name.chars().next().unwrap_or('?').to_uppercase().to_string()) }
+                                img.picon src={ "/p/" (p.id) "/icon" } alt="" width="24" height="24";
                                 span.label { (p.name) }
-                                span.label.chev { (icon("down")) }
                             }
                             nav.side-nav aria-label="Project" {
                                 @for (href, glyph, label) in [
@@ -131,6 +130,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                                     ("/flags", "flag", "Flags"),
                                     ("/surveys", "idea", "Surveys"),
                                     ("/digest", "mail", "Digest"),
+                                    ("/settings", "gear", "Settings"),
                                 ] {
                                     a href={ "/p/" (p.id) (href) } title=(label) aria-current=[(title == label || (href.is_empty() && title == p.name)).then_some("page")] {
                                         (icon(glyph)) span.label { (label) }
@@ -1085,11 +1085,22 @@ pub fn projects(list: &[ProjectSummary], admin: bool) -> Markup {
                 div { h1 { "Projects" } p.muted { "One per app. Pick one to open its Focus board." } }
                 @if admin { a.button href="/users" { (icon("users")) "Team" } }
             }
+            @if admin {
+                details.card.wide.new-project {
+                    summary { (icon("plus")) "New project" }
+                    form.invite method="post" action="/projects" {
+                        label { "Name " input type="text" name="name" required maxlength="80" placeholder="My app"; }
+                        label { "Time zone " input type="text" name="timezone" placeholder="Europe/Paris" maxlength="64"; }
+                        button type="submit" { "Create" }
+                    }
+                    p.muted.small { "Agents do the same with " code { "openlens-cli init --name <app>" } ". Empty time zone: UTC." }
+                }
+            }
             ul.project-list {
                 @for p in list {
                     li {
                         a.card href={ "/p/" (p.id) } {
-                            h2.violet { (icon("board")) (p.name) }
+                            h2.violet { img.picon src={ "/p/" (p.id) "/icon" } alt="" width="24" height="24"; (p.name) }
                             @if p.recent_events > 0 {
                                 p { strong { (compact(p.recent_events)) } " events in the last 7 days" }
                             } @else {
@@ -1271,6 +1282,131 @@ pub fn users(
                                 td { form method="post" action={ "/users/" (u.id) "/delete" } { button.ghost type="submit" { "Remove" } } }
                             }
                         } }
+                    }
+                }
+            }
+        },
+    )
+}
+
+/// What the settings page shows of a project (#219).
+pub struct SettingsView<'a> {
+    /// Time zone of the project's days (D-017).
+    pub timezone: &'a str,
+    /// The app address set by an admin, if any.
+    pub app_url: Option<&'a str>,
+    /// The app address seen in recent pageviews.
+    pub detected_url: Option<&'a str>,
+    /// This server's public address (for the snippets).
+    pub host: &'a str,
+    /// Wiring check over the last 24 hours, as (label, count, hint).
+    pub checks: &'a [(&'a str, i64, &'a str)],
+    /// Version of the feature map, if one was pushed.
+    pub map_version: Option<i64>,
+    /// Admins see the forms.
+    pub admin: bool,
+    /// A notice to show at the top (after an action).
+    pub notice: Option<&'a str>,
+    /// Yesterday, in the project's zone (default export day).
+    pub yesterday: &'a str,
+}
+
+/// A project's settings: name, app address, time zone, capture key and
+/// snippets, wiring check, export, and deletion (#219).
+pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
+    let base = format!("/p/{}/settings", p.id);
+    let script = format!(
+        r#"<script src="{}/c.js" data-key="{}" defer></script>"#,
+        v.host, p.key
+    );
+    let npm = format!(
+        "import {{ init }} from '@openlens/web';\ninit({{ host: '{}', key: '{}' }});",
+        v.host, p.key
+    );
+    let server = format!("OPENLENS_HOST={}\nOPENLENS_KEY={}", v.host, p.key);
+    layout(
+        "Settings",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "Settings" }
+                p.muted { "Everything agents do with " code { "openlens-cli" } " for this project, here too." }
+            } }
+            @if let Some(n) = v.notice { p.notice role="status" { (n) } }
+            section.card.wide {
+                h2.violet { (icon("gear")) "Project" }
+                @if v.admin {
+                    form.settings method="post" action=(base) {
+                        label { "Name " input type="text" name="name" value=(p.name) required maxlength="80"; }
+                        label { "App address "
+                            input type="url" name="app_url" value=[v.app_url] placeholder=(v.detected_url.unwrap_or("https://app.example.com")) maxlength="200";
+                        }
+                        label { "Time zone " input type="text" name="timezone" value=(v.timezone) required maxlength="64"; }
+                        button type="submit" { "Save" }
+                    }
+                } @else {
+                    dl.facts {
+                        dt { "Name" } dd { (p.name) }
+                        dt { "App address" } dd { (v.app_url.or(v.detected_url).unwrap_or("—")) }
+                        dt { "Time zone" } dd { (v.timezone) }
+                    }
+                }
+                p.muted.small {
+                    "The app address gives the project its icon (the app's favicon). Empty: "
+                    @match v.detected_url { Some(u) => { "detected from pageviews, " span.mono { (u) } "." }, None => "detected from pageviews once some arrive." }
+                    " Days and weeks of every KPI start in the time zone (an IANA name like Europe/Paris)."
+                }
+            }
+            section.card.wide {
+                h2.sky { (icon("code")) "Install" }
+                p { "Capture key " code.mono { (p.key) } " (public: it only sends events)." }
+                h3 { "Script tag" }
+                pre.snippet { code { (script) } }
+                h3 { "npm" }
+                pre.snippet { code { (npm) } }
+                h3 { "Server SDKs (Node, Python, Go, Ruby, PHP)" }
+                pre.snippet { code { (server) } }
+                p.muted.small { "Agents: " a href={ (v.host) "/agents.md" } { "the wiring guide" } "." }
+                @if v.admin {
+                    form.inline method="post" action={ (base) "/rotate-key" } {
+                        label.check { input type="checkbox" name="confirm" value="yes" required; " The old key stops working at once: every app must get the new one" }
+                        button.ghost type="submit" { "Rotate the key" }
+                    }
+                }
+            }
+            section.card.wide {
+                h2.mint { (icon("task")) "Wiring check" }
+                p.muted.small { "Last 24 hours, all environments (what " code { "openlens-cli verify" } " checks)." }
+                ul.checks {
+                    @for (label, n, hint) in v.checks {
+                        li.ok[*n > 0] {
+                            (icon(if *n > 0 { "task" } else { "alert" }))
+                            span { strong { (label) } " " (compact(*n)) }
+                            @if *n == 0 { span.muted.small { " · " (hint) } }
+                        }
+                    }
+                    li.ok[v.map_version.is_some()] {
+                        (icon(if v.map_version.is_some() { "task" } else { "alert" }))
+                        span { strong { "Feature map" } " " @match v.map_version { Some(n) => { "v" (n) }, None => "none" } }
+                        @if v.map_version.is_none() { span.muted.small { " · push one with " code { "openlens-cli map push" } } }
+                    }
+                }
+            }
+            section.card.wide {
+                h2.sun { (icon("down")) "Export" }
+                form.inline method="get" action={ "/p/" (p.id) "/export" } {
+                    label { "Day " input type="date" name="date" value=(v.yesterday) required; }
+                    button type="submit" { "Download NDJSON" }
+                }
+                p.muted.small { "One line per event of that day (UTC partitions), up to 500,000." }
+            }
+            @if v.admin {
+                section.card.wide.danger {
+                    h2.coral { (icon("alert")) "Delete the project" }
+                    p { "Removes its events, replays, source maps, people, flags, surveys and feature map. There is no undo (backups excepted)." }
+                    form.inline method="post" action={ (base) "/delete" } {
+                        label { "Type " code { (p.id) } " to confirm " input type="text" name="confirm" required autocomplete="off"; }
+                        button.danger type="submit" { "Delete forever" }
                     }
                 }
             }

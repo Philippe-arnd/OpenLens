@@ -1569,3 +1569,102 @@ async fn project_time_zone_is_set_and_checked() {
         .unwrap();
     assert_eq!(board.status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn project_settings_do_what_the_cli_does() {
+    let h = harness();
+    let owner = login_cookie(&h).await;
+    let page = get(&h, "/p/default/settings", Some(&owner), false).await;
+    assert_eq!(page.status(), StatusCode::OK);
+    let html = String::from_utf8(
+        axum::body::to_bytes(page.into_body(), 1 << 20)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    let key = h.state.meta.project("default").unwrap().unwrap().api_key;
+    assert!(html.contains(&key) && html.contains("Wiring check"));
+    assert!(!html.contains(" style="));
+
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/settings",
+            &owner,
+            "name=Journal&app_url=https%3A%2F%2Fjournal.example%2Fapp&timezone=Europe%2FParis"
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    let p = h.state.meta.project("default").unwrap().unwrap();
+    assert_eq!(
+        (p.name.as_str(), p.timezone.as_str()),
+        ("Journal", "Europe/Paris")
+    );
+    assert_eq!(
+        h.state
+            .meta
+            .project_setting("default", "app_url")
+            .unwrap()
+            .as_deref(),
+        Some("https://journal.example")
+    );
+    assert_eq!(
+        post_form(&h, "/p/default/settings", &owner, "name=J&timezone=Nowhere").await,
+        StatusCode::BAD_REQUEST
+    );
+
+    assert_eq!(
+        post_form(&h, "/p/default/settings/rotate-key", &owner, "").await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        post_form(&h, "/p/default/settings/rotate-key", &owner, "confirm=yes").await,
+        StatusCode::SEE_OTHER
+    );
+    assert!(h.state.meta.project_by_key(&key).unwrap().is_none());
+
+    let icon = get(&h, "/p/default/icon", Some(&owner), false).await;
+    assert_eq!(icon.headers()["content-type"], "image/svg+xml");
+
+    assert_eq!(
+        post_form(&h, "/projects", &owner, "name=Kanban&timezone=").await,
+        StatusCode::SEE_OTHER
+    );
+    assert!(h.state.meta.project("kanban").unwrap().is_some());
+    assert_eq!(
+        post_form(&h, "/p/kanban/settings/delete", &owner, "confirm=Kanban").await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        post_form(&h, "/p/kanban/settings/delete", &owner, "confirm=kanban").await,
+        StatusCode::SEE_OTHER
+    );
+    assert!(h.state.meta.project("kanban").unwrap().is_none());
+
+    let viewer = invite(
+        &h,
+        serde_json::json!({"email": "v@example.com", "role": "viewer"}),
+    )
+    .await;
+    assert_eq!(
+        post_form(&h, "/p/default/settings/rotate-key", &viewer, "confirm=yes").await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        post_form(&h, "/projects", &viewer, "name=Nope").await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        get(
+            &h,
+            "/p/default/export?date=2026-01-01",
+            Some(&viewer),
+            false
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN
+    );
+}

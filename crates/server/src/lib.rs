@@ -8,10 +8,12 @@ mod auth;
 mod capture;
 mod digest;
 mod flags;
+mod icon;
 mod oidc;
 mod replay;
 mod reword;
 mod s3;
+mod settings;
 mod surveys;
 mod web;
 

@@ -17,7 +17,10 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/", get(home))
         .route("/login", get(login_page).post(login))
         .route("/login/email", post(login_email))
-        .route("/projects", get(projects_page))
+        .route(
+            "/projects",
+            get(projects_page).post(crate::settings::create),
+        )
         .route("/welcome", get(welcome_page).post(welcome_create))
         .route("/users", get(users_page).post(users_invite))
         .route("/users/{id}/delete", post(users_delete))
@@ -39,6 +42,20 @@ pub(crate) fn routes() -> Router<AppState> {
         )
         .route("/p/{project}/watch", get(watch_churned))
         .route("/p/{project}/heatmap", get(heatmap_page))
+        .route("/p/{project}/icon", get(crate::icon::icon))
+        .route(
+            "/p/{project}/settings",
+            get(crate::settings::page).post(crate::settings::save),
+        )
+        .route(
+            "/p/{project}/settings/rotate-key",
+            post(crate::settings::rotate),
+        )
+        .route(
+            "/p/{project}/settings/delete",
+            post(crate::settings::delete),
+        )
+        .route("/p/{project}/export", get(crate::settings::export))
         .route("/p/{project}/digest", get(digest_page))
         .route("/p/{project}/heatmap.json", get(heatmap_json))
         .route("/p/{project}/heatmap/overlay", get(heatmap_overlay))
