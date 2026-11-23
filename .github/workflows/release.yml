@@ -38,6 +38,7 @@ jobs:
       OPENLENS_ADMIN_TOKEN: adm_ci_smoke
       OPENLENS_PROJECT_KEY: pk_ci_smoke
     steps:
+      - run: echo "GEOIP_MONTH=$(date -u +%Y-%m)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v6
       - uses: docker/setup-buildx-action@v4
       - name: build (cargo-chef dependency layer, GHA cache)
@@ -48,9 +49,12 @@ jobs:
           tags: openlens-openlens:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: GEOIP_MONTH=${{ env.GEOIP_MONTH }}
       - name: start the container exactly as Coolify does (compose, named volume, healthcheck)
         run: docker compose up -d --wait --wait-timeout 60
       - run: scripts/smoke.sh http://localhost:8686
+      - name: the country database is in the image and loads (#225)
+        run: docker compose logs | grep -q "country database loaded" || { echo "::error::no country database in the image"; exit 1; }
       - if: failure()
         run: docker compose logs
       - run: docker compose down -v
@@ -89,6 +93,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
+          build-args: GEOIP_MONTH=${{ env.GEOIP_MONTH }}
       # Automatic deploy of the maintainer's own instance after a stable
       # release (#198). Skipped when the secrets are absent (forks, others).
       - name: deploy to Coolify (stable releases only)
