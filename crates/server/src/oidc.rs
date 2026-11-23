@@ -334,6 +334,14 @@ pub(crate) async fn callback(
             "You signed in, but nobody invited this email to OpenLens yet. Ask an admin to add you under Team.",
         );
     };
+    if user.disabled {
+        return page(
+            StatusCode::FORBIDDEN,
+            "Sign-in disabled",
+            "An admin disabled sign-in for this account. Ask them to enable it again.",
+        );
+    }
+    let _ = state.meta.touch_sign_in(&user.id);
     let session = auth::set_cookie(
         &auth::new_session(&state, &user.id),
         &headers,

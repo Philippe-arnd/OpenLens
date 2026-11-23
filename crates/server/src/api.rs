@@ -40,9 +40,16 @@ pub(crate) fn routes() -> Router<AppState> {
             post(import).layer(axum::extract::DefaultBodyLimit::max(IMPORT_MAX)),
         )
         .route("/api/projects/{project}/export", get(export))
+        .route(
+            "/api/projects/{project}/replays/{session}/comments",
+            get(crate::comments::api_list).post(crate::comments::api_add),
+        )
         .route("/api/login-links", post(login_link))
         .route("/api/users", get(list_users))
-        .route("/api/users/{id}", axum::routing::delete(delete_user))
+        .route(
+            "/api/users/{id}",
+            axum::routing::delete(delete_user).patch(update_user),
+        )
 }
 
 /// Largest import chunk, in bytes (the CLI sends ~5,000 lines per chunk).
@@ -100,7 +107,7 @@ struct NewProject {
 }
 
 /// A valid IANA time zone name (`Europe/Paris`, `UTC`), or an error message.
-fn check_timezone(tz: &str) -> Result<String, &'static str> {
+pub(crate) fn check_timezone(tz: &str) -> Result<String, &'static str> {
     let tz = tz.trim();
     tz.parse::<chrono_tz::Tz>()
         .map(|_| tz.to_owned())
@@ -171,35 +178,7 @@ async fn delete_project(
         );
     }
     let st = state.clone();
-    let res = tokio::task::spawn_blocking(move || -> Result<bool, String> {
-        // Events still in the write-ahead log go to their files first, so
-        // nothing of this project is written back after the delete.
-        crate::flush_now(&st)?;
-        let existed = st
-            .meta
-            .delete_project(&project)
-            .map_err(|e| e.to_string())?;
-        if existed {
-            let mut dirs = vec![
-                st.data_dir
-                    .join("replay")
-                    .join(format!("project={project}")),
-                st.data_dir
-                    .join("sourcemaps")
-                    .join(format!("project={project}")),
-            ];
-            if let Ok(d) = openlens_storage::project_dir(&st.data_dir, &project) {
-                dirs.push(d);
-            }
-            for d in dirs {
-                if d.exists() {
-                    std::fs::remove_dir_all(&d).map_err(|e| e.to_string())?;
-                }
-            }
-        }
-        Ok(existed)
-    })
-    .await;
+    let res = tokio::task::spawn_blocking(move || purge_project(&st, &project)).await;
     match res {
         Ok(Ok(true)) => Json(json!({ "deleted": true })).into_response(),
         Ok(Ok(false)) => err(StatusCode::NOT_FOUND, "no such project"),
@@ -249,6 +228,34 @@ async fn create_project(
     }
 }
 
+/// Delete a project and every file of it (blocking): events, replays,
+/// source maps and its metadata. False when it did not exist.
+pub(crate) fn purge_project(st: &AppState, project: &str) -> Result<bool, String> {
+    // Events still in the write-ahead log go to their files first, so
+    // nothing of this project is written back after the delete.
+    crate::flush_now(st)?;
+    let existed = st.meta.delete_project(project).map_err(|e| e.to_string())?;
+    if existed {
+        let mut dirs = vec![
+            st.data_dir
+                .join("replay")
+                .join(format!("project={project}")),
+            st.data_dir
+                .join("sourcemaps")
+                .join(format!("project={project}")),
+        ];
+        if let Ok(d) = openlens_storage::project_dir(&st.data_dir, project) {
+            dirs.push(d);
+        }
+        for d in dirs {
+            if d.exists() {
+                std::fs::remove_dir_all(&d).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    Ok(existed)
+}
+
 #[derive(Deserialize)]
 struct SqlBody {
     sql: String,
@@ -281,6 +288,9 @@ pub(crate) struct FilterQuery {
     pub(crate) event: Option<String>,
     /// `1` or `true`: include the team's own users.
     pub(crate) internal: Option<String>,
+    /// Read times and days in this IANA zone instead (#215; the CLI's
+    /// `--tz` / `OPENLENS_TZ`).
+    pub(crate) tz: Option<String>,
 }
 
 impl FilterQuery {
@@ -296,7 +306,9 @@ impl FilterQuery {
             role: some(&self.role),
             release: some(&self.release),
             internal: matches!(self.internal.as_deref(), Some("1" | "true" | "on")),
-            tz: tz.to_owned(),
+            tz: some(&self.tz)
+                .filter(|t| t.parse::<chrono_tz::Tz>().is_ok())
+                .unwrap_or_else(|| tz.to_owned()),
         }
     }
 }
@@ -417,6 +429,74 @@ async fn delete_user(
     match tokio::task::spawn_blocking(move || meta.delete_user(&id)).await {
         Ok(Ok(true)) => Json(json!({ "deleted": true })).into_response(),
         Ok(Ok(false)) => err(StatusCode::NOT_FOUND, "no such user"),
+        Ok(Err(openlens_meta::MetaError::Invalid(why))) => err(StatusCode::CONFLICT, why),
+        _ => err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "metadata store unavailable",
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+struct UserPatch {
+    name: Option<String>,
+    email: Option<String>,
+    role: Option<String>,
+    projects: Option<Vec<String>>,
+    /// `[]` or `null`-free: give `"all"` to clear the project list.
+    #[serde(default)]
+    all_projects: bool,
+    disabled: Option<bool>,
+    timezone: Option<String>,
+}
+
+/// `PATCH /api/users/{id}` with any of `{name, email, role, projects,
+/// all_projects, disabled, timezone}`. 409 when it would leave no admin.
+async fn update_user(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(b): Json<UserPatch>,
+) -> Response {
+    if let Some(r) = guard(&state, &headers) {
+        return r;
+    }
+    if let Some(tz) = b.timezone.as_deref().filter(|t| !t.is_empty())
+        && check_timezone(tz).is_err()
+    {
+        return err(StatusCode::BAD_REQUEST, "timezone must be an IANA name");
+    }
+    let meta = state.meta.clone();
+    let res = tokio::task::spawn_blocking(move || {
+        let Some(u) = meta.user(&id)? else {
+            return Ok(None);
+        };
+        let projects = if b.all_projects {
+            None
+        } else {
+            b.projects.clone().or(u.projects.clone())
+        };
+        let name = b.name.clone().or(u.name.clone());
+        meta.update_user(
+            &id,
+            name.as_deref(),
+            b.email.as_deref().unwrap_or(&u.email),
+            b.role.as_deref().unwrap_or(&u.role),
+            projects.as_deref(),
+        )?;
+        if let Some(d) = b.disabled {
+            meta.set_user_disabled(&id, d)?;
+        }
+        if let Some(tz) = &b.timezone {
+            meta.set_user_timezone(&id, Some(tz.as_str()).filter(|t| !t.is_empty()))?;
+        }
+        meta.user(&id)
+    })
+    .await;
+    match res {
+        Ok(Ok(Some(u))) => Json(json!({ "user": u })).into_response(),
+        Ok(Ok(None)) => err(StatusCode::NOT_FOUND, "no such user"),
+        Ok(Err(openlens_meta::MetaError::Invalid(why))) => err(StatusCode::CONFLICT, why),
         _ => err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "metadata store unavailable",
@@ -688,7 +768,12 @@ async fn export(
         Ok(p) => p,
         Err(r) => return *r,
     };
-    let d = q.date.as_bytes();
+    export_day(&state, &p.id, &q.date).await
+}
+
+/// One day of a project's events as NDJSON (`date` is YYYY-MM-DD).
+pub(crate) async fn export_day(state: &AppState, project: &str, date: &str) -> Response {
+    let d = date.as_bytes();
     let valid = d.len() == 10
         && d.iter().enumerate().all(|(i, c)| {
             if i == 4 || i == 7 {
@@ -711,9 +796,9 @@ async fn export(
     let sql = format!(
         "SELECT uuid, event, distinct_id, session_id, CAST(timestamp AS VARCHAR) AS timestamp, url, path, feature, \
          role, account, plan, environment, release, properties FROM events WHERE date = '{}' ORDER BY timestamp",
-        q.date
+        date
     );
-    match engine.sql(&p.id, &sql).await {
+    match engine.sql(project, &sql).await {
         Ok(res) => {
             let mut body = String::new();
             for row in &res.rows {

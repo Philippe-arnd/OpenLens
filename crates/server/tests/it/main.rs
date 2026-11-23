@@ -1569,3 +1569,379 @@ async fn project_time_zone_is_set_and_checked() {
         .unwrap();
     assert_eq!(board.status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn project_settings_do_what_the_cli_does() {
+    let h = harness();
+    let owner = login_cookie(&h).await;
+    let page = get(&h, "/p/default/settings", Some(&owner), false).await;
+    assert_eq!(page.status(), StatusCode::OK);
+    let html = String::from_utf8(
+        axum::body::to_bytes(page.into_body(), 1 << 20)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    let key = h.state.meta.project("default").unwrap().unwrap().api_key;
+    assert!(html.contains(&key) && html.contains("Wiring check"));
+    assert!(!html.contains(" style="));
+
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/settings",
+            &owner,
+            "name=Journal&app_url=https%3A%2F%2Fjournal.example%2Fapp&timezone=Europe%2FParis"
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    let p = h.state.meta.project("default").unwrap().unwrap();
+    assert_eq!(
+        (p.name.as_str(), p.timezone.as_str()),
+        ("Journal", "Europe/Paris")
+    );
+    assert_eq!(
+        h.state
+            .meta
+            .project_setting("default", "app_url")
+            .unwrap()
+            .as_deref(),
+        Some("https://journal.example")
+    );
+    assert_eq!(
+        post_form(&h, "/p/default/settings", &owner, "name=J&timezone=Nowhere").await,
+        StatusCode::BAD_REQUEST
+    );
+
+    assert_eq!(
+        post_form(&h, "/p/default/settings/rotate-key", &owner, "").await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        post_form(&h, "/p/default/settings/rotate-key", &owner, "confirm=yes").await,
+        StatusCode::SEE_OTHER
+    );
+    assert!(h.state.meta.project_by_key(&key).unwrap().is_none());
+
+    let icon = get(&h, "/p/default/icon", Some(&owner), false).await;
+    assert_eq!(icon.headers()["content-type"], "image/svg+xml");
+
+    assert_eq!(
+        post_form(&h, "/projects", &owner, "name=Kanban&timezone=").await,
+        StatusCode::SEE_OTHER
+    );
+    assert!(h.state.meta.project("kanban").unwrap().is_some());
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/kanban/settings/delete",
+            &owner,
+            "confirm=kanban+app"
+        )
+        .await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        post_form(&h, "/p/kanban/settings/delete", &owner, "confirm=Kanban").await,
+        StatusCode::SEE_OTHER
+    );
+    assert!(h.state.meta.project("kanban").unwrap().is_none());
+
+    let viewer = invite(
+        &h,
+        serde_json::json!({"email": "v@example.com", "role": "viewer"}),
+    )
+    .await;
+    assert_eq!(
+        post_form(&h, "/p/default/settings/rotate-key", &viewer, "confirm=yes").await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        post_form(&h, "/projects", &viewer, "name=Nope").await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        get(
+            &h,
+            "/p/default/export?date=2026-01-01",
+            Some(&viewer),
+            false
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
+async fn team_crud_and_the_viewer_time_zone() {
+    let h = harness();
+    let owner = login_cookie(&h).await;
+    let ana = invite(
+        &h,
+        serde_json::json!({"email": "ana@example.com", "role": "admin"}),
+    )
+    .await;
+    let id = h
+        .state
+        .meta
+        .user_by_email("ana@example.com")
+        .unwrap()
+        .unwrap()
+        .id;
+    // Ana is the only admin user: she can't be removed or disabled.
+    assert_eq!(
+        post_form(&h, &format!("/users/{id}/disable"), &owner, "").await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            &format!("/users/{id}/delete"),
+            &owner,
+            "confirm=ana%40example.com"
+        )
+        .await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            &format!("/users/{id}"),
+            &owner,
+            "name=Ana&email=ana%40example.com&role=admin&projects="
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    assert_eq!(
+        h.state.meta.user(&id).unwrap().unwrap().name.as_deref(),
+        Some("Ana")
+    );
+    let page = get(&h, "/users?q=ana", Some(&owner), false).await;
+    let html = String::from_utf8(
+        axum::body::to_bytes(page.into_body(), 1 << 20)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(html.contains("ana@example.com") && html.contains("active"));
+
+    // Her own time zone drives what she reads.
+    assert_eq!(
+        post_form(&h, "/me", &ana, "name=Ana&timezone=Asia%2FTokyo").await,
+        StatusCode::SEE_OTHER
+    );
+    let ev = get(&h, "/p/default/events", Some(&ana), false).await;
+    let html = String::from_utf8(
+        axum::body::to_bytes(ev.into_body(), 1 << 20)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(html.contains("Times in Asia/Tokyo"), "viewer zone shown");
+    assert_eq!(
+        post_form(&h, "/me", &ana, "timezone=Mars").await,
+        StatusCode::BAD_REQUEST
+    );
+
+    // A second admin lets the first be disabled: her session ends at once.
+    invite(
+        &h,
+        serde_json::json!({"email": "bo@example.com", "role": "admin"}),
+    )
+    .await;
+    assert_eq!(
+        post_form(&h, &format!("/users/{id}/disable"), &owner, "").await,
+        StatusCode::SEE_OTHER
+    );
+    assert_ne!(
+        get(&h, "/p/default", Some(&ana), false).await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        post_form(&h, &format!("/users/{id}/delete"), &owner, "confirm=nope").await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            &format!("/users/{id}/delete"),
+            &owner,
+            "confirm=ana%40example.com"
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    assert!(h.state.meta.user(&id).unwrap().is_none());
+}
+
+#[tokio::test]
+async fn viewers_comment_on_replays_and_delete_only_their_own() {
+    let h = harness();
+    let owner = login_cookie(&h).await;
+    let ana = invite(
+        &h,
+        serde_json::json!({"email": "ana@example.com", "role": "viewer"}),
+    )
+    .await;
+    let bo = invite(
+        &h,
+        serde_json::json!({"email": "bo@example.com", "role": "viewer"}),
+    )
+    .await;
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/replays/s1/comments",
+            &ana,
+            "at=12400&body=Form+error+here"
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    let c = h.state.meta.replay_comments("default", "s1").unwrap();
+    assert_eq!(
+        (c.len(), c[0].at_ms, c[0].author.as_str()),
+        (1, 12_400, "ana@example.com")
+    );
+    let path = format!("/p/default/replays/s1/comments/{}/delete", c[0].id);
+    assert_eq!(post_form(&h, &path, &bo, "").await, StatusCode::FORBIDDEN);
+    // Viewers still can't change anything else under the project.
+    assert_eq!(
+        post_form(&h, "/p/default/settings/rotate-key", &ana, "confirm=yes").await,
+        StatusCode::FORBIDDEN
+    );
+    let api = get(&h, "/api/projects/default/replays/s1/comments", None, true).await;
+    assert_eq!(api.status(), StatusCode::OK);
+    assert_eq!(
+        post_form(&h, &path, &owner, "").await,
+        StatusCode::SEE_OTHER
+    );
+    assert!(
+        h.state
+            .meta
+            .replay_comments("default", "s1")
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn flags_and_surveys_are_managed_from_the_dashboard() {
+    let h = harness();
+    let owner = login_cookie(&h).await;
+    assert_eq!(
+        get(&h, "/p/default/flags-edit", Some(&owner), false)
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/flags-edit",
+            &owner,
+            "key=new-editor&description=Editor&rollout=20&roles=staff&enabled=on"
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/flags-edit",
+            &owner,
+            "key=new-editor&rollout=5"
+        )
+        .await,
+        StatusCode::BAD_REQUEST,
+        "duplicate key"
+    );
+    assert_eq!(
+        post_form(&h, "/p/default/flags-edit", &owner, "key=Bad+Key").await,
+        StatusCode::BAD_REQUEST
+    );
+    // Rename keeps one flag.
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/flags-edit",
+            &owner,
+            "original=new-editor&key=editor&rollout=30"
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    let keys: Vec<String> = h.state.meta.flags("default").unwrap();
+    assert_eq!(keys.len(), 1);
+    assert!(keys[0].contains("\"editor\"") && keys[0].contains("30"));
+    assert_eq!(
+        post_form(&h, "/p/default/flags/editor/delete", &owner, "confirm=nope").await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/flags/editor/delete",
+            &owner,
+            "confirm=editor"
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    assert!(h.state.meta.flags("default").unwrap().is_empty());
+
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/surveys-edit",
+            &owner,
+            "key=useful&question=How+useful%3F&kind=choice&choices=a&trigger=saved&sample=10"
+        )
+        .await,
+        StatusCode::BAD_REQUEST,
+        "a choice needs 2 options"
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/surveys-edit",
+            &owner,
+            "key=useful&question=How+useful%3F&kind=rating&trigger=saved&sample=10&enabled=on"
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    assert_eq!(h.state.meta.surveys("default").unwrap().len(), 1);
+    let viewer = invite(
+        &h,
+        serde_json::json!({"email": "v@example.com", "role": "viewer"}),
+    )
+    .await;
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/surveys/useful/delete",
+            &viewer,
+            "confirm=useful"
+        )
+        .await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/surveys/useful/delete",
+            &owner,
+            "confirm=useful"
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    assert!(h.state.meta.surveys("default").unwrap().is_empty());
+}

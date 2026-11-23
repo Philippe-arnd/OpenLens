@@ -55,11 +55,15 @@ async function main(): Promise<void> {
   const skipLabel = el("label", { class: "ol-skip" });
   const skip = el("input", { type: "checkbox", checked: "" });
   skipLabel.append(skip, " skip idle");
-  bar.append(back, play, fwd, track, time, speed, skipLabel);
+  const zoom = el("button", { type: "button", class: "ol-zoom", "aria-pressed": "false", title: "Actual size (Z)" }, "1:1");
+  bar.append(back, play, fwd, track, time, speed, skipLabel, zoom);
+  const info = el("p", { class: "ol-info", "aria-live": "polite" });
   const legend = el("ul", { class: "ol-legend", "aria-label": "Event types" });
   const log = el("ol", { class: "ol-log", "aria-label": "Events in this session" });
   const help = el("p", { class: "ol-help" }, "Space play/pause · J/L ±10 s · ←/→ ±5 s · +/− speed · click an event to jump to it");
-  root.replaceChildren(stage, bar, legend, log, help);
+  const main = el("div", { class: "ol-main" });
+  main.append(stage, bar, info, legend, help);
+  root.replaceChildren(main, log);
 
   const rep = new Replayer(events, { root: stage, skipInactive: true, mouseTail: false, showWarning: false });
   const total = rep.getMetaData().totalTime;
@@ -119,6 +123,7 @@ async function main(): Promise<void> {
       ArrowRight: () => go(rep.getCurrentTime() + 5_000),
       "+": () => setSpeed(opts[Math.min(opts.length - 1, i + 1)] ?? "1"),
       "-": () => setSpeed(opts[Math.max(0, i - 1)] ?? "1"),
+      z: () => zoom.click(),
     };
     const f = keys[e.key];
     if (f) {
@@ -130,19 +135,42 @@ async function main(): Promise<void> {
   rep.on("finish", () => setPlaying(false));
   setInterval(show, 250);
 
-  // Fit the recorded viewport into the stage.
+  // Fit the recorded viewport into the room left on screen ("contain",
+  // up to 2×), so the whole page and the controls show without scrolling;
+  // the controls take the video's width. 1:1 shows actual size, scrolling
+  // inside the stage. Heatmaps fit the width only (the page is tall).
+  let actual = false;
+  const widthOnly = Boolean(root.dataset.heatmap);
   const fit = () => {
     const wrapper = stage.querySelector<HTMLElement>(".replayer-wrapper");
     const frame = stage.querySelector("iframe");
     if (!wrapper || !frame) return;
     const w = Number(frame.getAttribute("width")) || 1;
-    const scale = Math.min(1, stage.clientWidth / w);
+    const h = Number(frame.getAttribute("height")) || 600;
+    const room = main.clientWidth;
+    const below = bar.offsetHeight + info.offsetHeight + 24;
+    const top = Math.max(0, stage.getBoundingClientRect().top + scrollY);
+    const tall = Math.max(240, innerHeight - Math.min(top, innerHeight / 3) - below);
+    let scale = widthOnly ? Math.min(1, room / w) : Math.min(2, room / w, tall / h);
+    if (actual) scale = 1;
     wrapper.style.transform = `scale(${scale})`;
     wrapper.style.transformOrigin = "0 0";
-    stage.style.height = `${(Number(frame.getAttribute("height")) || 600) * scale}px`;
+    const shownW = Math.min(room, w * scale);
+    stage.style.width = `${shownW}px`;
+    stage.style.height = `${actual ? Math.min(h, tall) : h * scale}px`;
+    stage.style.overflow = actual ? "auto" : "hidden";
+    root.style.setProperty("--ol-w", `${Math.max(shownW, Math.min(room, 320))}px`);
+    const kind = w < 600 ? "Phone" : w < 1024 ? "Tablet" : "Desktop";
+    info.textContent = `${kind} · ${w}×${h} · ${Math.round(scale * 100)} %`;
   };
+  zoom.addEventListener("click", () => {
+    actual = !actual;
+    zoom.setAttribute("aria-pressed", String(actual));
+    fit();
+  });
   rep.on("resize", fit);
   addEventListener("resize", fit);
+  if (typeof ResizeObserver !== "undefined") new ResizeObserver(() => fit()).observe(root);
 
   // data-at is a UTC timestamp ("2026-11-22 01:22:01.1"): start 3 s before it.
   if (root.dataset.heatmap) {
@@ -154,14 +182,26 @@ async function main(): Promise<void> {
   if (root.dataset.timeline) {
     items = await timeline(root.dataset.timeline, first0, total, marks, legend, log, (t) => go(t - 1000));
   }
+  items = items.concat(comments(root.dataset.comments, total, marks, (t) => go(t))).sort((a, b) => a.t - b.t);
+  for (const x of items) log.append(x.li);
   if (!items.length) {
     legend.hidden = true;
     log.hidden = true;
   }
+  // The comment form takes the moment the player is at (paused on focus).
+  const form = document.getElementById("ol-comment") as HTMLFormElement | null;
+  const atField = form?.querySelector<HTMLInputElement>("input[name=at]");
+  form?.querySelector("textarea")?.addEventListener("focus", () => {
+    if (playing) toggle();
+  });
+  form?.addEventListener("submit", () => {
+    if (atField) atField.value = String(Math.round(rep.getCurrentTime()));
+  });
 
   const at = root.dataset.at ? Date.parse(`${root.dataset.at.replace(" ", "T").slice(0, 23)}Z`) || 0 : 0;
   const first = (events[0] as { timestamp: number }).timestamp;
-  const offset = at > first ? Math.min(at - first - 3000, total) : 0;
+  const t0 = Number(root.dataset.t);
+  const offset = root.dataset.t && t0 >= 0 ? Math.min(t0, total) : at > first ? Math.min(at - first - 3000, total) : 0;
   rep.pause(Math.max(0, offset));
   fit();
   show();
@@ -252,6 +292,36 @@ async function timeline(
     legend.append(li);
   }
   return out;
+}
+
+/** Comments pinned to moments (#213): markers on the track and entries in
+ * the list, distinct from events. */
+function comments(
+  raw: string | undefined,
+  total: number,
+  marks: HTMLElement,
+  jump: (t: number) => void,
+): { t: number; li: HTMLLIElement }[] {
+  let list: { id: number; ms: number; body: string; author: string }[] = [];
+  try {
+    list = JSON.parse(raw ?? "[]");
+  } catch {
+    return [];
+  }
+  return list.map((c) => {
+    const t = Math.max(0, Math.min(total, c.ms));
+    const label = `${c.author}: ${c.body}`;
+    const b = el("button", { type: "button", class: "ol-mark k-note", title: `${fmt(t)} · ${label}`, "aria-label": `Comment at ${fmt(t)}, ${label}` });
+    b.style.left = `${total ? (t / total) * 100 : 0}%`;
+    b.addEventListener("click", () => jump(t));
+    marks.append(b);
+    const li = el("li", { class: "k-note" });
+    const go = el("button", { type: "button" });
+    go.append(el("span", { class: "ol-at" }, fmt(t)), el("span", { class: "ol-dot", "aria-hidden": "true" }), el("span", { class: "ol-what" }, `💬 ${label}`));
+    go.addEventListener("click", () => jump(t));
+    li.append(go);
+    return { t, li };
+  });
 }
 
 interface RecEvent {

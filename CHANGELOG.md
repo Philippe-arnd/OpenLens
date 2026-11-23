@@ -4,6 +4,27 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **Project settings page** (`/p/{id}/settings`, #219): rename, app address, time zone, capture key with install snippets, key rotation, a wiring check (what `openlens-cli verify` checks), a one-day NDJSON export, and deletion behind typing the project's id. **New project** on `/projects`. Everything agents do with the CLI is now doable from the browser.
+- **Project icons from the app's favicon** (#214): the server reads the icon the app's home page declares (or `/favicon.ico`) from the app address, set in settings or detected from pageviews. Only public addresses are fetched, 128 kB at most, images only; refreshed weekly. The project's initial stays as the fallback.
+
+- **Events page filters and families** (#217): an icon and a label per family (page views, clicks, forms, features, logins, errors, vitals, surveys, app events), filters on family, event, user, page and period next to environment, role and release, sorts by time, event or user, and a *next 100* link; all kept in the URL. A user's id links to their events.
+- **Active users as a share** (#217): the daily active users tile shows the share of known users (identified in the last 90 days), and the monthly share next to it (docs/kpis.md).
+
+- **Times in the reader's time zone** (#215, D-018): *My profile* (`/me`) sets the zone each person reads times and days in; the project's zone stays the default (and the digests' zone). The API takes `?tz=`, the CLI `--tz` / `OPENLENS_TZ`.
+- **Team management** (#216): names, a status per user (active, invited with its expiry, expired, disabled), last sign-in, search, an edit page (name, email, role, projects; the id and sessions survive an email change), new login link or resent invitation, revoke, disable/enable sign-in (sessions end at once, also for SSO), and removal behind typing the email. The last admin can't be demoted, disabled or removed (the owner token always remains). `PATCH /api/users/{id}` and `openlens-cli users list|update|disable|enable|delete`.
+
+- **The replay player fits the screen** (#212): the recording is scaled to the room left on screen (contain, up to 2×), so a desktop session fits a phone and a phone session is readable on a wide screen; the controls and timeline take the video's width; a line shows the device kind, the recorded size and the zoom; *1:1* (or Z) shows actual size. The event list sits beside the video from 1024 px wide.
+
+- **Comments on replays** (#213): pause, write, and the comment is pinned to that moment: a marker on the timeline, an entry in the event list, a list under the player with links that open the replay there (`?t=<ms>#c<id>`). Viewers comment too; authors and admins delete. Session lists show the count. API `GET|POST /api/projects/{p}/replays/{s}/comments`, CLI `openlens-cli comments <session> [--at 12.4 --add "…"]`.
+
+- **Flags and surveys managed from the dashboard** (#220): *New flag* / *New survey*, an edit page for every field (key, description, rollout, roles, accounts; question, answer kind, choices, trigger, sample, roles), renames, and deletion behind typing the key, with the models' own validation shown on the form. Admins only.
+
+### Changed
+
+- The sidebar's project switch lost its arrow (#214), and gained *Settings*.
+
 ## [0.2.0] - 2026-11-22
 
 ### Added

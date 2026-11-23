@@ -41,6 +41,10 @@ pub(crate) struct Viewer {
     pub admin: bool,
     /// Projects they may see (`None`: all).
     pub projects: Option<Vec<String>>,
+    /// `OWNER` or the user's id.
+    pub id: String,
+    /// The time zone they read times in, if they chose one (#215).
+    pub tz: Option<String>,
 }
 
 impl Viewer {
@@ -95,13 +99,29 @@ pub(crate) fn viewer(state: &AppState, headers: &HeaderMap) -> Option<Viewer> {
         return Some(Viewer {
             admin: true,
             projects: None,
+            tz: state.meta.setting("owner_timezone").ok().flatten(),
+            id,
         });
     }
     let u = state.meta.user(&id).ok()??;
+    if u.disabled {
+        return None;
+    }
     Some(Viewer {
         admin: u.role == "admin",
         projects: u.projects,
+        id,
+        tz: u.timezone,
     })
+}
+
+/// The time zone this request reads times and days in (#215, D-018): the
+/// viewer's own choice, else the project's, else UTC.
+pub(crate) fn tz_for(state: &AppState, headers: &HeaderMap, project_tz: &str) -> String {
+    viewer(state, headers)
+        .and_then(|v| v.tz)
+        .filter(|t| t.parse::<chrono_tz::Tz>().is_ok())
+        .unwrap_or_else(|| project_tz.to_owned())
 }
 
 pub(crate) fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {

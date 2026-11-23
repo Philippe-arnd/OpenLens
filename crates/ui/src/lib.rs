@@ -85,6 +85,34 @@ pub fn pct(r: f64) -> String {
     }
 }
 
+/// A UTC timestamp (`2026-11-23 10:04:05.123`, `T` or space, optional
+/// `Z`) shown in the reader's time zone as `YYYY-MM-DD HH:MM[:SS]` (#215).
+/// Unparseable input is shown as it came.
+pub fn local_time(ts: &str, tz: &str, seconds: bool) -> String {
+    let fmt = if seconds {
+        "%Y-%m-%d %H:%M:%S"
+    } else {
+        "%Y-%m-%d %H:%M"
+    };
+    let t = ts.trim().trim_end_matches('Z').replace('T', " ");
+    let t = t.split('+').next().unwrap_or(&t).to_owned();
+    let parsed = chrono::NaiveDateTime::parse_from_str(&t, "%Y-%m-%d %H:%M:%S%.f")
+        .or_else(|_| chrono::NaiveDateTime::parse_from_str(&t, "%Y-%m-%d %H:%M"));
+    match (parsed, tz.parse::<chrono_tz::Tz>()) {
+        (Ok(n), Ok(z)) => n.and_utc().with_timezone(&z).format(fmt).to_string(),
+        (Ok(n), Err(_)) => n.format(fmt).to_string(),
+        _ => ts
+            .get(..if seconds { 19 } else { 16 })
+            .unwrap_or(ts)
+            .to_owned(),
+    }
+}
+
+/// Short label of a time zone for headers ("Europe/Paris" → "Paris").
+fn tz_label(tz: &str) -> &str {
+    tz.rsplit('/').next().unwrap_or(tz)
+}
+
 /// Format seconds as "4m 12s".
 pub fn duration(secs: f64) -> String {
     let s = secs.max(0.0).round() as u64;
@@ -117,9 +145,8 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                         }
                         @if let Some(p) = project {
                             a.switch href="/projects" title={ "Project: " (p.name) " (switch)" } {
-                                span.initial aria-hidden="true" { (p.name.chars().next().unwrap_or('?').to_uppercase().to_string()) }
+                                img.picon src={ "/p/" (p.id) "/icon" } alt="" width="24" height="24";
                                 span.label { (p.name) }
-                                span.label.chev { (icon("down")) }
                             }
                             nav.side-nav aria-label="Project" {
                                 @for (href, glyph, label) in [
@@ -131,6 +158,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                                     ("/flags", "flag", "Flags"),
                                     ("/surveys", "idea", "Surveys"),
                                     ("/digest", "mail", "Digest"),
+                                    ("/settings", "gear", "Settings"),
                                 ] {
                                     a href={ "/p/" (p.id) (href) } title=(label) aria-current=[(title == label || (href.is_empty() && title == p.name)).then_some("page")] {
                                         (icon(glyph)) span.label { (label) }
@@ -145,6 +173,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                                 a.dark href="/theme/dark" title="Dark" aria-label="Theme: dark" { (icon("moon")) }
                             }
                             @if project.is_some() {
+                                a.side-link href="/me" title="My profile" { (icon("users")) span.label { "My profile" } }
                                 form method="post" action="/logout" {
                                     button.side-link type="submit" title="Log out" { (icon("logout")) span.label { "Log out" } }
                                 }
@@ -233,9 +262,17 @@ fn filter_bar(project: &str, b: &Board, f: &Filters, action: &str) -> Markup {
     }
     html! {
         form.filters method="get" action={ "/p/" (project) (action) } aria-label="Filters" {
+            (filter_fields(&envs, b, f))
+            button type="submit" { "Apply" }
+        }
+    }
+}
+
+fn filter_fields(envs: &[String], b: &Board, f: &Filters) -> Markup {
+    html! {
             label { "Environment "
                 select name="env" {
-                    @for e in &envs { option value=(e) selected[*e == f.environment] { (e) } }
+                    @for e in envs { option value=(e) selected[*e == f.environment] { (e) } }
                 }
             }
             label { "Role "
@@ -255,8 +292,6 @@ fn filter_bar(project: &str, b: &Board, f: &Filters, action: &str) -> Markup {
                 }
             }
             label.check { input type="checkbox" name="internal" value="1" checked[f.internal]; " Include the team" }
-            button type="submit" { "Apply" }
-        }
     }
 }
 
@@ -518,8 +553,18 @@ pub fn board(
             (filter_bar(p.id, b, f, ""))
             (insight_cards(p.id, b, plain))
             section.tiles aria-label="Key numbers" {
-                (tile("violet", "users", "Daily active users", &compact(b.users.dau), &{
-                    let mut sub = format!("{} weekly · {} monthly", compact(b.users.wau), compact(b.users.mau));
+                (tile("violet", "users", "Daily active users", &{
+                    if b.users.known > 0 {
+                        format!("{} · {}", compact(b.users.dau), pct(b.users.dau_share()))
+                    } else {
+                        compact(b.users.dau)
+                    }
+                }, &{
+                    let mut sub = String::new();
+                    if b.users.known > 0 {
+                        sub.push_str(&format!("of {} known users (90 days) · ", compact(b.users.known)));
+                    }
+                    sub.push_str(&format!("{} weekly · {} monthly ({})", compact(b.users.wau), compact(b.users.mau), pct(b.users.mau_share())));
                     if b.users.resurrected > 0 {
                         sub.push_str(&format!(" · {} came back", compact(b.users.resurrected)));
                     }
@@ -665,23 +710,68 @@ pub fn board(
 }
 
 /// Recent events.
-pub fn events(p: &ProjectInfo<'_>, b: &Board, rows: &[EventRow], f: &Filters) -> Markup {
+pub fn events(
+    p: &ProjectInfo<'_>,
+    b: &Board,
+    rows: &[EventRow],
+    f: &Filters,
+    eq: &openlens_engine::EventQuery,
+    next: Option<&str>,
+) -> Markup {
+    let mut envs = b.environments.clone();
+    if !envs.iter().any(|e| e == "production") {
+        envs.insert(0, "production".into());
+    }
+    let sort = eq.sort.as_deref().unwrap_or("time");
+    let days = eq.days.unwrap_or(30);
     layout(
         "Events",
         Some(p),
         html! {
-            div.heading { h1 { "Recent events" } p.muted { "The latest 100, newest first." } }
-            (filter_bar(p.id, b, f, "/events"))
+            div.heading { h1 { "Events" } p.muted {
+                @match sort { "event" => "By event name", "person" => "By user", _ => "Newest first" }
+                ", last " (days) (if days == 1 { " day" } else { " days" }) ", 100 per page. Times in " (f.tz) "."
+            } }
+            form.filters method="get" action={ "/p/" (p.id) "/events" } aria-label="Filters" {
+                (filter_fields(&envs, b, f))
+                label { "Family "
+                    select name="family" {
+                        option value="" { "All families" }
+                        @for (k, label, _) in openlens_engine::FAMILIES {
+                            option value=(k) selected[eq.family.as_deref() == Some(*k)] { (label) }
+                        }
+                    }
+                }
+                label { "Event " input type="text" name="event" value=[eq.event.as_deref()] placeholder="any" maxlength="200"; }
+                label { "User " input type="text" name="person" value=[eq.person.as_deref()] placeholder="any" maxlength="200"; }
+                label { "Page " input type="text" name="path" value=[eq.path.as_deref()] placeholder="/settings" maxlength="200"; }
+                label { "Period "
+                    select name="days" {
+                        @for (d, l) in [(1, "24 hours"), (7, "7 days"), (30, "30 days"), (90, "90 days")] {
+                            option value=(d) selected[days == d] { (l) }
+                        }
+                    }
+                }
+                label { "Sort "
+                    select name="sort" {
+                        option value="time" selected[sort == "time"] { "Newest first" }
+                        option value="event" selected[sort == "event"] { "Event name" }
+                        option value="person" selected[sort == "person"] { "User" }
+                    }
+                }
+                button type="submit" { "Apply" }
+            }
             section.card.wide {
-                @if rows.is_empty() { p.muted { "Nothing here yet." } }
+                @if rows.is_empty() { p.muted { "Nothing matches. Widen the period or clear a filter." } }
                 @else {
                     table.plain.events {
-                        thead { tr { th { "When (UTC)" } th { "Event" } th { "User" } th { "Role" } th { "Page" } th { "Feature" } th { "Release" } th { span.sr-only { "Replay" } } } }
+                        thead { tr { th { "When (" (tz_label(&f.tz)) ")" } th { "Event" } th { "User" } th { "Role" } th { "Page" } th { "Feature" } th { "Release" } th { span.sr-only { "Replay" } } } }
                         tbody { @for r in rows {
+                            @let fam = openlens_engine::family(&r.event);
                             tr {
-                                td.muted.mono { (r.timestamp.get(..19).unwrap_or(&r.timestamp)) }
-                                td { span.chip { (r.event) } }
-                                td.mono { (r.distinct_id) }
+                                td.muted.mono { (local_time(&r.timestamp, &f.tz, true)) }
+                                td { span class={ "chip fam " (fam) } title=(family_label(fam)) { (icon(family_icon(fam))) span.sr-only { (family_label(fam)) ": " } (r.event) } }
+                                td.mono { a href={ "/p/" (p.id) "/events?person=" (url_enc(&r.distinct_id)) } title="This user's events" { (r.distinct_id) } }
                                 td { (r.role.as_deref().unwrap_or("—")) }
                                 td.mono { (r.path.as_deref().unwrap_or("—")) }
                                 td { (r.feature.as_deref().unwrap_or("—")) }
@@ -692,10 +782,33 @@ pub fn events(p: &ProjectInfo<'_>, b: &Board, rows: &[EventRow], f: &Filters) ->
                             }
                         } }
                     }
+                    @if let Some(n) = next { p { a.button href=(n) { "Older / next 100" (icon("right")) } } }
                 }
             }
         },
     )
+}
+
+fn family_icon(fam: &str) -> &'static str {
+    match fam {
+        "page" => "route",
+        "click" => "bolt",
+        "form" => "task",
+        "feature" => "star",
+        "identify" => "users",
+        "error" => "alert",
+        "vital" => "pulse",
+        "survey" => "idea",
+        "custom" => "spark",
+        _ => "events",
+    }
+}
+
+fn family_label(fam: &str) -> &'static str {
+    openlens_engine::FAMILIES
+        .iter()
+        .find(|(k, _, _)| *k == fam)
+        .map_or("Other", |(_, l, _)| l)
 }
 
 /// Feature flags: switch on/off and change the rollout. Creating flags is
@@ -706,8 +819,11 @@ pub fn flags(p: &ProjectInfo<'_>, flags: &[openlens_flags::Flag]) -> Markup {
         Some(p),
         html! {
             div.heading {
-                h1 { "Flags" }
-                p.muted { "Ship a change to some users first, then compare. Each flag's users show up as their own cohort." }
+                div {
+                    h1 { "Flags" }
+                    p.muted { "Ship a change to some users first, then compare. Each flag's users show up as their own cohort." }
+                }
+                a.button href={ "/p/" (p.id) "/flags-edit" } { (icon("plus")) "New flag" }
             }
             @if flags.is_empty() {
                 section.card { p { "No flags yet. Your agent creates them together with the code that checks them: "
@@ -718,7 +834,7 @@ pub fn flags(p: &ProjectInfo<'_>, flags: &[openlens_flags::Flag]) -> Markup {
                         thead { tr { th { "Flag" } th { "Who" } th { "Rollout" } th { "On" } th {} } }
                         tbody { @for f in flags {
                             tr {
-                                th scope="row" { code { (f.key) } @if !f.description.is_empty() { br; span.muted.small { (f.description) } } }
+                                th scope="row" { a href={ "/p/" (p.id) "/flags-edit?key=" (f.key) } title="Edit" { code { (f.key) } } @if !f.description.is_empty() { br; span.muted.small { (f.description) } } }
                                 td.small { @if f.roles.is_empty() { "every role" } @else { (f.roles.join(", ")) }
                                     @if !f.accounts.is_empty() { br; span.muted { "+ " (f.accounts.len()) " accounts" } } }
                                 td { form.inline method="post" action={ "/p/" (p.id) "/flags/" (f.key) } {
@@ -735,6 +851,119 @@ pub fn flags(p: &ProjectInfo<'_>, flags: &[openlens_flags::Flag]) -> Markup {
                                 } }
                             }
                         } }
+                    }
+                }
+            }
+        },
+    )
+}
+
+/// Create or edit a flag (#220). `flag` is None for a new one.
+pub fn flag_edit(
+    p: &ProjectInfo<'_>,
+    flag: Option<&openlens_flags::Flag>,
+    error: Option<&str>,
+) -> Markup {
+    let new = flag.is_none_or(|f| f.key.is_empty());
+    let f = flag.cloned().unwrap_or(openlens_flags::Flag {
+        key: String::new(),
+        description: String::new(),
+        enabled: false,
+        rollout: 0,
+        roles: Vec::new(),
+        accounts: Vec::new(),
+    });
+    let action = format!("/p/{}/flags-edit", p.id);
+    layout(
+        "Flags",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { @if new { "New flag" } @else { "Flag " code { (f.key) } } }
+                p.muted { a href={ "/p/" (p.id) "/flags" } { "← Flags" } " · the code checks it with " code { "openlens.isEnabled(\"" (if f.key.is_empty() { "key" } else { &f.key }) "\")" } }
+            } }
+            @if let Some(e) = error { p.alert role="alert" { (e) } }
+            section.card.wide {
+                form.settings method="post" action=(action) {
+                    input type="hidden" name="original" value=(if new { "" } else { flag.map_or("", |x| x.key.as_str()) });
+                    label { "Key " input type="text" name="key" value=(f.key) required maxlength="64" pattern="[a-z0-9_-]+" placeholder="new-editor"; }
+                    label { "What it is for " input type="text" name="description" value=(f.description) maxlength="200"; }
+                    label { "Rollout % " input type="number" name="rollout" min="0" max="100" value=(f.rollout); }
+                    label { "Only roles " input type="text" name="roles" value=(f.roles.join(", ")) placeholder="every role"; }
+                    label { "Always on for accounts " input type="text" name="accounts" value=(f.accounts.join(", ")) placeholder="none"; }
+                    label.check { input type="checkbox" name="enabled" checked[f.enabled]; " On" }
+                    button type="submit" { (if new { "Create" } else { "Save" }) }
+                }
+                p.muted.small { "Roles are the feature map's canonical roles; lists are comma-separated. Users in the rollout keep their bucket when you raise it." }
+            }
+            @if !new {
+                section.card.wide.danger {
+                    h2.coral { (icon("alert")) "Delete the flag" }
+                    p { "The code then gets " code { "false" } " for it. Its past cohort stays in the data." }
+                    form.inline method="post" action={ "/p/" (p.id) "/flags/" (f.key) "/delete" } {
+                        label { "Type " code { (f.key) } " to confirm " input type="text" name="confirm" required autocomplete="off"; }
+                        button.danger type="submit" { "Delete" }
+                    }
+                }
+            }
+        },
+    )
+}
+
+/// Create or edit a micro-survey (#220).
+pub fn survey_edit(
+    p: &ProjectInfo<'_>,
+    survey: Option<&openlens_flags::survey::Survey>,
+    error: Option<&str>,
+) -> Markup {
+    let new = survey.is_none_or(|s| s.key.is_empty());
+    let s = survey.cloned().unwrap_or(openlens_flags::survey::Survey {
+        key: String::new(),
+        question: String::new(),
+        kind: "rating".into(),
+        choices: Vec::new(),
+        trigger: String::new(),
+        enabled: false,
+        sample: 10,
+        roles: Vec::new(),
+    });
+    layout(
+        "Surveys",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { @if new { "New survey" } @else { "Survey " code { (s.key) } } }
+                p.muted { a href={ "/p/" (p.id) "/surveys" } { "← Surveys" } " · one question, right after a moment of value, once per user" }
+            } }
+            @if let Some(e) = error { p.alert role="alert" { (e) } }
+            section.card.wide {
+                form.settings method="post" action={ "/p/" (p.id) "/surveys-edit" } {
+                    input type="hidden" name="original" value=(if new { "" } else { survey.map_or("", |x| x.key.as_str()) });
+                    label { "Key " input type="text" name="key" value=(s.key) required maxlength="64" pattern="[a-z0-9_-]+" placeholder="writing-usefulness"; }
+                    label.wide { "Question " input type="text" name="question" value=(s.question) required maxlength="200" placeholder="How useful was writing today?"; }
+                    label { "Answer "
+                        select name="kind" {
+                            @for (k, l) in [("rating", "Rating 1–5"), ("yes_no", "Yes / no"), ("choice", "One choice"), ("text", "Free text")] {
+                                option value=(k) selected[s.kind == k] { (l) }
+                            }
+                        }
+                    }
+                    label { "Choices " input type="text" name="choices" value=(s.choices.join(", ")) placeholder="for One choice: 2 to 6"; }
+                    label { "After the event " input type="text" name="trigger" value=(s.trigger) required maxlength="100" placeholder="entry_saved"; }
+                    label { "Ask % of users " input type="number" name="sample" min="0" max="100" value=(s.sample); }
+                    label { "Only roles " input type="text" name="roles" value=(s.roles.join(", ")) placeholder="every role"; }
+                    label.check { input type="checkbox" name="enabled" checked[s.enabled]; " On" }
+                    button type="submit" { (if new { "Create" } else { "Save" }) }
+                }
+                p.muted.small { "Answers are " code { "$survey" } " events: " a href={ "/p/" (p.id) "/events?event=%24survey" } { "see them in Events" } ", export them from Settings." }
+            }
+            @if !new {
+                section.card.wide.danger {
+                    h2.coral { (icon("alert")) "Delete the survey" }
+                    p { "Nobody is asked any more. The answers already given stay (they are events)." }
+                    form.inline method="post" action={ "/p/" (p.id) "/surveys/" (s.key) "/delete" } {
+                        label { "Type " code { (s.key) } " to confirm " input type="text" name="confirm" required autocomplete="off"; }
+                        button.danger type="submit" { "Delete" }
                     }
                 }
             }
@@ -833,7 +1062,7 @@ pub fn errors(
                                 td.small { (list(&g.roles)) }
                                 td.small { (list(&g.releases)) }
                                 td.small { (list(&g.places)) }
-                                td.small.muted { (g.last_seen.get(..16).unwrap_or(&g.last_seen)) }
+                                td.small.muted { (local_time(&g.last_seen, &f.tz, false)) }
                                 td { @if let Some(s) = &g.last_session {
                                     a.icon-link href={ "/p/" (p.id) "/replays/" (s) "?at=" (g.last_seen) } title="Replay the latest occurrence" aria-label="Replay the latest occurrence" { (icon("play")) }
                                 } }
@@ -851,6 +1080,8 @@ pub fn replays(
     p: &ProjectInfo<'_>,
     list: &[openlens_replay::Summary],
     who: Option<&str>,
+    tz: &str,
+    comments: &[(String, i64)],
 ) -> Markup {
     layout(
         "Replays",
@@ -870,15 +1101,16 @@ pub fn replays(
             } @else {
                 section.card.wide {
                     table.plain {
-                        thead { tr { th { "Started (UTC)" } th { "User" } th.num { "Length" } th.num { "Size" } th { span.sr-only { "Play" } } } }
+                        thead { tr { th { "Started (" (tz_label(tz)) ")" } th { "User" } th.num { "Length" } th.num { "Size" } th.num { "Comments" } th { span.sr-only { "Play" } } } }
                         tbody { @for r in list {
-                            @let started = r.started.format("%Y-%m-%d %H:%M").to_string();
+                            @let started = tz.parse::<chrono_tz::Tz>().map_or_else(|_| r.started.format("%Y-%m-%d %H:%M").to_string(), |z| r.started.with_timezone(&z).format("%Y-%m-%d %H:%M").to_string());
                             @let secs = (r.updated - r.started).num_seconds().max(0) as f64;
                             tr {
                                 td.mono { (started) }
                                 td.mono { a href={ "/p/" (p.id) "/replays?u=" (r.distinct_id) } { (r.distinct_id) } }
                                 td.num { (duration(secs)) }
                                 td.num.muted { (compact((r.bytes / 1024) as i64)) " kB" }
+                                td.num { @match comments.iter().find(|(s, _)| *s == r.session_id) { Some((_, n)) => { "💬 " (n) }, None => span.muted { "—" } } }
                                 td { a.button href={ "/p/" (p.id) "/replays/" (r.session_id) } { (icon("play")) "Play" } }
                             }
                         } }
@@ -891,7 +1123,21 @@ pub fn replays(
 
 /// The replay player page. The player script (rrweb Replayer, MIT) is the
 /// only script the dashboard serves (D-011).
-pub fn player(p: &ProjectInfo<'_>, session: &str, who: Option<&str>, at: Option<&str>) -> Markup {
+pub fn player(
+    p: &ProjectInfo<'_>,
+    session: &str,
+    who: Option<&str>,
+    at: Option<&str>,
+    t: Option<u64>,
+    comments: &[openlens_meta::ReplayComment],
+    me: Option<(&str, bool)>,
+) -> Markup {
+    let base = format!("/p/{}/replays/{}", p.id, session);
+    let data: Vec<serde_json::Value> = comments
+        .iter()
+        .map(|c| serde_json::json!({ "id": c.id, "ms": c.at_ms, "body": c.body, "author": c.author }))
+        .collect();
+    let data = serde_json::Value::Array(data).to_string();
     layout(
         "Replay",
         Some(p),
@@ -907,8 +1153,35 @@ pub fn player(p: &ProjectInfo<'_>, session: &str, who: Option<&str>, at: Option<
             }
             link rel="stylesheet" href="/assets/player.css";
             section.card.wide {
-                div #ol-player data-src={ "/p/" (p.id) "/replays/" (session) "/events.json" } data-timeline={ "/p/" (p.id) "/replays/" (session) "/timeline.json" } data-at=[at] {
+                div #ol-player data-src={ "/p/" (p.id) "/replays/" (session) "/events.json" } data-timeline={ "/p/" (p.id) "/replays/" (session) "/timeline.json" } data-at=[at] data-t=[t] data-comments=(data) {
                     p.muted { "Loading the recording…" }
+                }
+            }
+            section.card.wide.comments {
+                h2.violet { (icon("idea")) "Comments" span.muted.small { " · pinned to a moment" } }
+                @if comments.is_empty() { p.muted.small { "None yet. Pause where something happens and say what you see." } }
+                @else {
+                    ol.comment-list {
+                        @for c in comments {
+                            li id={ "c" (c.id) } {
+                                a.ol-c-at href={ (base) "?t=" (c.at_ms) "#c" (c.id) } { (duration(c.at_ms as f64 / 1000.0)) }
+                                " "
+                                span.comment-body { (c.body) }
+                                span.muted.small { " — " (c.author) " · " (c.created_at.get(..10).unwrap_or(&c.created_at)) }
+                                @if me.is_some_and(|(id, admin)| admin || id == c.user_id) {
+                                    form.inline method="post" action={ (base) "/comments/" (c.id) "/delete" } {
+                                        button.ghost type="submit" aria-label="Delete this comment" { "Delete" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                form #ol-comment.comment-form method="post" action={ (base) "/comments" } {
+                    input type="hidden" name="at" value=(t.unwrap_or(0));
+                    label for="ol-comment-body" { "Comment at the current moment" }
+                    textarea #ol-comment-body name="body" required maxlength="2000" rows="2" placeholder="The form error shows here" {}
+                    button type="submit" { "Add" }
                 }
             }
             script src="/assets/player.js" defer {}
@@ -1011,7 +1284,7 @@ fn retention_grid(b: &Board) -> Markup {
                     }
                 } }
             }
-            p.muted.small { "Share of each week's new users who were active again N weeks later (UTC weeks)." }
+            p.muted.small { "Share of each week's new users who were active again N weeks later (weeks start on Monday, " (b.filters.as_ref().map_or("UTC", |f| f.tz.as_str())) ")." }
         }
     }
 }
@@ -1085,11 +1358,22 @@ pub fn projects(list: &[ProjectSummary], admin: bool) -> Markup {
                 div { h1 { "Projects" } p.muted { "One per app. Pick one to open its Focus board." } }
                 @if admin { a.button href="/users" { (icon("users")) "Team" } }
             }
+            @if admin {
+                details.card.wide.new-project {
+                    summary { (icon("plus")) "New project" }
+                    form.invite method="post" action="/projects" {
+                        label { "Name " input type="text" name="name" required maxlength="80" placeholder="My app"; }
+                        label { "Time zone " input type="text" name="timezone" placeholder="Europe/Paris" maxlength="64"; }
+                        button type="submit" { "Create" }
+                    }
+                    p.muted.small { "Agents do the same with " code { "openlens-cli init --name <app>" } ". Empty time zone: UTC." }
+                }
+            }
             ul.project-list {
                 @for p in list {
                     li {
                         a.card href={ "/p/" (p.id) } {
-                            h2.violet { (icon("board")) (p.name) }
+                            h2.violet { img.picon src={ "/p/" (p.id) "/icon" } alt="" width="24" height="24"; (p.name) }
                             @if p.recent_events > 0 {
                                 p { strong { (compact(p.recent_events)) } " events in the last 7 days" }
                             } @else {
@@ -1225,11 +1509,23 @@ pub fn digest(p: &ProjectInfo<'_>, d: &openlens_engine::Digest, mailed: bool) ->
     )
 }
 
-/// Team: who can see the dashboard (admins only).
+/// One row of the team page (#216).
+pub struct UserRow<'a> {
+    /// The user.
+    pub user: &'a openlens_meta::User,
+    /// `active`, `invited`, `expired` or `disabled`.
+    pub status: &'a str,
+    /// When the pending invitation expires (UTC), if one is open.
+    pub expires: Option<String>,
+}
+
+/// The team: invite, find, edit, disable and remove users (#216).
 pub fn users(
-    users: &[openlens_meta::User],
+    rows: &[UserRow<'_>],
     projects: &[String],
     new_link: Option<(&str, &str)>,
+    q: &str,
+    notice: Option<&str>,
 ) -> Markup {
     layout(
         "Team",
@@ -1237,19 +1533,21 @@ pub fn users(
         html! {
             div.heading { div {
                 h1 { "Team" }
-                p.muted { "Admins change things (flags, team); viewers look. The owner (admin token) always has access." }
+                p.muted { "Admins change things (flags, settings, team); viewers look. The owner (admin token) always has access, so the last admin can't be removed or demoted." }
             } }
+            @if let Some(n) = notice { p.notice role="status" { (n) } }
             @if let Some((email, link)) = new_link {
                 section.card.wide {
-                    h2.mint { (icon("task")) "Invitation for " (email) }
+                    h2.mint { (icon("task")) "Login link for " (email) }
                     p { "Send this one-time link (valid 7 days):" }
-                    p { code { (link) } }
+                    pre.snippet { code { (link) } }
                 }
             }
             section.card.wide {
                 h2.violet { (icon("users")) "Invite someone" }
                 form.invite method="post" action="/users" {
                     label { "Email " input type="email" name="email" required; }
+                    label { "Name " input type="text" name="name" maxlength="80"; }
                     label { "Role " select name="role" { option value="viewer" { "viewer" } option value="admin" { "admin" } } }
                     label { "Projects " input type="text" name="projects" placeholder="all" list="project-ids"; }
                     datalist #project-ids { @for p in projects { option value=(p) {} } }
@@ -1258,19 +1556,236 @@ pub fn users(
                 p.muted.small { "Projects: comma-separated ids (" (projects.join(", ")) "), or empty for all." }
             }
             section.card.wide {
-                @if users.is_empty() { p.muted { "Nobody invited yet." } }
+                form.inline method="get" action="/users" role="search" {
+                    label { "Find " input type="text" name="q" value=(q) placeholder="name or email"; }
+                    button.ghost type="submit" { "Search" }
+                }
+                @if rows.is_empty() { p.muted { @if q.is_empty() { "Nobody invited yet." } @else { "Nobody matches." } } }
                 @else {
-                    table.plain {
-                        thead { tr { th { "Email" } th { "Role" } th { "Projects" } th { "Invited" } th {} } }
-                        tbody { @for u in users {
+                    div.table-scroll { table.plain {
+                        thead { tr { th { "User" } th { "Role" } th { "Projects" } th { "Status" } th { "Last sign-in" } th { span.sr-only { "Actions" } } } }
+                        tbody { @for r in rows {
+                            @let u = r.user;
                             tr {
-                                td { (u.email) }
+                                td { @if let Some(n) = &u.name { strong { (n) } br; } span.small { (u.email) } }
                                 td { span.chip { (u.role) } }
                                 td.small { @match &u.projects { Some(p) => (p.join(", ")), None => span.muted { "all" } } }
-                                td.small.muted { (u.created_at.get(..10).unwrap_or(&u.created_at)) }
-                                td { form method="post" action={ "/users/" (u.id) "/delete" } { button.ghost type="submit" { "Remove" } } }
+                                td.small {
+                                    span class={ "status " (match r.status { "active" => "good", "disabled" => "bad", _ => "muted" }) } { (r.status) }
+                                    @if let Some(e) = &r.expires { br; span.muted { "until " (e) } }
+                                }
+                                td.small.muted { (u.last_sign_in.as_deref().and_then(|t| t.get(..16)).map(|t| t.replace('T', " ")).unwrap_or_else(|| "never".into())) }
+                                td { a.button href={ "/users/" (u.id) } { "Edit" } }
                             }
                         } }
+                    } }
+                }
+            }
+        },
+    )
+}
+
+/// Edit one user: profile, access, sign-in, invitation and removal (#216).
+pub fn user_edit(u: &openlens_meta::User, status: &str, projects: &[String]) -> Markup {
+    let base = format!("/users/{}", u.id);
+    layout(
+        "Team",
+        None,
+        html! {
+            div.heading { div {
+                h1 { (u.name.as_deref().unwrap_or(&u.email)) }
+                p.muted { a href="/users" { "← Team" } " · " (status) }
+            } }
+            section.card.wide {
+                h2.violet { (icon("users")) "Profile and access" }
+                form.settings method="post" action=(base) {
+                    label { "Name " input type="text" name="name" value=[u.name.as_deref()] maxlength="80"; }
+                    label { "Email " input type="email" name="email" value=(u.email) required maxlength="200"; }
+                    label { "Role " select name="role" {
+                        option value="viewer" selected[u.role == "viewer"] { "viewer" }
+                        option value="admin" selected[u.role == "admin"] { "admin" }
+                    } }
+                    label { "Projects " input type="text" name="projects" value=(u.projects.as_ref().map(|p| p.join(",")).unwrap_or_default()) placeholder="all" list="project-ids"; }
+                    datalist #project-ids { @for p in projects { option value=(p) {} } }
+                    button type="submit" { "Save" }
+                }
+                p.muted.small { "Changing the email keeps the user's sessions and history." }
+            }
+            section.card.wide {
+                h2.sky { (icon("shield")) "Sign-in" }
+                div.actions {
+                    form.inline method="post" action={ (base) "/link" } { button type="submit" { (if status == "invited" || status == "expired" { "Resend the invitation" } else { "New login link" }) } }
+                    @if status == "invited" {
+                        form.inline method="post" action={ (base) "/revoke" } { button.ghost type="submit" { "Revoke the invitation" } }
+                    }
+                    @if u.disabled {
+                        form.inline method="post" action={ (base) "/enable" } { button type="submit" { "Enable sign-in" } }
+                    } @else {
+                        form.inline method="post" action={ (base) "/disable" } { button.ghost type="submit" { "Disable sign-in" } }
+                    }
+                }
+                p.muted.small { "Disabling ends their sessions at once and keeps the account; enabling lets them sign in again." }
+            }
+            section.card.wide.danger {
+                h2.coral { (icon("alert")) "Remove" }
+                form.inline method="post" action={ (base) "/delete" } {
+                    label { "Type " code { (u.email) } " to confirm " input type="text" name="confirm" required autocomplete="off"; }
+                    button.danger type="submit" { "Remove from the team" }
+                }
+            }
+        },
+    )
+}
+
+/// My profile: the time zone I read times in, and my name (#215, #216).
+pub fn me(
+    name: Option<&str>,
+    email: Option<&str>,
+    tz: Option<&str>,
+    notice: Option<&str>,
+) -> Markup {
+    layout(
+        "My profile",
+        None,
+        html! {
+            div.heading { div {
+                h1 { "My profile" }
+                p.muted { @if let Some(e) = email { (e) } @else { "Owner (admin token)" } }
+            } }
+            @if let Some(n) = notice { p.notice role="status" { (n) } }
+            section.card.wide {
+                form.settings method="post" action="/me" {
+                    @if email.is_some() {
+                        label { "Name " input type="text" name="name" value=[name] maxlength="80"; }
+                    }
+                    label { "Time zone " input type="text" name="timezone" value=[tz] placeholder="the project's" maxlength="64" list="zones"; }
+                    datalist #zones { @for z in ["Europe/Paris", "Europe/London", "Europe/Berlin", "Europe/Rome", "America/New_York", "America/Los_Angeles", "Asia/Tokyo", "UTC"] { option value=(z) {} } }
+                    button type="submit" { "Save" }
+                }
+                p.muted.small { "Every time and every day on the boards follows this zone (an IANA name like Europe/Paris). Empty: each project's own zone." }
+            }
+        },
+    )
+}
+
+/// What the settings page shows of a project (#219).
+pub struct SettingsView<'a> {
+    /// Time zone of the project's days (D-017).
+    pub timezone: &'a str,
+    /// The app address set by an admin, if any.
+    pub app_url: Option<&'a str>,
+    /// The app address seen in recent pageviews.
+    pub detected_url: Option<&'a str>,
+    /// This server's public address (for the snippets).
+    pub host: &'a str,
+    /// Wiring check over the last 24 hours, as (label, count, hint).
+    pub checks: &'a [(&'a str, i64, &'a str)],
+    /// Version of the feature map, if one was pushed.
+    pub map_version: Option<i64>,
+    /// Admins see the forms.
+    pub admin: bool,
+    /// A notice to show at the top (after an action).
+    pub notice: Option<&'a str>,
+    /// Yesterday, in the project's zone (default export day).
+    pub yesterday: &'a str,
+}
+
+/// A project's settings: name, app address, time zone, capture key and
+/// snippets, wiring check, export, and deletion (#219).
+pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
+    let base = format!("/p/{}/settings", p.id);
+    let script = format!(
+        r#"<script src="{}/c.js" data-key="{}" defer></script>"#,
+        v.host, p.key
+    );
+    let npm = format!(
+        "import {{ init }} from '@openlens/web';\ninit({{ host: '{}', key: '{}' }});",
+        v.host, p.key
+    );
+    let server = format!("OPENLENS_HOST={}\nOPENLENS_KEY={}", v.host, p.key);
+    layout(
+        "Settings",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "Settings" }
+                p.muted { "Everything agents do with " code { "openlens-cli" } " for this project, here too." }
+            } }
+            @if let Some(n) = v.notice { p.notice role="status" { (n) } }
+            section.card.wide {
+                h2.violet { (icon("gear")) "Project" }
+                @if v.admin {
+                    form.settings method="post" action=(base) {
+                        label { "Name " input type="text" name="name" value=(p.name) required maxlength="80"; }
+                        label { "App address "
+                            input type="url" name="app_url" value=[v.app_url] placeholder=(v.detected_url.unwrap_or("https://app.example.com")) maxlength="200";
+                        }
+                        label { "Time zone " input type="text" name="timezone" value=(v.timezone) required maxlength="64"; }
+                        button type="submit" { "Save" }
+                    }
+                } @else {
+                    dl.facts {
+                        dt { "Name" } dd { (p.name) }
+                        dt { "App address" } dd { (v.app_url.or(v.detected_url).unwrap_or("—")) }
+                        dt { "Time zone" } dd { (v.timezone) }
+                    }
+                }
+                p.muted.small {
+                    "The app address gives the project its icon (the app's favicon). Empty: "
+                    @match v.detected_url { Some(u) => { "detected from pageviews, " span.mono { (u) } "." }, None => "detected from pageviews once some arrive." }
+                    " Days and weeks of every KPI start in the time zone (an IANA name like Europe/Paris)."
+                }
+            }
+            section.card.wide {
+                h2.sky { (icon("code")) "Install" }
+                p { "Capture key " code.mono { (p.key) } " (public: it only sends events)." }
+                h3 { "Script tag" }
+                pre.snippet { code { (script) } }
+                h3 { "npm" }
+                pre.snippet { code { (npm) } }
+                h3 { "Server SDKs (Node, Python, Go, Ruby, PHP)" }
+                pre.snippet { code { (server) } }
+                p.muted.small { "Agents: " a href={ (v.host) "/agents.md" } { "the wiring guide" } "." }
+                @if v.admin {
+                    form.inline method="post" action={ (base) "/rotate-key" } {
+                        label.check { input type="checkbox" name="confirm" value="yes" required; " The old key stops working at once: every app must get the new one" }
+                        button.ghost type="submit" { "Rotate the key" }
+                    }
+                }
+            }
+            section.card.wide {
+                h2.mint { (icon("task")) "Wiring check" }
+                p.muted.small { "Last 24 hours, all environments (what " code { "openlens-cli verify" } " checks)." }
+                ul.checks {
+                    @for (label, n, hint) in v.checks {
+                        li.ok[*n > 0] {
+                            (icon(if *n > 0 { "task" } else { "alert" }))
+                            span { strong { (label) } " " (compact(*n)) }
+                            @if *n == 0 { span.muted.small { " · " (hint) } }
+                        }
+                    }
+                    li.ok[v.map_version.is_some()] {
+                        (icon(if v.map_version.is_some() { "task" } else { "alert" }))
+                        span { strong { "Feature map" } " " @match v.map_version { Some(n) => { "v" (n) }, None => "none" } }
+                        @if v.map_version.is_none() { span.muted.small { " · push one with " code { "openlens-cli map push" } } }
+                    }
+                }
+            }
+            section.card.wide {
+                h2.sun { (icon("down")) "Export" }
+                form.inline method="get" action={ "/p/" (p.id) "/export" } {
+                    label { "Day " input type="date" name="date" value=(v.yesterday) required; }
+                    button type="submit" { "Download NDJSON" }
+                }
+                p.muted.small { "One line per event of that day (UTC partitions), up to 500,000." }
+            }
+            @if v.admin {
+                section.card.wide.danger {
+                    h2.coral { (icon("alert")) "Delete the project" }
+                    p { "Removes its events, replays, source maps, people, flags, surveys and feature map. There is no undo (backups excepted)." }
+                    form.inline method="post" action={ (base) "/delete" } {
+                        label { "Type " code { (p.name) } " to confirm " input type="text" name="confirm" required autocomplete="off"; }
+                        button.danger type="submit" { "Delete forever" }
                     }
                 }
             }
@@ -1288,10 +1803,13 @@ pub fn surveys(
         "Surveys",
         Some(p),
         html! {
-            div.heading { div {
-                h1 { "Micro-surveys" }
-                p.muted { "One question, right after a moment of value, to a sample of users, once each. Agents create them (" code { "survey_set" } "); answers are " code { "$survey" } " events." }
-            } }
+            div.heading {
+                div {
+                    h1 { "Micro-surveys" }
+                    p.muted { "One question, right after a moment of value, to a sample of users, once each. Create them here or let agents do it (" code { "survey_set" } "); answers are " code { "$survey" } " events." }
+                }
+                a.button href={ "/p/" (p.id) "/surveys-edit" } { (icon("plus")) "New survey" }
+            }
             @if list.is_empty() {
                 section.card { p.muted { "No survey yet. Ask your agent, for example: “after entry_saved, ask 10% of users how useful writing felt, 1 to 5”." } }
             }
@@ -1306,6 +1824,7 @@ pub fn surveys(
                         @if s.roles.is_empty() { "everyone" } @else { (s.roles.join(", ")) }
                         " · " (compact(answered)) " answers"
                         @if let Some(r) = r { " · " (compact(r.dismissed)) " dismissed" }
+                        " · " a href={ "/p/" (p.id) "/surveys-edit?key=" (s.key) } { "Edit" }
                     }
                     form.inline method="post" action={ "/p/" (p.id) "/surveys/" (s.key) } {
                         label { input type="checkbox" name="enabled" checked[s.enabled]; " on" }

@@ -8,6 +8,15 @@ use maud::{Markup, PreEscaped, html};
 
 const ICONS: &[(&str, &str)] = &[
     (
+        "gear",
+        r#"<circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.5M12 18v2.5M3.5 12H6M18 12h2.5M6 6l1.8 1.8M16.2 16.2 18 18M6 18l1.8-1.8M16.2 7.8 18 6"/>"#,
+    ),
+    ("plus", r#"<path d="M12 5.5v13M5.5 12h13"/>"#),
+    (
+        "code",
+        r#"<path d="m8.5 7.5-4.5 4.5 4.5 4.5M15.5 7.5l4.5 4.5-4.5 4.5"/>"#,
+    ),
+    (
         "flag",
         r#"<path d="M6 20.5V4"/><path d="M6 4.5h10.5l-2.2 4 2.2 4H6"/>"#,
     ),

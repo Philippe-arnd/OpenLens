@@ -83,3 +83,14 @@ Append-only. Each entry: id, date, decision, why, consequences.
 - Rolling windows ("last 24 h", "last 7 days") do not depend on it.
 - Storage stays in UTC. Partitions are UTC days, so changing the zone rewrites nothing.
 - The SDK still starts a new session when the UTC day changes, because the browser does not know the project's zone. A session belongs to the local day it starts in.
+
+## D-018 (2026-11-22, Phil) Times follow the reader, the project's zone is the default
+
+**Decision:** every time shown and every day or week bucket follows the time zone of the person reading (#215). It supersedes D-017 for display. The project's zone stays as the default: for readers who chose none, for the admin API and the CLI without `--tz`, and for scheduled digests.
+
+**Why:** a team spread over several zones reads the same board. The events stay in UTC, so the reader's zone is only a view.
+
+**Consequences:**
+- The order is: the reader's zone (*My profile*, `/me`; the owner's is a setting), then `?tz=` on the API (`openlens-cli --tz` / `OPENLENS_TZ`), then the project's zone, then UTC.
+- Nothing is detected in the browser: the dashboard runs no script (strict CSP), and without a choice a reader sees what D-017 showed, so nothing changes by itself.
+- Caches stay valid: the board snapshot holds UTC rows, and buckets are computed per query.

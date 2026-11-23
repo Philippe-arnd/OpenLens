@@ -27,8 +27,41 @@ struct Cli {
     /// Admin token.
     #[arg(long, env = "OPENLENS_TOKEN", global = true, hide_env_values = true)]
     token: Option<String>,
+    /// Read times and days in this IANA zone (default: each project's).
+    #[arg(long, env = "OPENLENS_TZ", global = true)]
+    tz: Option<String>,
     #[command(subcommand)]
     command: Command,
+}
+
+#[derive(Subcommand)]
+enum UsersCmd {
+    /// Every user, with role, projects, time zone and last sign-in.
+    List,
+    /// Change a user's name, email, role, projects or time zone.
+    Update {
+        /// User id (from `users list`).
+        id: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        email: Option<String>,
+        /// viewer or admin.
+        #[arg(long)]
+        role: Option<String>,
+        /// Comma-separated project ids, or `all`.
+        #[arg(long)]
+        projects: Option<String>,
+        /// IANA zone they read times in (empty: the project's).
+        #[arg(long)]
+        timezone: Option<String>,
+    },
+    /// Refuse sign-in (their sessions end at once).
+    Disable { id: String },
+    /// Allow sign-in again.
+    Enable { id: String },
+    /// Remove a user (never the last admin).
+    Delete { id: String },
 }
 
 #[derive(Subcommand)]
@@ -104,6 +137,27 @@ enum Command {
     Flags {
         #[command(subcommand)]
         action: FlagsCmd,
+    },
+    /// Comments pinned to moments of a replay: list them, or add one with
+    /// --at and --add.
+    Comments {
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+        /// Session id.
+        session: String,
+        /// Seconds into the recording (with --add).
+        #[arg(long, default_value_t = 0.0)]
+        at: f64,
+        /// Add this comment.
+        #[arg(long)]
+        add: Option<String>,
+    },
+    /// The team: list, update, disable, enable or remove users (invite
+    /// with `login-link --email`).
+    Users {
+        #[command(subcommand)]
+        action: UsersCmd,
     },
     /// Upload the source maps of a build, so error stacks show original
     /// files and lines. Run it in the deploy step, with the same release
@@ -297,6 +351,8 @@ pub(crate) struct Client {
     server: String,
     token: String,
     agent: ureq::Agent,
+    /// Zone added as `tz=` to project reads (`--tz`).
+    tz: Option<String>,
 }
 
 impl Client {
@@ -320,6 +376,7 @@ impl Client {
             server,
             token,
             agent,
+            tz: None,
         })
     }
 
@@ -329,7 +386,15 @@ impl Client {
         path: &str,
         body: Option<Body>,
     ) -> Result<(u16, Value), String> {
-        let url = format!("{}{path}", self.server);
+        let mut url = format!("{}{path}", self.server);
+        if let Some(tz) = &self.tz
+            && method == "GET"
+            && path.starts_with("/api/projects/")
+        {
+            url.push(if path.contains('?') { '&' } else { '?' });
+            url.push_str("tz=");
+            url.push_str(&tz.replace('+', "%2B"));
+        }
         let auth = format!("Bearer {}", self.token);
         let resp = match (method, body) {
             ("GET", _) => self.agent.get(&url).header("authorization", &auth).call(),
@@ -405,7 +470,12 @@ fn out(v: &Value) {
 }
 
 fn run(cli: Cli) -> Result<bool, String> {
-    let client = || Client::new(cli.server.clone(), cli.token.clone());
+    let client = || {
+        Client::new(cli.server.clone(), cli.token.clone()).map(|mut c| {
+            c.tz = cli.tz.clone().filter(|t| !t.is_empty());
+            c
+        })
+    };
     match &cli.command {
         Command::DeleteProject { id, confirm } => {
             let (status, v) = client()?.call(
@@ -591,6 +661,84 @@ fn run(cli: Cli) -> Result<bool, String> {
                 &json!({ "rows": rows, "file": path.display().to_string(), "days_truncated": truncated }),
             );
             Ok(true)
+        }
+        Command::Comments {
+            project,
+            session,
+            at,
+            add,
+        } => {
+            let c = client()?;
+            let path = format!("/api/projects/{project}/replays/{session}/comments");
+            let (status, v) = match add {
+                Some(body) => c.call(
+                    "POST",
+                    &path,
+                    Some(Body::Json(json!({ "at": at, "body": body }))),
+                )?,
+                None => c.call("GET", &path, None)?,
+            };
+            out(&v);
+            Ok(status == 200 || status == 201)
+        }
+        Command::Users { action } => {
+            let c = client()?;
+            let (status, v) = match action {
+                UsersCmd::List => c.call("GET", "/api/users", None)?,
+                UsersCmd::Update {
+                    id,
+                    name,
+                    email,
+                    role,
+                    projects,
+                    timezone,
+                } => {
+                    let mut b = serde_json::Map::new();
+                    for (k, v) in [
+                        ("name", name),
+                        ("email", email),
+                        ("role", role),
+                        ("timezone", timezone),
+                    ] {
+                        if let Some(v) = v {
+                            b.insert(k.into(), json!(v));
+                        }
+                    }
+                    match projects.as_deref() {
+                        Some("all") => {
+                            b.insert("all_projects".into(), json!(true));
+                        }
+                        Some(p) => {
+                            b.insert(
+                                "projects".into(),
+                                json!(
+                                    p.split(',')
+                                        .map(str::trim)
+                                        .filter(|s| !s.is_empty())
+                                        .collect::<Vec<_>>()
+                                ),
+                            );
+                        }
+                        None => {}
+                    }
+                    c.call(
+                        "PATCH",
+                        &format!("/api/users/{id}"),
+                        Some(Body::Json(Value::Object(b))),
+                    )?
+                }
+                UsersCmd::Disable { id } | UsersCmd::Enable { id } => {
+                    let off = matches!(action, UsersCmd::Disable { .. });
+                    c.call(
+                        "PATCH",
+                        &format!("/api/users/{id}"),
+                        Some(Body::Json(json!({ "disabled": off }))),
+                    )?
+                }
+                UsersCmd::Delete { id } => c.call("DELETE", &format!("/api/users/{id}"), None)?,
+            };
+            out(&v);
+            Ok(status == 200)
         }
         Command::Flags { action } => {
             let c = client()?;

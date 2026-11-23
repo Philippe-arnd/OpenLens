@@ -49,7 +49,7 @@ pub(crate) async fn load(state: &AppState, project: &str) -> Vec<Flag> {
     }
 }
 
-async fn save(state: &AppState, project: &str, f: &Flag) -> Result<(), String> {
+pub(crate) async fn save(state: &AppState, project: &str, f: &Flag) -> Result<(), String> {
     f.validate()?;
     let json = serde_json::to_string(f).map_err(|e| e.to_string())?;
     let meta = state.meta.clone();

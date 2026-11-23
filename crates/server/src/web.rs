@@ -17,10 +17,21 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/", get(home))
         .route("/login", get(login_page).post(login))
         .route("/login/email", post(login_email))
-        .route("/projects", get(projects_page))
+        .route(
+            "/projects",
+            get(projects_page).post(crate::settings::create),
+        )
         .route("/welcome", get(welcome_page).post(welcome_create))
-        .route("/users", get(users_page).post(users_invite))
-        .route("/users/{id}/delete", post(users_delete))
+        .route("/users", get(crate::users::page).post(crate::users::invite))
+        .route(
+            "/users/{id}",
+            get(crate::users::edit_page).post(crate::users::update),
+        )
+        .route("/users/{id}/{action}", post(crate::users::action))
+        .route(
+            "/me",
+            get(crate::users::me_page).post(crate::users::me_save),
+        )
         .route("/logout", post(logout))
         .route("/l/{token}", get(login_link))
         .route("/p/{project}", get(board))
@@ -29,6 +40,14 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/p/{project}/pages", get(pages_page))
         .route("/p/{project}/replays", get(replays_page))
         .route("/p/{project}/replays/{session}", get(player_page))
+        .route(
+            "/p/{project}/replays/{session}/comments",
+            post(crate::comments::add),
+        )
+        .route(
+            "/p/{project}/replays/{session}/comments/{id}/delete",
+            post(crate::comments::delete),
+        )
         .route(
             "/p/{project}/replays/{session}/timeline.json",
             get(replay_timeline),
@@ -39,6 +58,36 @@ pub(crate) fn routes() -> Router<AppState> {
         )
         .route("/p/{project}/watch", get(watch_churned))
         .route("/p/{project}/heatmap", get(heatmap_page))
+        .route("/p/{project}/icon", get(crate::icon::icon))
+        .route(
+            "/p/{project}/flags-edit",
+            get(crate::manage::flag_page).post(crate::manage::flag_save),
+        )
+        .route(
+            "/p/{project}/flags/{key}/delete",
+            post(crate::manage::flag_delete),
+        )
+        .route(
+            "/p/{project}/surveys-edit",
+            get(crate::manage::survey_page).post(crate::manage::survey_save),
+        )
+        .route(
+            "/p/{project}/surveys/{key}/delete",
+            post(crate::manage::survey_delete),
+        )
+        .route(
+            "/p/{project}/settings",
+            get(crate::settings::page).post(crate::settings::save),
+        )
+        .route(
+            "/p/{project}/settings/rotate-key",
+            post(crate::settings::rotate),
+        )
+        .route(
+            "/p/{project}/settings/delete",
+            post(crate::settings::delete),
+        )
+        .route("/p/{project}/export", get(crate::settings::export))
         .route("/p/{project}/digest", get(digest_page))
         .route("/p/{project}/heatmap.json", get(heatmap_json))
         .route("/p/{project}/heatmap/overlay", get(heatmap_overlay))
@@ -238,6 +287,9 @@ async fn login_email(State(state): State<AppState>, Form(f): Form<EmailForm>) ->
         let e = email.clone();
         let link = tokio::task::spawn_blocking(move || {
             let u = meta.user_by_email(&e).ok()??;
+            if u.disabled {
+                return None;
+            }
             meta.create_login_link_for(Some(&u.id), 15 * 60).ok()
         })
         .await
@@ -285,6 +337,9 @@ async fn login_link(
             ),
         );
     };
+    if who != auth::OWNER {
+        let _ = state.meta.touch_sign_in(&who);
+    }
     let c = auth::set_cookie(
         &auth::new_session(&state, &who),
         &headers,
@@ -392,7 +447,7 @@ async fn board(
             openlens_ui::message("Not found", "No such project."),
         );
     };
-    let f = q.filters(&p.timezone);
+    let f = q.filters(&auth::tz_for(&state, &headers, &p.timezone));
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
         name: &p.name,
@@ -422,11 +477,24 @@ async fn board(
     }
 }
 
+#[derive(Deserialize)]
+struct EventsQuery {
+    #[serde(flatten)]
+    f: FilterQuery,
+    family: Option<String>,
+    person: Option<String>,
+    path: Option<String>,
+    days: Option<String>,
+    sort: Option<String>,
+    before: Option<String>,
+    skip: Option<String>,
+}
+
 async fn events(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
-    Query(q): Query<FilterQuery>,
+    axum::extract::RawQuery(raw): axum::extract::RawQuery,
 ) -> Response {
     if !auth::has_session(&state, &headers) {
         return to_login();
@@ -437,44 +505,76 @@ async fn events(
             openlens_ui::message("Not found", "No such project."),
         );
     };
-    let f = q.filters(&p.timezone);
+    let raw = raw.unwrap_or_default();
+    let Ok(q) = serde_urlencoded::from_str::<EventsQuery>(&raw) else {
+        return html(
+            StatusCode::BAD_REQUEST,
+            openlens_ui::message("Can't show that", "Unreadable filters."),
+        );
+    };
+    let some = |v: &Option<String>| {
+        v.as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+    };
+    let f = q.f.filters(&auth::tz_for(&state, &headers, &p.timezone));
+    let eq = openlens_engine::EventQuery {
+        event: some(&q.f.event),
+        family: some(&q.family),
+        person: some(&q.person),
+        path: some(&q.path),
+        days: some(&q.days).and_then(|d| d.parse().ok()),
+        sort: some(&q.sort).filter(|s| s == "event" || s == "person"),
+        before: some(&q.before),
+        skip: some(&q.skip).and_then(|d| d.parse().ok()).unwrap_or(0),
+        limit: 100,
+    };
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
         name: &p.name,
         key: &p.api_key,
     };
     let map = crate::load_map(&state, &p.id).await;
-    let (b, rows) = futures_join(
-        &state,
-        &p.id,
-        &f,
-        map.as_ref().map(|(m, v)| (m, *v)),
-        q.event.as_deref(),
-    )
-    .await;
+    let (b, rows) = tokio::join!(
+        openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
+        openlens_engine::event_list(&state.query, &p.id, &f, map.as_ref().map(|(m, _)| m), &eq)
+    );
     match (b, rows) {
-        (Ok(b), Ok(rows)) => html(StatusCode::OK, openlens_ui::events(&info, &b, &rows, &f)),
+        (Ok(b), Ok(rows)) => {
+            // The next page keeps every filter: a cursor when newest first,
+            // an offset for the other sorts.
+            let next = (rows.len() == eq.limit).then(|| {
+                let kept: Vec<(String, String)> =
+                    serde_urlencoded::from_str::<Vec<(String, String)>>(&raw)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter(|(k, _)| k != "before" && k != "skip")
+                        .collect();
+                let mut kept = kept;
+                match eq.sort {
+                    Some(_) => kept.push(("skip".into(), (eq.skip + eq.limit).to_string())),
+                    None => kept.push((
+                        "before".into(),
+                        rows.last().map(|r| r.timestamp.clone()).unwrap_or_default(),
+                    )),
+                }
+                format!(
+                    "/p/{}/events?{}",
+                    p.id,
+                    serde_urlencoded::to_string(&kept).unwrap_or_default()
+                )
+            });
+            html(
+                StatusCode::OK,
+                openlens_ui::events(&info, &b, &rows, &f, &eq, next.as_deref()),
+            )
+        }
         (Err(e), _) | (_, Err(e)) => html(
             StatusCode::BAD_REQUEST,
             openlens_ui::message("Can't show that", &e.to_string()),
         ),
     }
-}
-
-async fn futures_join(
-    state: &AppState,
-    project: &str,
-    f: &openlens_engine::Filters,
-    map: Option<(&openlens_featuremap::FeatureMap, i64)>,
-    event: Option<&str>,
-) -> (
-    openlens_engine::Result<openlens_engine::Board>,
-    openlens_engine::Result<Vec<openlens_engine::EventRow>>,
-) {
-    tokio::join!(
-        openlens_engine::board(&state.query, project, f, map),
-        openlens_engine::recent_events(&state.query, project, f, map.map(|(m, _)| m), event, 100)
-    )
 }
 
 /// The page the user came from, as a same-origin path, else `/`. A path
@@ -589,7 +689,7 @@ async fn errors_page(
             openlens_ui::message("Not found", "No such project."),
         );
     };
-    let f = q.filters(&p.timezone);
+    let f = q.filters(&auth::tz_for(&state, &headers, &p.timezone));
     let map = crate::load_map(&state, &p.id).await;
     let src = openlens_engine::source(map.as_ref().map(|(m, _)| m));
     let info = openlens_ui::ProjectInfo {
@@ -631,7 +731,7 @@ async fn pages_page(
             openlens_ui::message("Not found", "No such project."),
         );
     };
-    let f = q.filters(&p.timezone);
+    let f = q.filters(&auth::tz_for(&state, &headers, &p.timezone));
     let map = crate::load_map(&state, &p.id).await;
     let src = openlens_engine::source(map.as_ref().map(|(m, _)| m));
     let info = openlens_ui::ProjectInfo {
@@ -686,6 +786,8 @@ async fn player_css() -> Response {
 struct ReplayQuery {
     u: Option<String>,
     at: Option<String>,
+    /// Playback position to open at, milliseconds (comment links).
+    t: Option<u64>,
 }
 
 async fn replays_page(
@@ -717,7 +819,13 @@ async fn replays_page(
     match list {
         Ok(Ok(l)) => html(
             StatusCode::OK,
-            openlens_ui::replays(&info, &l, q.u.as_deref()),
+            openlens_ui::replays(
+                &info,
+                &l,
+                q.u.as_deref(),
+                &auth::tz_for(&state, &headers, &p.timezone),
+                &state.meta.replay_comment_counts(&p.id).unwrap_or_default(),
+            ),
         ),
         _ => html(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -789,9 +897,26 @@ async fn player_page(
             && a.chars()
                 .all(|c| c.is_ascii_digit() || " -:.TZ".contains(c))
     });
+    let viewer = auth::viewer(&state, &headers);
+    let meta = state.meta.clone();
+    let (pid, sid) = (p.id.clone(), session.clone());
+    let comments = tokio::task::spawn_blocking(move || meta.replay_comments(&pid, &sid))
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or_default();
+    let me = viewer.as_ref().map(|v| (v.id.as_str(), v.admin));
     player_csp(html(
         StatusCode::OK,
-        openlens_ui::player(&info, &session, Some(&who), at.as_deref()),
+        openlens_ui::player(
+            &info,
+            &session,
+            Some(&who),
+            at.as_deref(),
+            q.t,
+            &comments,
+            me,
+        ),
     ))
 }
 
@@ -870,7 +995,7 @@ async fn watch_churned(
     };
     let map = crate::load_map(&state, &p.id).await;
     let f = openlens_engine::Filters {
-        tz: p.timezone.clone(),
+        tz: auth::tz_for(&state, &headers, &p.timezone),
         ..openlens_engine::Filters::default()
     };
     let (sessions, recorded) = tokio::join!(
@@ -1004,7 +1129,7 @@ async fn heatmap_page(
     };
     // A recorded visit of this page, to draw the heatmap over the real page.
     let f = openlens_engine::Filters {
-        tz: p.timezone.clone(),
+        tz: auth::tz_for(&state, &headers, &p.timezone),
         ..openlens_engine::Filters::default()
     };
     let sessions = openlens_engine::sessions_on_path(&state.query, &p.id, &src, &f, &q.path)
@@ -1146,7 +1271,10 @@ pub(crate) async fn access_layer(
                 openlens_ui::message("Not for you", "You do not have access to this project."),
             );
         }
-        if req.method() != axum::http::Method::GET && !v.admin {
+        if req.method() != axum::http::Method::GET
+            && !v.admin
+            && !crate::comments::is_comment_path(&path)
+        {
             return html(
                 StatusCode::FORBIDDEN,
                 openlens_ui::message(
@@ -1169,102 +1297,6 @@ pub(crate) async fn access_layer(
         }
     }
     next.run(req).await
-}
-
-#[derive(Deserialize)]
-struct InviteForm {
-    email: String,
-    role: String,
-    #[serde(default)]
-    projects: String,
-}
-
-async fn users_page(State(state): State<AppState>) -> Response {
-    users_render(&state, None).await
-}
-
-async fn users_render(state: &AppState, link: Option<(String, String)>) -> Response {
-    let meta = state.meta.clone();
-    let meta2 = state.meta.clone();
-    let (users, projects) =
-        match tokio::task::spawn_blocking(move || (meta.users(), meta2.projects())).await {
-            Ok((Ok(u), Ok(p))) => (u, p),
-            _ => {
-                return html(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    openlens_ui::message("Oops", "The metadata store is unavailable."),
-                );
-            }
-        };
-    let ids: Vec<String> = projects.into_iter().map(|p| p.id).collect();
-    html(
-        StatusCode::OK,
-        openlens_ui::users(
-            &users,
-            &ids,
-            link.as_ref().map(|(e, l)| (e.as_str(), l.as_str())),
-        ),
-    )
-}
-
-async fn users_invite(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Form(f): Form<InviteForm>,
-) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return html(
-            StatusCode::FORBIDDEN,
-            openlens_ui::message("Refused", "Cross-site form."),
-        );
-    }
-    let projects: Vec<String> = f
-        .projects
-        .split(',')
-        .map(|s| s.trim().to_owned())
-        .filter(|s| !s.is_empty())
-        .collect();
-    let meta = state.meta.clone();
-    let res = tokio::task::spawn_blocking(move || {
-        let u = meta.upsert_user(
-            &f.email,
-            &f.role,
-            (!projects.is_empty()).then_some(&projects[..]),
-        )?;
-        let t = meta.create_login_link_for(Some(&u.id), 7 * 24 * 3600)?;
-        Ok::<_, openlens_meta::MetaError>((u.email, t))
-    })
-    .await;
-    match res {
-        Ok(Ok((email, t))) => {
-            let link = format!("{}/l/{t}", crate::base_url(&headers));
-            users_render(&state, Some((email, link))).await
-        }
-        Ok(Err(e)) => html(
-            StatusCode::BAD_REQUEST,
-            openlens_ui::message("Can't invite", &e.to_string()),
-        ),
-        Err(_) => html(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            openlens_ui::message("Oops", "Try again."),
-        ),
-    }
-}
-
-async fn users_delete(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return html(
-            StatusCode::FORBIDDEN,
-            openlens_ui::message("Refused", "Cross-site form."),
-        );
-    }
-    let meta = state.meta.clone();
-    let _ = tokio::task::spawn_blocking(move || meta.delete_user(&id)).await;
-    Redirect::to("/users").into_response()
 }
 
 #[cfg(test)]

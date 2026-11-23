@@ -6,13 +6,18 @@
 mod api;
 mod auth;
 mod capture;
+mod comments;
 mod digest;
 mod flags;
+mod icon;
+mod manage;
 mod oidc;
 mod replay;
 mod reword;
 mod s3;
+mod settings;
 mod surveys;
+mod users;
 mod web;
 
 use std::path::PathBuf;
