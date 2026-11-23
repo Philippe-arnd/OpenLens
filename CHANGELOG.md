@@ -22,10 +22,6 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
   - **Explicit cancel:** the feature map may declare `churn_event` (D-019). A user who sends it counts as churned at once, and the answers of surveys triggered on it show as the exit survey.
   - **Users at risk:** admins can export them as CSV or JSON (audited, with CSV formulas neutralised). They can also turn the list into a flag that starts off, with a control group held out (`users` and `holdout` on flags). The churn page compares how active the nudged and held-out users were over the last 7 days.
 
-### Fixed
-
-- The churn page failed with a feature map pushed ("last place" query). It now works with and without a map.
-
 - **Goals, part 2** (#272):
   - **Statuses for every KPI:** DAU, MAU, stickiness and feature success rates now have weekly series, so their status is no longer stuck at "not enough data". Web Vitals (LCP, INP, CLS at p75) can be goals too.
   - **Guardrails:** a goal can have up to two KPIs that must not get worse. The default limit is 5% worse than now, and it can be edited through the API. A breach is shown in red and raised as an alert (through the regression alerts toggle), and the alert closes once the KPI recovers.
@@ -81,6 +77,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- The churn page failed with a feature map pushed ("last place" query). It now works with and without a map.
 - **Going back a release right after an upgrade works again**: two starts in the same second named their upgrade copy the same, and the second refused to start. Copies now take the next free second. (The upgrade check waits between steps for releases up to v0.2.0.)
 
 ## [0.2.0] - 2026-11-22
