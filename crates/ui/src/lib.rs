@@ -507,6 +507,7 @@ pub fn board(
     f: &Filters,
     host: &str,
     plain: &[(String, String)],
+    revenue: Option<&openlens_engine::Revenue>,
 ) -> Markup {
     if b.total_events == 0 {
         return layout("Focus board", Some(p), empty(p, host));
@@ -606,6 +607,15 @@ pub fn board(
                                 }
                             } }
                         }
+                    }
+                }
+                @if let Some(r) = revenue {
+                    section.card {
+                        h2.mint { (icon("star")) "Revenue, last 30 days" }
+                        table.plain { tbody { @for m in &r.totals {
+                            tr { th scope="row" { (money(m.total, &m.currency)) } td.small.muted { (compact(m.payers)) " payers · " (money(m.per_active_user, &m.currency)) " per active user" } }
+                        } } }
+                        p.small { a href={ "/p/" (p.id) "/revenue" } { "By feature, role and release →" } }
                     }
                 }
                 (feature_pulse(b, feats.is_empty()))
@@ -1937,6 +1947,63 @@ pub fn churn(
                         } }
                     } }
                     p.muted.small { "Open a profile to see their last sessions and replays. Win them back before the window closes." }
+                }
+            }
+        },
+    )
+}
+
+/// An amount with its currency, rounded to the unit above 100.
+pub fn money(v: f64, cur: &str) -> String {
+    let n = if v.abs() >= 100.0 {
+        format!("{v:.0}")
+    } else {
+        format!("{v:.2}")
+    };
+    if cur == "?" { n } else { format!("{n} {cur}") }
+}
+
+/// Revenue on success events (#231).
+pub fn revenue(
+    p: &ProjectInfo<'_>,
+    b: &Board,
+    f: &Filters,
+    r: Option<&openlens_engine::Revenue>,
+) -> Markup {
+    let table = |title: &str, glyph: &str, rows: &[(String, String, f64)]| {
+        html! {
+            section.card {
+                h2.mint { (icon(glyph)) (title) }
+                table.plain { tbody { @for (k, c, v) in rows {
+                    tr { th scope="row" { span.mono { (k) } } td.num { (money(*v, c)) } }
+                } } }
+            }
+        }
+    };
+    layout(
+        "Revenue",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "Revenue" }
+                p.muted { "Amounts carried by success events (" code { "revenue" } " or " code { "value" } ", with an optional " code { "currency" } "), last 30 days, " strong { (f.environment) } "." }
+            } }
+            (filter_bar(p.id, b, f, "/revenue"))
+            @match r {
+                None => section.card.wide { p { "No success event carries an amount yet. Send one with the event, for example " code { "openlens.track(\"order_paid\", { revenue: 49, currency: \"EUR\" })" } ", and declare it as a feature's success event." } },
+                Some(r) => {
+                    section.tiles aria-label="Totals" {
+                        @for m in &r.totals {
+                            (tile("mint", "star", &format!("Revenue ({})", m.currency), &money(m.total, &m.currency), &format!("{} orders · {} payers · {} per active user", compact(m.orders), compact(m.payers), money(m.per_active_user, &m.currency))))
+                        }
+                    }
+                    @if r.totals.len() > 1 { p.muted.small { "Currencies are not summed. Set " code { "revenue: { currency: EUR, rates: { USD: 0.92 } }" } " in the feature map to show one total." } }
+                    @if r.converted { p.muted.small { "Converted into the display currency with the fixed rates of the feature map." } }
+                    div.grid {
+                        (table("By feature", "layers", &r.by_feature))
+                        (table("By role", "users", &r.by_role))
+                        (table("By release", "release", &r.by_release))
+                    }
                 }
             }
         },

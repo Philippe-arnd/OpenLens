@@ -92,6 +92,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/p/{project}/audience", get(crate::explore::audience))
         .route("/p/{project}/acquisition", get(crate::explore::acquisition))
         .route("/p/{project}/churn", get(crate::explore::churn))
+        .route("/p/{project}/revenue", get(crate::explore::revenue))
         .route("/p/{project}/flows", get(crate::explore::flows))
         .route("/p/{project}/live", get(crate::explore::live))
         .route(
@@ -493,8 +494,12 @@ async fn board(
         key: &p.api_key,
     };
     let map = crate::load_map(&state, &p.id).await;
-    match openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))).await
-    {
+    let (board, revenue) = tokio::join!(
+        openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
+        openlens_engine::revenue(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f)
+    );
+    let revenue = revenue.ok().flatten();
+    match board {
         Ok(b) => html(
             StatusCode::OK,
             openlens_ui::board(
@@ -507,6 +512,7 @@ async fn board(
                     .into_iter()
                     .map(|p| (p.title, p.next_step))
                     .collect::<Vec<_>>(),
+                revenue.as_ref(),
             ),
         ),
         Err(e) => html(

@@ -2507,3 +2507,45 @@ async fn the_churn_page_and_api() {
     assert_eq!(api["window"], 14);
     assert_eq!(api["users"], 1);
 }
+
+#[tokio::test]
+async fn revenue_shows_only_when_success_events_carry_amounts() {
+    let h = harness();
+    let owner = login_cookie(&h).await;
+    let (status, _) = post(&h, "/capture", batch(&h.key), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let board = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
+    assert!(
+        !board.contains("Revenue, last 30 days"),
+        "nothing changes without amounts"
+    );
+
+    h.state
+        .meta
+        .save_feature_map(
+            "default",
+            "revenue:\n  currency: EUR\n  rates: { USD: 0.9 }\nfeatures:\n  - key: checkout\n    name: Checkout\n    success: order_paid\n    entry: { routes: ['/checkout'] }\n",
+        )
+        .unwrap();
+    let body = serde_json::json!({
+        "key": h.key,
+        "batch": [
+            {"event": "order_paid", "distinct_id": "u1", "properties": {"revenue": 10, "currency": "EUR"}},
+            {"event": "order_paid", "distinct_id": "u2", "properties": {"value": 20.5, "currency": "usd"}},
+            {"event": "note_saved", "distinct_id": "u1", "properties": {"revenue": 999}},
+            {"event": "$vital", "distinct_id": "u1", "properties": {"$name": "LCP", "$value": 1234}}
+        ]
+    })
+    .to_string();
+    let (status, _) = post(&h, "/capture", body.into_bytes(), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let board = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
+    assert!(
+        board.contains("Revenue, last 30 days") && board.contains("28.45 EUR"),
+        "10 + 20.5 × 0.9, other events ignored"
+    );
+    let page = body_text(get(&h, "/p/default/revenue", Some(&owner), false).await).await;
+    assert!(page.contains("checkout") && page.contains("Converted") && !page.contains(" style="));
+}

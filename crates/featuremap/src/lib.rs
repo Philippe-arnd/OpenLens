@@ -35,6 +35,22 @@ pub struct FeatureMap {
     /// Declared features.
     #[serde(default)]
     pub features: Vec<Feature>,
+    /// Optional: the currency revenue is shown in, and fixed rates to
+    /// convert others into it (#231). Without it, each currency is shown
+    /// on its own and nothing is summed across currencies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revenue: Option<RevenueSettings>,
+}
+
+/// How revenue is shown (#231).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RevenueSettings {
+    /// ISO 4217 code of the display currency (`EUR`).
+    pub currency: String,
+    /// Units of the display currency for one unit of another (`USD: 0.92`).
+    #[serde(default)]
+    pub rates: std::collections::BTreeMap<String, f64>,
 }
 
 fn one() -> u32 {
@@ -182,6 +198,23 @@ pub fn validate(m: &FeatureMap) -> Vec<Issue> {
             "churn_after_days",
             "must be between 1 and 365 (default 14)",
         ));
+    }
+    if let Some(r) = &m.revenue {
+        let code = |c: &str| c.len() == 3 && c.bytes().all(|b| b.is_ascii_uppercase());
+        if !code(&r.currency) {
+            v.push(err(
+                "revenue.currency",
+                "an ISO 4217 code in capitals, like EUR or USD",
+            ));
+        }
+        for (k, rate) in &r.rates {
+            if !code(k) || !rate.is_finite() || *rate <= 0.0 {
+                v.push(err(
+                    format!("revenue.rates.{k}"),
+                    "a currency code and a positive rate (display units for one unit of it)",
+                ));
+            }
+        }
     }
     if m.roles.len() > MAX_ROLES {
         v.push(err(

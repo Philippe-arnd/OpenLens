@@ -19,6 +19,7 @@ mod errors;
 pub mod flows;
 mod insights;
 mod pages;
+mod revenue;
 pub mod stats;
 mod tasks;
 pub use acquisition::{AcquisitionRow, Touch, acquisition};
@@ -31,6 +32,7 @@ pub use pages::{
     ClickMap, Hotspot, MAP_COLUMNS, MAP_ROW, PageStats, SurveyResults, click_map, pages,
     sessions_on_path, survey_results,
 };
+pub use revenue::{Money, Revenue, revenue};
 pub use tasks::{RetentionRow, TaskTime};
 
 /// Engine errors.

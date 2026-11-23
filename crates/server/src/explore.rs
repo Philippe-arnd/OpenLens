@@ -323,6 +323,45 @@ pub(crate) async fn acquisition(
     }
 }
 
+/// `GET /p/{id}/revenue` (#231).
+pub(crate) async fn revenue(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    axum::extract::RawQuery(raw): axum::extract::RawQuery,
+) -> Response {
+    if !auth::has_session(&state, &headers) {
+        return Redirect::to("/login").into_response();
+    }
+    let Some(p) = project(&state, &id).await else {
+        return not_found("No such project.");
+    };
+    let Ok(q) = serde_urlencoded::from_str::<FilterQuery>(&raw.unwrap_or_default()) else {
+        return not_found("Unreadable filters.");
+    };
+    let f = q.filters(&auth::tz_for(&state, &headers, &p.timezone));
+    let map = crate::load_map(&state, &p.id).await;
+    let (b, r) = tokio::join!(
+        openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
+        openlens_engine::revenue(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f)
+    );
+    let info = openlens_ui::ProjectInfo {
+        id: &p.id,
+        name: &p.name,
+        key: &p.api_key,
+    };
+    match (b, r) {
+        (Ok(b), Ok(r)) => html_page(
+            StatusCode::OK,
+            openlens_ui::revenue(&info, &b, &f, r.as_ref()),
+        ),
+        (Err(e), _) | (_, Err(e)) => html_page(
+            StatusCode::BAD_REQUEST,
+            openlens_ui::message("Can't show that", &e.to_string()),
+        ),
+    }
+}
+
 /// `GET /p/{id}/churn` (#247).
 pub(crate) async fn churn(
     State(state): State<AppState>,
