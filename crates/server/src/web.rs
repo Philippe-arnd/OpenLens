@@ -93,6 +93,14 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/p/{project}/acquisition", get(crate::explore::acquisition))
         .route("/p/{project}/churn", get(crate::explore::churn))
         .route("/p/{project}/revenue", get(crate::explore::revenue))
+        .route(
+            "/p/{project}/goals",
+            get(crate::goals::page).post(crate::goals::create),
+        )
+        .route(
+            "/p/{project}/goals/{gid}/delete",
+            post(crate::goals::delete),
+        )
         .route("/p/{project}/flows", get(crate::explore::flows))
         .route("/p/{project}/live", get(crate::explore::live))
         .route(

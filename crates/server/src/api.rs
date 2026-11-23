@@ -56,6 +56,7 @@ pub(crate) fn routes() -> Router<AppState> {
             "/api/projects/{project}/churn",
             get(crate::explore::api_churn),
         )
+        .route("/api/projects/{project}/goals", get(crate::goals::api))
         .route("/api/login-links", post(login_link))
         .route("/api/users", get(list_users))
         .route(

@@ -163,6 +163,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                                     ("/audience", "globe", "Audience"),
                                     ("/acquisition", "route", "Acquisition"),
                                     ("/churn", "ban", "Churn"),
+                                    ("/goals", "star", "Goals"),
                                     ("/flows", "funnel", "Feature flow"),
                                     ("/features", "route", "Feature map"),
                                     ("/digest", "mail", "Digest"),
@@ -2004,6 +2005,167 @@ pub fn revenue(
                         (table("By role", "users", &r.by_role))
                         (table("By release", "release", &r.by_release))
                     }
+                }
+            }
+        },
+    )
+}
+
+/// A goal with where it stands (#235).
+pub struct GoalRow {
+    /// The stored goal.
+    pub goal: openlens_engine::goals::Goal,
+    /// KPI label.
+    pub label: String,
+    /// A share (shown as %).
+    pub share: bool,
+    /// Value now.
+    pub current: Option<f64>,
+    /// Projected value at the deadline.
+    pub projected: Option<f64>,
+    /// Per release (oldest first).
+    pub series: Vec<(String, f64)>,
+    /// Status label.
+    pub status: String,
+    /// Reached or on track.
+    pub good: bool,
+    /// Off track.
+    pub bad: bool,
+    /// Days to the deadline.
+    pub days_left: i64,
+}
+
+/// A KPI a goal can be set on, with its suggested target.
+pub struct GoalChoice {
+    /// Key.
+    pub kpi: String,
+    /// Label.
+    pub label: String,
+    /// Higher is better.
+    pub up: bool,
+    /// A share.
+    pub share: bool,
+    /// Value now.
+    pub current: f64,
+    /// Suggested target.
+    pub suggested: f64,
+}
+
+fn kpi_fmt(v: f64, share: bool) -> String {
+    if share {
+        pct(v)
+    } else if v.abs() >= 100.0 {
+        format!("{v:.0}")
+    } else {
+        format!("{v:.2}")
+    }
+}
+
+/// The KPI per release with the target as a line (one axis, SVG).
+fn goal_chart(r: &GoalRow) -> Markup {
+    let (w, h) = (320.0_f64, 90.0_f64);
+    let vals: Vec<f64> = r
+        .series
+        .iter()
+        .map(|x| x.1)
+        .chain([r.goal.target])
+        .chain(r.current)
+        .collect();
+    let max = vals.iter().copied().fold(f64::MIN, f64::max).max(1e-9);
+    let y = |v: f64| h - 6.0 - (v / max) * (h - 16.0);
+    let n = r.series.len().max(1);
+    let x = |i: usize| {
+        if n == 1 {
+            w / 2.0
+        } else {
+            8.0 + i as f64 * (w - 16.0) / (n - 1) as f64
+        }
+    };
+    let line: String = r
+        .series
+        .iter()
+        .enumerate()
+        .map(|(i, (_, v))| format!("{}{:.1} {:.1}", if i == 0 { "M" } else { "L" }, x(i), y(*v)))
+        .collect();
+    let ty = y(r.goal.target);
+    html! {
+        svg.goal-chart viewBox={ "0 0 " (w) " " (h) } role="img" aria-label={ (r.label) " per release, target " (kpi_fmt(r.goal.target, r.share)) } {
+            line.target x1="0" x2=(w) y1=(format!("{ty:.1}")) y2=(format!("{ty:.1}")) {}
+            text.tlabel x=(w - 4.0) y=(format!("{:.1}", ty - 3.0)) text-anchor="end" { "target " (kpi_fmt(r.goal.target, r.share)) }
+            @if r.series.len() > 1 { path.series d=(line) {} }
+            @for (i, (d, v)) in r.series.iter().enumerate() {
+                circle.dot cx=(format!("{:.1}", x(i))) cy=(format!("{:.1}", y(*v))) r="3.5" { title { (d) ": " (kpi_fmt(*v, r.share)) } }
+            }
+        }
+    }
+}
+
+/// Goals on KPIs (#235): target, gap, progress, trajectory.
+pub fn goals(
+    p: &ProjectInfo<'_>,
+    rows: &[GoalRow],
+    choices: &[GoalChoice],
+    admin: bool,
+    deadline: &str,
+) -> Markup {
+    layout(
+        "Goals",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "Goals" }
+                p.muted { "Where we want each number to be, by when, and whether the trend gets there. Targets are suggested from the releases so far; one click sets them." }
+            } }
+            @if rows.is_empty() { section.card.wide { p.muted { "No goal yet. Pick a KPI below: the suggested target is the best release so far or a 10% step, whichever is closer." } } }
+            div.grid {
+                @for r in rows {
+                    @let g = &r.goal;
+                    @let gap = r.current.map(|c| g.target - c);
+                    @let travelled = r.current.map(|c| { let total = g.target - g.baseline; if total.abs() < 1e-12 { 1.0 } else { ((c - g.baseline) / total).clamp(0.0, 1.0) } });
+                    section.card {
+                        h2.violet { (icon("star")) (r.label) }
+                        p {
+                            span class={ "status " (if r.good { "good" } else if r.bad { "bad" } else { "warn" }) } { (r.status) }
+                            " · target " strong { (kpi_fmt(g.target, r.share)) } " by " (g.deadline)
+                            @if r.days_left > 0 { span.muted { " (" (r.days_left) " days)" } }
+                        }
+                        p.small {
+                            "Now " strong { (r.current.map_or_else(|| "—".into(), |c| kpi_fmt(c, r.share))) }
+                            " · from " (kpi_fmt(g.baseline, r.share))
+                            @if let Some(gp) = gap { " · gap " (kpi_fmt(gp.abs(), r.share)) }
+                            @if let Some(pj) = r.projected { " · trend at the deadline " (kpi_fmt(pj, r.share)) }
+                        }
+                        @if let Some(t) = travelled { div.meter-row { span.small.muted { "way travelled" } (meter(t)) span.small { (pct(t)) } } }
+                        (goal_chart(r))
+                        @if !g.owner.is_empty() { p.muted.small { "Owner: " (g.owner) } }
+                        @if admin {
+                            form.inline method="post" action={ "/p/" (p.id) "/goals/" (g.id) "/delete" } { button.ghost type="submit" { "Remove" } }
+                        }
+                    }
+                }
+            }
+            @if admin && !choices.is_empty() {
+                section.card.wide {
+                    h2.mint { (icon("plus")) "Set a goal" }
+                    div.table-scroll { table.plain {
+                        thead { tr { th { "KPI" } th.num { "Now" } th { "Target" } th { "By" } th { "Owner" } th {} } }
+                        tbody { @for c in choices {
+                            tr {
+                                th scope="row" { (c.label) span.muted.small { " · " (if c.up { "higher is better" } else { "lower is better" }) } }
+                                td.num { (kpi_fmt(c.current, c.share)) }
+                                td colspan="4" {
+                                    form.inline method="post" action={ "/p/" (p.id) "/goals" } {
+                                        input type="hidden" name="kpi" value=(c.kpi);
+                                        label { span.sr-only { "Target" } input type="number" name="target" step="any" min="0" value=(if c.share { format!("{:.1}", c.suggested * 100.0) } else { format!("{:.2}", c.suggested) }) aria-label={ "Target for " (c.label) }; @if c.share { "%" } }
+                                        label { span.sr-only { "Deadline" } input type="date" name="deadline" value=(deadline) required aria-label={ "Deadline for " (c.label) }; }
+                                        label { span.sr-only { "Owner" } input type="text" name="owner" placeholder="owner" maxlength="80" aria-label={ "Owner of the goal on " (c.label) }; }
+                                        button.soft type="submit" { "Set" }
+                                    }
+                                }
+                            }
+                        } }
+                    } }
+                    p.muted.small { "The suggested target is filled in. Status: on track when the straight line through the releases reaches the target by the deadline, at risk when it misses by less than 10% of the target, not enough data under three releases." }
                 }
             }
         },

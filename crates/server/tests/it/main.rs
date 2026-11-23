@@ -2549,3 +2549,89 @@ async fn revenue_shows_only_when_success_events_carry_amounts() {
     let page = body_text(get(&h, "/p/default/revenue", Some(&owner), false).await).await;
     assert!(page.contains("checkout") && page.contains("Converted") && !page.contains(" style="));
 }
+
+#[tokio::test]
+async fn goals_are_suggested_set_tracked_and_removed() {
+    let h = harness();
+    let (status, _) = post(&h, "/capture", batch(&h.key), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let owner = login_cookie(&h).await;
+    let page = body_text(get(&h, "/p/default/goals", Some(&owner), false).await).await;
+    assert!(
+        page.contains("Set a goal")
+            && page.contains("Sessions with errors")
+            && !page.contains(" style=")
+    );
+    let deadline = (chrono::Utc::now() + chrono::Duration::days(60))
+        .format("%Y-%m-%d")
+        .to_string();
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/goals",
+            &owner,
+            &format!("kpi=error_rate&target=150&deadline={deadline}")
+        )
+        .await,
+        StatusCode::BAD_REQUEST,
+        "a share above 100%"
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/goals",
+            &owner,
+            "kpi=error_rate&target=5&deadline=2020-01-01"
+        )
+        .await,
+        StatusCode::BAD_REQUEST,
+        "a past deadline"
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/goals",
+            &owner,
+            &format!("kpi=error_rate&target=5&deadline={deadline}&owner=Ana")
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    let viewer = invite(
+        &h,
+        serde_json::json!({"email": "v@example.com", "role": "viewer"}),
+    )
+    .await;
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/goals",
+            &viewer,
+            &format!("kpi=error_rate&target=5&deadline={deadline}")
+        )
+        .await,
+        StatusCode::FORBIDDEN
+    );
+    let api: serde_json::Value = serde_json::from_str(
+        &body_text(get(&h, "/api/projects/default/goals", None, true).await).await,
+    )
+    .unwrap();
+    let g = &api["goals"][0];
+    assert_eq!(g["goal"]["target"], 0.05);
+    assert_eq!(g["goal"]["owner"], "Ana");
+    assert!(
+        g["status"] == "reached" || g["status"] == "not enough data",
+        "{g}"
+    );
+    let id = g["goal"]["id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        post_form(&h, &format!("/p/default/goals/{id}/delete"), &owner, "").await,
+        StatusCode::SEE_OTHER
+    );
+    let api: serde_json::Value = serde_json::from_str(
+        &body_text(get(&h, "/api/projects/default/goals", None, true).await).await,
+    )
+    .unwrap();
+    assert_eq!(api["goals"].as_array().unwrap().len(), 0);
+}

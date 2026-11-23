@@ -138,6 +138,13 @@ enum Command {
         #[command(subcommand)]
         action: FlagsCmd,
     },
+    /// Goals on KPIs: each with its target, current value, trend at the
+    /// deadline and status, plus a suggested target per KPI.
+    Goals {
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+    },
     /// Is the app up? (`up`, `down`, `unknown`, `off`, with open incidents.)
     /// Exits non-zero when down: handy right after a deploy.
     Status {
@@ -680,6 +687,11 @@ fn run(cli: Cli) -> Result<bool, String> {
                 &json!({ "rows": rows, "file": path.display().to_string(), "days_truncated": truncated }),
             );
             Ok(true)
+        }
+        Command::Goals { project } => {
+            let (status, v) = client()?.call("GET", &format!("/api/projects/{project}/goals"), None)?;
+            out(&v);
+            Ok(status == 200)
         }
         Command::Status { project } => {
             let (status, v) =

@@ -15,6 +15,7 @@ mod digest;
 mod explore;
 mod features;
 mod flags;
+mod goals;
 mod icon;
 mod manage;
 mod oidc;
