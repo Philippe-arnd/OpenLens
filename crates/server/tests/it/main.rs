@@ -3001,3 +3001,68 @@ async fn cookieless_visitors_get_a_daily_id_and_no_durable_link() {
         "the daily id is never linked to the login"
     );
 }
+
+#[tokio::test]
+async fn experiment_flags_hand_out_variants_and_show_each_arm() {
+    let h = harness();
+    let owner = login_cookie(&h).await;
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/flags-edit",
+            &owner,
+            "key=checkout&rollout=100&enabled=on&variants=control%3A50%2C+short%3A40"
+        )
+        .await,
+        StatusCode::BAD_REQUEST,
+        "weights must add up to 100"
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/flags-edit",
+            &owner,
+            "key=checkout&rollout=100&enabled=on&variants=control%3A50%2C+short%3A50"
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    let r = router(h.state.clone())
+        .oneshot(
+            Request::get(format!("/flags?key={}&distinct_id=u1", h.key))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&body_text(r).await).unwrap();
+    let arm = v["variants"]["checkout"].as_str().unwrap().to_owned();
+    assert!(arm == "control" || arm == "short", "{v}");
+    let body = serde_json::json!({
+        "key": h.key,
+        "batch": [
+            {"event": "$pageview", "distinct_id": "u1", "session_id": "s1", "properties": {"$pathname": "/", "$flags": "checkout", "$variants": format!("checkout={arm}")}},
+            {"event": "$pageview", "distinct_id": "u2", "session_id": "s2", "properties": {"$pathname": "/", "$flags": "checkout", "$variants": "other=x,checkout=short"}}
+        ]
+    })
+    .to_string();
+    let (status, _) = post(&h, "/capture", body.into_bytes(), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let page = body_text(
+        get(
+            &h,
+            "/p/default/flags-edit?key=checkout",
+            Some(&owner),
+            false,
+        )
+        .await,
+    )
+    .await;
+    assert!(
+        page.contains("Variants, last 30 days")
+            && page.contains("<code>short</code>")
+            && !page.contains(" style="),
+        "{page}"
+    );
+}

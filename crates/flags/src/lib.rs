@@ -29,6 +29,20 @@ pub struct Flag {
     /// Always on for these accounts, whatever the rollout.
     #[serde(default)]
     pub accounts: Vec<String>,
+    /// Optional variants for an experiment (#252): 2 to 6, weights summing
+    /// to 100. Users who get the flag are split between them; without
+    /// variants the flag is a plain on/off.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variants: Vec<Variant>,
+}
+
+/// One arm of an experiment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Variant {
+    /// Key used in code: `openlens.variant("checkout") === "short"`.
+    pub key: String,
+    /// Share of the flag's users, in percent.
+    pub weight: u8,
 }
 
 /// Who is asking.
@@ -85,8 +99,67 @@ impl Flag {
         if self.description.len() > 500 || self.roles.len() > 50 || self.accounts.len() > 1000 {
             return Err("description ≤ 500 chars, ≤ 50 roles, ≤ 1000 accounts".into());
         }
+        if !self.variants.is_empty() {
+            if !(2..=6).contains(&self.variants.len()) {
+                return Err("variants: 2 to 6".into());
+            }
+            if self
+                .variants
+                .iter()
+                .map(|v| u32::from(v.weight))
+                .sum::<u32>()
+                != 100
+            {
+                return Err("variant weights add up to 100".into());
+            }
+            let mut keys: Vec<&str> = self.variants.iter().map(|v| v.key.as_str()).collect();
+            keys.sort_unstable();
+            keys.dedup();
+            if keys.len() != self.variants.len()
+                || self.variants.iter().any(|v| {
+                    v.key.is_empty()
+                        || v.key.len() > 40
+                        || !v.key.bytes().all(|b| {
+                            b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_'
+                        })
+                })
+            {
+                return Err(
+                    "variant keys: distinct, 1-40 chars of lowercase letters, digits, - or _"
+                        .into(),
+                );
+            }
+        }
         Ok(())
     }
+}
+
+impl Flag {
+    /// The variant this subject gets, when the flag is on and has variants.
+    /// Independent of the rollout bucket, so raising the rollout keeps each
+    /// user's variant.
+    pub fn variant(&self, s: &Subject<'_>) -> Option<&str> {
+        if self.variants.is_empty() || !self.is_on(s) {
+            return None;
+        }
+        let b = bucket(&format!("{}:variant", self.key), s.distinct_id) / 100;
+        let mut acc = 0u32;
+        for v in &self.variants {
+            acc += u32::from(v.weight);
+            if b < acc {
+                return Some(&v.key);
+            }
+        }
+        self.variants.last().map(|v| v.key.as_str())
+    }
+}
+
+/// `flag key → variant` for the flags with variants that are on for `s`.
+pub fn variants(flags: &[Flag], s: &Subject<'_>) -> std::collections::BTreeMap<String, String> {
+    flags
+        .iter()
+        .filter_map(|f| f.variant(s).map(|v| (f.key.clone(), v.to_owned())))
+        .collect()
 }
 
 /// Keys of the flags that are on for `s`, sorted.

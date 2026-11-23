@@ -13,6 +13,7 @@ fn flag(rollout: u8) -> Flag {
         rollout,
         roles: vec![],
         accounts: vec![],
+        variants: vec![],
     }
 }
 
@@ -141,5 +142,74 @@ fn validation_and_evaluate() {
             }
         ),
         ["a", "new-editor"]
+    );
+}
+
+#[test]
+fn variants_split_by_weight_and_stay_put_when_the_rollout_grows() {
+    use openlens_flags::Variant;
+    let mut f = flag(50);
+    f.variants = vec![
+        Variant {
+            key: "control".into(),
+            weight: 70,
+        },
+        Variant {
+            key: "short".into(),
+            weight: 30,
+        },
+    ];
+    assert!(f.validate().is_ok());
+    let n = 40_000;
+    let picks: Vec<Option<String>> = (0..n)
+        .map(|i| {
+            f.variant(&Subject {
+                distinct_id: &format!("user-{i}"),
+                ..Subject::default()
+            })
+            .map(str::to_owned)
+        })
+        .collect();
+    let on = picks.iter().filter(|p| p.is_some()).count() as f64;
+    let short = picks
+        .iter()
+        .filter(|p| p.as_deref() == Some("short"))
+        .count() as f64;
+    assert!(
+        (on / n as f64 - 0.5).abs() < 0.01,
+        "only users in the rollout get a variant"
+    );
+    assert!((short / on - 0.3).abs() < 0.01, "30% of them get `short`");
+    // Widening the rollout keeps everyone's variant.
+    let mut wider = f.clone();
+    wider.rollout = 100;
+    for (i, p) in picks.iter().enumerate().take(5000) {
+        if let Some(v) = p {
+            let s = Subject {
+                distinct_id: &format!("user-{i}"),
+                ..Subject::default()
+            };
+            assert_eq!(wider.variant(&s), Some(v.as_str()));
+        }
+    }
+    // Validation.
+    let mut bad = f.clone();
+    bad.variants[0].weight = 60;
+    assert!(bad.validate().is_err(), "weights must add up to 100");
+    bad.variants = vec![Variant {
+        key: "solo".into(),
+        weight: 100,
+    }];
+    assert!(bad.validate().is_err(), "at least two");
+    let off = Flag {
+        variants: f.variants.clone(),
+        ..flag(0)
+    };
+    assert_eq!(
+        off.variant(&Subject {
+            distinct_id: "x",
+            ..Subject::default()
+        }),
+        None
     );
 }
