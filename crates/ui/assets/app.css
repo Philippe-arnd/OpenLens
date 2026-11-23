@@ -409,3 +409,14 @@ svg.world path:hover { stroke: var(--ink); stroke-width: 1; }
 .legend-scale i.c4 { color: color-mix(in srgb, var(--violet) 80%, var(--surface)); }
 .legend-scale i.c5 { color: var(--violet); }
 details.table-view summary { cursor: pointer; font-size: 13px; color: var(--ink-2); margin: 6px 0; }
+
+/* Feature flow (#224) */
+.sankey-scroll { overflow-x: auto; }
+svg.sankey { width: 100%; min-width: 640px; height: auto; display: block; }
+svg.sankey .ribbon { fill: color-mix(in srgb, var(--violet) 22%, transparent); }
+svg.sankey .ribbon.drop { fill: color-mix(in srgb, var(--bad) 18%, transparent); }
+svg.sankey .ribbon:hover { fill: color-mix(in srgb, var(--violet) 45%, transparent); }
+svg.sankey .node { fill: var(--violet); }
+svg.sankey .node.ok { fill: var(--good); }
+svg.sankey .node.exit { fill: var(--bad); }
+svg.sankey .slabel { font-size: 12px; fill: var(--ink); paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }

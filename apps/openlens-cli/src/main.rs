@@ -138,6 +138,18 @@ enum Command {
         #[command(subcommand)]
         action: FlagsCmd,
     },
+    /// How sessions move between features (Sankey data, last 30 days).
+    Flows {
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+        /// Start at this feature.
+        #[arg(long)]
+        from: Option<String>,
+        /// Only sessions that reached a success event.
+        #[arg(long)]
+        to_success: bool,
+    },
     /// Comments pinned to moments of a replay: list them, or add one with
     /// --at and --add.
     Comments {
@@ -661,6 +673,26 @@ fn run(cli: Cli) -> Result<bool, String> {
                 &json!({ "rows": rows, "file": path.display().to_string(), "days_truncated": truncated }),
             );
             Ok(true)
+        }
+        Command::Flows {
+            project,
+            from,
+            to_success,
+        } => {
+            let mut q = Vec::new();
+            if let Some(f) = from {
+                q.push(format!("from={}", f.replace(['&', '#', ' '], "")));
+            }
+            if *to_success {
+                q.push("to=success".to_owned());
+            }
+            let (status, v) = client()?.call(
+                "GET",
+                &format!("/api/projects/{project}/flows?{}", q.join("&")),
+                None,
+            )?;
+            out(&v);
+            Ok(status == 200)
         }
         Command::Comments {
             project,

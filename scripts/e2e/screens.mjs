@@ -12,7 +12,7 @@ const axePath = createRequire(import.meta.url).resolve("axe-core/axe.min.js");
 
 const [server, token, out] = process.argv.slice(2);
 mkdirSync(out, { recursive: true });
-const pages = ["", "/events", "/pages", "/errors", "/replays", "/flags", "/surveys", "/digest"];
+const pages = ["", "/events", "/pages", "/errors", "/replays", "/flags", "/surveys", "/digest", "/audience", "/flows", "/features", "/settings", "/breakdown?by=role"];
 // Pages outside a project (the owner is an admin, so /users is allowed).
 const global = ["/projects", "/users", "/welcome"];
 
@@ -39,7 +39,7 @@ for (const theme of ["light", "dark"]) {
     if (p === "" && heat === 0) problems.push(`${url}: roles × features cells have no heat class`);
     const spriteHeight = await tab.evaluate(() => document.querySelector("svg.sprite")?.getBoundingClientRect().height ?? 0);
     if (spriteHeight > 0) problems.push(`${url}: icon sprite is visible`);
-    const name = (p || "/board").slice(1).replace(/\//g, "-");
+    const name = (p || "/board").slice(1).replace(/[\/?=]/g, "-");
     await tab.screenshot({ path: `${out}/${name}-${theme}.png`, fullPage: true });
   }
 }

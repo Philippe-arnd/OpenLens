@@ -298,3 +298,124 @@ pub(crate) async fn audience(
         ),
     }
 }
+
+#[derive(Deserialize)]
+pub(crate) struct FlowParams {
+    #[serde(flatten)]
+    f: FilterQuery,
+    from: Option<String>,
+    to: Option<String>,
+}
+
+fn flow_query(q: &FlowParams) -> openlens_engine::FlowQuery {
+    openlens_engine::FlowQuery {
+        from: q.from.clone().filter(|s| !s.trim().is_empty()),
+        to_success: q.to.as_deref() == Some("success"),
+    }
+}
+
+/// `GET /p/{id}/flows[?from=<feature>|to=success]` (#224).
+pub(crate) async fn flows(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    axum::extract::RawQuery(raw): axum::extract::RawQuery,
+) -> Response {
+    if !auth::has_session(&state, &headers) {
+        return Redirect::to("/login").into_response();
+    }
+    let Some(p) = project(&state, &id).await else {
+        return not_found("No such project.");
+    };
+    let Ok(q) = serde_urlencoded::from_str::<FlowParams>(&raw.unwrap_or_default()) else {
+        return not_found("Unreadable filters.");
+    };
+    let f = q.f.filters(&auth::tz_for(&state, &headers, &p.timezone));
+    let fq = flow_query(&q);
+    let map = crate::load_map(&state, &p.id).await;
+    let (b, flow) = tokio::join!(
+        openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
+        openlens_engine::flows(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f, &fq)
+    );
+    let features: Vec<(String, String)> = map
+        .as_ref()
+        .map(|(m, _)| {
+            m.features
+                .iter()
+                .map(|x| (x.key.clone(), x.name.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let info = openlens_ui::ProjectInfo {
+        id: &p.id,
+        name: &p.name,
+        key: &p.api_key,
+    };
+    match (b, flow) {
+        (Ok(b), Ok(flow)) => html_page(
+            StatusCode::OK,
+            openlens_ui::flows(
+                &info,
+                &b,
+                &f,
+                &flow,
+                &features,
+                fq.from.as_deref(),
+                fq.to_success,
+            ),
+        ),
+        (Err(e), _) | (_, Err(e)) => html_page(
+            StatusCode::BAD_REQUEST,
+            openlens_ui::message("Can't show that", &e.to_string()),
+        ),
+    }
+}
+
+/// `GET /api/projects/{id}/flows[?from=&to=success]` (bearer): the same
+/// flow as JSON, for the CLI and agents.
+pub(crate) async fn api_flows(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    axum::extract::RawQuery(raw): axum::extract::RawQuery,
+) -> Response {
+    if !auth::has_bearer(&state, &headers) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            axum::Json(serde_json::json!({"error": "admin bearer token required"})),
+        )
+            .into_response();
+    }
+    let Some(p) = project(&state, &id).await else {
+        return (
+            StatusCode::NOT_FOUND,
+            axum::Json(serde_json::json!({"error": "unknown project"})),
+        )
+            .into_response();
+    };
+    let Ok(q) = serde_urlencoded::from_str::<FlowParams>(&raw.unwrap_or_default()) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({"error": "bad query"})),
+        )
+            .into_response();
+    };
+    let f = q.f.filters(&p.timezone);
+    let map = crate::load_map(&state, &p.id).await;
+    match openlens_engine::flows(
+        &state.query,
+        &p.id,
+        map.as_ref().map(|(m, _)| m),
+        &f,
+        &flow_query(&q),
+    )
+    .await
+    {
+        Ok(flow) => axum::Json(flow).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
+}

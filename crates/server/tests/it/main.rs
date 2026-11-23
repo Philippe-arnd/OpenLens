@@ -2270,3 +2270,32 @@ async fn page_views_get_device_browser_and_os_but_never_the_address() {
     let page = body_text(get(&h, "/p/default/audience", Some(&owner), false).await).await;
     assert!(page.contains("phone") && page.contains("Safari") && !page.contains(" style="));
 }
+
+#[tokio::test]
+async fn the_feature_flow_page_and_api() {
+    let h = harness();
+    let body = serde_json::json!({
+        "key": h.key,
+        "batch": [
+            {"event": "$pageview", "distinct_id": "u1", "session_id": "s1", "properties": {"$pathname": "/", "$feature": "search"}},
+            {"event": "click", "distinct_id": "u1", "session_id": "s1", "properties": {"$feature": "cart"}}
+        ]
+    })
+    .to_string();
+    let (status, _) = post(&h, "/capture", body.into_bytes(), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let owner = login_cookie(&h).await;
+    for u in [
+        "/p/default/flows",
+        "/p/default/flows?to=success",
+        "/p/default/flows?from=cart",
+    ] {
+        let r = get(&h, u, Some(&owner), false).await;
+        assert_eq!(r.status(), StatusCode::OK, "{u}");
+        assert!(!body_text(r).await.contains(" style="));
+    }
+    let api = body_text(get(&h, "/api/projects/default/flows", None, true).await).await;
+    let v: serde_json::Value = serde_json::from_str(&api).unwrap();
+    assert!(v["sessions"].as_i64().unwrap() <= 1, "{api}");
+}

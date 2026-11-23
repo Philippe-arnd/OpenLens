@@ -159,6 +159,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                                     ("/flags", "flag", "Flags"),
                                     ("/surveys", "idea", "Surveys"),
                                     ("/audience", "globe", "Audience"),
+                                    ("/flows", "funnel", "Feature flow"),
                                     ("/features", "route", "Feature map"),
                                     ("/digest", "mail", "Digest"),
                                     ("/settings", "gear", "Settings"),
@@ -1494,6 +1495,142 @@ pub fn audience(
                 (list("Systems", "layers", &a.os, Some("os")))
                 (list("Languages", "idea", &a.languages, None))
                 (list("Screens", "board", &a.screens, None))
+            }
+        },
+    )
+}
+
+/// Feature flow (#224): a Sankey of how sessions move between features,
+/// drawn in SVG on the server, with a table view.
+pub fn flows(
+    p: &ProjectInfo<'_>,
+    b: &Board,
+    f: &Filters,
+    flow: &openlens_engine::Flow,
+    features: &[(String, String)],
+    from: Option<&str>,
+    to_success: bool,
+) -> Markup {
+    use openlens_engine::flows::{EXIT, SUCCESS};
+    let label = |k: &str| -> String {
+        features
+            .iter()
+            .find(|(key, _)| key == k)
+            .map_or_else(|| k.to_owned(), |(_, n)| n.clone())
+    };
+    let cols = flow.steps.len().max(1);
+    let (w, h, nw, gap) = (1000.0_f64, 440.0_f64, 12.0_f64, 10.0_f64);
+    let total = flow
+        .steps
+        .iter()
+        .map(|c| c.iter().map(|n| n.1).sum::<i64>())
+        .max()
+        .unwrap_or(1)
+        .max(1) as f64;
+    let scale = |col: &Vec<(String, i64)>| (h - gap * (col.len().saturating_sub(1)) as f64) / total;
+    let k = flow.steps.iter().map(scale).fold(f64::INFINITY, f64::min);
+    let x = |i: usize| {
+        if cols == 1 {
+            0.0
+        } else {
+            i as f64 * (w - nw - 150.0) / (cols - 1) as f64
+        }
+    };
+    // Node boxes: (step, name) → (y, height).
+    let mut boxes: std::collections::HashMap<(usize, String), (f64, f64)> =
+        std::collections::HashMap::new();
+    for (i, col) in flow.steps.iter().enumerate() {
+        let mut y = 0.0;
+        for (n, c) in col {
+            let hh = (*c as f64 * k).max(2.0);
+            boxes.insert((i, n.clone()), (y, hh));
+            y += hh + gap;
+        }
+    }
+    let mut out_off: std::collections::HashMap<(usize, String), f64> =
+        std::collections::HashMap::new();
+    let mut in_off: std::collections::HashMap<(usize, String), f64> =
+        std::collections::HashMap::new();
+    let mut ribbons: Vec<(String, String, String, i64, bool)> = Vec::new();
+    for l in &flow.links {
+        let (Some(a), Some(bx)) = (
+            boxes.get(&(l.step, l.from.clone())),
+            boxes.get(&(l.step + 1, l.to.clone())),
+        ) else {
+            continue;
+        };
+        let th = (l.sessions as f64 * k).max(1.0);
+        let oa = out_off.entry((l.step, l.from.clone())).or_insert(0.0);
+        let ob = in_off.entry((l.step + 1, l.to.clone())).or_insert(0.0);
+        let (x0, x1) = (x(l.step) + nw, x(l.step + 1));
+        let (y0, y1) = (a.0 + *oa, bx.0 + *ob);
+        *oa += th;
+        *ob += th;
+        let xm = (x0 + x1) / 2.0;
+        let d = format!(
+            "M{x0:.1} {y0:.1}C{xm:.1} {y0:.1} {xm:.1} {y1:.1} {x1:.1} {y1:.1}L{x1:.1} {:.1}C{xm:.1} {:.1} {xm:.1} {:.1} {x0:.1} {:.1}Z",
+            y1 + th,
+            y1 + th,
+            y0 + th,
+            y0 + th
+        );
+        ribbons.push((d, l.from.clone(), l.to.clone(), l.sessions, l.to == EXIT));
+    }
+    let base = format!("/p/{}/flows", p.id);
+    layout(
+        "Feature flow",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "Feature flow" }
+                p.muted { "How sessions move between features, last 30 days, " strong { (f.environment) } ": "
+                    (compact(flow.sessions)) " sessions, " (compact(flow.succeeded)) " reached a success event. Repeats are merged; 5 steps at most; the 8 widest per step, the rest is Other." }
+            } }
+            nav.tabs aria-label="View" {
+                a href=(base) aria-current=[(from.is_none() && !to_success).then_some("page")] { "From the start" }
+                a href={ (base) "?to=success" } aria-current=[to_success.then_some("page")] { "Paths to success" }
+            }
+            form.filters method="get" action=(base) aria-label="After a feature" {
+                label { "After the feature "
+                    select name="from" {
+                        option value="" { "—" }
+                        @for (k, n) in features { option value=(k) selected[from == Some(k.as_str())] { (n) } }
+                    }
+                }
+                input type="hidden" name="env" value=(f.environment);
+                button type="submit" { "Show" }
+            }
+            (filter_bar(p.id, b, f, "/flows"))
+            section.card.wide {
+                @if flow.sessions == 0 { p.muted { "No session used a feature in this window. Features come from the feature map and " code { "data-feature" } "." } }
+                @else {
+                    div.sankey-scroll {
+                        svg.sankey viewBox={ "-2 -2 " (w + 4.0) " " (h + 4.0) } role="img" aria-label="Feature flow (the table below has the numbers)" {
+                            @for (d, a, bn, n, drop) in &ribbons {
+                                path class=(if *drop { "ribbon drop" } else { "ribbon" }) d=(d) { title { (label(a)) " → " (label(bn)) ": " (compact(*n)) " sessions" } }
+                            }
+                            @for (i, col) in flow.steps.iter().enumerate() {
+                                @for (n, c) in col {
+                                    @let (y, hh) = boxes.get(&(i, n.clone())).copied().unwrap_or((0.0, 0.0));
+                                    @let cls = if n == SUCCESS { "node ok" } else if n == EXIT { "node exit" } else { "node" };
+                                    rect class=(cls) x=(format!("{:.1}", x(i))) y=(format!("{y:.1}")) width=(nw) height=(format!("{hh:.1}")) rx="2" { title { (label(n)) ": " (compact(*c)) } }
+                                    @if hh >= 11.0 {
+                                        text.slabel x=(format!("{:.1}", x(i) + nw + 5.0)) y=(format!("{:.1}", y + hh / 2.0 + 4.0)) { (label(n)) " · " (compact(*c)) }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    details.table-view {
+                        summary { "As a table" }
+                        table.plain {
+                            thead { tr { th.num { "Step" } th { "From" } th { "To" } th.num { "Sessions" } } }
+                            tbody { @for l in &flow.links {
+                                tr { td.num { (l.step + 1) } td { (label(&l.from)) } td { @if l.to == EXIT { span.status.bad { "exit" } } @else { (label(&l.to)) } } td.num { (compact(l.sessions)) } }
+                            } }
+                        }
+                    }
+                }
             }
         },
     )

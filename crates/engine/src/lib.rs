@@ -14,12 +14,14 @@ use serde_json::{Map, Value};
 
 mod digest;
 mod errors;
+pub mod flows;
 mod insights;
 mod pages;
 pub mod stats;
 mod tasks;
 pub use digest::{Delta, Digest, digest, digest_markdown};
 pub use errors::{ErrorGroup, error_groups};
+pub use flows::{Flow, FlowLink, FlowQuery, flows};
 pub use insights::{CohortStats, FlagCohort, Funnel, FunnelStep, Insight, Journey, Readiness};
 pub use pages::{
     ClickMap, Hotspot, MAP_COLUMNS, MAP_ROW, PageStats, SurveyResults, click_map, pages,
