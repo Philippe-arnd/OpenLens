@@ -32,6 +32,7 @@ fn harness() -> Harness {
         data_dir: dir.path().to_path_buf(),
         admin_token: "adm_test".into(),
         boards: Default::default(),
+        flushing: Default::default(),
     };
     Harness {
         _dir: dir,

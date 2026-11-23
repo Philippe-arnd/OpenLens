@@ -155,6 +155,8 @@ pub struct Writer {
     wal_seq: u64,
     buffer: Vec<Event>,
     oldest: Option<Instant>,
+    /// WAL files of a [`Pending`] whose write failed: removed by the next one.
+    stale_wals: Vec<PathBuf>,
 }
 
 impl Writer {
@@ -208,6 +210,7 @@ impl Writer {
                 wal_seq,
                 buffer: Vec::new(),
                 oldest: None,
+                stale_wals: Vec::new(),
             },
             count,
         ))
@@ -251,23 +254,72 @@ impl Writer {
     /// Write buffered events to Parquet and start a fresh WAL. Returns the
     /// number of events flushed.
     pub fn flush(&mut self) -> Result<usize> {
-        if self.buffer.is_empty() {
+        let Some(pending) = self.take()? else {
             return Ok(0);
+        };
+        pending
+            .write()
+            .inspect_err(|_| self.restore(pending.clone()))
+    }
+
+    /// Give back the events of a [`Pending`] whose write failed, so the next
+    /// flush tries again (and removes its WAL then).
+    pub fn restore(&mut self, pending: Pending) {
+        let mut events = pending.events;
+        events.append(&mut self.buffer);
+        self.buffer = events;
+        self.oldest.get_or_insert_with(Instant::now);
+        self.stale_wals.extend(pending.old_wals);
+    }
+
+    /// The first half of a flush, cheap enough to hold the writer's lock
+    /// for (#293): take the buffered events and start a fresh WAL. Appends
+    /// can go on while [`Pending::write`] turns them into Parquet. If the
+    /// process dies in between, the old WAL is still there and is replayed
+    /// at the next start.
+    pub fn take(&mut self) -> Result<Option<Pending>> {
+        if self.buffer.is_empty() {
+            return Ok(None);
         }
-        write_segments(&self.root, &self.buffer)?;
-        let n = self.buffer.len();
-        self.buffer.clear();
-        self.oldest = None;
-        // Segments are durable: the WAL that covered them can go.
-        let old = self.wal_path.clone();
-        self.wal_seq += 1;
         let wal_dir = self.root.join("wal");
-        let (wal, path) = open_wal(&wal_dir, self.wal_seq)?;
+        let (wal, path) = open_wal(&wal_dir, self.wal_seq + 1)?;
+        self.wal_seq += 1;
+        let mut old_wals = std::mem::take(&mut self.stale_wals);
+        old_wals.push(std::mem::replace(&mut self.wal_path, path));
         self.wal = wal;
-        self.wal_path = path;
-        fs::remove_file(old)?;
-        sync_dir(&wal_dir)?;
-        Ok(n)
+        self.oldest = None;
+        Ok(Some(Pending {
+            root: self.root.clone(),
+            events: std::mem::take(&mut self.buffer),
+            old_wals,
+        }))
+    }
+}
+
+/// Events taken by [`Writer::take`], not yet in Parquet.
+#[derive(Clone)]
+pub struct Pending {
+    root: PathBuf,
+    events: Vec<Event>,
+    old_wals: Vec<PathBuf>,
+}
+
+impl Pending {
+    /// Write the segments, then remove the WAL that covered them. Returns
+    /// the number of events written. On error the WAL stays: hand the
+    /// events back with [`Writer::restore`].
+    pub fn write(&self) -> Result<usize> {
+        write_segments(&self.root, &self.events)?;
+        // Segments are durable: the WAL that covered them can go.
+        for wal in &self.old_wals {
+            match fs::remove_file(wal) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        sync_dir(&self.root.join("wal"))?;
+        Ok(self.events.len())
     }
 }
 
