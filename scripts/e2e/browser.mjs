@@ -76,9 +76,9 @@ await tab.click("#share-btn");
 await tab.click("#like-btn");
 // and a form inside it: typing then Enter submits it.
 await tab.fill("#invite-email", "x@example.com");
-await tab.press("#invite-email", "Enter");
 // Leaving the field sends a `$field` event (#232): name and time, never the value.
 await tab.locator("#invite-email").blur();
+await tab.press("#invite-email", "Enter");
 await tab.evaluate(() => { setTimeout(() => { throw new Error("e2e boom"); }, 0); });
 await tab.waitForTimeout(200);
 await tab.evaluate(() => openlens.flush());
