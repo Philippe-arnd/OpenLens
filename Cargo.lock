@@ -2505,6 +2505,7 @@ dependencies = [
  "openlens-ui",
  "rand",
  "ring",
+ "rustls",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -2517,6 +2518,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "ureq",
+ "webpki-roots",
 ]
 
 [[package]]

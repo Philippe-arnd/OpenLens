@@ -297,6 +297,10 @@ pub struct Board {
     pub role_features: Vec<(String, String, i64)>,
     /// Latest releases, newest first.
     pub releases: Vec<ReleaseRow>,
+    /// Set by the server when the app is down right now (#266): what and
+    /// since when, for a banner at the top of the board.
+    #[serde(skip)]
+    pub app_down: Option<String>,
     /// Environments seen.
     pub environments: Vec<String>,
     /// Raw role values no rule of the feature map matches, with user counts.

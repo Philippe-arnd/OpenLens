@@ -531,6 +531,24 @@ async fn board(
         openlens_engine::revenue(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f)
     );
     let revenue = revenue.ok().flatten();
+    let mut board = board;
+    if let Ok(b) = board.as_mut() {
+        let st = crate::alerts::status(&state, &p.id);
+        if st.state == "down" {
+            b.app_down = st.open.first().map(|(rule, since, _)| {
+                let when = chrono::DateTime::from_timestamp(*since, 0)
+                    .map_or_else(String::new, |t| t.format("%Y-%m-%d %H:%M UTC").to_string());
+                format!(
+                    "{} since {when}",
+                    if rule == "traffic" {
+                        "No traffic"
+                    } else {
+                        "The app is down"
+                    }
+                )
+            });
+        }
+    }
     let releases: Vec<(String, String)> = board
         .as_ref()
         .map(|b| {
