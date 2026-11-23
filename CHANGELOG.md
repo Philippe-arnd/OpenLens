@@ -6,6 +6,11 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Added
 
+- **Release process, part 2** (#258):
+  - **Notes draft:** a Monday PR adds a draft of `docs/releases/vX.Y.Z.md` in the house template, built from the CHANGELOG. Merge it before the train to publish it as the notes.
+  - **Screenshots PR:** lists the images that changed, with before and after links. Changes under 0.5% of pixels are ignored.
+  - **Release summary:** an hour after the train tags, a table checks the GitHub release, the publish, image and chart runs, the image on GHCR, the site, and the reference instance (when the `OPENLENS_PROD_URL` variable is set).
+  - **`GET /version`:** a new public endpoint returns the running version. `/healthz` stays a bare `ok`.
 - **Churn, part 2** (#269): the churn page now shows why users leave and who came back.
   - **Top reasons:** a ranked list, each reason with its numbers:
     - features that users who stay tried in their first 14 days (only users old enough to have had those 14 days count, so a longer life does not bias it);

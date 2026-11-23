@@ -45,6 +45,36 @@ jobs:
           node scripts/e2e/readme-shots.mjs http://localhost:8687 adm_ci $RUNNER_TEMP/shots
           if command -v oxipng > /dev/null; then oxipng -q -o 3 --strip safe $RUNNER_TEMP/shots/*.png; fi
           cp $RUNNER_TEMP/shots/*.png docs/img/
+      - name: visual diff
+        id: diff
+        run: |
+          set -euo pipefail
+          # Changed images against main (#258): ImageMagick counts the
+          # pixels that differ beyond a 2% colour fuzz; above 0.5% of the
+          # image, it is listed (dates and counts on demo data move a few
+          # pixels every run).
+          sudo apt-get install -y -qq imagemagick > /dev/null 2>&1 || true
+          table="$RUNNER_TEMP/diff.md"
+          : > "$table"
+          for f in docs/img/*.png; do
+            name=$(basename "$f")
+            if ! git cat-file -e "HEAD:$f" 2>/dev/null; then
+              echo "| \`$name\` | new" >> "$table"; continue
+            fi
+            git show "HEAD:$f" > "$RUNNER_TEMP/old-$name"
+            px=$(identify -format '%[fx:w*h]' "$f")
+            ae=$(compare -metric AE -fuzz 2% "$RUNNER_TEMP/old-$name" "$f" null: 2>&1 || true)
+            ae=${ae%% *}
+            case "$ae" in ''|*[!0-9.e+]*) ae=$px ;; esac
+            share=$(awk -v a="$ae" -v p="$px" 'BEGIN { printf "%.2f", 100 * a / (p > 0 ? p : 1) }')
+            if awk -v s="$share" 'BEGIN { exit !(s > 0.5) }'; then
+              echo "| \`$name\` | $share% of pixels" >> "$table"
+            else
+              git checkout -q -- "$f"   # noise only: keep the old image
+            fi
+          done
+          echo "rows=$(wc -l < "$table")" >> "$GITHUB_OUTPUT"
+          { echo "### Screenshots that changed"; echo; echo "| Image | Changed |"; echo "|---|---|"; sed 's/$/ |/' "$table"; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
         with:
           name: readme-shots
@@ -64,8 +94,19 @@ jobs:
           git add docs/img
           git commit -qm "Screenshots of $TAG"
           git push -q origin "$branch"
-          if url=$(gh pr create --base main --head "$branch" --title "Screenshots of $TAG" \
-                --body "README and site images regenerated from $TAG on demo data (\`scripts/e2e/readme-shots.mjs\`). The full set is the \`readme-shots\` artifact."); then
+          repo="https://github.com/$GITHUB_REPOSITORY"
+          old=$(git rev-parse HEAD~1); new=$(git rev-parse HEAD)
+          body="README and site images regenerated from $TAG on demo data (\`scripts/e2e/readme-shots.mjs\`). The full set is the \`readme-shots\` artifact.
+
+          | Image | Changed | Before → after |
+          |---|---|---|"
+          while IFS= read -r row; do
+            name=$(sed -E 's/^\| `([^`]+)`.*/\1/' <<< "$row")
+            body="$body
+          $row | [before]($repo/blob/$old/docs/img/$name?raw=1) → [after]($repo/blob/$new/docs/img/$name?raw=1) |"
+          done < "$RUNNER_TEMP/diff.md"
+          body=$(sed 's/^          //' <<< "$body")
+          if url=$(gh pr create --base main --head "$branch" --title "Screenshots of $TAG" --body "$body"); then
             # A merge made with this token starts no workflow: rebuild Pages.
             gh pr merge "$url" --merge --delete-branch && gh workflow run pages.yml \
               || echo "::warning::$url waits for a merge"

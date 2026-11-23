@@ -31,6 +31,7 @@ Open (or label) an issue with `release-hold` and say why. Remove the label to le
 - Patch release: the CHANGELOG section is the notes. Nothing to write.
 - Minor or major: add `docs/releases/vX.Y.Z.md` in a PR before Tuesday, in the house style of the existing files there: a one-sentence promise in bold, *Upgrade now if…* when a bug fix matters, Highlights (bullets, one idea each), *Changes in behaviour*, *Install or upgrade*, *Known limitations*. Plain words, short sentences, no marketing superlatives, no analytics vendor names (clean room).
 - Every merged change already adds its line under `[Unreleased]`; the notes regroup those lines, they do not invent new claims.
+- A draft arrives by itself on Monday (`release-notes.yml`, PR "Release notes for vX.Y.Z (draft)"): edit that PR rather than starting from nothing. `scripts/release/draft-notes.sh X.Y.Z` prints the same draft locally.
 
 ## Hotfix on an older minor
 1. `git checkout -b release/X.Y vX.Y.Z` (the last tag of that minor), cherry-pick the fix, set the version to `X.Y.(Z+1)` in `Cargo.toml` and the SDK manifests, add a CHANGELOG section.
@@ -43,7 +44,7 @@ Open (or label) an issue with `release-hold` and say why. Remove the label to le
 - the Pages site shows `vX.Y.Z`;
 - the screenshots PR merged (or says the images did not change);
 - `main` is on the next minor (`Cargo.toml`) and the CHANGELOG names the version.
-Check with `gh release view vX.Y.Z` and `gh run list --limit 15`. Report what is missing instead of calling it done.
+Check with `scripts/release/summary.sh vX.Y.Z` (the train also runs it an hour after tagging, as `release-summary.yml`): every row ✅, or say which is not. Report what is missing instead of calling it done.
 
 ## Roll back
 - Running installs follow `:X.Y` or `:latest`: point them back at the previous tag (`vX.Y.(Z-1)`); the data is compatible both ways within a minor (the upgrade check proves it), and the first start of a new version left a copy in `backups/upgrade/`.

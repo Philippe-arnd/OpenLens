@@ -47,7 +47,11 @@ It then:
 2. starts the publish, image and chart workflows;
 3. opens a PR that moves `[Unreleased]` under the version and the date and sets `main` to the next minor version, and merges it. If the workflow token may not open PRs (Settings → Actions → *Allow GitHub Actions to create pull requests*), it opens a `release-hold` issue instead, and the branch waits to be merged by hand.
 
-Run it by hand from the Actions tab: `dry_run` (on by default) only reports what it would do. After a stable release, **`screenshots.yml`** retakes the README and site images on demo data (`scripts/e2e/readme-shots.mjs`, 1440×900 ×2 and a phone, optimised with oxipng) and opens a PR with them, which merges itself and rebuilds Pages. Run it by hand to refresh them now. A minor or major release can add `docs/releases/vX.Y.Z.md` before Tuesday, and its notes are used.
+Run it by hand from the Actions tab: `dry_run` (on by default) only reports what it would do. After a stable release, **`screenshots.yml`** retakes the README and site images on demo data (`scripts/e2e/readme-shots.mjs`, 1440×900 ×2 and a phone, optimised with oxipng) and opens a PR with them, which merges itself and rebuilds Pages. Run it by hand to refresh them now. The screenshots PR lists the images that changed (more than 0.5% of pixels beyond a 2% colour fuzz, so moving dates and counts on demo data are ignored), with links to the image before and after.
+
+**Notes draft** (`release-notes.yml`, Mondays 15:43 UTC): when the next version has no `docs/releases/vX.Y.Z.md` and `[Unreleased]` has entries, a PR adds a draft in the house template, made from the CHANGELOG (`scripts/release/draft-notes.sh`, no LLM). It does not merge itself: reword the highlights, then merge before Tuesday and the train publishes it as the notes. Without it, the notes come from the CHANGELOG.
+
+**Release summary** (`release-summary.yml`): an hour after tagging, the train starts a check of every part of the release (`scripts/release/summary.sh`): the GitHub release and its assets, the publish, image and chart runs, the image on GHCR, the site naming the version, and the reference instance's `GET /version` when the `OPENLENS_PROD_URL` repository variable is set. It is the run summary, and a comment on the release PR. Run it by hand with any tag.
 
 **A release (vX.Y.Z):** (by hand, for a hotfix or when the train is held)
 1. In a PR:

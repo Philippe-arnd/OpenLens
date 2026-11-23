@@ -76,6 +76,7 @@ pub fn router(state: AppState) -> Router {
         .layer(CorsLayer::permissive());
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/version", get(version))
         .route("/c.js", get(sdk))
         .route("/r.js", get(recorder))
         .route("/s.js", get(survey_widget))
@@ -163,6 +164,18 @@ async fn agents_guide() -> impl axum::response::IntoResponse {
 /// Liveness probe used by the container healthcheck.
 async fn healthz() -> &'static str {
     "ok"
+}
+
+/// `GET /version` (#258): the running version, public, so a release can
+/// check that an instance was redeployed (`/healthz` stays a bare `ok`).
+async fn version() -> impl axum::response::IntoResponse {
+    (
+        [
+            ("cache-control", "no-store"),
+            ("access-control-allow-origin", "*"),
+        ],
+        axum::Json(serde_json::json!({ "version": env!("CARGO_PKG_VERSION") })),
+    )
 }
 
 /// `vX.Y.Z` as numbers; pre-releases and other tags are ignored.

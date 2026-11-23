@@ -1,0 +1,58 @@
+name: Release notes draft
+
+# Monday afternoon (#258), after the morning's dependency updates: when the
+# next release (the version in Cargo.toml) has no docs/releases/vX.Y.Z.md
+# yet and [Unreleased] has entries, open a PR with a draft in the house
+# template (scripts/release/draft-notes.sh). It does not merge itself:
+# edit it, merge it before Tuesday's train, and its text is the release
+# notes. Unmerged, the train uses the CHANGELOG as before.
+on:
+  schedule:
+    - cron: "43 15 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print the draft, open nothing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-notes
+  cancel-in-progress: false
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          v=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          file="docs/releases/v$v.md"
+          skip() { echo "::notice::no draft: $1"; exit 0; }
+          [ -f "$file" ] && skip "$file exists"
+          awk '/^## \[Unreleased\]/{f=1;next} /^## \[/{f=0} f' CHANGELOG.md | grep -q '^- ' || skip "nothing under [Unreleased]"
+          branch="release/notes-v$v"
+          git ls-remote --exit-code --heads origin "$branch" > /dev/null && skip "$branch is already open"
+          scripts/release/draft-notes.sh "$v" > "$file"
+          { echo "### Draft of $file"; echo; cat "$file"; } >> "$GITHUB_STEP_SUMMARY"
+          [ "$DRY" = true ] && skip "dry run"
+          git config user.name "openlens-release-train"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -q -b "$branch"
+          git add "$file"
+          git commit -qm "Release notes draft for v$v"
+          git push -q origin "$branch"
+          gh pr create --base main --head "$branch" --title "Release notes for v$v (draft)" \
+            --body "A draft of the notes of v$v from the CHANGELOG. Edit the highlights in your words, add what users must know before upgrading, then merge before Tuesday 06:17 UTC: the release train publishes this file as the notes." \
+            || echo "::warning::could not open the PR (Settings → Actions → allow GitHub Actions to create pull requests); the draft is on $branch"
