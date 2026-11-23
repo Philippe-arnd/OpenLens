@@ -661,12 +661,6 @@ pub(crate) async fn create(
     Path(id): Path<String>,
     Form(f): Form<Finding>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return html_page(
-            StatusCode::FORBIDDEN,
-            openlens_ui::message("Refused", "Cross-site form."),
-        );
-    }
     let Some(p) = project(&state, &id).await else {
         return html_page(
             StatusCode::NOT_FOUND,
@@ -754,12 +748,6 @@ pub(crate) async fn target(
     Path(id): Path<String>,
     Form(f): Form<TargetForm>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return html_page(
-            StatusCode::FORBIDDEN,
-            openlens_ui::message("Refused", "Cross-site form."),
-        );
-    }
     let repo = f
         .repo
         .trim()

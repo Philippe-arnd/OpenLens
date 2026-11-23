@@ -186,12 +186,6 @@ pub(crate) async fn sql_run(
     Path(id): Path<String>,
     Form(f): Form<SqlForm>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return html_page(
-            StatusCode::FORBIDDEN,
-            openlens_ui::message("Refused", "Cross-site form."),
-        );
-    }
     if let Some(r) = admin_only(&state, &headers) {
         return r;
     }
@@ -631,12 +625,6 @@ pub(crate) async fn make_audience(
     Path(id): Path<String>,
     axum::extract::Form(form): axum::extract::Form<AudienceForm>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return html_page(
-            StatusCode::FORBIDDEN,
-            openlens_ui::message("Refused", "Cross-site form."),
-        );
-    }
     let Some(p) = project(&state, &id).await else {
         return not_found("No such project.");
     };

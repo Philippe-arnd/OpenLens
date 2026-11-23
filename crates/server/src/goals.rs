@@ -483,9 +483,6 @@ pub(crate) async fn create(
             openlens_ui::message("Can't set that goal", m),
         )
     };
-    if !crate::flags::same_origin(&headers) {
-        return oops("Cross-site form.");
-    }
     let Some(p) = project(&state, &id).await else {
         return oops("No such project.");
     };
@@ -558,9 +555,6 @@ pub(crate) async fn create_objective(
             openlens_ui::message("Can't set that objective", m),
         )
     };
-    if !crate::flags::same_origin(&headers) {
-        return oops("Cross-site form.");
-    }
     let Some(p) = project(&state, &id).await else {
         return oops("No such project.");
     };
@@ -612,12 +606,6 @@ pub(crate) async fn delete_objective(
     headers: HeaderMap,
     Path((id, oid)): Path<(String, String)>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return html_page(
-            StatusCode::FORBIDDEN,
-            openlens_ui::message("Refused", "Cross-site form."),
-        );
-    }
     let mut all = load_objectives(&state.meta, &id);
     all.retain(|o| o.id != oid);
     let _ = save_objectives(&state.meta, &id, &all);
@@ -631,12 +619,6 @@ pub(crate) async fn delete(
     headers: HeaderMap,
     Path((id, gid)): Path<(String, String)>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return html_page(
-            StatusCode::FORBIDDEN,
-            openlens_ui::message("Refused", "Cross-site form."),
-        );
-    }
     let mut all = load(&state.meta, &id);
     all.retain(|g| g.id != gid);
     let _ = save(&state.meta, &id, &all);

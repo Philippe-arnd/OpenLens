@@ -149,12 +149,6 @@ pub(crate) async fn forget(
     Path((project, who)): Path<(String, String)>,
     Form(f): Form<ConfirmForm>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return html_page(
-            StatusCode::FORBIDDEN,
-            openlens_ui::message("Refused", "Cross-site form."),
-        );
-    }
     if let Some(r) = admin(&state, &headers) {
         return r;
     }

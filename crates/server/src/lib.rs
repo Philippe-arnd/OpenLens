@@ -14,6 +14,7 @@ pub mod boards;
 mod capture;
 mod comments;
 mod cookieless;
+mod csrf;
 mod digest;
 mod explore;
 mod features;
@@ -98,6 +99,7 @@ pub fn router(state: AppState) -> Router {
         .merge(surveys::routes())
         .merge(replay::routes())
         .merge(web::routes())
+        .layer(axum::middleware::from_fn(csrf::layer))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             web::access_layer,

@@ -175,12 +175,6 @@ pub(crate) async fn add(
     Path(id): Path<String>,
     Form(f): Form<NoteForm>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return html_page(
-            StatusCode::FORBIDDEN,
-            openlens_ui::message("Refused", "Cross-site form."),
-        );
-    }
     let Some(v) = auth::viewer(&state, &headers) else {
         return Redirect::to("/login").into_response();
     };
@@ -202,12 +196,6 @@ pub(crate) async fn delete(
     headers: HeaderMap,
     Path((id, nid)): Path<(String, i64)>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return html_page(
-            StatusCode::FORBIDDEN,
-            openlens_ui::message("Refused", "Cross-site form."),
-        );
-    }
     let Some(v) = auth::viewer(&state, &headers) else {
         return Redirect::to("/login").into_response();
     };

@@ -73,9 +73,6 @@ pub(crate) async fn create(
             openlens_ui::message("Can't make that link", m),
         )
     };
-    if !crate::flags::same_origin(&headers) {
-        return oops("Cross-site form.");
-    }
     let embed = match origins(&f.embed) {
         Ok(e) => e,
         Err(e) => return oops(&e),
@@ -130,12 +127,6 @@ pub(crate) async fn revoke(
     headers: HeaderMap,
     Path((id, lid)): Path<(String, String)>,
 ) -> Response {
-    if !crate::flags::same_origin(&headers) {
-        return html_page(
-            StatusCode::FORBIDDEN,
-            openlens_ui::message("Refused", "Cross-site form."),
-        );
-    }
     let _ = state.meta.revoke_share_link(&id, &lid);
     if let Ok(mut c) = CACHE.lock() {
         *c = None;
