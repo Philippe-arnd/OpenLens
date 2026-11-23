@@ -1694,6 +1694,9 @@ pub fn live(p: &ProjectInfo<'_>, f: &Filters, l: &openlens_engine::Live) -> Mark
     )
 }
 
+/// One check as shown: (time, ok, status, ms, error).
+pub type CheckRow = (String, bool, Option<i64>, Option<i64>, Option<String>);
+
 /// Uptime (#256): the app's state, availability, response times and
 /// incidents.
 pub struct UptimeView<'a> {
@@ -1710,7 +1713,7 @@ pub struct UptimeView<'a> {
     /// (rule, start, end, length in minutes, cause), newest first.
     pub incidents: Vec<(String, String, Option<String>, i64, String)>,
     /// The last checks, newest first: (time, ok, status, ms, error).
-    pub last: Vec<(String, bool, Option<i64>, Option<i64>, Option<String>)>,
+    pub last: Vec<CheckRow>,
 }
 
 /// The Uptime page.

@@ -321,10 +321,11 @@ pub(crate) async fn tick(state: &AppState, minute: u64) {
         if s.regressions && minute % 60 == 1 {
             regressions(state, &p).await;
         }
-        if s.traffic && minute % 5 == 0 {
-            if let Some((stopped, cause)) = traffic_stopped(state, &p.id).await {
-                track(state, &p.id, &p.name, "traffic", stopped, &cause, 0).await;
-            }
+        if s.traffic
+            && minute.is_multiple_of(5)
+            && let Some((stopped, cause)) = traffic_stopped(state, &p.id).await
+        {
+            track(state, &p.id, &p.name, "traffic", stopped, &cause, 0).await;
         }
     }
 }
@@ -391,7 +392,7 @@ async fn regressions(state: &AppState, p: &openlens_meta::Project) {
         .iter()
         .filter(|g| g.users >= 2 && g.first_seen.replace('T', " ") >= hour_ago)
     {
-        let rule = format!("error:{}", &crate::short_hash(&g.fingerprint));
+        let rule = format!("error:{}", crate::short_hash(&g.fingerprint));
         if state
             .meta
             .open_incident(&p.id, &rule)

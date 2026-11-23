@@ -379,18 +379,6 @@ pub(crate) async fn load_map(
     openlens_featuremap::parse(&yaml).map.map(|m| (m, version))
 }
 
-#[cfg(test)]
-mod version_tests {
-    #[test]
-    fn only_newer_stable_releases_count() {
-        use super::stable_version as v;
-        assert!(v("v0.3.0") > v("0.2.0"));
-        assert!(v("v0.10.0") > v("v0.9.9"));
-        assert_eq!(v("v0.2.0-261122-755dcee"), None);
-        assert_eq!(v("nightly"), None);
-    }
-}
-
 /// Run one alert pass now (tests and tools; the server runs it every
 /// minute by itself).
 #[doc(hidden)]
@@ -402,4 +390,16 @@ pub async fn alert_tick(state: &AppState, minute: u64) {
 pub(crate) fn short_hash(s: &str) -> String {
     use sha2::Digest;
     hex::encode(sha2::Sha256::digest(s.as_bytes()))[..12].to_owned()
+}
+
+#[cfg(test)]
+mod version_tests {
+    #[test]
+    fn only_newer_stable_releases_count() {
+        use super::stable_version as v;
+        assert!(v("v0.3.0") > v("0.2.0"));
+        assert!(v("v0.10.0") > v("v0.9.9"));
+        assert_eq!(v("v0.2.0-261122-755dcee"), None);
+        assert_eq!(v("nightly"), None);
+    }
 }

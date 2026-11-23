@@ -491,7 +491,7 @@ pub(crate) async fn uptime(
         .checks(&p.id, now - 7 * 86400)
         .unwrap_or_default();
     let day: Vec<_> = week.iter().filter(|c| c.0 >= now - 86400).collect();
-    let share = |v: &[&(i64, bool, Option<i64>, Option<i64>, Option<String>)]| {
+    let share = |v: &[&openlens_meta::Check]| {
         (!v.is_empty()).then(|| v.iter().filter(|c| c.1).count() as f64 / v.len() as f64)
     };
     let mut ms: Vec<i64> = day.iter().filter_map(|c| c.3).collect();

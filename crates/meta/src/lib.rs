@@ -247,6 +247,12 @@ fn user_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
     })
 }
 
+/// One uptime probe: `(at, ok, status, ms, error)` (#256).
+pub type Check = (i64, bool, Option<i64>, Option<i64>, Option<String>);
+
+/// One incident: `(rule, started_at, ended_at, cause, notified)` (#256).
+pub type Incident = (String, i64, Option<i64>, String, bool);
+
 /// A comment pinned to a moment of a replay (#213).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ReplayComment {
@@ -772,11 +778,7 @@ impl Meta {
 
     /// Probes of a project since `since` (Unix seconds), oldest first:
     /// `(at, ok, status, ms, error)`.
-    pub fn checks(
-        &self,
-        project: &str,
-        since: i64,
-    ) -> Result<Vec<(i64, bool, Option<i64>, Option<i64>, Option<String>)>> {
+    pub fn checks(&self, project: &str, since: i64) -> Result<Vec<Check>> {
         self.with(|c| {
             let mut st = c.prepare(
                 "SELECT at, ok, status, ms, error FROM uptime_checks WHERE project = ?1 AND at >= ?2 ORDER BY at",
@@ -837,11 +839,7 @@ impl Meta {
 
     /// Incidents started since `since`, newest first:
     /// `(rule, started_at, ended_at, cause, notified)`.
-    pub fn incidents(
-        &self,
-        project: &str,
-        since: i64,
-    ) -> Result<Vec<(String, i64, Option<i64>, String, bool)>> {
+    pub fn incidents(&self, project: &str, since: i64) -> Result<Vec<Incident>> {
         self.with(|c| {
             let mut st = c.prepare(
                 "SELECT rule, started_at, ended_at, cause, notified_at IS NOT NULL FROM incidents \
