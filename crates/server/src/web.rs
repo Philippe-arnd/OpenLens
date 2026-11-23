@@ -59,6 +59,12 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/p/{project}/watch", get(watch_churned))
         .route("/p/{project}/heatmap", get(heatmap_page))
         .route("/p/{project}/icon", get(crate::icon::icon))
+        .route("/p/{project}/settings/share", post(crate::share::create))
+        .route(
+            "/p/{project}/settings/share/{lid}/revoke",
+            post(crate::share::revoke),
+        )
+        .route("/s/{token}", get(crate::share::view))
         .route(
             "/p/{project}/settings/alerts",
             post(crate::settings::alerts),
@@ -99,6 +105,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/audit", get(crate::privacy::audit_page))
         .route("/p/{project}/breakdown", get(crate::explore::breakdown))
         .route("/p/{project}/audience", get(crate::explore::audience))
+        .route("/p/{project}/forms", get(crate::explore::forms))
         .route("/p/{project}/acquisition", get(crate::explore::acquisition))
         .route("/p/{project}/churn", get(crate::explore::churn))
         .route("/p/{project}/revenue", get(crate::explore::revenue))

@@ -124,7 +124,52 @@ pub fn duration(secs: f64) -> String {
     }
 }
 
+thread_local! {
+    static SHARED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Is the page being rendered for a share link (#229)?
+fn shared() -> bool {
+    SHARED.with(std::cell::Cell::get)
+}
+
+/// Render a page for a read-only share link (#229): no sidebar, no
+/// filters, no links that need a login; a banner says what it is.
+pub fn render_shared(f: impl FnOnce() -> Markup) -> Markup {
+    SHARED.with(|s| s.set(true));
+    let m = f();
+    SHARED.with(|s| s.set(false));
+    m
+}
+
+fn shared_layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Markup {
+    html! {
+        (DOCTYPE)
+        html lang="en" {
+            head {
+                meta charset="utf-8";
+                meta name="viewport" content="width=device-width, initial-scale=1";
+                meta name="color-scheme" content="light dark";
+                meta name="robots" content="noindex";
+                title { (title) @if let Some(p) = project { " · " (p.name) } " · OpenLens" }
+                link rel="stylesheet" href="/assets/app.css";
+                link rel="icon" type="image/svg+xml" href="/assets/favicon.svg";
+            }
+            body.shared {
+                (icons::sprite())
+                div.content {
+                    p.shared-banner { span.blob aria-hidden="true" {} " Read-only view" @if let Some(p) = project { " of " strong { (p.name) } } " · OpenLens" }
+                    main { (body) }
+                }
+            }
+        }
+    }
+}
+
 fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Markup {
+    if shared() {
+        return shared_layout(title, project, body);
+    }
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -162,6 +207,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                                     ("/surveys", "idea", "Surveys"),
                                     ("/audience", "globe", "Audience"),
                                     ("/acquisition", "route", "Acquisition"),
+                                    ("/forms", "task", "Forms"),
                                     ("/churn", "ban", "Churn"),
                                     ("/goals", "star", "Goals"),
                                     ("/flows", "funnel", "Feature flow"),
@@ -265,6 +311,9 @@ pub fn welcome(sso: bool, error: Option<&str>) -> Markup {
 }
 
 fn filter_bar(project: &str, b: &Board, f: &Filters, action: &str) -> Markup {
+    if shared() {
+        return html! {};
+    }
     let mut envs = b.environments.clone();
     if !envs.iter().any(|e| e == "production") {
         envs.insert(0, "production".into());
@@ -464,7 +513,7 @@ fn insight_cards(pid: &str, b: &Board, plain: &[(String, String)]) -> Markup {
                                 p.evidence { (c.evidence) }
                                 p.next title=[pl.map(|_| format!("Original: {}", c.next_step))] { span.label { "Next step" } " " (pl.map_or(c.next_step.as_str(), |x| x.1.as_str())) }
                                 @if c.kind == "churn_point" {
-                                    p { a.button href={ "/p/" (pid) "/watch?churned_at=" (url_enc(&c.subject)) } { (icon("play")) "Watch a session that churned here" } }
+                                    @if !shared() { p { a.button href={ "/p/" (pid) "/watch?churned_at=" (url_enc(&c.subject)) } { (icon("play")) "Watch a session that churned here" } } }
                                 }
                             }
                         }
@@ -558,7 +607,7 @@ pub fn board(
         html! {
             div.heading {
                 h1 { "Focus board" }
-                p.muted { "What " (scope) " did lately in " strong { (f.environment) } ". " a href={ "/p/" (p.id) "/digest" } { "This week vs last →" } " · " a href={ "/p/" (p.id) "/breakdown?by=role&env=" (url_enc(&f.environment)) } { "Break down →" } }
+                p.muted { "What " (scope) " did lately in " strong { (f.environment) } ". " @if !shared() { a href={ "/p/" (p.id) "/digest" } { "This week vs last →" } " · " a href={ "/p/" (p.id) "/breakdown?by=role&env=" (url_enc(&f.environment)) } { "Break down →" } } }
             }
             (filter_bar(p.id, b, f, ""))
             (insight_cards(p.id, b, plain))
@@ -2210,6 +2259,53 @@ pub fn audit(rows: &[(String, String, Option<String>, String, String)]) -> Marku
     )
 }
 
+/// Forms (#232): which field makes people give up.
+pub fn forms(
+    p: &ProjectInfo<'_>,
+    b: &Board,
+    f: &Filters,
+    list: &[openlens_engine::forms::FormStats],
+) -> Markup {
+    layout(
+        "Forms",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "Forms" }
+                p.muted { "Last 30 days, " strong { (f.environment) } ". A form starts when someone leaves one of its fields, and is abandoned when the session ends without sending it. Field values are never sent; passwords and masked fields send nothing." }
+            } }
+            (filter_bar(p.id, b, f, "/forms"))
+            @if list.is_empty() { section.card.wide { p.muted { "No form filled yet (SDK builds from 2026-11-23 on send field events)." } } }
+            @for fm in list {
+                section.card.wide {
+                    h2.violet { (icon("task")) span.mono { (fm.form) } span.muted.small { " · " (fm.path) } }
+                    p {
+                        strong { (compact(fm.starts)) } " started · " strong { (compact(fm.submits)) } " sent · "
+                        span class={ "status " (if fm.abandonment() > 0.5 { "bad" } else if fm.abandonment() > 0.25 { "warn" } else { "good" }) } { (pct(fm.abandonment())) " abandoned" }
+                        @if fm.submits > 0 { " · " (duration(fm.median_secs)) " to fill (median)" }
+                        @if fm.starts < 20 { " " span.chip title="Under 20 starts: the rates move a lot" { "low sample" } }
+                    }
+                    div.table-scroll { table.plain {
+                        thead { tr { th { "Field" } th.num { "Sessions" } th.num { "Last before leaving" } th { span.sr-only { "Share" } } th.num { "Came back to it" } th.num { "Time spent" } } }
+                        tbody { @for fl in &fm.fields {
+                            @let left = fl.last_before_leaving as f64 / (fm.starts - fm.submits).max(1) as f64;
+                            tr {
+                                th scope="row" { span.mono { (fl.name) } }
+                                td.num { (compact(fl.sessions)) }
+                                td.num { (compact(fl.last_before_leaving)) }
+                                td.meter { (meter(left)) }
+                                td.num { (compact(fl.revisited)) }
+                                td.num { (duration(fl.median_ms as f64 / 1000.0)) }
+                            }
+                        } }
+                    } }
+                    @if let Some(s) = &fm.abandoned_session { p.small { a href={ "/p/" (p.id) "/replays/" (s) } { (icon("play")) " Replay a session that gave up" } } }
+                }
+            }
+        },
+    )
+}
+
 /// Feature flags: switch on/off and change the rollout. Creating flags is
 /// done by agents (API/CLI/MCP) with the code that uses them.
 pub fn flags(p: &ProjectInfo<'_>, flags: &[openlens_flags::Flag]) -> Markup {
@@ -3090,6 +3186,8 @@ pub struct SettingsView<'a> {
     pub yesterday: &'a str,
     /// Alert settings (#256).
     pub alerts: AlertsView,
+    /// Share links (#229).
+    pub shares: Vec<openlens_meta::ShareLink>,
 }
 
 /// A project's alert settings as the page shows them (#256).
@@ -3216,6 +3314,30 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
                 }
             }
             @if v.admin {
+                section.card.wide #share {
+                    h2.sky { (icon("route")) "Share links" }
+                    p.small { "A read-only link to the Focus board or the weekly digest, for people without an account: no SQL, people, replays or settings behind it. Filters are fixed when the link is made." }
+                    form.settings method="post" action={ (base) "/share" } {
+                        label { "What " select name="scope" { option value="board" { "Focus board" } option value="digest" { "Weekly digest" } } }
+                        label { "Release " input type="text" name="release" placeholder="all" maxlength="100"; }
+                        label { "Expires after (days, 0 = never) " input type="number" name="days" min="0" max="366" value="30"; }
+                        label { "May be embedded on " input type="text" name="embed" placeholder="https://intranet.example.com" maxlength="500"; }
+                        button type="submit" { "Make a link" }
+                    }
+                    @if !v.shares.is_empty() {
+                        div.table-scroll { table.plain {
+                            thead { tr { th { "What" } th { "Release" } th { "Embed" } th { "Expires" } th { "By" } th {} } }
+                            tbody { @for l in &v.shares {
+                                tr {
+                                    td { (l.scope) } td.small { (l.release.as_deref().unwrap_or("all")) } td.small { (l.embed.as_deref().unwrap_or("no")) }
+                                    td.small { @match l.expires_at { Some(t) => (chrono::DateTime::from_timestamp(t, 0).map_or_else(String::new, |d| d.format("%Y-%m-%d").to_string())), None => "never" } }
+                                    td.small { (l.created_by) }
+                                    td { form.inline method="post" action={ (base) "/share/" (l.id) "/revoke" } { button.ghost type="submit" { "Revoke" } } }
+                                }
+                            } }
+                        } }
+                    }
+                }
                 section.card.wide {
                     h2.violet { (icon("code")) "Explore the data" }
                     p { a.button href={ "/p/" (p.id) "/sql" } { "Read-only SQL" } " " a.button href={ "/p/" (p.id) "/breakdown?by=role" } { "Break down" } }

@@ -25,6 +25,7 @@ mod reword;
 mod s3;
 mod secrets;
 mod settings;
+mod share;
 mod storage;
 mod surveys;
 mod users;

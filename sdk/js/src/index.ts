@@ -417,6 +417,44 @@ function autocapture(): void {
     track("$submit", { ...describe(form), $form: form.getAttribute("name") || form.id || undefined });
   };
   document.addEventListener("submit", onSubmit, true);
+  // Form fields (#232): one `$field` event when a field is left, with the
+  // time spent in it and whether it changed. The value never leaves the
+  // page; passwords and ignored or masked fields send nothing.
+  const fields = new WeakMap<Element, { t: number; v: string }>();
+  const fieldOf = (e: Event) => {
+    const el = e.composedPath()[0];
+    if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)) return null;
+    if (el instanceof HTMLInputElement && ["password", "hidden", "submit", "button", "reset", "image", "file"].includes(el.type)) return null;
+    const form = el.form;
+    if (!form || lineage(el).some((x) => x.hasAttribute("data-openlens-ignore") || x.hasAttribute("data-openlens-mask"))) return null;
+    return { el, form };
+  };
+  document.addEventListener(
+    "focusin",
+    (e) => {
+      const f = fieldOf(e);
+      if (f) fields.set(f.el, { t: Date.now(), v: f.el.value });
+    },
+    true,
+  );
+  document.addEventListener(
+    "focusout",
+    (e) => {
+      const f = fieldOf(e);
+      const start = f && fields.get(f.el);
+      if (!f || !start) return;
+      fields.delete(f.el);
+      const label = f.el.labels?.[0]?.textContent?.trim();
+      const name = (f.el.getAttribute("name") || f.el.id || f.el.getAttribute("aria-label") || label || f.el.type || "field").slice(0, 60);
+      track("$field", {
+        $form: f.form.getAttribute("name") || f.form.id || undefined,
+        $field: name,
+        $ms: Math.min(Date.now() - start.t, 3_600_000),
+        $changed: f.el.value !== start.v,
+      });
+    },
+    true,
+  );
   // `submit` does not leave a shadow root: listen on each open root the
   // user reaches (focus or click inside it comes before any submit).
   const watched = new WeakSet<ShadowRoot>();

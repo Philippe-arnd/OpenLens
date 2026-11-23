@@ -373,6 +373,11 @@ form.comment-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; 
 form.comment-form label { flex-basis: 100%; font-size: 12.5px; color: var(--muted); }
 form.comment-form textarea { flex: 1 1 260px; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--surface); color: var(--ink); }
 
+/* Share links (#229) */
+.shared-banner { margin: 0; padding: 10px 24px; font-size: 13px; color: var(--muted); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
+.shared-banner .blob { width: 16px; height: 16px; }
+body.shared .content { max-width: 1280px; margin: 0 auto; }
+
 /* Goals (#235) */
 svg.goal-chart { width: 100%; height: auto; display: block; margin: 6px 0; }
 svg.goal-chart .target { stroke: var(--good); stroke-width: 1.5; stroke-dasharray: 4 3; }

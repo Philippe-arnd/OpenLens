@@ -131,6 +131,7 @@ pub(crate) async fn page(
                 admin: viewer.admin,
                 notice,
                 yesterday: &yesterday,
+                shares: state.meta.share_links(&p.id).unwrap_or_default(),
                 alerts: {
                     let a = crate::alerts::Settings::load(&state.meta, &p.id);
                     openlens_ui::AlertsView {

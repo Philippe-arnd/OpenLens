@@ -17,6 +17,7 @@ pub mod churn;
 mod digest;
 mod errors;
 pub mod flows;
+pub mod forms;
 pub mod goals;
 mod insights;
 mod pages;
