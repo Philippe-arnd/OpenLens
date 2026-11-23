@@ -60,6 +60,22 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/p/{project}/heatmap", get(heatmap_page))
         .route("/p/{project}/icon", get(crate::icon::icon))
         .route(
+            "/p/{project}/flags-edit",
+            get(crate::manage::flag_page).post(crate::manage::flag_save),
+        )
+        .route(
+            "/p/{project}/flags/{key}/delete",
+            post(crate::manage::flag_delete),
+        )
+        .route(
+            "/p/{project}/surveys-edit",
+            get(crate::manage::survey_page).post(crate::manage::survey_save),
+        )
+        .route(
+            "/p/{project}/surveys/{key}/delete",
+            post(crate::manage::survey_delete),
+        )
+        .route(
             "/p/{project}/settings",
             get(crate::settings::page).post(crate::settings::save),
         )

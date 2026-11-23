@@ -1830,3 +1830,118 @@ async fn viewers_comment_on_replays_and_delete_only_their_own() {
             .is_empty()
     );
 }
+
+#[tokio::test]
+async fn flags_and_surveys_are_managed_from_the_dashboard() {
+    let h = harness();
+    let owner = login_cookie(&h).await;
+    assert_eq!(
+        get(&h, "/p/default/flags-edit", Some(&owner), false)
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/flags-edit",
+            &owner,
+            "key=new-editor&description=Editor&rollout=20&roles=staff&enabled=on"
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/flags-edit",
+            &owner,
+            "key=new-editor&rollout=5"
+        )
+        .await,
+        StatusCode::BAD_REQUEST,
+        "duplicate key"
+    );
+    assert_eq!(
+        post_form(&h, "/p/default/flags-edit", &owner, "key=Bad+Key").await,
+        StatusCode::BAD_REQUEST
+    );
+    // Rename keeps one flag.
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/flags-edit",
+            &owner,
+            "original=new-editor&key=editor&rollout=30"
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    let keys: Vec<String> = h.state.meta.flags("default").unwrap();
+    assert_eq!(keys.len(), 1);
+    assert!(keys[0].contains("\"editor\"") && keys[0].contains("30"));
+    assert_eq!(
+        post_form(&h, "/p/default/flags/editor/delete", &owner, "confirm=nope").await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/flags/editor/delete",
+            &owner,
+            "confirm=editor"
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    assert!(h.state.meta.flags("default").unwrap().is_empty());
+
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/surveys-edit",
+            &owner,
+            "key=useful&question=How+useful%3F&kind=choice&choices=a&trigger=saved&sample=10"
+        )
+        .await,
+        StatusCode::BAD_REQUEST,
+        "a choice needs 2 options"
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/surveys-edit",
+            &owner,
+            "key=useful&question=How+useful%3F&kind=rating&trigger=saved&sample=10&enabled=on"
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    assert_eq!(h.state.meta.surveys("default").unwrap().len(), 1);
+    let viewer = invite(
+        &h,
+        serde_json::json!({"email": "v@example.com", "role": "viewer"}),
+    )
+    .await;
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/surveys/useful/delete",
+            &viewer,
+            "confirm=useful"
+        )
+        .await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/surveys/useful/delete",
+            &owner,
+            "confirm=useful"
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    assert!(h.state.meta.surveys("default").unwrap().is_empty());
+}

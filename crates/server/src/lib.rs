@@ -10,6 +10,7 @@ mod comments;
 mod digest;
 mod flags;
 mod icon;
+mod manage;
 mod oidc;
 mod replay;
 mod reword;

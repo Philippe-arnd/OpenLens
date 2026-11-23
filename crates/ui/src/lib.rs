@@ -819,8 +819,11 @@ pub fn flags(p: &ProjectInfo<'_>, flags: &[openlens_flags::Flag]) -> Markup {
         Some(p),
         html! {
             div.heading {
-                h1 { "Flags" }
-                p.muted { "Ship a change to some users first, then compare. Each flag's users show up as their own cohort." }
+                div {
+                    h1 { "Flags" }
+                    p.muted { "Ship a change to some users first, then compare. Each flag's users show up as their own cohort." }
+                }
+                a.button href={ "/p/" (p.id) "/flags-edit" } { (icon("plus")) "New flag" }
             }
             @if flags.is_empty() {
                 section.card { p { "No flags yet. Your agent creates them together with the code that checks them: "
@@ -831,7 +834,7 @@ pub fn flags(p: &ProjectInfo<'_>, flags: &[openlens_flags::Flag]) -> Markup {
                         thead { tr { th { "Flag" } th { "Who" } th { "Rollout" } th { "On" } th {} } }
                         tbody { @for f in flags {
                             tr {
-                                th scope="row" { code { (f.key) } @if !f.description.is_empty() { br; span.muted.small { (f.description) } } }
+                                th scope="row" { a href={ "/p/" (p.id) "/flags-edit?key=" (f.key) } title="Edit" { code { (f.key) } } @if !f.description.is_empty() { br; span.muted.small { (f.description) } } }
                                 td.small { @if f.roles.is_empty() { "every role" } @else { (f.roles.join(", ")) }
                                     @if !f.accounts.is_empty() { br; span.muted { "+ " (f.accounts.len()) " accounts" } } }
                                 td { form.inline method="post" action={ "/p/" (p.id) "/flags/" (f.key) } {
@@ -848,6 +851,119 @@ pub fn flags(p: &ProjectInfo<'_>, flags: &[openlens_flags::Flag]) -> Markup {
                                 } }
                             }
                         } }
+                    }
+                }
+            }
+        },
+    )
+}
+
+/// Create or edit a flag (#220). `flag` is None for a new one.
+pub fn flag_edit(
+    p: &ProjectInfo<'_>,
+    flag: Option<&openlens_flags::Flag>,
+    error: Option<&str>,
+) -> Markup {
+    let new = flag.is_none_or(|f| f.key.is_empty());
+    let f = flag.cloned().unwrap_or(openlens_flags::Flag {
+        key: String::new(),
+        description: String::new(),
+        enabled: false,
+        rollout: 0,
+        roles: Vec::new(),
+        accounts: Vec::new(),
+    });
+    let action = format!("/p/{}/flags-edit", p.id);
+    layout(
+        "Flags",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { @if new { "New flag" } @else { "Flag " code { (f.key) } } }
+                p.muted { a href={ "/p/" (p.id) "/flags" } { "← Flags" } " · the code checks it with " code { "openlens.isEnabled(\"" (if f.key.is_empty() { "key" } else { &f.key }) "\")" } }
+            } }
+            @if let Some(e) = error { p.alert role="alert" { (e) } }
+            section.card.wide {
+                form.settings method="post" action=(action) {
+                    input type="hidden" name="original" value=(if new { "" } else { flag.map_or("", |x| x.key.as_str()) });
+                    label { "Key " input type="text" name="key" value=(f.key) required maxlength="64" pattern="[a-z0-9_-]+" placeholder="new-editor"; }
+                    label { "What it is for " input type="text" name="description" value=(f.description) maxlength="200"; }
+                    label { "Rollout % " input type="number" name="rollout" min="0" max="100" value=(f.rollout); }
+                    label { "Only roles " input type="text" name="roles" value=(f.roles.join(", ")) placeholder="every role"; }
+                    label { "Always on for accounts " input type="text" name="accounts" value=(f.accounts.join(", ")) placeholder="none"; }
+                    label.check { input type="checkbox" name="enabled" checked[f.enabled]; " On" }
+                    button type="submit" { (if new { "Create" } else { "Save" }) }
+                }
+                p.muted.small { "Roles are the feature map's canonical roles; lists are comma-separated. Users in the rollout keep their bucket when you raise it." }
+            }
+            @if !new {
+                section.card.wide.danger {
+                    h2.coral { (icon("alert")) "Delete the flag" }
+                    p { "The code then gets " code { "false" } " for it. Its past cohort stays in the data." }
+                    form.inline method="post" action={ "/p/" (p.id) "/flags/" (f.key) "/delete" } {
+                        label { "Type " code { (f.key) } " to confirm " input type="text" name="confirm" required autocomplete="off"; }
+                        button.danger type="submit" { "Delete" }
+                    }
+                }
+            }
+        },
+    )
+}
+
+/// Create or edit a micro-survey (#220).
+pub fn survey_edit(
+    p: &ProjectInfo<'_>,
+    survey: Option<&openlens_flags::survey::Survey>,
+    error: Option<&str>,
+) -> Markup {
+    let new = survey.is_none_or(|s| s.key.is_empty());
+    let s = survey.cloned().unwrap_or(openlens_flags::survey::Survey {
+        key: String::new(),
+        question: String::new(),
+        kind: "rating".into(),
+        choices: Vec::new(),
+        trigger: String::new(),
+        enabled: false,
+        sample: 10,
+        roles: Vec::new(),
+    });
+    layout(
+        "Surveys",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { @if new { "New survey" } @else { "Survey " code { (s.key) } } }
+                p.muted { a href={ "/p/" (p.id) "/surveys" } { "← Surveys" } " · one question, right after a moment of value, once per user" }
+            } }
+            @if let Some(e) = error { p.alert role="alert" { (e) } }
+            section.card.wide {
+                form.settings method="post" action={ "/p/" (p.id) "/surveys-edit" } {
+                    input type="hidden" name="original" value=(if new { "" } else { survey.map_or("", |x| x.key.as_str()) });
+                    label { "Key " input type="text" name="key" value=(s.key) required maxlength="64" pattern="[a-z0-9_-]+" placeholder="writing-usefulness"; }
+                    label.wide { "Question " input type="text" name="question" value=(s.question) required maxlength="200" placeholder="How useful was writing today?"; }
+                    label { "Answer "
+                        select name="kind" {
+                            @for (k, l) in [("rating", "Rating 1–5"), ("yes_no", "Yes / no"), ("choice", "One choice"), ("text", "Free text")] {
+                                option value=(k) selected[s.kind == k] { (l) }
+                            }
+                        }
+                    }
+                    label { "Choices " input type="text" name="choices" value=(s.choices.join(", ")) placeholder="for One choice: 2 to 6"; }
+                    label { "After the event " input type="text" name="trigger" value=(s.trigger) required maxlength="100" placeholder="entry_saved"; }
+                    label { "Ask % of users " input type="number" name="sample" min="0" max="100" value=(s.sample); }
+                    label { "Only roles " input type="text" name="roles" value=(s.roles.join(", ")) placeholder="every role"; }
+                    label.check { input type="checkbox" name="enabled" checked[s.enabled]; " On" }
+                    button type="submit" { (if new { "Create" } else { "Save" }) }
+                }
+                p.muted.small { "Answers are " code { "$survey" } " events: " a href={ "/p/" (p.id) "/events?event=%24survey" } { "see them in Events" } ", export them from Settings." }
+            }
+            @if !new {
+                section.card.wide.danger {
+                    h2.coral { (icon("alert")) "Delete the survey" }
+                    p { "Nobody is asked any more. The answers already given stay (they are events)." }
+                    form.inline method="post" action={ "/p/" (p.id) "/surveys/" (s.key) "/delete" } {
+                        label { "Type " code { (s.key) } " to confirm " input type="text" name="confirm" required autocomplete="off"; }
+                        button.danger type="submit" { "Delete" }
                     }
                 }
             }
@@ -1687,10 +1803,13 @@ pub fn surveys(
         "Surveys",
         Some(p),
         html! {
-            div.heading { div {
-                h1 { "Micro-surveys" }
-                p.muted { "One question, right after a moment of value, to a sample of users, once each. Agents create them (" code { "survey_set" } "); answers are " code { "$survey" } " events." }
-            } }
+            div.heading {
+                div {
+                    h1 { "Micro-surveys" }
+                    p.muted { "One question, right after a moment of value, to a sample of users, once each. Create them here or let agents do it (" code { "survey_set" } "); answers are " code { "$survey" } " events." }
+                }
+                a.button href={ "/p/" (p.id) "/surveys-edit" } { (icon("plus")) "New survey" }
+            }
             @if list.is_empty() {
                 section.card { p.muted { "No survey yet. Ask your agent, for example: “after entry_saved, ask 10% of users how useful writing felt, 1 to 5”." } }
             }
@@ -1705,6 +1824,7 @@ pub fn surveys(
                         @if s.roles.is_empty() { "everyone" } @else { (s.roles.join(", ")) }
                         " · " (compact(answered)) " answers"
                         @if let Some(r) = r { " · " (compact(r.dismissed)) " dismissed" }
+                        " · " a href={ "/p/" (p.id) "/surveys-edit?key=" (s.key) } { "Edit" }
                     }
                     form.inline method="post" action={ "/p/" (p.id) "/surveys/" (s.key) } {
                         label { input type="checkbox" name="enabled" checked[s.enabled]; " on" }

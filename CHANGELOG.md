@@ -19,6 +19,8 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 - **Comments on replays** (#213): pause, write, and the comment is pinned to that moment: a marker on the timeline, an entry in the event list, a list under the player with links that open the replay there (`?t=<ms>#c<id>`). Viewers comment too; authors and admins delete. Session lists show the count. API `GET|POST /api/projects/{p}/replays/{s}/comments`, CLI `openlens-cli comments <session> [--at 12.4 --add "…"]`.
 
+- **Flags and surveys managed from the dashboard** (#220): *New flag* / *New survey*, an edit page for every field (key, description, rollout, roles, accounts; question, answer kind, choices, trigger, sample, roles), renames, and deletion behind typing the key, with the models' own validation shown on the form. Admins only.
+
 ### Changed
 
 - The sidebar's project switch lost its arrow (#214), and gained *Settings*.
