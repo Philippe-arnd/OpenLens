@@ -320,9 +320,21 @@ function pageview(): void {
   track(
     "$pageview",
     first
-      ? { ...(document.referrer ? { $referrer: document.referrer } : {}), $lang: navigator.language, $sw: screen.width }
+      ? { ...(document.referrer ? { $referrer: document.referrer } : {}), ...utm(), $lang: navigator.language, $sw: screen.width }
       : {},
   );
+}
+
+/** Campaign parameters of the landing URL (#226): `utm_*` and the common
+ * click ids, as `$utm_source`... (values cut to 100 characters). */
+function utm(): Record<string, string> {
+  const out: Record<string, string> = {};
+  const q = new URLSearchParams(location.search);
+  for (const k of ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "gclid", "fbclid", "msclkid"]) {
+    const v = q.get(k);
+    if (v) out["$" + k] = v.slice(0, 100);
+  }
+  return out;
 }
 
 /** `el` and its ancestors, crossing open shadow roots (web components):

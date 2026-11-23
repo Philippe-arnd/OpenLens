@@ -161,6 +161,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                                     ("/flags", "flag", "Flags"),
                                     ("/surveys", "idea", "Surveys"),
                                     ("/audience", "globe", "Audience"),
+                                    ("/acquisition", "route", "Acquisition"),
                                     ("/flows", "funnel", "Feature flow"),
                                     ("/features", "route", "Feature map"),
                                     ("/digest", "mail", "Digest"),
@@ -911,6 +912,7 @@ pub const BREAKDOWNS: &[(&str, &str)] = &[
     ("device", "Device"),
     ("browser", "Browser"),
     ("os", "OS"),
+    ("channel", "Channel"),
 ];
 
 /// Users, sessions, tasks and errors broken down by one dimension (#222).
@@ -1772,6 +1774,65 @@ pub fn uptime(p: &ProjectInfo<'_>, v: &UptimeView<'_>) -> Markup {
                         li { span class={ "status " (if *ok { "good" } else { "bad" }) } { (if *ok { "ok" } else { "failed" }) } " " (t)
                             @if let Some(s) = status { " · HTTP " (s) } @if let Some(m) = ms { " · " (m) " ms" } @if let Some(e) = err { " · " span.muted { (e) } } }
                     } }
+                }
+            }
+        },
+    )
+}
+
+/// Where users come from (#226), ranked by the share reaching the value
+/// moment, not by visits.
+pub fn acquisition(
+    p: &ProjectInfo<'_>,
+    b: &Board,
+    f: &Filters,
+    rows: &[openlens_engine::AcquisitionRow],
+    by: &str,
+    last: bool,
+) -> Markup {
+    let base = format!("/p/{}/acquisition", p.id);
+    let env = url_enc(&f.environment);
+    let dims = [
+        ("channel", "Channel"),
+        ("source", "Source"),
+        ("campaign", "Campaign"),
+        ("referrer", "Referrer"),
+    ];
+    let total: i64 = rows.iter().map(|r| r.users).sum();
+    layout(
+        "Acquisition",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "Where users come from" }
+                p.muted { "Last 90 days, " strong { (f.environment) } ", by " (if last { "last touch (direct visits don't count)" } else { "first touch" }) ". Ranked by the share that reaches the value moment, not by visits." }
+            } }
+            nav.tabs aria-label="Group by" {
+                @for (k, l) in dims {
+                    a href={ (base) "?by=" (k) "&touch=" (if last { "last" } else { "first" }) "&env=" (env) } aria-current=[(k == by).then_some("page")] { (l) }
+                }
+                " · "
+                a href={ (base) "?by=" (by) "&touch=first&env=" (env) } aria-current=[(!last).then_some("page")] { "First touch" }
+                a href={ (base) "?by=" (by) "&touch=last&env=" (env) } aria-current=[last.then_some("page")] { "Last touch" }
+            }
+            (filter_bar(p.id, b, f, &format!("/acquisition?by={by}&touch={}", if last { "last" } else { "first" })))
+            section.card.wide {
+                @if rows.is_empty() { p.muted { "No landing with a channel yet. The SDK sends the referrer and the campaign parameters on the first page view of a visit (SDK builds from 2026-11-23 on)." } }
+                @else {
+                    div.table-scroll { table.plain {
+                        thead { tr { th { (dims.iter().find(|d| d.0 == by).map_or("Channel", |d| d.1)) } th.num { "Users" } th.num { "Reached value" } th { span.sr-only { "Share" } } th.num { "Came back" } th.num { "Churned" } } }
+                        tbody { @for r in rows {
+                            tr {
+                                th scope="row" { span.mono { (r.value) } @if r.users < 20 { " " span.chip title="Under 20 users: the rates move a lot" { "low sample" } } }
+                                td.num { (compact(r.users)) span.muted.small { " · " (pct(r.users as f64 / total.max(1) as f64)) } }
+                                td.num { strong { (pct(r.value_rate())) } }
+                                td.meter { (meter(r.value_rate())) }
+                                td.num { (pct(r.returned as f64 / r.users.max(1) as f64)) }
+                                td.num { @if r.judged > 0 { (pct(r.churned as f64 / r.judged as f64)) } @else { span.muted { "—" } } }
+                            }
+                        } }
+                    } }
+                    p.muted.small { "Reached value: a success event of the feature map (any feature use when none is declared). Came back: active on two days or more. Churned: of the users first seen before the churn window, those inactive for longer than it now." }
                 }
             }
         },

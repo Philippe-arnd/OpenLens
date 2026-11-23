@@ -12,6 +12,7 @@ use openlens_query::{QueryEngine, QueryError};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
+mod acquisition;
 mod digest;
 mod errors;
 pub mod flows;
@@ -19,6 +20,7 @@ mod insights;
 mod pages;
 pub mod stats;
 mod tasks;
+pub use acquisition::{AcquisitionRow, Touch, acquisition};
 pub use digest::{Delta, Digest, digest, digest_markdown};
 pub use errors::{ErrorGroup, error_groups};
 pub use flows::{Flow, FlowLink, FlowQuery, flows};
@@ -844,6 +846,7 @@ pub async fn breakdown(
         "device" => "regexp_match(properties, '\"\\$device\":\"([a-z]+)\"')[1]",
         "browser" => "regexp_match(properties, '\"\\$browser\":\"([A-Za-z ]+)\"')[1]",
         "os" => "regexp_match(properties, '\"\\$os\":\"([A-Za-z]+)\"')[1]",
+        "channel" => "regexp_match(properties, '\"\\$channel\":\"([a-z]+)\"')[1]",
         _ => return Err(EngineError::InvalidFilter("by")),
     };
     let src = source(map);

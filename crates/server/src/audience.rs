@@ -134,6 +134,134 @@ pub(crate) fn parse_ua(
     (device, browser, os)
 }
 
+/// The host of a URL, lowercased, without `www.` (None when not http(s)).
+pub(crate) fn host(url: &str) -> Option<String> {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let h = rest.split(['/', '?', '#']).next()?.split('@').next_back()?;
+    let h = h.split(':').next()?.to_ascii_lowercase();
+    let h = h.strip_prefix("www.").unwrap_or(&h).to_owned();
+    (!h.is_empty() && h.len() <= 253).then_some(h)
+}
+
+/// The channel of a landing (#226), from its campaign parameters and the
+/// referrer's host; no rules to write.
+pub(crate) fn channel(
+    utm_source: Option<&str>,
+    utm_medium: Option<&str>,
+    click_id: bool,
+    ref_host: Option<&str>,
+    own_host: Option<&str>,
+) -> &'static str {
+    let medium = utm_medium.unwrap_or("").to_ascii_lowercase();
+    let source = utm_source.unwrap_or("").to_ascii_lowercase();
+    let host = ref_host.unwrap_or("");
+    let ends = |list: &[&str]| {
+        list.iter()
+            .any(|d| host == *d || host.ends_with(&format!(".{d}")))
+    };
+    let search = [
+        "google.com",
+        "bing.com",
+        "duckduckgo.com",
+        "yahoo.com",
+        "ecosia.org",
+        "qwant.com",
+        "baidu.com",
+        "yandex.ru",
+        "yandex.com",
+        "startpage.com",
+        "search.brave.com",
+        "kagi.com",
+    ];
+    let social = [
+        "facebook.com",
+        "instagram.com",
+        "t.co",
+        "twitter.com",
+        "x.com",
+        "linkedin.com",
+        "lnkd.in",
+        "reddit.com",
+        "youtube.com",
+        "tiktok.com",
+        "pinterest.com",
+        "mastodon.social",
+        "threads.net",
+        "bsky.app",
+        "news.ycombinator.com",
+        "discord.com",
+        "whatsapp.com",
+        "telegram.org",
+    ];
+    let ai = [
+        "chatgpt.com",
+        "chat.openai.com",
+        "perplexity.ai",
+        "claude.ai",
+        "gemini.google.com",
+        "copilot.microsoft.com",
+        "you.com",
+        "phind.com",
+        "mistral.ai",
+        "chat.mistral.ai",
+    ];
+    let mail = [
+        "mail.google.com",
+        "outlook.live.com",
+        "outlook.office.com",
+        "mail.yahoo.com",
+        "mail.proton.me",
+    ];
+    if click_id
+        || [
+            "cpc",
+            "ppc",
+            "paid",
+            "display",
+            "cpm",
+            "paidsearch",
+            "paid_social",
+            "paidsocial",
+        ]
+        .iter()
+        .any(|m| medium.contains(m))
+    {
+        return "paid";
+    }
+    if medium.contains("email")
+        || medium.contains("newsletter")
+        || source.contains("newsletter")
+        || ends(&mail)
+    {
+        return "email";
+    }
+    if !host.is_empty() && own_host.is_some_and(|o| o == host) {
+        return "internal";
+    }
+    if ends(&ai)
+        || ["chatgpt", "perplexity", "claude", "gemini", "copilot"]
+            .iter()
+            .any(|a| source.contains(a))
+    {
+        return "ai";
+    }
+    if ends(&search)
+        || (host.contains(".google.") || host.starts_with("google."))
+        || medium == "organic"
+    {
+        return "search";
+    }
+    if ends(&social) || medium.contains("social") {
+        return "social";
+    }
+    if !host.is_empty() || !source.is_empty() {
+        return "referral";
+    }
+    "direct"
+}
+
 /// Add `$country`, `$device`, `$browser` and `$os` to the page views of a
 /// batch (server values replace whatever the client sent under those
 /// names). Other events are left as they are.
@@ -164,9 +292,64 @@ pub(crate) fn enrich(events: &mut [openlens_event::Event], headers: &HeaderMap) 
                 props.insert(k.into(), serde_json::Value::String(v.into()));
             }
         }
+        // The first view of a page load (it carries `$lang`) gets its
+        // channel; only the referrer's host is kept (#226).
+        if props.contains_key("$lang") {
+            let get = |k: &str| props.get(k).and_then(|v| v.as_str()).map(str::to_owned);
+            let ref_host = get("$referrer").as_deref().and_then(host);
+            let own = e.url.as_deref().and_then(host);
+            let click = ["$gclid", "$fbclid", "$msclkid"]
+                .iter()
+                .any(|k| props.contains_key(*k));
+            let ch = channel(
+                get("$utm_source").as_deref(),
+                get("$utm_medium").as_deref(),
+                click,
+                ref_host.as_deref(),
+                own.as_deref(),
+            );
+            props.remove("$referrer");
+            props.remove("$ref_host");
+            props.remove("$channel");
+            if let Some(h) = ref_host {
+                props.insert("$ref_host".into(), serde_json::Value::String(h));
+            }
+            props.insert("$channel".into(), serde_json::Value::String(ch.into()));
+        }
         if let Ok(s) = serde_json::to_string(&serde_json::Value::Object(props)) {
             e.properties = s;
         }
+    }
+}
+
+#[cfg(test)]
+mod channel_tests {
+    use super::{channel, host};
+
+    #[test]
+    fn groups_landings_into_channels() {
+        assert_eq!(
+            host("https://www.Google.com/search?q=x").as_deref(),
+            Some("google.com")
+        );
+        assert_eq!(host("ftp://x"), None);
+        let c = |s: Option<&str>, m: Option<&str>, click: bool, h: Option<&str>| {
+            channel(s, m, click, h, Some("app.example.com"))
+        };
+        assert_eq!(c(None, None, false, None), "direct");
+        assert_eq!(c(None, None, false, Some("google.com")), "search");
+        assert_eq!(c(None, None, false, Some("google.fr")), "search");
+        assert_eq!(c(None, None, false, Some("news.ycombinator.com")), "social");
+        assert_eq!(c(None, None, false, Some("chatgpt.com")), "ai");
+        assert_eq!(c(Some("newsletter"), Some("email"), false, None), "email");
+        assert_eq!(
+            c(Some("google"), Some("cpc"), false, Some("google.com")),
+            "paid"
+        );
+        assert_eq!(c(None, None, true, Some("facebook.com")), "paid");
+        assert_eq!(c(None, None, false, Some("app.example.com")), "internal");
+        assert_eq!(c(None, None, false, Some("blog.someone.dev")), "referral");
+        assert_eq!(c(Some("partner"), None, false, None), "referral");
     }
 }
 
