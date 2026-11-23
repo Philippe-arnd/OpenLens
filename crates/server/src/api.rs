@@ -42,7 +42,10 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/api/projects/{project}/export", get(export))
         .route("/api/login-links", post(login_link))
         .route("/api/users", get(list_users))
-        .route("/api/users/{id}", axum::routing::delete(delete_user))
+        .route(
+            "/api/users/{id}",
+            axum::routing::delete(delete_user).patch(update_user),
+        )
 }
 
 /// Largest import chunk, in bytes (the CLI sends ~5,000 lines per chunk).
@@ -281,6 +284,9 @@ pub(crate) struct FilterQuery {
     pub(crate) event: Option<String>,
     /// `1` or `true`: include the team's own users.
     pub(crate) internal: Option<String>,
+    /// Read times and days in this IANA zone instead (#215; the CLI's
+    /// `--tz` / `OPENLENS_TZ`).
+    pub(crate) tz: Option<String>,
 }
 
 impl FilterQuery {
@@ -296,7 +302,9 @@ impl FilterQuery {
             role: some(&self.role),
             release: some(&self.release),
             internal: matches!(self.internal.as_deref(), Some("1" | "true" | "on")),
-            tz: tz.to_owned(),
+            tz: some(&self.tz)
+                .filter(|t| t.parse::<chrono_tz::Tz>().is_ok())
+                .unwrap_or_else(|| tz.to_owned()),
         }
     }
 }
@@ -417,6 +425,74 @@ async fn delete_user(
     match tokio::task::spawn_blocking(move || meta.delete_user(&id)).await {
         Ok(Ok(true)) => Json(json!({ "deleted": true })).into_response(),
         Ok(Ok(false)) => err(StatusCode::NOT_FOUND, "no such user"),
+        Ok(Err(openlens_meta::MetaError::Invalid(why))) => err(StatusCode::CONFLICT, why),
+        _ => err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "metadata store unavailable",
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+struct UserPatch {
+    name: Option<String>,
+    email: Option<String>,
+    role: Option<String>,
+    projects: Option<Vec<String>>,
+    /// `[]` or `null`-free: give `"all"` to clear the project list.
+    #[serde(default)]
+    all_projects: bool,
+    disabled: Option<bool>,
+    timezone: Option<String>,
+}
+
+/// `PATCH /api/users/{id}` with any of `{name, email, role, projects,
+/// all_projects, disabled, timezone}`. 409 when it would leave no admin.
+async fn update_user(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(b): Json<UserPatch>,
+) -> Response {
+    if let Some(r) = guard(&state, &headers) {
+        return r;
+    }
+    if let Some(tz) = b.timezone.as_deref().filter(|t| !t.is_empty())
+        && check_timezone(tz).is_err()
+    {
+        return err(StatusCode::BAD_REQUEST, "timezone must be an IANA name");
+    }
+    let meta = state.meta.clone();
+    let res = tokio::task::spawn_blocking(move || {
+        let Some(u) = meta.user(&id)? else {
+            return Ok(None);
+        };
+        let projects = if b.all_projects {
+            None
+        } else {
+            b.projects.clone().or(u.projects.clone())
+        };
+        let name = b.name.clone().or(u.name.clone());
+        meta.update_user(
+            &id,
+            name.as_deref(),
+            b.email.as_deref().unwrap_or(&u.email),
+            b.role.as_deref().unwrap_or(&u.role),
+            projects.as_deref(),
+        )?;
+        if let Some(d) = b.disabled {
+            meta.set_user_disabled(&id, d)?;
+        }
+        if let Some(tz) = &b.timezone {
+            meta.set_user_timezone(&id, Some(tz.as_str()).filter(|t| !t.is_empty()))?;
+        }
+        meta.user(&id)
+    })
+    .await;
+    match res {
+        Ok(Ok(Some(u))) => Json(json!({ "user": u })).into_response(),
+        Ok(Ok(None)) => err(StatusCode::NOT_FOUND, "no such user"),
+        Ok(Err(openlens_meta::MetaError::Invalid(why))) => err(StatusCode::CONFLICT, why),
         _ => err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "metadata store unavailable",

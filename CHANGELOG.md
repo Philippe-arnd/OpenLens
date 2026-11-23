@@ -12,6 +12,9 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 - **Events page filters and families** (#217): an icon and a label per family (page views, clicks, forms, features, logins, errors, vitals, surveys, app events), filters on family, event, user, page and period next to environment, role and release, sorts by time, event or user, and a *next 100* link; all kept in the URL. A user's id links to their events.
 - **Active users as a share** (#217): the daily active users tile shows the share of known users (identified in the last 90 days), and the monthly share next to it (docs/kpis.md).
 
+- **Times in the reader's time zone** (#215, D-018): *My profile* (`/me`) sets the zone each person reads times and days in; the project's zone stays the default (and the digests' zone). The API takes `?tz=`, the CLI `--tz` / `OPENLENS_TZ`.
+- **Team management** (#216): names, a status per user (active, invited with its expiry, expired, disabled), last sign-in, search, an edit page (name, email, role, projects; the id and sessions survive an email change), new login link or resent invitation, revoke, disable/enable sign-in (sessions end at once, also for SSO), and removal behind typing the email. The last admin can't be demoted, disabled or removed (the owner token always remains). `PATCH /api/users/{id}` and `openlens-cli users list|update|disable|enable|delete`.
+
 ### Changed
 
 - The sidebar's project switch lost its arrow (#214), and gained *Settings*.

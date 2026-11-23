@@ -2525,6 +2525,7 @@ name = "openlens-ui"
 version = "0.3.0"
 dependencies = [
  "chrono",
+ "chrono-tz",
  "maud",
  "openlens-engine",
  "openlens-errors",

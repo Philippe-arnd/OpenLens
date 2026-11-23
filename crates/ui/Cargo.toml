@@ -15,6 +15,7 @@ openlens-replay = { path = "../replay" }
 openlens-errors = { path = "../errors" }
 openlens-meta = { path = "../meta" }
 chrono.workspace = true
+chrono-tz.workspace = true
 maud.workspace = true
 
 [lints]

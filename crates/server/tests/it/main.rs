@@ -1674,3 +1674,108 @@ async fn project_settings_do_what_the_cli_does() {
         StatusCode::FORBIDDEN
     );
 }
+
+#[tokio::test]
+async fn team_crud_and_the_viewer_time_zone() {
+    let h = harness();
+    let owner = login_cookie(&h).await;
+    let ana = invite(
+        &h,
+        serde_json::json!({"email": "ana@example.com", "role": "admin"}),
+    )
+    .await;
+    let id = h
+        .state
+        .meta
+        .user_by_email("ana@example.com")
+        .unwrap()
+        .unwrap()
+        .id;
+    // Ana is the only admin user: she can't be removed or disabled.
+    assert_eq!(
+        post_form(&h, &format!("/users/{id}/disable"), &owner, "").await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            &format!("/users/{id}/delete"),
+            &owner,
+            "confirm=ana%40example.com"
+        )
+        .await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            &format!("/users/{id}"),
+            &owner,
+            "name=Ana&email=ana%40example.com&role=admin&projects="
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    assert_eq!(
+        h.state.meta.user(&id).unwrap().unwrap().name.as_deref(),
+        Some("Ana")
+    );
+    let page = get(&h, "/users?q=ana", Some(&owner), false).await;
+    let html = String::from_utf8(
+        axum::body::to_bytes(page.into_body(), 1 << 20)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(html.contains("ana@example.com") && html.contains("active"));
+
+    // Her own time zone drives what she reads.
+    assert_eq!(
+        post_form(&h, "/me", &ana, "name=Ana&timezone=Asia%2FTokyo").await,
+        StatusCode::SEE_OTHER
+    );
+    let ev = get(&h, "/p/default/events", Some(&ana), false).await;
+    let html = String::from_utf8(
+        axum::body::to_bytes(ev.into_body(), 1 << 20)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(html.contains("Times in Asia/Tokyo"), "viewer zone shown");
+    assert_eq!(
+        post_form(&h, "/me", &ana, "timezone=Mars").await,
+        StatusCode::BAD_REQUEST
+    );
+
+    // A second admin lets the first be disabled: her session ends at once.
+    invite(
+        &h,
+        serde_json::json!({"email": "bo@example.com", "role": "admin"}),
+    )
+    .await;
+    assert_eq!(
+        post_form(&h, &format!("/users/{id}/disable"), &owner, "").await,
+        StatusCode::SEE_OTHER
+    );
+    assert_ne!(
+        get(&h, "/p/default", Some(&ana), false).await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        post_form(&h, &format!("/users/{id}/delete"), &owner, "confirm=nope").await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            &format!("/users/{id}/delete"),
+            &owner,
+            "confirm=ana%40example.com"
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    assert!(h.state.meta.user(&id).unwrap().is_none());
+}

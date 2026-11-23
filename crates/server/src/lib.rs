@@ -15,6 +15,7 @@ mod reword;
 mod s3;
 mod settings;
 mod surveys;
+mod users;
 mod web;
 
 use std::path::PathBuf;

@@ -127,6 +127,7 @@ fn users_are_validated_updated_and_bound_to_their_links() {
     assert!(m.upsert_user("x@y.z", "root", None).is_err());
     let t = m.create_login_link_for(Some(&u.id), 600).unwrap();
     assert_eq!(m.consume_login_link(&t).unwrap(), Some(Some(u.id.clone())));
+    m.upsert_user("other@example.com", "admin", None).unwrap();
     assert!(m.delete_user(&u.id).unwrap());
     assert!(m.user(&u.id).unwrap().is_none());
 }
@@ -164,4 +165,56 @@ fn projects_rename_rotate_and_drop_their_settings() {
     m.set_project_setting(&p.id, "icon", "x").unwrap();
     assert!(m.delete_project(&p.id).unwrap());
     assert!(m.project_setting(&p.id, "icon").unwrap().is_none());
+}
+
+#[test]
+fn users_update_disable_and_keep_one_admin() {
+    let m = Meta::in_memory().unwrap();
+    let a = m.upsert_user("a@example.com", "admin", None).unwrap();
+    let v = m.upsert_user("v@example.com", "viewer", None).unwrap();
+    // The only admin can't be demoted, disabled or removed.
+    assert!(
+        m.update_user(&a.id, None, &a.email, "viewer", None)
+            .is_err()
+    );
+    assert!(m.set_user_disabled(&a.id, true).is_err());
+    assert!(m.delete_user(&a.id).is_err());
+    // A viewer can be anything; email changes keep the id.
+    let u = m
+        .update_user(
+            &v.id,
+            Some(" Vera "),
+            "vera@example.com",
+            "admin",
+            Some(&["p".into()]),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (u.id.as_str(), u.name.as_deref(), u.email.as_str()),
+        (v.id.as_str(), Some("Vera"), "vera@example.com")
+    );
+    assert!(
+        m.update_user(&v.id, None, "a@example.com", "admin", None)
+            .is_err()
+    );
+    // Two admins: one may step down.
+    assert!(
+        m.update_user(&a.id, None, &a.email, "viewer", None)
+            .unwrap()
+            .is_some()
+    );
+    m.create_login_link_for(Some(&v.id), 600).unwrap();
+    assert!(m.pending_link(&v.id).unwrap().is_some());
+    m.set_user_disabled(&a.id, true).unwrap();
+    assert!(m.user(&a.id).unwrap().unwrap().disabled);
+    m.set_user_timezone(&a.id, Some("Europe/Paris")).unwrap();
+    assert!(m.set_user_timezone(&a.id, Some("x y")).is_err());
+    assert_eq!(
+        m.user(&a.id).unwrap().unwrap().timezone.as_deref(),
+        Some("Europe/Paris")
+    );
+    m.touch_sign_in(&v.id).unwrap();
+    assert!(m.user(&v.id).unwrap().unwrap().last_sign_in.is_some());
+    assert_eq!(m.revoke_links(&v.id).unwrap(), 1);
 }
