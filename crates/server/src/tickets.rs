@@ -105,7 +105,7 @@ pub(crate) async fn draft(
 ) -> Result<Draft, String> {
     let f = filters(p);
     let map = crate::load_map(state, &p.id).await;
-    let b = openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v)))
+    let b = crate::boards::board(state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v)))
         .await
         .map_err(|e| e.to_string())?;
     let base = format!("{host}/p/{}", p.id);
@@ -493,8 +493,7 @@ pub(crate) async fn hourly(state: &AppState, p: &openlens_meta::Project) {
     };
     let f = filters(p);
     let map = crate::load_map(state, &p.id).await;
-    let Ok(b) =
-        openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))).await
+    let Ok(b) = crate::boards::board(state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))).await
     else {
         return;
     };

@@ -119,7 +119,7 @@ pub(crate) async fn breakdown(
     let f = q.f.filters(&auth::tz_for(&state, &headers, &p.timezone));
     let map = crate::load_map(&state, &p.id).await;
     let (b, rows) = tokio::join!(
-        openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
+        crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
         openlens_engine::breakdown(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f, &by)
     );
     let info = openlens_ui::ProjectInfo {
@@ -305,7 +305,7 @@ pub(crate) async fn acquisition(
         openlens_engine::Touch::First
     };
     let (b, rows) = tokio::join!(
-        openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
+        crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
         openlens_engine::acquisition(
             &state.query,
             &p.id,
@@ -351,7 +351,7 @@ pub(crate) async fn forms(
     let f = q.filters(&auth::tz_for(&state, &headers, &p.timezone));
     let map = crate::load_map(&state, &p.id).await;
     let (b, list) = tokio::join!(
-        openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
+        crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
         openlens_engine::forms::forms(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f)
     );
     let info = openlens_ui::ProjectInfo {
@@ -387,7 +387,7 @@ pub(crate) async fn revenue(
     let f = q.filters(&auth::tz_for(&state, &headers, &p.timezone));
     let map = crate::load_map(&state, &p.id).await;
     let (b, r) = tokio::join!(
-        openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
+        crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
         openlens_engine::revenue(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f)
     );
     let info = openlens_ui::ProjectInfo {
@@ -426,7 +426,7 @@ pub(crate) async fn churn(
     let f = q.filters(&auth::tz_for(&state, &headers, &p.timezone));
     let map = crate::load_map(&state, &p.id).await;
     let (b, c) = tokio::join!(
-        openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
+        crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
         openlens_engine::churn(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f)
     );
     let info = openlens_ui::ProjectInfo {
@@ -733,7 +733,7 @@ pub(crate) async fn audience(
     let f = q.filters(&auth::tz_for(&state, &headers, &p.timezone));
     let map = crate::load_map(&state, &p.id).await;
     let (b, a) = tokio::join!(
-        openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
+        crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
         openlens_engine::audience(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f)
     );
     let info = openlens_ui::ProjectInfo {
@@ -788,7 +788,7 @@ pub(crate) async fn flows(
     let fq = flow_query(&q);
     let map = crate::load_map(&state, &p.id).await;
     let (b, flow) = tokio::join!(
-        openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
+        crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
         openlens_engine::flows(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f, &fq)
     );
     let features: Vec<(String, String)> = map

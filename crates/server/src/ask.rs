@@ -262,8 +262,7 @@ async fn brief(state: &AppState, p: &openlens_meta::Project) -> String {
                 .join(", ")
         ));
     }
-    if let Ok(b) =
-        openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))).await
+    if let Ok(b) = crate::boards::board(state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))).await
     {
         s.push_str(&format!(
             "\n## Last 30 days (production)\nDAU {} · WAU {} · MAU {} · stickiness {:.2} · sessions {} · bounce {:.1}% · sessions with errors {:.1}%\n",
@@ -319,14 +318,7 @@ async fn run_tool(
         "kpi" => {
             let mut f = f;
             f.role = arg("role").filter(|r| r.len() <= 64);
-            match openlens_engine::board(
-                &state.query,
-                &p.id,
-                &f,
-                map.as_ref().map(|(m, v)| (m, *v)),
-            )
-            .await
-            {
+            match crate::boards::board(state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))).await {
                 Ok(b) => {
                     let mut t = format!(
                         "dau\twau\tmau\tstickiness\tsessions\tbounce\terror_rate\tavg_secs\n{}\t{}\t{}\t{:.3}\t{}\t{:.3}\t{:.3}\t{:.0}\n\nrelease\tfirst_seen\tusers\tsessions\terror_rate\tbounce\ttasks_per_session",
@@ -363,23 +355,18 @@ async fn run_tool(
                 Err(e) => (format!("error: {e}"), None),
             }
         }
-        "insights" => match openlens_engine::board(
-            &state.query,
-            &p.id,
-            &f,
-            map.as_ref().map(|(m, v)| (m, *v)),
-        )
-        .await
-        {
-            Ok(b) => {
-                let mut t = String::from("title\tevidence\tnext step");
-                for i in &b.insights {
-                    t.push_str(&format!("\n{}\t{}\t{}", i.title, i.evidence, i.next_step));
+        "insights" => {
+            match crate::boards::board(state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))).await {
+                Ok(b) => {
+                    let mut t = String::from("title\tevidence\tnext step");
+                    for i in &b.insights {
+                        t.push_str(&format!("\n{}\t{}\t{}", i.title, i.evidence, i.next_step));
+                    }
+                    (t, Some(("Insight cards".into(), base)))
                 }
-                (t, Some(("Insight cards".into(), base)))
+                Err(e) => (format!("error: {e}"), None),
             }
-            Err(e) => (format!("error: {e}"), None),
-        },
+        }
         "feature_context" => {
             let (Some((m, _)), Some(k)) = (&map, arg("key")) else {
                 return ("no feature map, or no key".into(), None);

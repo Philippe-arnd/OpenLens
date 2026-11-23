@@ -31,6 +31,7 @@ fn harness() -> Harness {
         query: openlens_query::QueryEngine::new(dir.path(), openlens_query::Limits::default()),
         data_dir: dir.path().to_path_buf(),
         admin_token: "adm_test".into(),
+        boards: Default::default(),
     };
     Harness {
         _dir: dir,
@@ -3919,4 +3920,56 @@ fn url_encode(s: &str) -> String {
             }
         })
         .collect()
+}
+
+#[tokio::test]
+async fn the_board_is_computed_once_and_follows_new_data() {
+    let h = harness();
+    let batch = serde_json::json!({"key": h.key, "batch": [
+        {"event": "$pageview", "distinct_id": "u1", "properties": {"$pathname": "/"}}
+    ]});
+    let (status, _) = post(&h, "/capture", batch.to_string().into_bytes(), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let boards = h.state.boards.clone();
+    let before = boards.computed();
+    let uri = "/api/projects/default/board";
+    let (a, b, c, d) = tokio::join!(
+        get(&h, uri, None, true),
+        get(&h, uri, None, true),
+        get(&h, uri, None, true),
+        get(&h, uri, None, true)
+    );
+    for r in [a, b, c, d] {
+        assert_eq!(r.status(), StatusCode::OK);
+    }
+    assert_eq!(
+        boards.computed(),
+        before + 1,
+        "concurrent calls share one computation"
+    );
+    let again = get(&h, "/api/projects/default/board", None, true).await;
+    assert_eq!(again.status(), StatusCode::OK);
+    assert_eq!(
+        boards.computed(),
+        before + 1,
+        "a second call is served from the cache"
+    );
+    // New data: the next call is still answered at once, and the board is
+    // recomputed behind it.
+    let (status, _) = post(&h, "/capture", batch.to_string().into_bytes(), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let r = get(&h, "/api/projects/default/board", None, true).await;
+    assert_eq!(r.status(), StatusCode::OK);
+    for _ in 0..100 {
+        if boards.computed() > before + 1 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(
+        boards.computed() > before + 1,
+        "new data triggers a recomputation"
+    );
 }

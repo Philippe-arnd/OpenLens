@@ -197,13 +197,9 @@ pub(crate) async fn view(
                     ..openlens_engine::Filters::default()
                 };
                 let map = crate::load_map(&state, &p.id).await;
-                let Ok(b) = openlens_engine::board(
-                    &state.query,
-                    &p.id,
-                    &f,
-                    map.as_ref().map(|(m, v)| (m, *v)),
-                )
-                .await
+                let Ok(b) =
+                    crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v)))
+                        .await
                 else {
                     return not_found();
                 };

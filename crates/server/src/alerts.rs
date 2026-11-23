@@ -503,7 +503,7 @@ async fn regressions(state: &AppState, p: &openlens_meta::Project) {
         ..openlens_engine::Filters::default()
     };
     let Ok(board) =
-        openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))).await
+        crate::boards::board(state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))).await
     else {
         return;
     };

@@ -76,7 +76,7 @@ async fn evaluate(
         tz: tz.to_owned(),
         ..openlens_engine::Filters::default()
     };
-    let b = openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v)))
+    let b = crate::boards::board(state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v)))
         .await
         .map_err(|e| e.to_string())?;
     let w = goals::weekly(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f)

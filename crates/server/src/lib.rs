@@ -10,6 +10,7 @@ mod audience;
 mod auth;
 pub mod backup;
 mod backups;
+pub mod boards;
 mod capture;
 mod comments;
 mod cookieless;
@@ -66,6 +67,8 @@ pub struct AppState {
     pub admin_token: Arc<str>,
     /// Query engine over the data root.
     pub query: openlens_query::QueryEngine,
+    /// Board results shared across requests (#291).
+    pub boards: boards::BoardCache,
 }
 
 /// Build the application router.
@@ -305,6 +308,9 @@ fn flush_and_compact(
         if w.should_flush() {
             let n = w.flush().map_err(|e| e.to_string())?;
             tracing::debug!(n, "flushed events to parquet");
+            if n > 0 {
+                state.boards.bump();
+            }
         }
     }
     if last_compact.elapsed() >= Duration::from_secs(600) {
@@ -314,6 +320,8 @@ fn flush_and_compact(
         for p in state.meta.projects().map_err(|e| e.to_string())? {
             let now = chrono::Utc::now();
             clean_stored_urls(state, &p.id);
+            // Compaction, erasure and retention below rewrite files.
+            state.boards.bump();
             if let Err(err) = openlens_storage::compact(&state.data_dir, &p.id, now) {
                 tracing::warn!(project = %p.id, %err, "compaction failed");
             }
@@ -376,7 +384,9 @@ fn clean_stored_urls(state: &AppState, project: &str) {
 /// Flush everything still buffered (used on shutdown).
 pub fn flush_now(state: &AppState) -> Result<usize, String> {
     let mut w = state.writer.lock().map_err(|_| "writer lock poisoned")?;
-    w.flush().map_err(|e| e.to_string())
+    let n = w.flush().map_err(|e| e.to_string())?;
+    state.boards.bump();
+    Ok(n)
 }
 
 /// Constant-time string comparison.

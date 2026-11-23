@@ -128,7 +128,7 @@ pub(crate) async fn page(
         ..openlens_engine::Filters::default()
     };
     let releases: Vec<(String, String)> =
-        openlens_engine::board(&state.query, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v)))
+        crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v)))
             .await
             .map(|b| {
                 b.releases
