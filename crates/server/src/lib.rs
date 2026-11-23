@@ -28,7 +28,7 @@ mod privacy;
 mod replay;
 mod reword;
 mod s3;
-mod secrets;
+pub mod secrets;
 mod settings;
 mod share;
 mod storage;
@@ -66,6 +66,8 @@ pub struct AppState {
     pub data_dir: PathBuf,
     /// Admin token for the dashboard and API.
     pub admin_token: Arc<str>,
+    /// Signs session cookies and the OIDC flow ([`secrets::session_key`]).
+    pub session_key: Arc<str>,
     /// Query engine over the data root.
     pub query: openlens_query::QueryEngine,
     /// Board results shared across requests (#291).

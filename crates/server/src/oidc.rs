@@ -170,7 +170,7 @@ pub(crate) async fn start(State(state): State<AppState>, headers: HeaderMap) -> 
     let (st, nonce, verifier) = (random(32), random(32), random(64));
     let exp = chrono::Utc::now().timestamp() + FLOW_SECS;
     let payload = format!("{st}.{nonce}.{verifier}.{exp}");
-    let sig = auth::sign(&state.admin_token, &format!("oidc:{payload}"));
+    let sig = auth::sign(&state.session_key, &format!("oidc:{payload}"));
     let redirect_uri = format!("{}/oidc/callback", crate::base_url(&headers));
     let url = format!(
         "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={st}&nonce={nonce}&code_challenge={}&code_challenge_method=S256",
@@ -283,7 +283,7 @@ pub(crate) async fn callback(
     };
     if !crate::token_matches(
         sig,
-        &auth::sign(&state.admin_token, &format!("oidc:{payload}")),
+        &auth::sign(&state.session_key, &format!("oidc:{payload}")),
     ) {
         return fail("bad flow signature");
     }

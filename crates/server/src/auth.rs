@@ -61,7 +61,7 @@ pub(crate) fn new_session(state: &AppState, user: &str) -> String {
     let exp = chrono::Utc::now().timestamp() + SESSION_SECS;
     format!(
         "{exp}.{user}.{}",
-        sign(&state.admin_token, &format!("session:{exp}:{user}"))
+        sign(&state.session_key, &format!("session:{exp}:{user}"))
     )
 }
 
@@ -77,12 +77,12 @@ fn session_user(state: &AppState, value: &str) -> Option<String> {
             let ok = user.len() <= 120
                 && token_matches(
                     sig,
-                    &sign(&state.admin_token, &format!("session:{exp}:{user}")),
+                    &sign(&state.session_key, &format!("session:{exp}:{user}")),
                 );
             ok.then(|| user.to_owned())
         }
         // Legacy owner cookie.
-        None => token_matches(rest, &sign(&state.admin_token, &format!("session:{exp}")))
+        None => token_matches(rest, &sign(&state.session_key, &format!("session:{exp}")))
             .then(|| OWNER.to_owned()),
     }
 }

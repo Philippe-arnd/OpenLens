@@ -245,12 +245,14 @@ fn build_state() -> Result<openlens_server::AppState, String> {
     if recovered > 0 {
         tracing::info!(recovered, "recovered events from the write-ahead log");
     }
+    let session_key = openlens_server::secrets::session_key(&data_dir)?;
     Ok(openlens_server::AppState {
         meta: Arc::new(meta),
         writer: Arc::new(Mutex::new(writer)),
         query: openlens_query::QueryEngine::new(&data_dir, openlens_query::Limits::default()),
         data_dir,
         admin_token: admin_token.into(),
+        session_key: session_key.into(),
         boards: Default::default(),
         flushing: Default::default(),
     })
