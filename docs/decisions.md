@@ -121,3 +121,14 @@ Append-only. Each entry: id, date, decision, why, consequences.
 - Person-level SQL is refused unless an admin allows it per project.
 - Each project has a daily token budget (`OPENLENS_LLM_DAILY_TOKENS`, 400,000 by default), and each person may ask 30 questions an hour.
 
+
+## D-021 (2026-11-23, agent for the audit) Ask's SQL without person-level detail runs on an aggregate-only view
+
+**Decision:** when a project does not allow person-level detail, the `sql` tool of Ask runs in its own query context. There, `events` is a view with only `event, timestamp, path, feature, role, plan, release, environment, flags, date`, plus `user_key` and `session_key`: an HMAC-SHA256 of the user and session ids, keyed by a secret kept per project (`project:<id>:ask_key`, never shown). `persons`, `person_aliases` and `raw_events` do not exist there. The plan must end in an aggregate, without window functions or subqueries above it, and every group of fewer than **5** distinct people is dropped. The threshold is fixed (D-014).
+
+**Why:** the first filter searched words in the SQL text, and three plain queries got around it (a window function, the `persons` table, `person_aliases`). Checking what the query can reach, and what its plan returns, does not depend on how it is written.
+
+**Consequences:**
+- Small projects (fewer than 5 people in a group) get empty results from Ask's SQL; the other Ask tools still answer.
+- A query that renames `user_key` below the aggregate is refused rather than guessed.
+- With person-level detail allowed, `events` is the full table (with the feature map applied), and `user_key` and `session_key` are the ids themselves.

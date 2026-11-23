@@ -3593,7 +3593,8 @@ async fn fake_llm(seen: Arc<Mutex<Vec<String>>>) -> String {
                     serde_json::json!({"choices":[{"message":{"content":"","tool_calls":[
                         {"id":"a","type":"function","function":{"name":"kpi","arguments":"{}"}},
                         {"id":"b","type":"function","function":{"name":"propose_flag","arguments":"{\"key\":\"beta\",\"enabled\":true,\"rollout\":100}"}},
-                        {"id":"c","type":"function","function":{"name":"sql","arguments":"{\"query\":\"SELECT distinct_id FROM events\"}"}}
+                        {"id":"c","type":"function","function":{"name":"sql","arguments":"{\"query\":\"SELECT distinct_id FROM events\"}"}},
+                        {"id":"d","type":"function","function":{"name":"sql","arguments":"{\"query\":\"SELECT count(*) AS n, array_agg(concat('le', 'ak-', person)) AS ids FROM persons\"}"}}
                     ]}}],"usage":{"prompt_tokens":100,"completion_tokens":10}})
                 };
                 axum::Json(reply)
@@ -3693,6 +3694,8 @@ async fn ask_answers_with_evidence_and_only_proposes_changes() {
             && second.contains("refused: `distinct_id` is person-level"),
         "{second}"
     );
+    // Tables of people are not there to read in aggregate mode.
+    assert!(!second.contains("leak-u1"), "{second}");
     assert!(bodies.iter().all(|b| !b.contains("sk-test-secret")));
     // Nothing changed until someone clicks.
     let flags = openlens_server::flags_for_tests(&h.state, "default").await;

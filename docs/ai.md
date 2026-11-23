@@ -29,7 +29,7 @@ Use **Settings → AI** (admins), or set environment variables. Environment vari
 - **Every request:** fixed rules, the tool list, and a project brief rebuilt daily and whenever the map changes. The brief holds the feature map (keys, names, areas, success events), the headline KPIs and the latest releases, the top insights, and the goals.
 - **Your question,** plus the previous six questions and answers as plain text (no tool results).
 - **Tool results,** as compact tables of at most 20 rows. Available tools: KPIs, insights, one feature's context, error groups, goals, and read-only SQL.
-- **Never:** event properties, page URLs, replays, emails, user or session ids. SQL may *count* users (`count(DISTINCT distinct_id)`) but not list them. An admin can allow person-level detail for one project on the Ask page.
+- **Never:** event properties, page URLs, replays, emails, user or session ids. SQL runs on an aggregate-only view: people are counted with `count(DISTINCT user_key)` (a keyed hash), never listed, and groups of fewer than 5 people are left out (D-021). An admin can allow person-level detail for one project on the Ask page.
 - **What is sent** (on the Ask page, admins only) shows the exact body of the last request for the project. The key travels in a header and is never stored with it.
 
 ## Safety
