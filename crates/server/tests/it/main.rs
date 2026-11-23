@@ -2931,3 +2931,73 @@ async fn the_timeline_gathers_changes_and_notes() {
         StatusCode::SEE_OTHER
     );
 }
+
+#[tokio::test]
+async fn cookieless_visitors_get_a_daily_id_and_no_durable_link() {
+    let h = harness();
+    let send = |batch: serde_json::Value| {
+        let state = h.state.clone();
+        let body = serde_json::json!({"key": h.key, "batch": batch}).to_string();
+        async move {
+            router(state)
+                .oneshot(
+                    Request::post("/capture")
+                        .header("content-type", "application/json")
+                        .header("x-forwarded-for", "198.51.100.23")
+                        .header(
+                            "user-agent",
+                            "Mozilla/5.0 (X11; Linux x86_64) Firefox/132.0",
+                        )
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+                .status()
+        }
+    };
+    assert_eq!(
+        send(serde_json::json!([{"event": "$pageview", "distinct_id": "$cookieless", "session_id": "$cookieless", "properties": {"$pathname": "/"}}])).await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        send(serde_json::json!([
+            {"event": "$pageview", "distinct_id": "$cookieless", "session_id": "$cookieless", "properties": {"$pathname": "/b"}},
+            {"event": "$identify", "distinct_id": "ana", "session_id": "$cookieless", "properties": {"$anon_distinct_id": "$cookieless"}}
+        ]))
+        .await,
+        StatusCode::OK
+    );
+    openlens_server::flush_now(&h.state).unwrap();
+    let r = h
+        .state
+        .query
+        .sql(
+            "default",
+            "SELECT distinct_id, session_id, properties FROM raw_events ORDER BY timestamp",
+        )
+        .await
+        .unwrap();
+    let all = serde_json::to_string(&r.rows).unwrap();
+    assert!(
+        !all.contains("$cookieless") && !all.contains("198.51.100.23"),
+        "{all}"
+    );
+    let ids: std::collections::HashSet<&str> = r
+        .rows
+        .iter()
+        .filter(|x| x["distinct_id"] != "ana")
+        .filter_map(|x| x["distinct_id"].as_str())
+        .collect();
+    assert_eq!(ids.len(), 1, "one visitor for the day: {ids:?}");
+    let sessions: std::collections::HashSet<&str> = r
+        .rows
+        .iter()
+        .filter_map(|x| x["session_id"].as_str())
+        .collect();
+    assert_eq!(sessions.len(), 1, "one session while active");
+    assert!(
+        !all.contains("anon_distinct_id"),
+        "the daily id is never linked to the login"
+    );
+}

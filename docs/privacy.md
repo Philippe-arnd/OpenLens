@@ -28,4 +28,6 @@ What OpenLens stores, for how long, where, and what it never stores. Everything 
 
 ## Cookieless mode
 
-Planned (#273): no persistent identifier for anonymous visitors, for sites that run without a consent banner.
+Add `data-cookieless` to the script tag (or `init({ cookieless: true })`). The SDK then writes nothing to the device (no cookie, no localStorage; its state stays in memory), and the server turns each anonymous visitor into a hash of a salt that changes every UTC day, the project, the address and the user agent; the address is not stored, and yesterday's salt is overwritten, so a visitor can't be followed from one day to the next. A session continues while the visitor is active within 30 minutes. Logged-in users keep their own id, but the daily id is never linked to it. Session replay is off in this mode.
+
+What it changes: anonymous visitors count as new every day (returning visitors, retention and churn rely on logged-in users), and behind no proxy (no `X-Forwarded-For`) every request counts as a new visitor.

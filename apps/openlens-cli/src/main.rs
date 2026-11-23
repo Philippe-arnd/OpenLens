@@ -704,7 +704,11 @@ fn run(cli: Cli) -> Result<bool, String> {
         Command::Annotate { project, note, day } => {
             let path = format!("/api/projects/{project}/timeline");
             let (status, v) = match note {
-                Some(n) => client()?.call("POST", &path, Some(Body::Json(json!({ "body": n, "day": day }))))?,
+                Some(n) => client()?.call(
+                    "POST",
+                    &path,
+                    Some(Body::Json(json!({ "body": n, "day": day }))),
+                )?,
                 None => client()?.call("GET", &path, None)?,
             };
             out(&v);

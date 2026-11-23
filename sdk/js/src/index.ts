@@ -20,6 +20,10 @@ declare global {
 export type Props = Record<string, unknown>;
 
 export interface Config {
+  /** Store nothing on the device (no cookie, no localStorage): the server
+   * derives anonymous visitors and sessions from a hash that changes every
+   * day. Session replay is off in this mode. (#273) */
+  cookieless?: boolean;
   /** OpenLens server URL, e.g. https://lens.example.com */
   host: string;
   /** Project capture key (pk_…). */
@@ -83,17 +87,34 @@ function uuid(): string {
   });
 }
 
+/** Where the SDK keeps its state: the browser's localStorage, or memory
+ * only in cookieless mode (#273), so nothing is written to the device. */
+const memory = new Map<string, string>();
+const memStore = {
+  getItem: (k: string) => memory.get(k) ?? null,
+  setItem: (k: string, v: string) => void memory.set(k, v),
+  removeItem: (k: string) => void memory.delete(k),
+};
+function store(): Pick<Storage, "getItem" | "setItem" | "removeItem"> {
+  return cfg?.cookieless ? memStore : localStorage;
+}
+
+/** In cookieless mode the server derives the anonymous visitor and the
+ * session from a daily rotating hash: the SDK sends this placeholder. */
+const COOKIELESS = "$cookieless";
+
 function storageKey(): string {
   return `openlens_${cfg?.key ?? ""}`;
 }
 
 function load(): State {
   try {
-    const raw = localStorage.getItem(storageKey());
+    const raw = store().getItem(storageKey());
     if (raw) return JSON.parse(raw) as State;
   } catch {
     // Storage blocked: fall back to memory only.
   }
+  if (cfg?.cookieless) return { anon: COOKIELESS, dims: {}, sid: COOKIELESS, last: 0 };
   return { anon: uuid(), dims: {}, sid: uuid(), last: 0 };
 }
 
@@ -101,7 +122,7 @@ function load(): State {
  * current session), so tabs share one visitor and one session. */
 function refresh(): void {
   try {
-    const raw = localStorage.getItem(storageKey());
+    const raw = store().getItem(storageKey());
     if (raw) state = { ...state, ...(JSON.parse(raw) as State) };
   } catch {
     // Storage blocked: this tab keeps its own state.
@@ -123,7 +144,7 @@ function isBot(): boolean {
 
 function save(): void {
   try {
-    localStorage.setItem(storageKey(), JSON.stringify(state));
+    store().setItem(storageKey(), JSON.stringify(state));
   } catch {
     // Storage blocked or full: keep going in memory.
   }
@@ -132,7 +153,7 @@ function save(): void {
 /** New session after 30 min of inactivity or when the UTC day changes. */
 function touchSession(now: number): void {
   const dayChanged = new Date(now).toISOString().slice(0, 10) !== new Date(state.last).toISOString().slice(0, 10);
-  if (!state.last || now - state.last > SESSION_GAP || dayChanged) state.sid = uuid();
+  if (!state.last || now - state.last > SESSION_GAP || dayChanged) state.sid = cfg?.cookieless ? COOKIELESS : uuid();
   state.last = now;
 }
 
@@ -178,7 +199,7 @@ function maybeSurvey(event: string): void {
   if (surveyOpen || consent !== "granted" || !cfg) return;
   const done = (k: string) => {
     try {
-      return localStorage.getItem(`${storageKey()}_survey_${k}`) === "1";
+      return store().getItem(`${storageKey()}_survey_${k}`) === "1";
     } catch {
       return true;
     }
@@ -188,7 +209,7 @@ function maybeSurvey(event: string): void {
   surveyOpen = true;
   const close = (props: Props) => {
     try {
-      localStorage.setItem(`${storageKey()}_survey_${s.key}`, "1");
+      store().setItem(`${storageKey()}_survey_${s.key}`, "1");
     } catch {
       // memory only
     }
@@ -231,7 +252,7 @@ function loadFlags(): void {
       if (j?.flags) {
         activeFlags = j.flags;
         try {
-          localStorage.setItem(`${storageKey()}_flags`, JSON.stringify(activeFlags));
+          store().setItem(`${storageKey()}_flags`, JSON.stringify(activeFlags));
         } catch {
           // memory only
         }
@@ -271,7 +292,7 @@ export function setConsent(granted: boolean): void {
   if (!granted) queue = [];
   else {
     flush();
-    if (cfg?.replay !== false) startReplay();
+    if (cfg?.replay !== false && !cfg?.cookieless) startReplay();
   }
 }
 
@@ -536,7 +557,7 @@ export function init(config: Config): void {
   origFetch = window.fetch?.bind(window);
   state = load();
   try {
-    activeFlags = JSON.parse(localStorage.getItem(`${storageKey()}_flags`) || "[]") as string[];
+    activeFlags = JSON.parse(store().getItem(`${storageKey()}_flags`) || "[]") as string[];
   } catch {
     activeFlags = [];
   }
@@ -549,7 +570,7 @@ export function init(config: Config): void {
     if (doc.prerendering) document.addEventListener("prerenderingchange", autocapture, { once: true });
     else autocapture();
   }
-  if (config.replay !== false && consent === "granted") startReplay();
+  if (config.replay !== false && !config.cookieless && consent === "granted") startReplay();
   timer = setInterval(() => flush(), 5000);
   addEventListener("visibilitychange", () => document.visibilityState === "hidden" && flush(true));
   addEventListener("pagehide", () => flush(true));

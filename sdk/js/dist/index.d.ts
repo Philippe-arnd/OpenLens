@@ -14,6 +14,10 @@ declare global {
 }
 export type Props = Record<string, unknown>;
 export interface Config {
+    /** Store nothing on the device (no cookie, no localStorage): the server
+     * derives anonymous visitors and sessions from a hash that changes every
+     * day. Session replay is off in this mode. (#273) */
+    cookieless?: boolean;
     /** OpenLens server URL, e.g. https://lens.example.com */
     host: string;
     /** Project capture key (pk_…). */

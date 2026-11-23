@@ -29,7 +29,8 @@ if (script && key) {
     key,
     release: detectRelease(script),
     environment: script.dataset.environment || undefined,
-    replay: script.dataset.replay !== "off",
+    replay: script.dataset.replay !== "off" && script.dataset.cookieless === undefined,
+    cookieless: script.dataset.cookieless !== undefined && script.dataset.cookieless !== "false",
     consent: (script.dataset.consent as "granted" | "pending" | "denied" | undefined) || undefined,
   });
 }
