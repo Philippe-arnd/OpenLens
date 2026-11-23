@@ -210,6 +210,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                                     ("/forms", "task", "Forms"),
                                     ("/churn", "ban", "Churn"),
                                     ("/goals", "star", "Goals"),
+                                    ("/timeline", "clock", "Timeline"),
                                     ("/flows", "funnel", "Feature flow"),
                                     ("/features", "route", "Feature map"),
                                     ("/digest", "mail", "Digest"),
@@ -359,6 +360,59 @@ fn tile(accent: &str, glyph: &str, label: &str, value: &str, hint: &str) -> Mark
             div.label { span.chip-icon { (icon(glyph)) } (label) }
             div.value { (value) }
             div.hint { (hint) }
+        }
+    }
+}
+
+/// One entry of the timeline of changes (#267).
+#[derive(Debug, Clone)]
+pub struct Mark {
+    /// Day (YYYY-MM-DD).
+    pub day: String,
+    /// `release`, `change`, `alert` or `note`.
+    pub kind: String,
+    /// What happened.
+    pub text: String,
+    /// Note id (notes only).
+    pub id: Option<i64>,
+    /// Who (changes and notes).
+    pub by: Option<String>,
+    /// The note author's id (to allow deleting).
+    pub author_id: Option<String>,
+}
+
+fn mark_icon(kind: &str) -> &'static str {
+    match kind {
+        "release" => "release",
+        "alert" => "alert",
+        "note" => "idea",
+        _ => "flag",
+    }
+}
+
+/// The active users bars with the timeline's days marked under them.
+fn sparkline_marked(series: &[(String, i64)], marks: &[Mark]) -> Markup {
+    let n = series.len().max(1) as f64;
+    let w = 280.0;
+    let gap = 2.0;
+    let bw = (w - gap * (n - 1.0)) / n;
+    let on: Vec<(usize, Vec<&Mark>)> = series
+        .iter()
+        .enumerate()
+        .map(|(i, (d, _))| (i, marks.iter().filter(|m| &m.day == d).collect::<Vec<_>>()))
+        .filter(|(_, v)| !v.is_empty())
+        .collect();
+    html! {
+        (sparkline(series))
+        @if !on.is_empty() {
+            svg.marks viewBox={ "0 0 " (w) " 12" } role="img" aria-label="Changes on these days (the timeline lists them)" preserveAspectRatio="none" {
+                @for (i, ms) in &on {
+                    @let kind = if ms.iter().any(|m| m.kind == "alert") { "alert" } else if ms.iter().any(|m| m.kind == "release") { "release" } else { "change" };
+                    circle class={ "mk " (kind) } cx=(format!("{:.1}", *i as f64 * (bw + gap) + bw / 2.0)) cy="6" r="4" {
+                        title { @for (j, m) in ms.iter().enumerate() { @if j > 0 { " · " } (m.day) ": " (m.text) } }
+                    }
+                }
+            }
         }
     }
 }
@@ -558,6 +612,7 @@ pub fn board(
     host: &str,
     plain: &[(String, String)],
     revenue: Option<&openlens_engine::Revenue>,
+    marks: &[Mark],
 ) -> Markup {
     if b.total_events == 0 {
         return layout("Focus board", Some(p), empty(p, host));
@@ -640,8 +695,8 @@ pub fn board(
             div.grid {
                 section.card {
                     h2.violet { (icon("pulse")) "Active users" }
-                    (sparkline(&b.dau_series))
-                    p.muted.small { "Last 14 days. Hover a bar for the day." }
+                    (sparkline_marked(&b.dau_series, marks))
+                    p.muted.small { "Last 14 days. Hover a bar for the day" @if !marks.is_empty() && !shared() { ", a dot for what changed (" a href={ "/p/" (p.id) "/timeline" } { "timeline" } ")" } "." }
                 }
                 section.card {
                     h2.sky { (icon("bolt")) "Web Vitals (p75)" }
@@ -2306,6 +2361,44 @@ pub fn forms(
     )
 }
 
+/// The timeline of changes (#267).
+pub fn timeline(p: &ProjectInfo<'_>, marks: &[Mark], me: &str, admin: bool, today: &str) -> Markup {
+    layout(
+        "Timeline",
+        Some(p),
+        html! {
+            div.heading { div {
+                h1 { "Timeline" }
+                p.muted { "What changed, last 90 days: releases, flag and survey changes, feature map pushes, alerts, and notes. Each day with a change is marked on the active users chart." }
+            } }
+            section.card.wide {
+                form.settings method="post" action={ "/p/" (p.id) "/timeline" } {
+                    label { "Day " input type="date" name="day" value=(today) required; }
+                    label.wide { "Note " input type="text" name="body" required maxlength="500" placeholder="Pricing page redesign shipped"; }
+                    button type="submit" { "Add" }
+                }
+            }
+            section.card.wide {
+                @if marks.is_empty() { p.muted { "Nothing yet." } }
+                @else {
+                    ol.timeline { @for m in marks {
+                        li class={ "tl " (m.kind) } {
+                            span.tl-day.mono { (m.day) }
+                            span.tl-icon { (icon(mark_icon(&m.kind))) }
+                            span.tl-text { (m.text) @if let Some(b) = &m.by { span.muted.small { " — " (b) } } }
+                            @if let (Some(id), Some(a)) = (m.id, &m.author_id) {
+                                @if admin || a == me {
+                                    form.inline method="post" action={ "/p/" (p.id) "/timeline/" (id) "/delete" } { button.ghost type="submit" aria-label="Delete this note" { "Delete" } }
+                                }
+                            }
+                        }
+                    } }
+                }
+            }
+        },
+    )
+}
+
 /// Feature flags: switch on/off and change the rollout. Creating flags is
 /// done by agents (API/CLI/MCP) with the code that uses them.
 pub fn flags(p: &ProjectInfo<'_>, flags: &[openlens_flags::Flag]) -> Markup {
@@ -3467,11 +3560,27 @@ mod tests {
             "Most people who left (72%) were in billing last".to_owned(),
             "Check the billing page first.".to_owned(),
         )];
-        let html = render(board(&p, &b, &Filters::default(), "http://x", &plain, None));
+        let html = render(board(
+            &p,
+            &b,
+            &Filters::default(),
+            "http://x",
+            &plain,
+            None,
+            &[],
+        ));
         assert!(html.contains("Most people who left (72%)"));
         assert!(html.contains("Original: 72% of churned users were last seen in billing"));
         assert!(html.contains("Check the billing page first."));
-        let html = render(board(&p, &b, &Filters::default(), "http://x", &[], None));
+        let html = render(board(
+            &p,
+            &b,
+            &Filters::default(),
+            "http://x",
+            &[],
+            None,
+            &[],
+        ));
         assert!(
             html.contains("72% of churned users were last seen in billing")
                 && !html.contains("Original:")

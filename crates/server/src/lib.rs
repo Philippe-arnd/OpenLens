@@ -28,6 +28,7 @@ mod settings;
 mod share;
 mod storage;
 mod surveys;
+mod timeline;
 mod users;
 mod web;
 

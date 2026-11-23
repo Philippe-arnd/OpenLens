@@ -2843,3 +2843,91 @@ async fn forms_show_the_field_where_people_give_up() {
     let email = page.find(">email<").unwrap();
     assert!(phone < email, "phone, where people leave, comes first");
 }
+
+#[tokio::test]
+async fn the_timeline_gathers_changes_and_notes() {
+    let h = harness();
+    let (status, _) = post(&h, "/capture", batch(&h.key), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let owner = login_cookie(&h).await;
+    let viewer = invite(
+        &h,
+        serde_json::json!({"email": "v@example.com", "role": "viewer"}),
+    )
+    .await;
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    // Anyone signed in adds a note; flag changes come from the audit log.
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/timeline",
+            &viewer,
+            &format!("day={today}&body=Pricing+page+shipped")
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            "/p/default/flags-edit",
+            &owner,
+            "key=beta&rollout=10&enabled=on"
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    let page = body_text(get(&h, "/p/default/timeline", Some(&owner), false).await).await;
+    assert!(
+        page.contains("Pricing page shipped")
+            && page.contains("Flag beta changed")
+            && !page.contains(" style=")
+    );
+    let api = body_text(
+        router(h.state.clone())
+            .oneshot(
+                Request::post("/api/projects/default/timeline")
+                    .header("authorization", "Bearer adm_test")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"body":"Deployed v2"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert!(api.contains("\"id\""), "{api}");
+    let list = body_text(get(&h, "/api/projects/default/timeline", None, true).await).await;
+    assert!(list.contains("Deployed v2") && list.contains("Pricing page shipped"));
+    let board = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
+    assert!(board.contains("class=\"mk"), "a dot under today's bar");
+    // A viewer can't delete the owner's note… but can delete their own.
+    let notes = h.state.meta.notes("default", "2000-01-01").unwrap();
+    let api_note = notes.iter().find(|n| n.4 == "Deployed v2").unwrap().0;
+    let own = notes
+        .iter()
+        .find(|n| n.4 == "Pricing page shipped")
+        .unwrap()
+        .0;
+    assert_eq!(
+        post_form(
+            &h,
+            &format!("/p/default/timeline/{api_note}/delete"),
+            &viewer,
+            ""
+        )
+        .await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        post_form(
+            &h,
+            &format!("/p/default/timeline/{own}/delete"),
+            &viewer,
+            ""
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+}

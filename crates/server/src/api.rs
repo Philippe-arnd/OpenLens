@@ -62,6 +62,10 @@ pub(crate) fn routes() -> Router<AppState> {
             axum::routing::delete(crate::privacy::api_forget),
         )
         .route("/api/audit", get(crate::privacy::api_audit))
+        .route(
+            "/api/projects/{project}/timeline",
+            get(crate::timeline::api_list).post(crate::timeline::api_add),
+        )
         .route("/api/login-links", post(login_link))
         .route("/api/users", get(list_users))
         .route(

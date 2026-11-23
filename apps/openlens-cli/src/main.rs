@@ -138,6 +138,19 @@ enum Command {
         #[command(subcommand)]
         action: FlagsCmd,
     },
+    /// Add a note to the timeline (for example right after a deploy);
+    /// without --note, list the timeline.
+    Annotate {
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+        /// The note (1–500 characters).
+        #[arg(long)]
+        note: Option<String>,
+        /// Its day (YYYY-MM-DD, default today).
+        #[arg(long)]
+        day: Option<String>,
+    },
     /// Goals on KPIs: each with its target, current value, trend at the
     /// deadline and status, plus a suggested target per KPI.
     Goals {
@@ -687,6 +700,15 @@ fn run(cli: Cli) -> Result<bool, String> {
                 &json!({ "rows": rows, "file": path.display().to_string(), "days_truncated": truncated }),
             );
             Ok(true)
+        }
+        Command::Annotate { project, note, day } => {
+            let path = format!("/api/projects/{project}/timeline");
+            let (status, v) = match note {
+                Some(n) => client()?.call("POST", &path, Some(Body::Json(json!({ "body": n, "day": day }))))?,
+                None => client()?.call("GET", &path, None)?,
+            };
+            out(&v);
+            Ok(status == 200 || status == 201)
         }
         Command::Goals { project } => {
             let (status, v) =
