@@ -224,20 +224,19 @@ fn build_state() -> Result<openlens_server::AppState, String> {
             .map_err(|e| e.to_string())?;
         tracing::info!(project = %project.id, "created the default project for OPENLENS_PROJECT_KEY");
     }
-    let token_existed = meta
-        .setting("admin_token")
-        .map_err(|e| e.to_string())?
-        .is_some();
-    let admin_token = match std::env::var("OPENLENS_ADMIN_TOKEN")
+    let admin_token_hash = match std::env::var("OPENLENS_ADMIN_TOKEN")
         .ok()
         .filter(|t| !t.is_empty())
     {
-        Some(t) => t,
-        None => meta.admin_token().map_err(|e| e.to_string())?,
+        Some(t) => openlens_meta::sha256_hex(&t),
+        None => {
+            let (hash, generated) = meta.admin_token_hash().map_err(|e| e.to_string())?;
+            if let Some(admin_token) = generated {
+                tracing::info!(%admin_token, "generated admin token, shown only now (store it; set OPENLENS_ADMIN_TOKEN to choose your own)");
+            }
+            hash
+        }
     };
-    if !token_existed && std::env::var("OPENLENS_ADMIN_TOKEN").is_err() {
-        tracing::info!(%admin_token, "generated admin token (store it; set OPENLENS_ADMIN_TOKEN to choose your own)");
-    }
 
     let (writer, recovered) =
         openlens_storage::Writer::open(&data_dir, openlens_storage::FlushPolicy::default())
@@ -251,7 +250,7 @@ fn build_state() -> Result<openlens_server::AppState, String> {
         writer: Arc::new(Mutex::new(writer)),
         query: openlens_query::QueryEngine::new(&data_dir, openlens_query::Limits::default()),
         data_dir,
-        admin_token: admin_token.into(),
+        admin_token_hash: admin_token_hash.into(),
         session_key: session_key.into(),
         boards: Default::default(),
         flushing: Default::default(),
