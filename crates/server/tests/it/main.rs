@@ -4240,8 +4240,7 @@ const ROUTES: &[(&str, &str, Access)] = &[
     ("GET", "/p/{project}/replays/{session}/events.json", Read),
     ("GET", "/p/{project}/watch", Read),
     ("GET", "/p/{project}/heatmap", Read),
-    // Shown on shared pages; decided in #294 part 4.
-    ("GET", "/p/{project}/icon", Public),
+    ("GET", "/p/{project}/icon", Read),
     ("GET", "/p/{project}/timeline", Read),
     ("POST", "/p/{project}/timeline", Shared),
     ("POST", "/p/{project}/timeline/{nid}/delete", Shared),
