@@ -106,7 +106,7 @@ pub(crate) async fn create(
                 "share.create",
                 &format!("{} link {}", link.scope, link.id),
             );
-            let url = format!("{}/s/{token}", crate::base_url(&headers));
+            let url = format!("{}/s/{token}", crate::public_url(&headers));
             html_page(
                 StatusCode::OK,
                 openlens_ui::message(
@@ -174,7 +174,7 @@ pub(crate) async fn view(
                 key: "",
             };
             let markup = if link.scope == "digest" {
-                match crate::digest::compute(&state, &p, &crate::base_url(&headers)).await {
+                match crate::digest::compute(&state, &p, &crate::public_url(&headers)).await {
                     Ok((d, _)) => {
                         openlens_ui::render_shared(|| openlens_ui::digest(&info, &d, false))
                     }

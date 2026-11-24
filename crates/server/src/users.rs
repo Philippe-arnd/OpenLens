@@ -156,7 +156,7 @@ pub(crate) async fn invite(
     .await;
     match res {
         Ok(Ok((email, t))) => {
-            let link = format!("{}/l/{t}", crate::base_url(&headers));
+            let link = format!("{}/l/{t}", crate::public_url(&headers));
             crate::privacy::audit(&state, &headers, None, "user.invite", &email);
             render(&state, Some((email, link)), "", None).await
         }
@@ -276,7 +276,7 @@ pub(crate) async fn action(
             .await
             {
                 Ok(Ok(t)) => {
-                    let link = format!("{}/l/{t}", crate::base_url(&headers));
+                    let link = format!("{}/l/{t}", crate::public_url(&headers));
                     render(&state, Some((u.email, link)), "", None).await
                 }
                 _ => oops("Try again."),

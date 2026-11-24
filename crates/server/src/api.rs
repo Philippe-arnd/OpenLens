@@ -322,7 +322,7 @@ async fn create_project(
         Err(e) => return err(StatusCode::BAD_REQUEST, e),
     };
     let meta = state.meta.clone();
-    let host = crate::base_url(&headers);
+    let host = crate::public_url(&headers);
     match tokio::task::spawn_blocking(move || {
         let mut p = meta.create_project(body.name.trim(), None)?;
         if let Some(tz) = tz {
@@ -503,7 +503,7 @@ async fn login_link(
         }
     };
     let meta = state.meta.clone();
-    let host = crate::base_url(&headers);
+    let host = crate::public_url(&headers);
     let res = tokio::task::spawn_blocking(move || {
         let user = match &req.email {
             Some(email) => Some(meta.upsert_user(

@@ -448,6 +448,37 @@ pub(crate) fn list_sized(cfg: &Config, prefix: &str) -> Result<Vec<(String, u64)
         .collect())
 }
 
+/// The immediate "sub-directories" under `prefix` (a `/`-delimited
+/// listing): `events/` returns `events/project=<p>/`, and
+/// `events/project=<p>/` returns that project's `events/project=<p>/date=<d>/`.
+/// At most 1000, like [`list`] and [`list_sized`] (#326).
+pub(crate) fn list_prefixes(cfg: &Config, prefix: &str) -> Result<Vec<String>, String> {
+    let full = format!("{}{prefix}", cfg.prefix);
+    let body = ok(
+        request(
+            cfg,
+            "GET",
+            "",
+            &[("list-type", "2"), ("prefix", &full), ("delimiter", "/")],
+            &[],
+        )?,
+        "list",
+    )?;
+    let text = String::from_utf8_lossy(&body);
+    Ok(text
+        .split("<CommonPrefixes>")
+        .skip(1)
+        .filter_map(|t| {
+            let p = t.split("<Prefix>").nth(1)?.split("</Prefix>").next()?;
+            Some(
+                p.strip_prefix(&cfg.prefix)
+                    .unwrap_or(p)
+                    .replace("&amp;", "&"),
+            )
+        })
+        .collect())
+}
+
 /// Put, read back and delete a probe object: are the settings right?
 pub(crate) fn test(cfg: &Config) -> Result<(), String> {
     let key = format!(".openlens-probe-{}", chrono::Utc::now().timestamp());

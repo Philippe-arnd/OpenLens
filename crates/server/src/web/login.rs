@@ -134,11 +134,14 @@ pub(super) async fn login_email(
     done
 }
 
-pub(super) async fn logout(headers: HeaderMap) -> Response {
-    with_cookie(
-        Redirect::to("/login").into_response(),
-        &auth::set_cookie("", &headers, 0),
-    )
+pub(super) async fn logout() -> Response {
+    let mut r = Redirect::to("/login").into_response();
+    for c in auth::clear_cookies() {
+        if let Ok(v) = HeaderValue::from_str(&c) {
+            r.headers_mut().append(header::SET_COOKIE, v);
+        }
+    }
+    r
 }
 
 /// GET of a login link: a "Continue" page that leaves the link valid

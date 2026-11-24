@@ -102,7 +102,7 @@ pub(crate) async fn page(
         }
         _ => None,
     };
-    let host = crate::base_url(&headers);
+    let host = crate::public_url(&headers);
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
         name: &p.name,

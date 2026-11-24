@@ -50,7 +50,7 @@ pub(crate) async fn api(
     let Ok(Ok(Some(p))) = tokio::task::spawn_blocking(move || meta.project(&id)).await else {
         return crate::apierr::json(StatusCode::NOT_FOUND, "unknown project");
     };
-    match compute(&state, &p, &crate::base_url(&headers)).await {
+    match compute(&state, &p, &crate::public_url(&headers)).await {
         Ok((d, md)) => Json(json!({ "digest": d, "markdown": md })).into_response(),
         Err(e) => crate::apierr::json(StatusCode::BAD_REQUEST, e.to_string()),
     }

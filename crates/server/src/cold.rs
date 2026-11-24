@@ -60,6 +60,64 @@ fn day_of(name: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(name.strip_prefix("date=")?, "%Y-%m-%d").ok()
 }
 
+/// `(project, day)` of every cold day, found on S3 itself rather than
+/// from the local markers (NSEC-02): S3 is the source of truth, since a
+/// restore or a disk loss leaves the markers behind but not the bucket.
+fn s3_cold_days(cfg: &Config) -> Result<Vec<(String, NaiveDate)>, String> {
+    let mut out = Vec::new();
+    for p in s3::list_prefixes(cfg, "events/")? {
+        let Some(project) = p
+            .strip_prefix("events/project=")
+            .map(|s| s.trim_end_matches('/').to_owned())
+        else {
+            continue;
+        };
+        for d in s3::list_prefixes(cfg, &p)? {
+            let Some(day) = d.rsplit('/').find(|s| !s.is_empty()).and_then(day_of) else {
+                continue;
+            };
+            out.push((project.clone(), day));
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
+/// `(project, day)` of every cold day: the union of the local markers and
+/// what S3 itself lists, so a day whose marker was lost (a restore, or the
+/// disk failing while the bucket survived) is still found (NSEC-02). Any
+/// day S3 has but the markers do not is written back as a marker, so the
+/// markers stay a cache of this, rebuilt as they are read rather than only
+/// at startup.
+pub(crate) fn authoritative_cold_days(
+    cfg: &Config,
+    root: &Path,
+) -> Result<Vec<(String, NaiveDate)>, String> {
+    let local: HashSet<(String, NaiveDate)> = cold_days(root).into_iter().collect();
+    let remote = s3_cold_days(cfg)?;
+    for (project, day) in &remote {
+        // Already known cold, or still a live local day (S3 also holds
+        // every recent day as a plain backup copy, D-016): neither needs
+        // its marker rebuilt.
+        if local.contains(&(project.clone(), *day)) || root.join(rel(project, *day)).is_dir() {
+            continue;
+        }
+        let names = s3::list(cfg, &format!("{}/", rel(project, *day)))?
+            .into_iter()
+            .filter_map(|k| k.rsplit('/').next().map(str::to_owned))
+            .filter(|n| n.ends_with(".parquet"))
+            .map(|n| n + "\n")
+            .collect::<String>();
+        let m = marker(root, project, *day);
+        if let Some(parent) = m.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        fs::write(&m, names).map_err(|e| e.to_string())?;
+        tracing::info!(%project, %day, "cold day marker rebuilt from S3");
+    }
+    Ok(cold_days(root))
+}
+
 fn rel(project: &str, day: NaiveDate) -> String {
     format!("events/project={project}/date={}", day.format("%Y-%m-%d"))
 }
@@ -145,10 +203,14 @@ pub(crate) fn offload(cfg: &Config, root: &Path, today: NaiveDate) -> Result<usi
                 continue;
             }
             let m = marker(root, &project, day);
-            if let Some(parent) = m.parent() {
-                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
+            let Some(parent) = m.parent() else { continue };
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             fs::write(&m, listing(&local)).map_err(|e| e.to_string())?;
+            // NSEC-02: the marker must survive a crash before the local
+            // day is removed, or the day is lost from the markers (and,
+            // until the next S3 listing rebuilds them, from erasure and
+            // expiry) while its disk copy is already gone.
+            openlens_storage::sync_dir(parent).map_err(|e| e.to_string())?;
             fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
             moved += 1;
         }
@@ -190,7 +252,7 @@ pub(crate) fn restore(
 /// The bytes the cold days of `project` hold on S3.
 pub(crate) fn project_bytes(cfg: &Config, root: &Path, project: &str) -> Result<u64, String> {
     let mut n = 0;
-    for (p, day) in cold_days(root) {
+    for (p, day) in authoritative_cold_days(cfg, root)? {
         if p == project {
             n += s3::list_sized(cfg, &format!("{}/", rel(&p, day)))?
                 .iter()
@@ -205,7 +267,7 @@ pub(crate) fn project_bytes(cfg: &Config, root: &Path, project: &str) -> Result<
 /// them). They go back to S3 at the next hourly pass.
 pub(crate) fn restore_project(cfg: &Config, root: &Path, project: &str) -> Result<usize, String> {
     let mut n = 0;
-    for (p, day) in cold_days(root) {
+    for (p, day) in authoritative_cold_days(cfg, root)? {
         if p == project {
             restore(cfg, root, &p, day)?;
             n += 1;
@@ -224,7 +286,7 @@ pub(crate) fn erase(
     ids: &HashSet<String>,
 ) -> Result<usize, String> {
     let mut removed = 0;
-    for (p, day) in cold_days(root) {
+    for (p, day) in authoritative_cold_days(cfg, root)? {
         if p != project {
             continue;
         }
@@ -261,10 +323,10 @@ pub(crate) fn erase(
         }
         // Back to the cold tier at once: S3 now holds exactly these files.
         let m = marker(root, &p, day);
-        if let Some(parent) = m.parent() {
-            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
+        let Some(parent) = m.parent() else { continue };
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         fs::write(&m, listing(&files(&dir))).map_err(|e| e.to_string())?;
+        openlens_storage::sync_dir(parent).map_err(|e| e.to_string())?;
         fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
     }
     Ok(removed)
@@ -275,7 +337,7 @@ pub(crate) fn erase(
 pub(crate) fn expire(cfg: &Config, root: &Path, today: NaiveDate) -> Result<usize, String> {
     let cutoff = today - chrono::Duration::days(openlens_storage::EVENT_RETENTION_DAYS);
     let mut n = 0;
-    for (p, day) in cold_days(root) {
+    for (p, day) in authoritative_cold_days(cfg, root)? {
         if day >= cutoff {
             continue;
         }
@@ -358,6 +420,31 @@ mod tests {
                     // A real bucket lists only at its root (`/bucket`).
                     "GET" if query.contains("list-type=2") && !key.is_empty() => {
                         ("404 Not Found", b"<Code>NoSuchKey</Code>".to_vec())
+                    }
+                    "GET" if query.contains("list-type=2") && query.contains("delimiter=") => {
+                        let prefix = query
+                            .split('&')
+                            .find_map(|kv| kv.strip_prefix("prefix="))
+                            .map(decode)
+                            .unwrap_or_default();
+                        let mut seen = std::collections::BTreeSet::new();
+                        for k in store.keys().filter(|k| k.starts_with(&prefix)) {
+                            if let Some(rest) = k.get(prefix.len()..)
+                                && let Some(i) = rest.find('/')
+                            {
+                                seen.insert(format!("{prefix}{}", &rest[..=i]));
+                            }
+                        }
+                        let items: String = seen
+                            .iter()
+                            .map(|p| {
+                                format!("<CommonPrefixes><Prefix>{p}</Prefix></CommonPrefixes>")
+                            })
+                            .collect();
+                        (
+                            "200 OK",
+                            format!("<ListBucketResult>{items}</ListBucketResult>").into_bytes(),
+                        )
                     }
                     "GET" if query.contains("list-type=2") => {
                         let prefix = query
@@ -477,6 +564,22 @@ mod tests {
         assert!(!old_dir.exists());
         assert!(root.join(rel("p", recent)).is_dir());
         assert_eq!(cold_days(root), [("p".to_owned(), old)]);
+
+        // NSEC-02: losing the local marker (a restore, or the disk failing
+        // while the bucket survived) must not stop erasure, expiry or
+        // export from reaching this day: S3 is still asked, and the
+        // marker is rebuilt from it.
+        fs::remove_dir_all(root.join("cold")).unwrap();
+        assert!(cold_days(root).is_empty(), "marker lost");
+        assert_eq!(
+            authoritative_cold_days(&cfg, root).unwrap(),
+            [("p".to_owned(), old)]
+        );
+        assert_eq!(
+            cold_days(root),
+            [("p".to_owned(), old)],
+            "marker rebuilt from S3"
+        );
 
         // Erasing bob reaches the cold day, which goes back to S3 without him.
         let ids: HashSet<String> = ["bob".to_owned()].into();

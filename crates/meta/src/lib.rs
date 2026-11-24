@@ -273,6 +273,10 @@ fn migrate(c: &Connection) -> rusqlite::Result<()> {
             "last_sign_in",
             "ALTER TABLE users ADD COLUMN last_sign_in TEXT",
         ),
+        // SEC-07: the (issuer, subject) an OIDC sign-in bound to this user
+        // on their first sign-in; required to match on every one after.
+        ("oidc_iss", "ALTER TABLE users ADD COLUMN oidc_iss TEXT"),
+        ("oidc_sub", "ALTER TABLE users ADD COLUMN oidc_sub TEXT"),
     ] {
         let has: bool = c
             .prepare("SELECT 1 FROM pragma_table_info('users') WHERE name = ?1")?
@@ -299,7 +303,7 @@ pub struct MapVersion {
     pub message: Option<String>,
 }
 
-const USER_SELECT: &str = "SELECT id, email, role, projects, created_at, name, timezone, disabled, last_sign_in FROM users";
+const USER_SELECT: &str = "SELECT id, email, role, projects, created_at, name, timezone, disabled, last_sign_in, oidc_iss, oidc_sub FROM users";
 
 /// A dashboard user (D-016). `admin` can change things (flags, users);
 /// `viewer` can only look. `projects: None` means every project.
@@ -323,6 +327,10 @@ pub struct User {
     pub disabled: bool,
     /// Last successful sign-in (RFC 3339), if any.
     pub last_sign_in: Option<String>,
+    /// The OIDC issuer this user first signed in with (SEC-07), if any.
+    pub oidc_iss: Option<String>,
+    /// The OIDC subject this user first signed in as (SEC-07), if any.
+    pub oidc_sub: Option<String>,
 }
 
 fn user_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
@@ -342,6 +350,8 @@ fn user_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
         timezone: r.get(6)?,
         disabled: r.get::<_, i64>(7)? != 0,
         last_sign_in: r.get(8)?,
+        oidc_iss: r.get(9)?,
+        oidc_sub: r.get(10)?,
     })
 }
 

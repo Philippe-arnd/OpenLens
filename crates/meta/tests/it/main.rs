@@ -147,6 +147,41 @@ fn users_are_validated_updated_and_bound_to_their_links() {
     assert!(m.user(&u.id).unwrap().is_none());
 }
 
+/// SEC-07: a user's first OIDC sign-in binds (issuer, subject); another
+/// provider account, even one that shares the e-mail, is then refused.
+#[test]
+fn oidc_subject_is_bound_on_first_sign_in_and_checked_after() {
+    let m = Meta::in_memory().unwrap();
+    let u = m.upsert_user("ana@example.com", "viewer", None).unwrap();
+    assert_eq!(u.oidc_iss, None);
+    assert!(
+        m.bind_oidc_subject(&u.id, "https://idp.example", "sub-1")
+            .unwrap()
+    );
+    let bound = m.user(&u.id).unwrap().unwrap();
+    assert_eq!(bound.oidc_iss.as_deref(), Some("https://idp.example"));
+    assert_eq!(bound.oidc_sub.as_deref(), Some("sub-1"));
+    // The same (issuer, subject) is accepted again...
+    assert!(
+        m.bind_oidc_subject(&u.id, "https://idp.example", "sub-1")
+            .unwrap()
+    );
+    // ...a different subject at the same provider is not...
+    assert!(
+        !m.bind_oidc_subject(&u.id, "https://idp.example", "sub-2")
+            .unwrap()
+    );
+    // ...and neither is the same subject at a different provider.
+    assert!(
+        !m.bind_oidc_subject(&u.id, "https://other.example", "sub-1")
+            .unwrap()
+    );
+    assert!(
+        !m.bind_oidc_subject("no-such-user", "https://idp.example", "sub-1")
+            .unwrap()
+    );
+}
+
 #[test]
 fn feature_maps_are_versioned_and_identical_pushes_are_no_ops() {
     let m = Meta::in_memory().unwrap();

@@ -33,7 +33,7 @@ impl Meta {
                 params![id, email, role, projects, Utc::now().to_rfc3339()],
             )?;
             Ok(c.query_row(
-                "SELECT id, email, role, projects, created_at, name, timezone, disabled, last_sign_in FROM users WHERE email = ?1",
+                &format!("{USER_SELECT} WHERE email = ?1"),
                 [&email],
                 user_from_row,
             )?)
@@ -43,12 +43,10 @@ impl Meta {
     /// One user by id.
     pub fn user(&self, id: &str) -> Result<Option<User>> {
         self.read(|c| {
-            Ok(c.query_row(
-                "SELECT id, email, role, projects, created_at, name, timezone, disabled, last_sign_in FROM users WHERE id = ?1",
-                [id],
-                user_from_row,
+            Ok(
+                c.query_row(&format!("{USER_SELECT} WHERE id = ?1"), [id], user_from_row)
+                    .optional()?,
             )
-            .optional()?)
         })
     }
 
@@ -57,7 +55,7 @@ impl Meta {
         let email = email.trim().to_lowercase();
         self.read(|c| {
             Ok(c.query_row(
-                "SELECT id, email, role, projects, created_at, name, timezone, disabled, last_sign_in FROM users WHERE email = ?1",
+                &format!("{USER_SELECT} WHERE email = ?1"),
                 [&email],
                 user_from_row,
             )
@@ -68,9 +66,7 @@ impl Meta {
     /// Every user, by email.
     pub fn users(&self) -> Result<Vec<User>> {
         self.read(|c| {
-            let mut st = c.prepare(
-                "SELECT id, email, role, projects, created_at, name, timezone, disabled, last_sign_in FROM users ORDER BY email",
-            )?;
+            let mut st = c.prepare(&format!("{USER_SELECT} ORDER BY email"))?;
             let rows = st
                 .query_map([], user_from_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -198,6 +194,34 @@ impl Meta {
                 params![id, Utc::now().to_rfc3339()],
             )?;
             Ok(())
+        })
+    }
+
+    /// SEC-07: bind this user to the OIDC (issuer, subject) that just
+    /// signed them in. The first sign-in records the pair; every one after
+    /// must match it exactly, so a different account at the provider
+    /// (even one the provider lets reuse this e-mail) cannot sign in as
+    /// this user.
+    pub fn bind_oidc_subject(&self, id: &str, iss: &str, sub: &str) -> Result<bool> {
+        self.with(|c| {
+            let bound: Option<(Option<String>, Option<String>)> = c
+                .query_row(
+                    "SELECT oidc_iss, oidc_sub FROM users WHERE id = ?1",
+                    [id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            match bound {
+                None => Ok(false),
+                Some((None, None)) => {
+                    c.execute(
+                        "UPDATE users SET oidc_iss = ?2, oidc_sub = ?3 WHERE id = ?1",
+                        params![id, iss, sub],
+                    )?;
+                    Ok(true)
+                }
+                Some((i, s)) => Ok(i.as_deref() == Some(iss) && s.as_deref() == Some(sub)),
+            }
         })
     }
 
