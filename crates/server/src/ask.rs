@@ -418,10 +418,16 @@ async fn run_tool(
                 let full = format!(
                     "(SELECT *, distinct_id AS user_key, session_id AS session_key FROM {src}) AS events"
                 );
-                Box::pin(state.query.sql_over(&p.id, &full, &q)).await
+                Box::pin(state.query.cold().sql_over(&p.id, &full, &q)).await
             } else {
                 let key = pseudonym_key(state, &p.id);
-                Box::pin(state.query.sql_aggregate(&p.id, &src, key.as_bytes(), &q)).await
+                Box::pin(
+                    state
+                        .query
+                        .cold()
+                        .sql_aggregate(&p.id, &src, key.as_bytes(), &q),
+                )
+                .await
             };
             match run {
                 Ok(r) => (tsv(&r.rows), Some(("SQL".into(), q))),

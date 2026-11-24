@@ -190,3 +190,11 @@ Append-only. Each entry: id, date, decision, why, consequences.
 
 **Consequences:** a day is trimmed only after its rollups are written, so the history of an older install is rolled up before it is trimmed. Adding three tables to `rollups/v1` makes every stored day roll up again once, seven per pass.
 
+## D-029 (2026-11-24, agent for #326) One long query at a time; compacted days sorted for pruning
+
+**Decision:** free-form queries (Ask, the SQL page, `POST /api/.../sql`) are cold: at most one runs at a time, and a second one fails at once with "another long query is running" (503 with `Retry-After` on the API) instead of queueing. The board and the pages are hot and never wait for the gate. A query that runs out of the memory pool says so plainly instead of returning DataFusion's error. When a closed day is compacted, its rows are sorted by event then time and written in 64k-row groups with page statistics, so a query on one event or a short range reads only the groups that hold it. Days already compacted keep their layout until their next rewrite.
+
+**Why:** one person's large Ask question must not slow the board for everyone, or the ingestion that shares the runtime. Sorting costs nothing at read time and lets DataFusion's row-group pruning work.
+
+**Consequences:** no setting (D-014). The S3 cold tier is part B of #326.
+

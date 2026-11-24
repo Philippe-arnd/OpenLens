@@ -521,8 +521,12 @@ pub(crate) fn write_parquet_as(dir: &Path, name: &str, batch: &RecordBatch) -> R
     }
     let tmp = dir.join(format!(".{name}.tmp"));
     let dst = dir.join(format!("{name}.parquet"));
+    // Row groups of 64k rows (not 1M) with page statistics: a query on one
+    // event or a short time range reads only the groups that hold it (#326).
     let props = WriterProperties::builder()
         .set_compression(Compression::ZSTD(ZstdLevel::try_new(3)?))
+        .set_max_row_group_row_count(Some(64 * 1024))
+        .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Page)
         .build();
     let file = File::create(&tmp)?;
     let mut writer = ArrowWriter::try_new(file, batch.schema(), Some(props))?;
@@ -632,7 +636,7 @@ fn compact_dir(dir: &Path, min_files: usize) -> Result<bool> {
         }
     }
     let merged = arrow::compute::concat_batches(&event_schema(), &batches)?;
-    let merged = unique_uuids(&merged)?;
+    let merged = sorted(&unique_uuids(&merged)?)?;
     // The merged segment is durable before the old ones go.
     write_parquet(dir, &merged)?;
     for f in files {
@@ -859,6 +863,31 @@ fn trim_batch(b: &RecordBatch) -> Result<(RecordBatch, usize)> {
     let mut cols = b.columns().to_vec();
     cols[idx] = Arc::new(out) as ArrayRef;
     Ok((RecordBatch::try_new(b.schema(), cols)?, changed))
+}
+
+/// `batch` ordered by event then time (#326): each row group then covers a
+/// few event names and a short span, so its statistics let a query skip it.
+fn sorted(batch: &RecordBatch) -> Result<RecordBatch> {
+    let (Some(ev), Some(ts)) = (
+        batch.column_by_name("event"),
+        batch.column_by_name("timestamp"),
+    ) else {
+        return Ok(batch.clone());
+    };
+    let idx = arrow::compute::lexsort_to_indices(
+        &[
+            arrow::compute::SortColumn {
+                values: ev.clone(),
+                options: None,
+            },
+            arrow::compute::SortColumn {
+                values: ts.clone(),
+                options: None,
+            },
+        ],
+        None,
+    )?;
+    Ok(arrow::compute::take_record_batch(batch, &idx)?)
 }
 
 /// Keep the first row of each uuid (a resent event is stored once).

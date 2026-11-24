@@ -6,6 +6,8 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Added
 
+- **Query guard rails** (#326, part A): Ask, the SQL page and the SQL API run one long query at a time (a second one is told to retry, 503 on the API) so the board never waits. Running out of memory gives a plain message. Compacted days are sorted by event and time in smaller row groups, so queries skip what they do not need (D-029).
+
 - **Page rollups, shorter click detail** (#324): each closed day is also rolled up into `click_q`, `label_q` and `scroll_q`. After 30 days, clicks keep only their page, time and rage flag: their label and position go (D-028).
 
 - **Rollups in the S3 copy** (D-026): the hourly S3 copy now includes the daily rollups, which can no longer be rebuilt once their events expire, and sends a day again when an erasure rewrites it.

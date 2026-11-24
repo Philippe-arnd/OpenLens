@@ -177,7 +177,7 @@ pub(crate) async fn sql_run(
         name: &p.name,
         key: &p.api_key,
     };
-    match state.query.sql(&p.id, &f.sql).await {
+    match state.query.cold().sql(&p.id, &f.sql).await {
         Ok(res) if f.format == "csv" => {
             let mut r = csv(&res).into_response();
             let h = r.headers_mut();
