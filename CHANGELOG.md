@@ -6,6 +6,8 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Added
 
+- **Scoped API tokens:** `read`, `write` or `admin`, optionally limited to projects, stored hashed, made with `openlens-cli tokens create --scope read --project <id>` (or `POST /api/tokens`), listed and revoked with `tokens list|revoke`. A `read` token gets 403 on every write and is enough for `openlens-cli mcp`; scoped tokens never open dashboard pages.
+
 - **From finding to ticket to measured effect** (#245, the DMAIC loop):
   - **Create ticket:** a link on insight cards, error groups, goals not yet on track, and feature-map findings.
   - **What the ticket holds:** the problem, the evidence, links, a hypothesis, a success metric with its target and check date, and acceptance criteria. It is written for a person or a coding agent.

@@ -36,6 +36,26 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+enum TokensCmd {
+    /// Every scoped API token (never their values).
+    List,
+    /// Make a token for an agent or a script; it is printed once.
+    Create {
+        /// read, write or admin.
+        #[arg(long)]
+        scope: String,
+        /// Limit it to this project (repeat for several).
+        #[arg(long = "project")]
+        projects: Vec<String>,
+        /// What it is for.
+        #[arg(long, default_value = "")]
+        label: String,
+    },
+    /// Revoke a token (id from `tokens list`).
+    Revoke { id: String },
+}
+
+#[derive(Subcommand)]
 enum UsersCmd {
     /// Every user, with role, projects, time zone and last sign-in.
     List,
@@ -201,6 +221,12 @@ enum Command {
         /// Add this comment.
         #[arg(long)]
         add: Option<String>,
+    },
+    /// Scoped API tokens: `read` for an MCP client, `write` for an agent
+    /// that wires one app, `admin` for the install. Needs the admin token.
+    Tokens {
+        #[command(subcommand)]
+        action: TokensCmd,
     },
     /// The team: list, update, disable, enable or remove users (invite
     /// with `login-link --email`).
@@ -926,6 +952,26 @@ fn run(cli: Cli) -> Result<bool, String> {
                     )?
                 }
                 UsersCmd::Delete { id } => c.call("DELETE", &format!("/api/users/{id}"), None)?,
+            };
+            out(&v);
+            Ok(status == 200)
+        }
+        Command::Tokens { action } => {
+            let c = client()?;
+            let (status, v) = match action {
+                TokensCmd::List => c.call("GET", "/api/tokens", None)?,
+                TokensCmd::Create {
+                    scope,
+                    projects,
+                    label,
+                } => c.call(
+                    "POST",
+                    "/api/tokens",
+                    Some(Body::Json(
+                        json!({ "scope": scope, "projects": projects, "label": label }),
+                    )),
+                )?,
+                TokensCmd::Revoke { id } => c.call("DELETE", &format!("/api/tokens/{id}"), None)?,
             };
             out(&v);
             Ok(status == 200)

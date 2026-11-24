@@ -140,13 +140,19 @@ pub(crate) fn has_session(state: &AppState, headers: &HeaderMap) -> bool {
     viewer(state, headers).is_some()
 }
 
-/// Does the request carry the admin bearer token?
+/// Does the request carry the admin bearer token, or a scoped API token
+/// that [`crate::scopes::layer`] checked for this request?
 pub(crate) fn has_bearer(state: &AppState, headers: &HeaderMap) -> bool {
-    headers
+    let admin = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
-        .is_some_and(|t| crate::admin_token_matches(state, t.trim()))
+        .is_some_and(|t| crate::admin_token_matches(state, t.trim()));
+    admin
+        || headers
+            .get(crate::scopes::MARK)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| token_matches(v, &crate::scopes::mark(state)))
 }
 
 /// `Set-Cookie` header value for a session (Secure when served over HTTPS).

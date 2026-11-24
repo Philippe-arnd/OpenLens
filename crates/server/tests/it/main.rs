@@ -1435,6 +1435,135 @@ async fn email_login_is_off_without_smtp_and_never_tells_who_exists() {
     }
 }
 
+async fn api_as(
+    h: &Harness,
+    method: &str,
+    uri: &str,
+    token: &str,
+    body: &str,
+) -> (StatusCode, serde_json::Value) {
+    let r = router(h.state.clone())
+        .oneshot(
+            Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_owned()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let s = r.status();
+    let b = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+    (s, serde_json::from_slice(&b).unwrap_or_default())
+}
+
+#[tokio::test]
+async fn scoped_tokens_reach_only_their_scope_and_projects() {
+    let h = harness();
+    let (s, v) = api_as(
+        &h,
+        "POST",
+        "/api/tokens",
+        "adm_test",
+        r#"{"scope":"read","label":"mcp"}"#,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let read = v["token"].as_str().unwrap().to_owned();
+    let (_, v) = api_as(
+        &h,
+        "POST",
+        "/api/tokens",
+        "adm_test",
+        r#"{"scope":"write","projects":["default"]}"#,
+    )
+    .await;
+    let write = v["token"].as_str().unwrap().to_owned();
+    let (_, v) = api_as(
+        &h,
+        "POST",
+        "/api/tokens",
+        "adm_test",
+        r#"{"scope":"write","projects":["elsewhere"]}"#,
+    )
+    .await;
+    let other = v["token"].as_str().unwrap().to_owned();
+    let flag = r#"{"key":"beta","enabled":false,"rollout":0}"#;
+
+    assert_eq!(
+        api_as(&h, "GET", "/api/projects/default/flags", &read, "")
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        api_as(&h, "PUT", "/api/projects/default/flags/beta", &read, flag)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        api_as(&h, "GET", "/api/users", &read, "").await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        api_as(&h, "GET", "/api/tokens", &write, "").await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        api_as(&h, "PUT", "/api/projects/default/flags/beta", &write, flag)
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        api_as(&h, "GET", "/api/projects/default/flags", &other, "")
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    // Not a key to the dashboard.
+    let page = router(h.state.clone())
+        .oneshot(
+            Request::get("/p/default")
+                .header("authorization", format!("Bearer {read}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(page.status().is_redirection());
+    // The internal marker cannot be sent from outside.
+    let forged = router(h.state.clone())
+        .oneshot(
+            Request::get("/api/projects/default/flags")
+                .header("x-openlens-scope-checked", "anything")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(forged.status(), StatusCode::UNAUTHORIZED);
+    // Listed without their values, then revoked.
+    let (_, list) = api_as(&h, "GET", "/api/tokens", "adm_test", "").await;
+    assert!(!list.to_string().contains(&read));
+    let id = list["tokens"][0]["id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        api_as(&h, "DELETE", &format!("/api/tokens/{id}"), "adm_test", "")
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        api_as(&h, "GET", "/api/projects/default/flags", &read, "")
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED
+    );
+}
+
 /// Through a proxy, one client address gets a burst, then 429 with
 /// Retry-After (which the SDK honours by retrying later).
 #[tokio::test]
@@ -4045,6 +4174,9 @@ const ROUTES: &[(&str, &str, Access)] = &[
     ("GET", "/api/projects/{project}/goals", Api),
     ("POST", "/api/projects/{project}/goals", Api),
     ("GET", "/api/audit", Api),
+    ("GET", "/api/tokens", Api),
+    ("POST", "/api/tokens", Api),
+    ("DELETE", "/api/tokens/{id}", Api),
     ("GET", "/api/projects/{project}/timeline", Api),
     ("POST", "/api/projects/{project}/timeline", Api),
     ("POST", "/api/login-links", Api),

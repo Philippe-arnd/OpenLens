@@ -28,6 +28,7 @@ mod privacy;
 mod replay;
 mod reword;
 mod s3;
+mod scopes;
 pub mod secrets;
 mod settings;
 mod share;
@@ -103,6 +104,10 @@ pub fn router(state: AppState) -> Router {
         .merge(replay::routes())
         .merge(web::routes())
         .layer(axum::middleware::from_fn(csrf::layer))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            scopes::layer,
+        ))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             web::access_layer,

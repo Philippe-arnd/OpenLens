@@ -8,7 +8,7 @@ You are the agent that maintains a web app. Your goal is that the product manage
 
 **MCP:** `openlens-cli mcp --automation-read-root <app repo> --automation-write-root <scratch dir>` speaks MCP over stdio. Its tools are `guide`, `projects`, `init`, `feature_map_lint`, `feature_map_push`, `map_health`, `map_overview`, `feature_context`, `suggest_map_changes`, `verify`, `insights`, `kpi_report`, `board`, `errors`, `sql`, `flags`, `flag_set` and `login_link`, and it reads files only inside the read root.
 
-`openlens-cli` reads `OPENLENS_SERVER` and `OPENLENS_TOKEN` (or `--server`/`--token`), prints JSON, and exits non-zero when something needs fixing. It is in the server image (`docker exec <container> openlens-cli …`), or `cargo install --git <repo> openlens-cli`.
+`openlens-cli` reads `OPENLENS_SERVER` and `OPENLENS_TOKEN` (or `--server`/`--token`), prints JSON, and exits non-zero when something needs fixing. Prefer a scoped token to the admin token: an admin makes one with `openlens-cli tokens create --scope write --project <id> --label <agent>` (`read` is enough for `openlens-cli mcp`); it is printed once, and `tokens revoke <id>` ends it. It is in the server image (`docker exec <container> openlens-cli …`), or `cargo install --git <repo> openlens-cli`.
 
 API quick reference (send `Authorization: Bearer <admin token>` on every call):
 
