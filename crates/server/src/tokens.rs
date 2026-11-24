@@ -12,13 +12,13 @@ use crate::AppState;
 use crate::auth;
 use crate::web::html_page;
 
-fn guard(state: &AppState, headers: &HeaderMap) -> Result<auth::Viewer, Response> {
+fn guard(state: &AppState, headers: &HeaderMap) -> Result<auth::Viewer, Box<Response>> {
     match auth::viewer(state, headers) {
-        None => Err(Redirect::to("/login").into_response()),
-        Some(v) if !v.admin => Err(html_page(
+        None => Err(Box::new(Redirect::to("/login").into_response())),
+        Some(v) if !v.admin => Err(Box::new(html_page(
             StatusCode::FORBIDDEN,
             openlens_ui::message("Admins only", "API tokens and sessions are for admins."),
-        )),
+        ))),
         Some(v) => Ok(v),
     }
 }
@@ -69,7 +69,7 @@ async fn render(
 /// `GET /settings/tokens`.
 pub(crate) async fn page(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if let Err(r) = guard(&state, &headers) {
-        return r;
+        return *r;
     }
     render(&state, None, None, None).await
 }
@@ -81,7 +81,7 @@ pub(crate) async fn create(
     body: axum::body::Bytes,
 ) -> Response {
     if let Err(r) = guard(&state, &headers) {
-        return r;
+        return *r;
     }
     // One `project` field per ticked project (none: every project), which
     // a struct cannot take from a form: read the pairs.
@@ -133,7 +133,7 @@ pub(crate) async fn revoke(
     Path(id): Path<String>,
 ) -> Response {
     if let Err(r) = guard(&state, &headers) {
-        return r;
+        return *r;
     }
     let meta = state.meta.clone();
     let key = id.clone();
@@ -155,7 +155,7 @@ pub(crate) async fn sign_out_everywhere(
 ) -> Response {
     let v = match guard(&state, &headers) {
         Ok(v) => v,
-        Err(r) => return r,
+        Err(r) => return *r,
     };
     let next = state.session_gen.load(Ordering::Relaxed).saturating_add(1);
     let meta = state.meta.clone();
