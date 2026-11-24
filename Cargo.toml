@@ -12,6 +12,8 @@ repository = "https://github.com/Philippe-arnd/openlens"
 publish = false
 
 [workspace.dependencies]
+# Returns freed memory to the OS after a large board (#418). MIT.
+mimalloc = { version = "0.1", default-features = false }
 axum = "0.8"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "fs"] }
 tokio-util = { version = "0.7", features = ["io"] }

@@ -22,6 +22,11 @@ mod upgrade;
 
 use std::process::ExitCode;
 
+/// mimalloc gives memory back to the OS after a large computation, where
+/// the system allocator kept a 4 M-event board's peak (#418).
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 const DEFAULT_ADDR: &str = "0.0.0.0:8686";
 
 fn main() -> ExitCode {
