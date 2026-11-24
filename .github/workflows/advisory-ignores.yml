@@ -1,0 +1,56 @@
+name: advisory ignores
+
+# deny.toml ignores a few RustSec advisories that have no fix (#196). Once
+# a month this checks them again with the ignores removed: an ignored
+# advisory that now has a fix opens (or updates) one issue, so the ignore
+# is dropped and the dependency updated rather than forgotten.
+on:
+  schedule:
+    - cron: "29 5 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recheck:
+    name: ignored advisories that have a fix
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2
+        with:
+          tool: cargo-deny
+      - name: check without the ignores
+        run: |
+          ids=$(grep -oE 'RUSTSEC-[0-9]{4}-[0-9]{4}' deny.toml | sort -u)
+          echo "ignored: $ids"
+          python3 - <<'PY'
+          import re
+          s = open("deny.toml").read()
+          s = re.sub(r"(?ms)^ignore\s*=\s*\[.*?^\]", "ignore = []", s)
+          open("deny-recheck.toml", "w").write(s)
+          PY
+          cargo deny --config deny-recheck.toml check advisories > report.txt 2>&1 || true
+          : > fixed.txt
+          for id in $ids; do
+            # The block of this advisory, up to the next one.
+            block=$(awk -v id="$id" '$0 ~ id {p=1} p && /^(error|warning)\[/ && $0 !~ id {exit} p' report.txt)
+            if echo "$block" | grep -qiE 'solution: upgrade to'; then echo "$id" >> fixed.txt; fi
+          done
+          cat report.txt
+          echo "with a fix now: $(cat fixed.txt)"
+      - name: open or update the issue
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          [ -s fixed.txt ] || { echo "no ignored advisory has a fix yet"; exit 0; }
+          title="An ignored RustSec advisory now has a fix"
+          body="These advisories are ignored in deny.toml but now have a fix: $(tr '\n' ' ' < fixed.txt). Update the dependency and drop the ignore. Report: $RUN"
+          open=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "$title in:title" --json number -q '.[0].number')
+          if [ -n "$open" ]; then gh issue comment "$open" -R "$GITHUB_REPOSITORY" --body "$body"; else gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body "$body"; fi
