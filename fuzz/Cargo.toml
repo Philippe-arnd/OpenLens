@@ -1,0 +1,59 @@
+[package]
+name = "openlens-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "AGPL-3.0-only"
+
+# Not a workspace member: `cargo +nightly fuzz run <target>` builds it with
+# the sanitizer flags it needs (#299).
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+openlens-event = { path = "../crates/event" }
+openlens-featuremap = { path = "../crates/featuremap" }
+openlens-errors = { path = "../crates/errors" }
+openlens-testkit = { path = "../crates/testkit" }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+[[bin]]
+name = "capture_batch"
+path = "fuzz_targets/capture_batch.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "feature_map"
+path = "fuzz_targets/feature_map.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "error_stack"
+path = "fuzz_targets/error_stack.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "page_url"
+path = "fuzz_targets/page_url.rs"
+test = false
+doc = false
+bench = false
+
+# `cargo run --bin seed`: start every corpus from the hostile inputs of
+# crates/testkit (rule 27: a crash found here goes back there).
+[[bin]]
+name = "seed"
+path = "seed.rs"
+test = false
+doc = false
+bench = false

@@ -1,0 +1,59 @@
+name: fuzz
+
+# Coverage-guided fuzzing of what strangers send (#299): each target runs
+# 10 minutes every night from the hostile inputs of crates/testkit. A crash
+# uploads its input and opens (or updates) one issue.
+on:
+  schedule:
+    - cron: "41 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [capture_batch, feature_map, error_stack, page_url]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: nightly
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2
+        with:
+          tool: cargo-fuzz
+      - name: seed the corpus
+        working-directory: fuzz
+        run: cargo run --bin seed
+      - name: run for 10 minutes
+        working-directory: fuzz
+        run: cargo +nightly fuzz run "${{ matrix.target }}" -- -max_total_time=600
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
+
+  report:
+    name: open an issue on a crash
+    needs: [fuzz]
+    if: failure() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="fuzz: a target crashed"
+          open=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "$title in:title" --json number -q '.[0].number')
+          body="A nightly fuzz target crashed on ${GITHUB_SHA::7}. Run and crash inputs: $RUN. Fix it and add the input to crates/testkit (rule 27)."
+          if [ -n "$open" ]; then gh issue comment "$open" -R "$GITHUB_REPOSITORY" --body "$body"; else gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body "$body"; fi
