@@ -23,6 +23,7 @@ mod goals;
 mod icon;
 mod llm;
 mod manage;
+pub mod metrics;
 mod oidc;
 mod privacy;
 mod replay;
@@ -76,6 +77,8 @@ pub struct AppState {
     pub boards: boards::BoardCache,
     /// Held while a flush writes Parquet, so flushes never overlap (#293).
     pub flushing: Arc<Mutex<()>>,
+    /// Counters for `/metrics` (#296).
+    pub metrics: Arc<metrics::Metrics>,
 }
 
 /// Build the application router.
@@ -86,9 +89,15 @@ pub fn router(state: AppState) -> Router {
         .route("/flags", get(flags::public))
         .route("/r", post(replay::ingest))
         .layer(DefaultBodyLimit::max(MAX_BODY))
-        .layer(CorsLayer::permissive());
+        .layer(CorsLayer::permissive())
+        .layer(tower_http::timeout::TimeoutLayer::with_status_code(
+            axum::http::StatusCode::REQUEST_TIMEOUT,
+            Duration::from_secs(10),
+        ));
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/readyz", get(metrics::readyz))
+        .route("/metrics", get(metrics::metrics))
         .route("/version", get(version))
         .route("/c.js", get(sdk))
         .route("/r.js", get(recorder))
@@ -104,6 +113,11 @@ pub fn router(state: AppState) -> Router {
         .merge(replay::routes())
         .merge(web::routes())
         .layer(axum::middleware::from_fn(csrf::layer))
+        // Pages, the API and Ask (a few model rounds) get two minutes.
+        .layer(tower_http::timeout::TimeoutLayer::with_status_code(
+            axum::http::StatusCode::REQUEST_TIMEOUT,
+            Duration::from_secs(120),
+        ))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             scopes::layer,
@@ -113,6 +127,24 @@ pub fn router(state: AppState) -> Router {
             web::access_layer,
         ))
         .layer(axum::middleware::from_fn(web::theme_layer))
+        // One span per request, tagged with its id; the id is returned in
+        // `x-request-id` (kept from the proxy when it sent one) (#296).
+        .layer(
+            tower_http::trace::TraceLayer::new_for_http().make_span_with(
+                |req: &axum::http::Request<axum::body::Body>| {
+                    let id = req
+                        .headers()
+                        .get("x-request-id")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("");
+                    tracing::info_span!("request", method = %req.method(), path = %req.uri().path(), id)
+                },
+            ),
+        )
+        .layer(tower_http::request_id::PropagateRequestIdLayer::x_request_id())
+        .layer(tower_http::request_id::SetRequestIdLayer::x_request_id(
+            tower_http::request_id::MakeRequestUuid,
+        ))
         .with_state(state)
 }
 
@@ -328,8 +360,10 @@ fn flush_and_compact(
             }
         };
         if let Some(pending) = pending {
+            let started = std::time::Instant::now();
             match pending.write() {
                 Ok(n) => {
+                    state.metrics.flushed(n, started.elapsed().as_millis());
                     tracing::debug!(n, "flushed events to parquet");
                     state.boards.bump();
                 }

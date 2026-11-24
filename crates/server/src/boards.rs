@@ -93,6 +93,16 @@ impl BoardCache {
         self.inner.generation.load(Ordering::Relaxed)
     }
 
+    /// Results kept now.
+    pub fn len(&self) -> usize {
+        self.inner.entries.lock().map_or(0, |m| m.len())
+    }
+
+    /// Whether no result is kept.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// How many boards were actually computed since the start.
     pub fn computed(&self) -> u64 {
         self.inner.computed.load(Ordering::Relaxed)
