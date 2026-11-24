@@ -158,3 +158,11 @@ Append-only. Each entry: id, date, decision, why, consequences.
 
 **Consequences:** a change to the event schema adds a column and never renames one. A change that would break one of these promises waits for a major version, or is announced as **Breaking:** with the steps to follow.
 
+## D-025 (2026-11-24, agent for #322) Rollups by 15-minute UTC bucket, gone with the events
+
+**Decision:** closed days are rolled up into `person_q` (person, bucket, environment, release, role: events, errors, first and last time) and `metric_q` (bucket, environment, release, role, event, feature: events, distinct people). Buckets are 15 minutes wide in UTC, so a reader in any zone rebuilds their own days exactly (D-018 stays true). A day is closed a full day after it ends. People are the merged person, as in every query. The rollups are deleted when someone is erased and rebuilt from the events left, and they are pruned with their day, so they never outlive the events. Rebuilt after an alias merge? No: a day rolled up stays as written until an erasure or a schema change, a small drift accepted for now. The schema version is in the path (`rollups/v1/`), so a new one rolls everything up again.
+
+**Why:** a day bucket in UTC cannot give a Paris or Kolkata day, and fifteen minutes covers every real offset. Keeping rollups past the events would change the retention promise of docs/privacy.md, which is for the owner to decide (#323, #325). Vitals and feature sets wait for the board to read rollups (#323), where their shape is known.
+
+**Consequences:** the tables are about as many rows as person-sessions, far fewer than events. No setting is added; older installs roll up their history on their own, seven days per project every ten minutes.
+

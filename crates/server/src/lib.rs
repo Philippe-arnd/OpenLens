@@ -353,6 +353,7 @@ async fn run_jobs(state: AppState, digest: Job, digest_first: Duration) {
                 Ok(Err(err)) => tracing::error!(%err, "compaction failed"),
                 Err(err) => tracing::error!(%err, "compaction crashed"),
             }
+            roll_up(&st, chrono::Utc::now()).await;
         }
     });
     // S3 copy: 5 minutes after start, then hourly.
@@ -486,6 +487,56 @@ fn compact(state: &AppState) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Closed days rolled up per project and pass, so a first pass over a
+/// long history does not hold the heavy lock for long (#322).
+const ROLLUPS_PER_PASS: usize = 7;
+
+/// Roll up the closed days that have no rollup yet (#322): every day at
+/// the first start after an upgrade, a few per pass, then each day once it
+/// is closed. A day erased meanwhile is skipped and done on the next pass.
+async fn roll_up(state: &AppState, now: chrono::DateTime<chrono::Utc>) -> usize {
+    let projects = match state.meta.projects() {
+        Ok(p) => p,
+        Err(err) => {
+            tracing::warn!(%err, "rollups: cannot list projects");
+            return 0;
+        }
+    };
+    let mut written = 0;
+    for p in projects {
+        let days = match openlens_storage::rollup::missing(&state.data_dir, &p.id, now) {
+            Ok(d) => d,
+            Err(err) => {
+                tracing::warn!(project = %p.id, %err, "rollups: cannot list days");
+                continue;
+            }
+        };
+        for day in days.into_iter().take(ROLLUPS_PER_PASS) {
+            let generation = openlens_storage::rollup::generation();
+            let label = day.format("%Y-%m-%d").to_string();
+            let batches = match state.query.rollup_day(&p.id, &label).await {
+                Ok(b) => b,
+                Err(err) => {
+                    tracing::warn!(project = %p.id, day = %label, %err, "rollup failed");
+                    continue;
+                }
+            };
+            let Ok(_guard) = privacy::MAINTENANCE.lock() else {
+                return written;
+            };
+            match openlens_storage::rollup::write(&state.data_dir, &p.id, day, generation, &batches)
+            {
+                Ok(true) => written += 1,
+                Ok(false) => {}
+                Err(err) => {
+                    tracing::warn!(project = %p.id, day = %label, %err, "rollup not written")
+                }
+            }
+        }
+    }
+    written
 }
 
 /// One-off rewrite of the URLs stored before capture cleaned them (#290),
@@ -632,6 +683,64 @@ mod jobs_tests {
     #![allow(clippy::unwrap_used)]
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
+
+    #[tokio::test]
+    async fn closed_days_are_rolled_up_a_few_per_pass() {
+        let dir = tempfile::tempdir().unwrap();
+        let meta = openlens_meta::Meta::in_memory().unwrap();
+        let project = meta.create_project("Rolled", None).unwrap();
+        let (mut writer, _) =
+            openlens_storage::Writer::open(dir.path(), openlens_storage::FlushPolicy::default())
+                .unwrap();
+        let now: chrono::DateTime<chrono::Utc> = "2026-03-20T12:00:00Z".parse().unwrap();
+        let evs: Vec<_> = (0..10)
+            .map(|d| {
+                let t = now - chrono::Duration::days(d);
+                openlens_event::Event {
+                    uuid: format!("0191f0c0-0000-7000-8000-{d:012}"),
+                    project: project.id.clone(),
+                    event: "$pageview".into(),
+                    distinct_id: "u1".into(),
+                    session_id: None,
+                    timestamp: t,
+                    received_at: t,
+                    url: None,
+                    path: None,
+                    feature: None,
+                    role: None,
+                    account: None,
+                    plan: None,
+                    environment: "production".into(),
+                    release: None,
+                    flags: None,
+                    properties: "{}".into(),
+                }
+            })
+            .collect();
+        writer.append(&evs).unwrap();
+        writer.flush().unwrap();
+        let state = crate::AppState {
+            meta: Arc::new(meta),
+            writer: Arc::new(Mutex::new(writer)),
+            query: openlens_query::QueryEngine::new(dir.path(), openlens_query::Limits::default()),
+            data_dir: dir.path().to_path_buf(),
+            admin_token_hash: "x".into(),
+            session_key: "k".into(),
+            boards: Default::default(),
+            flushing: Default::default(),
+            metrics: Default::default(),
+            disk_space: crate::disk_space,
+            session_gen: Default::default(),
+            caches: Default::default(),
+        };
+        // Ten days of events: today and yesterday are not closed yet.
+        assert_eq!(super::roll_up(&state, now).await, super::ROLLUPS_PER_PASS);
+        assert_eq!(
+            super::roll_up(&state, now).await,
+            8 - super::ROLLUPS_PER_PASS
+        );
+        assert_eq!(super::roll_up(&state, now).await, 0);
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_hung_digest_never_holds_up_the_flush() {

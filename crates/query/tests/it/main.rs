@@ -335,3 +335,149 @@ async fn aggregate_sql_hides_people_and_small_groups() {
             .contains("mapped")
     );
 }
+
+/// Rollups (#322) answer like the raw events in any time zone, people
+/// merged with their anonymous visits included, and go away when someone
+/// is erased.
+#[tokio::test]
+async fn rollups_match_raw_queries_in_every_zone() {
+    use chrono::{DateTime, NaiveDate};
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let at = |s: &str| s.parse::<DateTime<Utc>>().unwrap();
+    let mut evs = Vec::new();
+    // Around two UTC midnights, so Paris (+1) and Kolkata (+5:30) days
+    // cut the UTC days in other places.
+    let times = [
+        "2026-03-01T17:20:00Z",
+        "2026-03-01T18:40:00Z",
+        "2026-03-01T22:50:00Z",
+        "2026-03-01T23:10:00Z",
+        "2026-03-02T00:05:00Z",
+        "2026-03-02T18:29:00Z",
+        "2026-03-02T18:31:00Z",
+        "2026-03-02T23:59:00Z",
+    ];
+    for (i, t) in times.iter().enumerate() {
+        for (j, who) in ["anon-1", "bob", "carol"].iter().enumerate() {
+            if (i + j) % 3 == 2 {
+                continue;
+            }
+            let mut e = ev("a", if j == 1 { "admin" } else { "member" }, 0);
+            e.distinct_id = (*who).into();
+            e.timestamp = at(t);
+            e.received_at = at(t);
+            e.event = if i % 4 == 3 {
+                "$error".into()
+            } else {
+                "$pageview".into()
+            };
+            e.feature = (i % 2 == 0).then(|| "billing".into());
+            evs.push(e);
+        }
+    }
+    let mut identify = ev("a", "member", 0);
+    identify.event = "$identify".into();
+    identify.distinct_id = "alice".into();
+    identify.timestamp = at("2026-03-02T00:06:00Z");
+    identify.received_at = identify.timestamp;
+    identify.properties = r#"{"$anon_distinct_id":"anon-1"}"#.into();
+    evs.push(identify);
+    w.append(&evs).unwrap();
+    w.flush().unwrap();
+    let q = QueryEngine::new(dir.path(), Limits::default());
+
+    let days = ["2026-03-01", "2026-03-02"];
+    for day in days {
+        let batches = q.rollup_day("a", day).await.unwrap();
+        let named: Vec<(&str, _)> = batches.iter().map(|(n, b)| (*n, b.clone())).collect();
+        let d = NaiveDate::parse_from_str(day, "%Y-%m-%d").unwrap();
+        let g = openlens_storage::rollup::generation();
+        assert!(openlens_storage::rollup::write(dir.path(), "a", d, g, &named).unwrap());
+    }
+
+    let rows = |r: openlens_query::QueryResult| -> Vec<String> {
+        r.rows
+            .iter()
+            .map(|row| serde_json::Value::Object(row.clone()).to_string())
+            .collect()
+    };
+    for zone in ["UTC", "Europe/Paris", "Asia/Kolkata"] {
+        let local = |col: &str| {
+            format!(
+                "date_trunc('day', to_local_time(arrow_cast({col}, 'Timestamp(Microsecond, Some(\"{zone}\"))')))"
+            )
+        };
+        let raw = q
+            .sql(
+                "a",
+                &format!(
+                    "SELECT {d} AS d, count(DISTINCT distinct_id) AS dau, count(*) AS n, \
+                     sum(CASE WHEN event = '$error' THEN 1 ELSE 0 END) AS errors \
+                     FROM events GROUP BY 1 ORDER BY 1",
+                    d = local("timestamp")
+                ),
+            )
+            .await
+            .unwrap();
+        let rolled = q
+            .sql(
+                "a",
+                &format!(
+                    "SELECT {d} AS d, count(DISTINCT person) AS dau, sum(events) AS n, \
+                     sum(errors) AS errors FROM person_q GROUP BY 1 ORDER BY 1",
+                    d = local("bucket")
+                ),
+            )
+            .await
+            .unwrap();
+        assert_eq!(rows(raw), rows(rolled), "people per day in {zone}");
+        let raw = q
+            .sql(
+                "a",
+                &format!(
+                    "SELECT {d} AS d, event, feature, count(*) AS n FROM events \
+                     GROUP BY 1, 2, 3 ORDER BY 1, 2, 3",
+                    d = local("timestamp")
+                ),
+            )
+            .await
+            .unwrap();
+        let rolled = q
+            .sql(
+                "a",
+                &format!(
+                    "SELECT {d} AS d, event, feature, sum(events) AS n FROM metric_q \
+                     GROUP BY 1, 2, 3 ORDER BY 1, 2, 3",
+                    d = local("bucket")
+                ),
+            )
+            .await
+            .unwrap();
+        assert_eq!(rows(raw), rows(rolled), "events per day in {zone}");
+    }
+    // The anonymous visits count as alice's.
+    let people = q
+        .sql("a", "SELECT DISTINCT person FROM person_q ORDER BY person")
+        .await
+        .unwrap();
+    assert_eq!(
+        rows(people),
+        [
+            r#"{"person":"alice"}"#,
+            r#"{"person":"bob"}"#,
+            r#"{"person":"carol"}"#
+        ]
+    );
+
+    // Erasing someone drops the rollups, to be rebuilt without them.
+    let gone: std::collections::HashSet<String> = ["bob".to_owned()].into();
+    assert!(openlens_storage::erase(dir.path(), "a", &gone).unwrap() > 0);
+    let d = NaiveDate::parse_from_str(days[0], "%Y-%m-%d").unwrap();
+    assert!(!openlens_storage::rollup::has(dir.path(), "a", d).unwrap());
+    let empty = q
+        .sql("a", "SELECT count(*) AS n FROM person_q")
+        .await
+        .unwrap();
+    assert_eq!(empty.rows[0]["n"], 0);
+}

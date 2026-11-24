@@ -27,6 +27,7 @@ use datafusion::prelude::{SQLOptions, SessionConfig, SessionContext};
 use futures::StreamExt;
 
 mod aggregate;
+mod rollup;
 pub use aggregate::MIN_USERS;
 use serde::Serialize;
 
@@ -349,6 +350,23 @@ impl QueryEngine {
                 ctx.register_table("events", view)
                     .map_err(|e| QueryError::Storage(e.to_string()))?;
             }
+        }
+        // The rollups of closed days (#322), read-only like the events.
+        let rdir = openlens_storage::rollup::rollups_dir(&self.root, project)
+            .map_err(|e| QueryError::Storage(e.to_string()))?;
+        for (name, schema) in openlens_storage::rollup::tables() {
+            let url = ListingTableUrl::parse(format!("{}/", rdir.display()))
+                .map_err(|e| QueryError::Storage(e.to_string()))?;
+            let options = ListingOptions::new(Arc::new(ParquetFormat::default()))
+                .with_file_extension(format!("{name}.parquet"))
+                .with_table_partition_cols(vec![("date".to_owned(), DataType::Utf8)]);
+            let config = ListingTableConfig::new(url)
+                .with_listing_options(options)
+                .with_schema(schema);
+            let t =
+                ListingTable::try_new(config).map_err(|e| QueryError::Storage(e.to_string()))?;
+            ctx.register_table(name, Arc::new(t))
+                .map_err(|e| QueryError::Storage(e.to_string()))?;
         }
         for (p, name, t, _) in self.snapshots.iter() {
             if p == project {
