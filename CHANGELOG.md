@@ -6,6 +6,8 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Added
 
+- **Rollups in the S3 copy** (D-026): the hourly S3 copy now includes the daily rollups, which can no longer be rebuilt once their events expire, and sends a day again when an erasure rewrites it.
+
 - **Access by type, the last pages** (#339): storage and backups, API tokens, AI settings, the audit log, SQL, exports and project creation take `Admin` or `ProjectWrite` instead of their own checks. The admin token now opens admin pages too, as it already did for project changes.
 
 - **Bound SQL values** (#310, part 1): the board's filter values are passed to DataFusion as parameters instead of being written into the SQL, every quote goes through the new `openlens-sqlgen` crate, and CI fails on a hand-made escape (D-027). A feature map with a control character or a 200+ byte value in a role, key or event is now refused at upload.
