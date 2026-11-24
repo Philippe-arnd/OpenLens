@@ -10,6 +10,10 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 - **Scoped API tokens:** `read`, `write` or `admin`, optionally limited to projects, stored hashed, made with `openlens-cli tokens create --scope read --project <id>` (or `POST /api/tokens`), listed and revoked with `tokens list|revoke`. A `read` token gets 403 on every write and is enough for `openlens-cli mcp`; scoped tokens never open dashboard pages.
 
+- **Group commit for ingestion** (#333): a capture request writes its events under the writer's lock and waits for the disk outside it, so one `fsync` serves every request that arrived in the meantime (a lone request still syncs at once). A resent batch dropped as a duplicate now waits until its first copy is on disk before its 200. `/metrics` counts `openlens_wal_syncs_total`.
+
+- **Dashboard reads no longer queue behind each other** (#344, part 1): metadata reads (settings, users, projects, tokens, flags and the like) go to 4 read-only SQLite connections next to the one writer.
+
 - **Crash test** (#331): `cargo xtask crash` SIGKILLs the real server while it ingests, resends what was not acknowledged, and checks that no acknowledged event is lost or stored twice (docs/development.md, *Crash test*).
 
 - **Documentation matches the code** (#318): every `OPENLENS_*` variable the server reads is listed in docs/deploy/README.md, and `cargo xtask env-docs` (in `cargo xtask ci`) fails when one is not. The SDK size is now measured (5.5 kB gzipped), and D-014 is amended to point to the full list.

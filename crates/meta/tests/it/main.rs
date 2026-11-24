@@ -276,3 +276,33 @@ fn a_person_forgotten_after_a_lookup_is_seen_at_once() {
     assert!(!meta.is_forgotten("p", "u2").unwrap());
     assert!(!meta.is_forgotten("other", "u1").unwrap());
 }
+
+#[test]
+fn reads_on_the_reader_connections_see_each_write_at_once() {
+    // A file store has reader connections (#344); a write must be visible
+    // to the next read, whichever connection serves it.
+    let dir = tempfile::tempdir().unwrap();
+    let meta = std::sync::Arc::new(Meta::open(&dir.path().join("meta.db")).unwrap());
+    for i in 0..20 {
+        meta.set_setting("k", &i.to_string()).unwrap();
+        assert_eq!(
+            meta.setting("k").unwrap().as_deref(),
+            Some(i.to_string().as_str())
+        );
+    }
+    // Reads from many threads at once, while writes go on.
+    std::thread::scope(|s| {
+        for _ in 0..8 {
+            let meta = meta.clone();
+            s.spawn(move || {
+                for _ in 0..50 {
+                    assert!(meta.setting("k").unwrap().is_some());
+                }
+            });
+        }
+        for i in 0..50 {
+            meta.set_setting("other", &i.to_string()).unwrap();
+        }
+    });
+    assert_eq!(meta.setting("other").unwrap().as_deref(), Some("49"));
+}

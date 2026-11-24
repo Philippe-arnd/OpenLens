@@ -61,9 +61,17 @@ pub struct Person {
     pub last_seen: String,
 }
 
+/// Read-only connections next to the writer (#344).
+const READERS: usize = 4;
+
 /// The metadata store.
 pub struct Meta {
     conn: Mutex<Connection>,
+    /// Read-only connections (#344): WAL lets them read while the one
+    /// writer writes, so dashboard reads stop queueing behind each other
+    /// and behind writes. Empty for [`Meta::in_memory`]: reads use `conn`.
+    readers: Vec<Mutex<Connection>>,
+    next_reader: std::sync::atomic::AtomicUsize,
     /// Per project, the people forgotten (#295): capture checks every event
     /// against it, so it is read once and kept until the next `forget`.
     forgotten: Mutex<HashMap<String, Arc<HashSet<String>>>>,
@@ -467,8 +475,21 @@ impl Meta {
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
         conn.execute_batch(SCHEMA)?;
         migrate(&conn)?;
+        let readers = (0..READERS)
+            .map(|_| {
+                let r = Connection::open_with_flags(
+                    path,
+                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                        | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+                )?;
+                r.busy_timeout(std::time::Duration::from_secs(5))?;
+                Ok(Mutex::new(r))
+            })
+            .collect::<Result<Vec<_>>>()?;
         Ok(Self {
             conn: Mutex::new(conn),
+            readers,
+            next_reader: Default::default(),
             forgotten: Mutex::default(),
         })
     }
@@ -490,6 +511,8 @@ impl Meta {
         migrate(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
+            readers: Vec::new(),
+            next_reader: Default::default(),
             forgotten: Mutex::default(),
         })
     }
@@ -499,9 +522,30 @@ impl Meta {
         f(&conn)
     }
 
+    /// Run a read on a free reader connection (any free one, else wait for
+    /// one in turn); on the writer when there are none (in memory).
+    fn read<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        let n = self.readers.len();
+        if n == 0 {
+            return self.with(f);
+        }
+        let first = self
+            .next_reader
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        for i in 0..n {
+            if let Ok(c) = self.readers[(first + i) % n].try_lock() {
+                return f(&c);
+            }
+        }
+        let c = self.readers[first % n]
+            .lock()
+            .map_err(|_| MetaError::Poisoned)?;
+        f(&c)
+    }
+
     /// A stored setting, if set.
     pub fn setting(&self, key: &str) -> Result<Option<String>> {
-        self.with(|c| {
+        self.read(|c| {
             Ok(
                 c.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
                     r.get(0)
@@ -588,7 +632,7 @@ impl Meta {
 
     /// All projects, oldest first.
     pub fn projects(&self) -> Result<Vec<Project>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st =
                 c.prepare("SELECT id, name, api_key, timezone FROM projects ORDER BY created_at")?;
             let rows = st.query_map([], |r| {
@@ -605,7 +649,7 @@ impl Meta {
 
     /// The project with this capture key.
     pub fn project_by_key(&self, key: &str) -> Result<Option<Project>> {
-        self.with(|c| {
+        self.read(|c| {
             Ok(c.query_row(
                 "SELECT id, name, api_key, timezone FROM projects WHERE api_key = ?1",
                 [key],
@@ -782,7 +826,7 @@ impl Meta {
 
     /// A person by id.
     pub fn person(&self, project: &str, distinct_id: &str) -> Result<Option<Person>> {
-        self.with(|c| {
+        self.read(|c| {
             Ok(c.query_row(
                 "SELECT distinct_id, role, account, plan, first_seen, last_seen FROM persons
                  WHERE project = ?1 AND distinct_id = ?2",
@@ -804,7 +848,7 @@ impl Meta {
 
     /// Role history of a person, oldest first: `(role, since)`.
     pub fn role_history(&self, project: &str, distinct_id: &str) -> Result<Vec<(String, String)>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st = c.prepare(
                 "SELECT role, since FROM role_history WHERE project = ?1 AND distinct_id = ?2 ORDER BY since",
             )?;
@@ -887,7 +931,7 @@ impl Meta {
 
     /// Every API token (never their values).
     pub fn api_tokens(&self) -> Result<Vec<ApiToken>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st = c.prepare(
                 "SELECT id, scope, projects, label, created_at, last_used FROM api_tokens ORDER BY created_at",
             )?;
@@ -980,7 +1024,7 @@ impl Meta {
 
     /// One user by id.
     pub fn user(&self, id: &str) -> Result<Option<User>> {
-        self.with(|c| {
+        self.read(|c| {
             Ok(c.query_row(
                 "SELECT id, email, role, projects, created_at, name, timezone, disabled, last_sign_in FROM users WHERE id = ?1",
                 [id],
@@ -993,7 +1037,7 @@ impl Meta {
     /// One user by email (case-insensitive).
     pub fn user_by_email(&self, email: &str) -> Result<Option<User>> {
         let email = email.trim().to_lowercase();
-        self.with(|c| {
+        self.read(|c| {
             Ok(c.query_row(
                 "SELECT id, email, role, projects, created_at, name, timezone, disabled, last_sign_in FROM users WHERE email = ?1",
                 [&email],
@@ -1005,7 +1049,7 @@ impl Meta {
 
     /// Every user, by email.
     pub fn users(&self) -> Result<Vec<User>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st = c.prepare(
                 "SELECT id, email, role, projects, created_at, name, timezone, disabled, last_sign_in FROM users ORDER BY email",
             )?;
@@ -1042,7 +1086,7 @@ impl Meta {
     /// Probes of a project since `since` (Unix seconds), oldest first:
     /// `(at, ok, status, ms, error)`.
     pub fn checks(&self, project: &str, since: i64) -> Result<Vec<Check>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st = c.prepare(
                 "SELECT at, ok, status, ms, error FROM uptime_checks WHERE project = ?1 AND at >= ?2 ORDER BY at",
             )?;
@@ -1057,7 +1101,7 @@ impl Meta {
 
     /// The open incident of a rule, if any: `(id, started_at, notified)`.
     pub fn open_incident(&self, project: &str, rule: &str) -> Result<Option<(i64, i64, bool)>> {
-        self.with(|c| {
+        self.read(|c| {
             Ok(c.query_row(
                 "SELECT id, started_at, notified_at IS NOT NULL FROM incidents WHERE project = ?1 AND rule = ?2 AND ended_at IS NULL",
                 params![project, rule],
@@ -1080,7 +1124,7 @@ impl Meta {
 
     /// When an incident was last announced (Unix seconds), if it was.
     pub fn incident_last_notified(&self, id: i64) -> Result<Option<i64>> {
-        self.with(|c| {
+        self.read(|c| {
             Ok(c.query_row(
                 "SELECT notified_at FROM incidents WHERE id = ?1",
                 [id],
@@ -1116,7 +1160,7 @@ impl Meta {
     /// Incidents started since `since`, newest first:
     /// `(rule, started_at, ended_at, cause, notified)`.
     pub fn incidents(&self, project: &str, since: i64) -> Result<Vec<Incident>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st = c.prepare(
                 "SELECT rule, started_at, ended_at, cause, notified_at IS NOT NULL FROM incidents \
                  WHERE project = ?1 AND (started_at >= ?2 OR ended_at IS NULL) ORDER BY started_at DESC LIMIT 100",
@@ -1159,7 +1203,7 @@ impl Meta {
         {
             return Ok(set.contains(id));
         }
-        let set: HashSet<String> = self.with(|c| {
+        let set: HashSet<String> = self.read(|c| {
             let mut st = c.prepare("SELECT distinct_id FROM forgotten WHERE project = ?1")?;
             let rows = st.query_map([project], |r| r.get::<_, String>(0))?;
             Ok(rows.collect::<rusqlite::Result<HashSet<_>>>()?)
@@ -1173,7 +1217,7 @@ impl Meta {
 
     /// People forgotten since `since` (Unix seconds).
     pub fn forgotten_since(&self, project: &str, since: i64) -> Result<Vec<String>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st =
                 c.prepare("SELECT distinct_id FROM forgotten WHERE project = ?1 AND at >= ?2")?;
             let rows = st
@@ -1228,7 +1272,7 @@ impl Meta {
     /// The live share link a token opens (not expired, not revoked).
     pub fn share_link(&self, token: &str) -> Result<Option<ShareLink>> {
         let now = Utc::now().timestamp();
-        self.with(|c| {
+        self.read(|c| {
             Ok(c.query_row(
                 &format!("SELECT {SHARE_COLS} FROM share_links WHERE hash = ?1 AND (expires_at IS NULL OR expires_at > ?2)"),
                 params![sha256_hex(token), now],
@@ -1240,7 +1284,7 @@ impl Meta {
 
     /// A project's share links, newest first (expired ones too).
     pub fn share_links(&self, project: &str) -> Result<Vec<ShareLink>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st = c.prepare(&format!(
                 "SELECT {SHARE_COLS} FROM share_links WHERE project = ?1 ORDER BY created_at DESC"
             ))?;
@@ -1289,7 +1333,7 @@ impl Meta {
     /// Notes from `since` (YYYY-MM-DD) on, newest first:
     /// `(id, day, author, author_id, body)`.
     pub fn notes(&self, project: &str, since: &str) -> Result<Vec<Note>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st = c.prepare(
                 "SELECT id, day, author, author_id, body FROM notes WHERE project = ?1 AND day >= ?2 ORDER BY day DESC, id DESC LIMIT 500",
             )?;
@@ -1318,7 +1362,7 @@ impl Meta {
 
     /// A project's audit entries since `since` (Unix seconds), oldest first.
     pub fn project_audit(&self, project: &str, since: i64) -> Result<Vec<AuditEntry>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st = c.prepare(
                 "SELECT at, actor, project, action, detail FROM audit WHERE project = ?1 AND at >= ?2 ORDER BY id LIMIT 1000",
             )?;
@@ -1349,7 +1393,7 @@ impl Meta {
 
     /// The audit log, newest first: `(at, actor, project, action, detail)`.
     pub fn audit_log(&self, limit: usize) -> Result<Vec<AuditEntry>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st = c.prepare(
                 "SELECT at, actor, project, action, detail FROM audit ORDER BY id DESC LIMIT ?1",
             )?;
@@ -1401,7 +1445,7 @@ impl Meta {
 
     /// A replay's comments, in playback order.
     pub fn replay_comments(&self, project: &str, session: &str) -> Result<Vec<ReplayComment>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st = c.prepare(
                 "SELECT id, session, at_ms, user_id, author, body, created_at FROM replay_comments \
                  WHERE project = ?1 AND session = ?2 ORDER BY at_ms, id",
@@ -1425,7 +1469,7 @@ impl Meta {
 
     /// Comments per session of a project.
     pub fn replay_comment_counts(&self, project: &str) -> Result<Vec<(String, i64)>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st = c.prepare(
                 "SELECT session, count(*) FROM replay_comments WHERE project = ?1 GROUP BY session",
             )?;
@@ -1579,7 +1623,7 @@ impl Meta {
     /// When the user's newest unused login link expires (Unix seconds), if
     /// one is pending: an invitation still open.
     pub fn pending_link(&self, id: &str) -> Result<Option<i64>> {
-        self.with(|c| {
+        self.read(|c| {
             Ok(c.query_row(
                 "SELECT max(expires_at) FROM login_links WHERE user_id = ?1 AND expires_at >= ?2",
                 params![id, Utc::now().timestamp()],
@@ -1650,7 +1694,7 @@ impl Meta {
 
     /// Latest feature map of a project: `(version, yaml)`.
     pub fn feature_map(&self, project: &str) -> Result<Option<(i64, String)>> {
-        self.with(|c| {
+        self.read(|c| {
             Ok(c.query_row(
                 "SELECT version, yaml FROM feature_maps WHERE project = ?1 ORDER BY version DESC LIMIT 1",
                 [project],
@@ -1662,7 +1706,7 @@ impl Meta {
 
     /// Every stored version of a project's map, newest first (#221, #240).
     pub fn feature_map_versions(&self, project: &str) -> Result<Vec<MapVersion>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st = c.prepare(
                 "SELECT version, created_at, length(yaml), author, message FROM feature_maps WHERE project = ?1 ORDER BY version DESC LIMIT 50",
             )?;
@@ -1683,7 +1727,7 @@ impl Meta {
 
     /// One stored version of a project's map.
     pub fn feature_map_version(&self, project: &str, version: i64) -> Result<Option<String>> {
-        self.with(|c| {
+        self.read(|c| {
             Ok(c.query_row(
                 "SELECT yaml FROM feature_maps WHERE project = ?1 AND version = ?2",
                 params![project, version],
@@ -1719,7 +1763,7 @@ impl Meta {
 
     /// All flag definitions of a project (JSON), by key.
     pub fn flags(&self, project: &str) -> Result<Vec<String>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st = c.prepare("SELECT json FROM flags WHERE project = ?1 ORDER BY key")?;
             let rows = st.query_map([project], |r| r.get(0))?;
             Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -1750,7 +1794,7 @@ impl Meta {
 
     /// All survey definitions of a project (JSON), by key.
     pub fn surveys(&self, project: &str) -> Result<Vec<String>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st = c.prepare("SELECT json FROM surveys WHERE project = ?1 ORDER BY key")?;
             let rows = st.query_map([project], |r| r.get(0))?;
             Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -1769,7 +1813,7 @@ impl Meta {
 
     /// Count of persons per raw role value in a project, most common first.
     pub fn role_counts(&self, project: &str) -> Result<Vec<(Option<String>, i64)>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st = c.prepare(
                 "SELECT role, COUNT(*) AS n FROM persons WHERE project = ?1 GROUP BY role ORDER BY n DESC",
             )?;
