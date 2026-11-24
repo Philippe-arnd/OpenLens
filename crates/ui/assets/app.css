@@ -534,3 +534,4 @@ select:focus-visible, input:focus-visible, button:focus-visible { outline: 2px s
   .tile .value { font-size: 24px; }
   .section-tabs { flex-wrap: nowrap; overflow-x: auto; }
 }
+.prev-next { display: flex; justify-content: space-between; gap: 12px; margin-top: 18px; }

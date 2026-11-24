@@ -137,7 +137,7 @@ pub(crate) fn routes() -> Router<AppState> {
         )
         .route(
             "/p/{project}/features/{file}",
-            get(crate::features::download),
+            get(crate::features::feature_or_download),
         )
         .route("/p/{project}/people/{who}", get(crate::explore::person))
         .route(

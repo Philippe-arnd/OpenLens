@@ -13,6 +13,7 @@ mod audience;
 mod board;
 mod components;
 mod explore;
+mod feature_page;
 mod features;
 mod glossary;
 mod goals;
@@ -25,6 +26,7 @@ pub use audience::*;
 pub use board::*;
 pub use components::*;
 pub use explore::*;
+pub use feature_page::*;
 pub use features::*;
 pub use goals::*;
 pub use icons::icon;
@@ -642,6 +644,15 @@ pub fn message(title: &str, text: &str) -> Markup {
         title,
         None,
         html! { section.login { h1 { (title) } p { (text) } p { a href="/" { "Back to the board" } } } },
+    )
+}
+
+/// [`message`] with markup (a link back, for instance).
+pub fn message_html(title: &str, body: Markup) -> Markup {
+    layout(
+        title,
+        None,
+        html! { section.login { h1 { (title) } p { (body) } } },
     )
 }
 

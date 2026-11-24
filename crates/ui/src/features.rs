@@ -224,7 +224,7 @@ pub fn feature_map(v: &MapView<'_>) -> Markup {
                             @let u = uses(&f.key);
                             @let h = f.success.as_deref().map(hits);
                             tr {
-                                th scope="row" { strong { (f.name) } br; code.small { (f.key) } @if let Some(o) = &f.owner { br; span.muted.small { (o) } } }
+                                th scope="row" { strong { a href={ "/p/" (v.p.id) "/features/" (f.key) } { (f.name) } } br; code.small { (f.key) } @if let Some(o) = &f.owner { br; span.muted.small { (o) } } }
                                 td.small {
                                     @for r in &f.entry.routes { code { (r) } " " }
                                     @for s in &f.entry.selectors { code { (s) } " " }

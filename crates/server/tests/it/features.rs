@@ -338,6 +338,41 @@ async fn map_health_finds_planted_defects_and_versions_keep_author_and_message()
         .status(),
         StatusCode::NOT_FOUND
     );
+    // The feature's own page (#411): breadcrumb, tabs, a former key redirects.
+    let owner = login_cookie(&h).await;
+    let page = body_text(get(&h, "/p/default/features/reading", Some(&owner), false).await).await;
+    assert!(page.contains("aria-label=\"Breadcrumb\""), "{page}");
+    assert!(
+        page.contains("href=\"/p/default/features\">Feature map"),
+        "{page}"
+    );
+    assert!(page.contains("aria-current=\"page\">Overview"), "{page}");
+    assert!(
+        page.contains("href=\"/p/default/features/edit\""),
+        "a related feature links"
+    );
+    let hist = body_text(
+        get(
+            &h,
+            "/p/default/features/reading?tab=history",
+            Some(&owner),
+            false,
+        )
+        .await,
+    )
+    .await;
+    assert!(hist.contains("aria-current=\"page\">History") && hist.contains("Map versions"));
+    let old = get(&h, "/p/default/features/docs", Some(&owner), false).await;
+    assert!(old.status().is_redirection());
+    let gone = get(&h, "/p/default/features/nope", Some(&owner), false).await;
+    assert_eq!(gone.status(), StatusCode::NOT_FOUND);
+    assert!(body_text(gone).await.contains("Back to the feature map"));
+    // The downloads keep their URLs.
+    let yaml = get(&h, "/p/default/features/map.yaml", Some(&owner), false).await;
+    assert_eq!(yaml.status(), StatusCode::OK);
+    // The map lists each feature as a link to its page.
+    let map = body_text(get(&h, "/p/default/features", Some(&owner), false).await).await;
+    assert!(map.contains("href=\"/p/default/features/reading\""));
 
     let versions: serde_json::Value = serde_json::from_str(
         &body_text(get(&h, "/api/projects/default/feature-map/versions", None, true).await).await,

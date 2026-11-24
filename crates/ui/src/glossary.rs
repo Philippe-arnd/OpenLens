@@ -75,6 +75,15 @@ pub(crate) const KPI: &[(&str, &str)] = &[
         "Revenue",
         "Sum of the purchase events' amounts in the period, in the project's currency; payers are distinct users who paid.",
     ),
+    (
+        "Users",
+        "Distinct people who used this feature in the last 30 days.",
+    ),
+    ("Uses", "Times the feature was used in the last 30 days."),
+    (
+        "Succeeded",
+        "Distinct people who reached its declared success event in the last 30 days.",
+    ),
 ];
 
 /// The definition of a tile label, if there is one.
@@ -124,6 +133,7 @@ mod tests {
             include_str!("team.rs"),
             include_str!("features.rs"),
             include_str!("explore.rs"),
+            include_str!("feature_page.rs"),
         ];
         let mut seen = 0;
         for src in sources {
