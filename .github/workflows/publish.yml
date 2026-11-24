@@ -51,13 +51,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           new=false; ref=""
-          if [ "${{ inputs.snapshot }}" = "true" ] || [ "$GITHUB_REF" = refs/heads/main ]; then
+          # A dispatched `tag` wins: the release train dispatches from main,
+          # where the push rule below would build a snapshot instead (v0.3.0).
+          if [ -n "${{ inputs.tag }}" ]; then
+            tag="${{ inputs.tag }}"
+          elif [ "${{ inputs.snapshot }}" = "true" ] || [ "$GITHUB_REF" = refs/heads/main ]; then
             # A build release: the tag is created with the release, at the end.
             v=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
             tag="v$v-$(date -u +%y%m%d)-$(git rev-parse --short=7 HEAD)"
             ref=$(git rev-parse HEAD); new=true
-          elif [ -n "${{ inputs.tag }}" ]; then
-            tag="${{ inputs.tag }}"
           else
             tag="$GITHUB_REF_NAME"
           fi
