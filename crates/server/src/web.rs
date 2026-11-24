@@ -276,10 +276,11 @@ async fn css() -> Response {
         .into_response()
 }
 
-async fn home(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return to_login();
-    }
+async fn home(
+    _: crate::access::Session,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Response {
     let meta = state.meta.clone();
     let viewer = auth::viewer(&state, &headers);
     let visible = tokio::task::spawn_blocking(move || meta.projects())
@@ -585,14 +586,12 @@ async fn project(state: &AppState, id: String) -> Option<openlens_meta::Project>
 }
 
 async fn board(
+    _: crate::access::Session,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
     Query(q): Query<FilterQuery>,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return to_login();
-    }
     let Some(p) = project(&state, id).await else {
         return html(
             StatusCode::NOT_FOUND,
@@ -678,14 +677,12 @@ struct EventsQuery {
 }
 
 async fn events(
+    _: crate::access::Session,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
     axum::extract::RawQuery(raw): axum::extract::RawQuery,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return to_login();
-    }
     let Some(p) = project(&state, id).await else {
         return html(
             StatusCode::NOT_FOUND,
@@ -862,14 +859,12 @@ pub(crate) async fn theme_layer(
 }
 
 async fn errors_page(
+    _: crate::access::Session,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
     Query(q): Query<FilterQuery>,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return to_login();
-    }
     let Some(p) = project(&state, id).await else {
         return html(
             StatusCode::NOT_FOUND,
@@ -904,14 +899,12 @@ async fn errors_page(
 }
 
 async fn pages_page(
+    _: crate::access::Session,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
     Query(q): Query<FilterQuery>,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return to_login();
-    }
     let Some(p) = project(&state, id).await else {
         return html(
             StatusCode::NOT_FOUND,
@@ -978,14 +971,12 @@ struct ReplayQuery {
 }
 
 async fn replays_page(
+    _: crate::access::Session,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
     Query(q): Query<ReplayQuery>,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return to_login();
-    }
     let Some(p) = project(&state, id).await else {
         return html(
             StatusCode::NOT_FOUND,
@@ -1035,14 +1026,12 @@ fn player_csp(mut r: Response) -> Response {
 }
 
 async fn player_page(
+    _: crate::access::Session,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((id, session)): Path<(String, String)>,
     Query(q): Query<ReplayQuery>,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return to_login();
-    }
     let Some(p) = project(&state, id).await else {
         return html(
             StatusCode::NOT_FOUND,
@@ -1108,13 +1097,10 @@ async fn player_page(
 }
 
 async fn replay_events(
+    _: crate::access::SessionData,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path((id, session)): Path<(String, String)>,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
     match crate::replay::load(&state, id, session).await {
         Ok(Some((_, events))) => (
             [
@@ -1131,13 +1117,10 @@ async fn replay_events(
 /// The session's OpenLens events (page views, clicks, submits, errors,
 /// success and custom events), for the markers on the player's timeline.
 async fn replay_timeline(
+    _: crate::access::SessionData,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path((id, session)): Path<(String, String)>,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
     if !openlens_replay::valid_id(&session) || project(&state, id.clone()).await.is_none() {
         return StatusCode::NOT_FOUND.into_response();
     }
@@ -1166,14 +1149,12 @@ struct WatchQuery {
 /// From a churn-point card: open the replay of the latest recorded session
 /// of a user who churned at that place, at the moment they left.
 async fn watch_churned(
+    _: crate::access::Session,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
     Query(q): Query<WatchQuery>,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return to_login();
-    }
     let Some(p) = project(&state, id).await else {
         return html(
             StatusCode::NOT_FOUND,
@@ -1291,14 +1272,12 @@ async fn click_map_for(
 }
 
 async fn heatmap_page(
+    _: crate::access::Session,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
     Query(q): Query<HeatmapQuery>,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return to_login();
-    }
     let Some(p) = project(&state, id).await else {
         return html(
             StatusCode::NOT_FOUND,
@@ -1351,14 +1330,11 @@ async fn heatmap_page(
 }
 
 async fn heatmap_json(
+    _: crate::access::SessionData,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path(id): Path<String>,
     Query(q): Query<HeatmapQuery>,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
     let Some(p) = project(&state, id).await else {
         return StatusCode::NOT_FOUND.into_response();
     };
@@ -1377,14 +1353,11 @@ async fn heatmap_json(
 }
 
 async fn heatmap_overlay(
+    _: crate::access::Session,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path(id): Path<String>,
     Query(q): Query<HeatmapQuery>,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return to_login();
-    }
     let Some(p) = project(&state, id).await else {
         return html(
             StatusCode::NOT_FOUND,
@@ -1409,13 +1382,11 @@ async fn heatmap_overlay(
 }
 
 async fn digest_page(
+    _: crate::access::Session,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return to_login();
-    }
     let Some(p) = project(&state, id).await else {
         return html(
             StatusCode::NOT_FOUND,

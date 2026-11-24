@@ -29,13 +29,11 @@ fn not_found(what: &str) -> Response {
 
 /// `GET /p/{id}/people/{distinct_id}`.
 pub(crate) async fn person(
+    _: crate::access::Session,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((id, who)): Path<(String, String)>,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return Redirect::to("/login").into_response();
-    }
     let Some(p) = project(&state, &id).await else {
         return not_found("No such project.");
     };
@@ -101,14 +99,12 @@ pub(crate) struct BreakdownQuery {
 
 /// `GET /p/{id}/breakdown?by=role|plan|account|environment|release|page|feature`.
 pub(crate) async fn breakdown(
+    _: crate::access::Session,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
     axum::extract::RawQuery(raw): axum::extract::RawQuery,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return Redirect::to("/login").into_response();
-    }
     let Some(p) = project(&state, &id).await else {
         return not_found("No such project.");
     };
@@ -273,14 +269,12 @@ pub(crate) struct AcqParams {
 
 /// `GET /p/{id}/acquisition?by=channel|source|campaign|referrer&touch=first|last` (#226).
 pub(crate) async fn acquisition(
+    _: crate::access::Session,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
     axum::extract::RawQuery(raw): axum::extract::RawQuery,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return Redirect::to("/login").into_response();
-    }
     let Some(p) = project(&state, &id).await else {
         return not_found("No such project.");
     };
@@ -329,14 +323,12 @@ pub(crate) async fn acquisition(
 
 /// `GET /p/{id}/forms` (#232).
 pub(crate) async fn forms(
+    _: crate::access::Session,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
     axum::extract::RawQuery(raw): axum::extract::RawQuery,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return Redirect::to("/login").into_response();
-    }
     let Some(p) = project(&state, &id).await else {
         return not_found("No such project.");
     };
@@ -365,14 +357,12 @@ pub(crate) async fn forms(
 
 /// `GET /p/{id}/revenue` (#231).
 pub(crate) async fn revenue(
+    _: crate::access::Session,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
     axum::extract::RawQuery(raw): axum::extract::RawQuery,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return Redirect::to("/login").into_response();
-    }
     let Some(p) = project(&state, &id).await else {
         return not_found("No such project.");
     };
@@ -705,14 +695,12 @@ pub(crate) async fn api_churn(
 
 /// `GET /p/{id}/audience` (#225).
 pub(crate) async fn audience(
+    _: crate::access::Session,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
     axum::extract::RawQuery(raw): axum::extract::RawQuery,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return Redirect::to("/login").into_response();
-    }
     let Some(p) = project(&state, &id).await else {
         return not_found("No such project.");
     };
@@ -760,14 +748,12 @@ fn flow_query(q: &FlowParams) -> openlens_engine::FlowQuery {
 
 /// `GET /p/{id}/flows[?from=<feature>|to=success]` (#224).
 pub(crate) async fn flows(
+    _: crate::access::Session,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
     axum::extract::RawQuery(raw): axum::extract::RawQuery,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return Redirect::to("/login").into_response();
-    }
     let Some(p) = project(&state, &id).await else {
         return not_found("No such project.");
     };
@@ -866,14 +852,12 @@ pub(crate) async fn api_flows(
 
 /// `GET /p/{id}/live` (#228).
 pub(crate) async fn live(
+    _: crate::access::Session,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
     axum::extract::RawQuery(raw): axum::extract::RawQuery,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return Redirect::to("/login").into_response();
-    }
     let Some(p) = project(&state, &id).await else {
         return not_found("No such project.");
     };

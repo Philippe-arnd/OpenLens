@@ -14,7 +14,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 - **Quality measured in CI** (#313, #314, #302): line coverage on every push to `main` (job summary per crate), surviving mutants of the engine every week in one rolling issue, a nightly benchmark compared with the last 7 runs (an issue past 20 % worse), and the README's SDK size badge read from the measured size, published with the site.
 
-- **Access by type, not by path** (#339, part 1): a handler that changes a project now takes `ProjectWrite` (an admin who may see the project, or the bearer token), and Team pages take `Admin`. The middleware keeps only "a `/p/*` request needs a session that may see the project": its path exceptions for comments, timeline notes and Ask are gone, and those routes stay open to read-only roles because their handlers ask for no write access.
+- **Access by type, not by path** (#339, part 1): a handler that changes a project now takes `ProjectWrite` (an admin who may see the project, or the bearer token), and Team pages take `Admin`. The middleware keeps only "a `/p/*` request needs a session that may see the project": its path exceptions for comments, timeline notes and Ask are gone, and those routes stay open to read-only roles because their handlers ask for no write access. Pages that only need a signed-in person take `Session` (or `SessionData` for JSON, which answers 401) instead of checking by hand.
 
 - **`xtask bench --with-board PROJECT`** (#344, part 2): measures ingestion while two readers compute a board in a loop (docs/benchmarks.md), and warns when the capture p99 goes above 50 ms.
 

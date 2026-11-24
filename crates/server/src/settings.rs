@@ -481,13 +481,11 @@ fn when(t: i64, tz: &str) -> String {
 
 /// `GET /p/{id}/uptime` (#256).
 pub(crate) async fn uptime(
+    _: crate::access::Session,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Response {
-    if !crate::auth::has_session(&state, &headers) {
-        return Redirect::to("/login").into_response();
-    }
     let Some(p) = load(&state, &id).await else {
         return html_page(
             StatusCode::NOT_FOUND,

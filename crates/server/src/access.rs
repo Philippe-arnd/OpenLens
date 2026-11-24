@@ -4,6 +4,9 @@
 //! - [`ProjectWrite`]: an admin who may see the `{project}` of the route, or
 //!   the bearer token. Every handler that changes a project takes it.
 //! - [`Admin`]: an admin (Team pages).
+//! - [`Session`]: anyone signed in to the dashboard (a page sends the
+//!   others to the login); [`SessionData`], the same for a data file
+//!   (JSON, timelines), which answers 401 instead.
 //!
 //! A handler that only needs to see the project (pages, and the `Shared`
 //! posts open to read-only roles: comments, timeline notes, Ask) takes
@@ -83,6 +86,36 @@ impl FromRequestParts<AppState> for Admin {
                 "Ask an admin to invite people.",
             )),
             Some(_) => Ok(Self),
+        }
+    }
+}
+
+/// Anyone signed in to the dashboard; others go to the login page.
+pub(crate) struct Session;
+
+impl FromRequestParts<AppState> for Session {
+    type Rejection = Response;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Response> {
+        if auth::has_session(state, &parts.headers) {
+            Ok(Self)
+        } else {
+            Err(crate::web::to_login())
+        }
+    }
+}
+
+/// Anyone signed in, for a data file: others get 401, not a redirect.
+pub(crate) struct SessionData;
+
+impl FromRequestParts<AppState> for SessionData {
+    type Rejection = Response;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Response> {
+        if auth::has_session(state, &parts.headers) {
+            Ok(Self)
+        } else {
+            Err(StatusCode::UNAUTHORIZED.into_response())
         }
     }
 }
