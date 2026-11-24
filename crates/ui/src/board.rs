@@ -81,6 +81,9 @@ pub fn board(
             @if !b.objectives_at_risk.is_empty() && !shared() {
                 p.notice role="status" { (icon("star")) " Objectives at risk: " (b.objectives_at_risk.join(" · ")) " — " a href={ "/p/" (p.id) "/goals" } { "Goals" } }
             }
+            @if let Some((done, total)) = b.setup.filter(|_| !shared()) {
+                p.notice role="status" { (icon("task")) " Setup: " (done) " of " (total) " required steps done — " a href={ "/p/" (p.id) "/settings" } { "Finish in Settings" } }
+            }
             (filter_bar(p.id, b, f, ""))
             (insight_cards(p.id, b, plain))
             section.tiles aria-label="Key numbers" {

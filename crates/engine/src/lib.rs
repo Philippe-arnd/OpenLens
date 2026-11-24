@@ -332,6 +332,10 @@ pub struct Board {
     /// for a strip at the top of the board.
     #[serde(skip)]
     pub objectives_at_risk: Vec<String>,
+    /// Required setup steps (done, total), for admins while incomplete
+    /// (#403): a one-line strip at the top of the board.
+    #[serde(skip)]
+    pub setup: Option<(usize, usize)>,
     /// Environments seen.
     pub environments: Vec<String>,
     /// Raw role values no rule of the feature map matches, with user counts.

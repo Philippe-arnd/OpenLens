@@ -414,6 +414,8 @@ pub struct SettingsView<'a> {
     pub alerts: AlertsView,
     /// Share links (#229).
     pub shares: Vec<openlens_meta::ShareLink>,
+    /// Setup steps (#403).
+    pub setup: Vec<SetupStep>,
 }
 
 /// A project's alert settings as the page shows them (#256).
@@ -467,6 +469,7 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
                 p.muted { "Everything agents do with " code { "openlens-cli" } " for this project, here too." }
             } }
             @if let Some(n) = v.notice { p.notice role="status" { (n) } }
+            @if !v.setup.is_empty() { (setup_progress(&v.setup)) }
             section.card.wide {
                 h2.violet { (icon("gear")) "Project" }
                 @if v.admin {
@@ -492,7 +495,7 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
                     " Days and weeks of every KPI start in the time zone (an IANA name like Europe/Paris)."
                 }
             }
-            section.card.wide {
+            section.card.wide #install {
                 h2.sky { (icon("code")) "Install" }
                 p { "Capture key " code.mono { (p.key) } " (public: it only sends events)." }
                 h3 { "Script tag" }

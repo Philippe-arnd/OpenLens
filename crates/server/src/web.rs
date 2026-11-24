@@ -407,6 +407,9 @@ async fn board_page(
     let mut board = board;
     if let Ok(b) = board.as_mut() {
         b.objectives_at_risk = crate::goals::snapshot(&state, &p.id).0;
+        if auth::viewer(&state, &headers).is_some_and(|v| v.admin) {
+            b.setup = crate::settings::setup_left(&state, &p.id);
+        }
         let st = crate::alerts::status(&state, &p.id);
         if st.state == "down" {
             b.app_down = st.open.first().map(|(rule, since, _)| {

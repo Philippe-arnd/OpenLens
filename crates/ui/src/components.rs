@@ -57,6 +57,46 @@ pub(crate) fn tile(accent: &str, glyph: &str, label: &str, value: &str, hint: &s
     }
 }
 
+/// One step of a project's setup (#403).
+#[derive(Debug, Clone)]
+pub struct SetupStep {
+    /// What to do.
+    pub label: &'static str,
+    /// It is done.
+    pub done: bool,
+    /// It counts towards "Set up" (the others are shown, not required).
+    pub required: bool,
+    /// Where it is fixed.
+    pub href: String,
+}
+
+/// The setup progress of a project (#403): the required steps as a bar,
+/// the optional ones listed; one "✓ Set up" line once the required are done.
+pub(crate) fn setup_progress(steps: &[SetupStep]) -> Markup {
+    let req: Vec<&SetupStep> = steps.iter().filter(|s| s.required).collect();
+    let done = req.iter().filter(|s| s.done).count();
+    let all = done == req.len();
+    html! {
+        section.card.wide.setup aria-label="Setup" {
+            @if all {
+                p { strong { "✓ Set up" } " · " (steps.iter().filter(|s| s.done).count()) " of " (steps.len()) " steps done, the rest are optional." }
+            } @else {
+                h2.violet { (icon("task")) "Setup: " (done) " / " (req.len()) " required steps" }
+                progress value=(done) max=(req.len()) aria-label="Required setup steps done" { (done) " of " (req.len()) }
+            }
+            ul.setup-steps {
+                @for st in steps {
+                    li class=(if st.done { "done" } else { "todo" }) {
+                        (if st.done { "✓ " } else { "○ " })
+                        @if st.done { (st.label) } @else { a href=(st.href) { (st.label) } }
+                        @if !st.required { span.muted.small { " · optional" } }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Where a board card or tile leads (#409): the page, with the board's
 /// filters (environment, role, release, the team toggle) carried along.
 pub(crate) fn detail_url(project: &str, path: &str, f: &Filters) -> String {
