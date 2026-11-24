@@ -27,7 +27,8 @@ What OpenLens stores, for how long, where, and what it never stores. Everything 
 
 ## Retention (fixed, D-015)
 
-- Events: 400 days. Daily rollups (counts per 15 minutes, and per person: their number of events and errors, with no URL, property or session) are kept as long as the project exists, so older periods can still be compared (D-026). Recordings: 30 days after their last chunk. Uptime checks: 7 days.
+- Click labels and positions (`$text`, `$tag`, `$id`, `$href`, `$x`, `$y`, `$vw`): 30 days. After that, a click keeps only its page, time and rage flag, and the day's page rollups keep the counts per click-map cell and the 20 most clicked labels per page (D-028).
+- Events: 400 days. Daily rollups (counts per 15 minutes; per person only their number of events and errors; per page its path, click-map counts, scroll depth and the 20 most clicked labels; no property, query string or session) are kept as long as the project exists, so older periods can still be compared (D-026). Recordings: 30 days after their last chunk. Uptime checks: 7 days.
 - Backups and the S3 copy follow your own schedule and retention.
 
 ## Rights of the people you measure

@@ -182,3 +182,11 @@ Append-only. Each entry: id, date, decision, why, consequences.
 
 **Consequences:** a new filter value is bound with `Params::set` or `bind`, never formatted in. Every value taken from a request is bound (part 2: events, people, pages, replays, data exports). Values from the feature map or a stored definition (success events, steps, variants) stay quoted literals, checked at upload.
 
+## D-028 (2026-11-24, agent for #324) Page rollups, and clicks lose their detail after 30 days
+
+**Decision:** each closed day also gets `click_q` (clicks per page and click-map cell, with rage clicks and viewport widths), `label_q` (the 20 most clicked labels per page) and `scroll_q` (sessions per page by deepest scroll, in 10 % steps), split by environment, release and role. These are UTC days, because a heatmap needs no local day. After 30 days, once the day has its rollups, `$click` events lose `$text`, `$tag`, `$id`, `$href`, `$x`, `$y` and `$vw`. The event row, its page, `$feature` and `$rage` stay, because churn reads rage clicks over 90 days. The 30 days are fixed (D-014).
+
+**Why:** click labels are the most personal text the SDK sends, and positions are most of a click's bytes. Nothing reads them past 30 days, and the rollups keep what a longer view would need.
+
+**Consequences:** a day is trimmed only after its rollups are written, so the history of an older install is rolled up before it is trimmed. Adding three tables to `rollups/v1` makes every stored day roll up again once, seven per pass.
+

@@ -480,6 +480,12 @@ fn compact(state: &AppState) -> Result<(), String> {
             Ok(n) => tracing::info!(project = %p.id, days = n, "expired old event days"),
             Err(err) => tracing::warn!(project = %p.id, %err, "event retention failed"),
         }
+        // Click labels and positions go after 30 days, once rolled up (#324).
+        match openlens_storage::trim_clicks(&state.data_dir, &p.id, now) {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(project = %p.id, clicks = n, "trimmed old click detail"),
+            Err(err) => tracing::warn!(project = %p.id, %err, "click trimming failed"),
+        }
         match openlens_replay::prune(&state.data_dir, &p.id, now) {
             Ok(0) => {}
             Ok(n) => tracing::info!(project = %p.id, recordings = n, "expired old recordings"),
