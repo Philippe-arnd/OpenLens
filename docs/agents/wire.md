@@ -10,7 +10,7 @@ You are the agent that maintains a web app. Your goal is that the product manage
 
 `openlens-cli` reads `OPENLENS_SERVER` and `OPENLENS_TOKEN` (or `--server`/`--token`), prints JSON, and exits non-zero when something needs fixing. Prefer a scoped token to the admin token: an admin makes one with `openlens-cli tokens create --scope write --project <id> --label <agent>` (`read` is enough for `openlens-cli mcp`); it is printed once, and `tokens revoke <id>` ends it. It is in the server image (`docker exec <container> openlens-cli …`), or `cargo install --git <repo> openlens-cli`.
 
-API quick reference (send `Authorization: Bearer <admin token>` on every call):
+API quick reference (send `Authorization: Bearer <admin token>` on every call). Every route also answers under the versioned prefix `/api/v1/...`, which is the contract; `/api/...` stays as an alias. The full list is the OpenAPI document at `/api/openapi.json`:
 
 | Call | Purpose |
 | --- | --- |
