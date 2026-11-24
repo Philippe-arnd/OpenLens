@@ -496,7 +496,15 @@ async fn login_link(
             )?),
             None => None,
         };
-        let t = meta.create_login_link_for(user.as_ref().map(|u| u.id.as_str()), 7 * 24 * 3600)?;
+        let t = meta.create_login_link_for(
+            user.as_ref().map(|u| u.id.as_str()),
+            // An owner link opens everything: one day (#315). Invites: a week.
+            if user.is_some() {
+                7 * 24 * 3600
+            } else {
+                24 * 3600
+            },
+        )?;
         Ok::<_, openlens_meta::MetaError>((user, t))
     })
     .await;

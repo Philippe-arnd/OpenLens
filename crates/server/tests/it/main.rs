@@ -278,11 +278,30 @@ async fn login_links_open_the_board_exactly_once() {
     .unwrap();
     let url = body["url"].as_str().unwrap();
     let path = &url[url.find("/l/").unwrap()..];
-    let first = get(&h, path, None, false).await;
+    // Link previews GET the link: that must not use it (#315).
+    for _ in 0..2 {
+        let page = get(&h, path, None, false).await;
+        assert_eq!(page.status(), StatusCode::OK);
+        assert!(page.headers().get("set-cookie").is_none());
+    }
+    let first = use_link(&h, path).await;
     assert!(first.status().is_redirection());
     assert!(first.headers().get("set-cookie").is_some());
-    let second = get(&h, path, None, false).await;
+    let second = use_link(&h, path).await;
     assert_eq!(second.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// The "Continue" button of a login link page.
+async fn use_link(h: &Harness, path: &str) -> axum::response::Response {
+    router(h.state.clone())
+        .oneshot(
+            Request::post(path)
+                .header("sec-fetch-site", "same-origin")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
@@ -1113,7 +1132,7 @@ async fn invite(h: &Harness, body: serde_json::Value) -> String {
     )
     .unwrap();
     let url = v["url"].as_str().unwrap();
-    let r = get(h, &url[url.find("/l/").unwrap()..], None, false).await;
+    let r = use_link(h, &url[url.find("/l/").unwrap()..]).await;
     r.headers()["set-cookie"]
         .to_str()
         .unwrap()
@@ -4265,6 +4284,7 @@ const ROUTES: &[(&str, &str, Access)] = &[
     ("POST", "/me", Signed),
     ("POST", "/logout", Signed),
     ("GET", "/l/{token}", Public),
+    ("POST", "/l/{token}", Public),
     ("GET", "/p/{project}", Read),
     ("GET", "/p/{project}/events", Read),
     ("GET", "/p/{project}/errors", Read),

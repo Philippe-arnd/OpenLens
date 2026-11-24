@@ -39,7 +39,8 @@ echo "6. a login link opens the board, which shows the data"
 URL=$(curl -fsS -X POST "$BASE/api/login-links" -H "authorization: Bearer $TOKEN" |
       python3 -c 'import json,sys; print(json.load(sys.stdin)["url"])')
 PATH_ONLY="/l/${URL##*/l/}"
-COOKIE=$(curl -s -o /dev/null -D - "$BASE$PATH_ONLY" | tr -d '\r' | sed -n 's/^[Ss]et-[Cc]ookie: \(ol_session=[^;]*\).*/\1/p')
+curl -fsS "$BASE$PATH_ONLY" | grep -q "Continue" || fail "login link page"
+COOKIE=$(curl -s -o /dev/null -D - -X POST "$BASE$PATH_ONLY" | tr -d '\r' | sed -n 's/^[Ss]et-[Cc]ookie: \(ol_session=[^;]*\).*/\1/p')
 [ -n "$COOKIE" ] || fail "login link set no cookie"
 curl -fsS -H "cookie: $COOKIE" "$BASE/p/default" | grep -q "Daily active users" || fail "board"
 curl -fsS -H "cookie: $COOKIE" "$BASE/p/default/events" | grep -q "smoke" || fail "events page"
