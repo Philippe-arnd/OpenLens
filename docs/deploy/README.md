@@ -38,7 +38,7 @@ The image `ghcr.io/philippe-arnd/openlens` is public. Binaries for `x86_64` and 
 
 ## Watching it run
 
-- `GET /readyz`: `ready`, or 503 with the reason (metadata store, data volume not writable, volume almost full). The Helm chart's probes still call `/healthz` (a bare `ok`) until a release with `/readyz` is published (#353 switches the readiness probe).
+- `GET /readyz`: `ready`, or 503 with the reason (metadata store, data volume not writable, volume almost full). The Helm chart and the Kustomize base use it as their readiness probe; liveness and startup stay on `/healthz` (a bare `ok`), so a full volume takes the pod out of the Service without restarting it.
 - `GET /metrics`: Prometheus text, with the admin token or a `read` API token (`openlens-cli tokens create --scope read`): requests and events captured, rejected and rate-limited, writes refused for disk, flushes and their duration, age of the last flush, buffered events, WAL size, board computations and cache, SQL queries stopped at their time limit, WAL fsyncs (`wal_syncs_total`: under load, well below the capture requests), free disk.
 - Slow clients: a connection gets 10 seconds to send its request headers, then it is closed (fixed, #346). Put a proxy with its own limits in front if your clients are slower.
 - Every response carries `x-request-id` (the proxy's, when it sent one), also in the log line of the request.

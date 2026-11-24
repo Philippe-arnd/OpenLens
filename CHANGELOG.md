@@ -4,6 +4,10 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Changed
+
+- **Kubernetes readiness follows `/readyz`** (#353): the chart and the Kustomize base take a pod out of the Service when its metadata store or data volume fails, instead of only when the process is down.
+
 ## [0.3.0] - 2026-11-24
 
 ### Added
