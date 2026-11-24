@@ -38,20 +38,18 @@ async fn live(
     let roles = format!(
         "SELECT DISTINCT role FROM raw_events WHERE date >= '{since}' AND role IS NOT NULL LIMIT 200"
     );
+    // Bound, not spliced (#310).
+    let mut params = openlens_sqlgen::Params::new();
     let successes: Vec<String> = m
         .features
         .iter()
-        .filter_map(|f| f.success.clone())
-        .filter(|s| s.len() <= 200 && !s.contains('\''))
+        .filter_map(|f| f.success.as_deref())
+        .filter_map(|s| params.bind(s).ok())
         .collect();
     let hits = (!successes.is_empty()).then(|| {
         format!(
             "SELECT event, count(*) AS n FROM events WHERE date >= '{since}' AND event IN ({}) GROUP BY event",
-            successes
-                .iter()
-                .map(|s| format!("'{s}'"))
-                .collect::<Vec<_>>()
-                .join(", ")
+            successes.join(", ")
         )
     });
     let (a, b) = tokio::join!(
@@ -82,7 +80,7 @@ async fn live(
         }
     }
     if let Some(sql) = hits
-        && let Ok(r) = state.query.sql(project, &sql).await
+        && let Ok(r) = state.query.with_params(&params).sql(project, &sql).await
     {
         for row in &r.rows {
             if let Some(e) = txt(row, "event") {

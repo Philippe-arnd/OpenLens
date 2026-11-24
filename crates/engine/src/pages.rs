@@ -129,9 +129,10 @@ pub async fn click_map(
     f: &Filters,
     path: &str,
 ) -> Result<ClickMap> {
-    let q = &q.with_params(&f.params()?);
+    let mut params = f.params()?;
     let w = f.clause(30)?;
-    let p = crate::lit(path)?;
+    let p = crate::bind(&mut params, path)?;
+    let q = &q.with_params(&params);
     let base = format!(
         "SELECT CAST(regexp_match(properties, '\"\\$x\":([0-9.]+)')[1] AS DOUBLE) AS x, \
                 CAST(regexp_match(properties, '\"\\$y\":([0-9]+)')[1] AS DOUBLE) AS y, \
@@ -171,13 +172,14 @@ pub async fn sessions_on_path(
     f: &Filters,
     path: &str,
 ) -> Result<Vec<String>> {
-    let q = &q.with_params(&f.params()?);
+    let mut params = f.params()?;
     let w = f.clause(30)?;
     let sql = format!(
         "SELECT session_id, max(timestamp) AS t FROM {src} WHERE {w} AND event = '$pageview' AND path = {} \
          AND session_id IS NOT NULL GROUP BY session_id ORDER BY t DESC LIMIT 200",
-        crate::lit(path)?
+        crate::bind(&mut params, path)?
     );
+    let q = &q.with_params(&params);
     Ok(q.sql(project, &sql)
         .await?
         .rows

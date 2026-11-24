@@ -13,6 +13,7 @@ openlens-event = { path = "../event" }
 openlens-storage = { path = "../storage" }
 openlens-meta = { path = "../meta" }
 openlens-query = { path = "../query" }
+openlens-sqlgen = { path = "../sqlgen" }
 openlens-engine = { path = "../engine" }
 openlens-featuremap = { path = "../featuremap" }
 openlens-flags = { path = "../flags" }

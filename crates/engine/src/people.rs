@@ -2,11 +2,6 @@
 
 use super::*;
 
-/// A string as a SQL literal (quotes doubled; control characters refused).
-pub fn sql_literal(s: &str) -> Result<String> {
-    lit(s)
-}
-
 /// Who the users are, from page views of the last 30 days (#225): distinct
 /// users per country, device class, browser, OS, language and screen
 /// width bucket. A user seen in two countries counts in both.
@@ -103,12 +98,14 @@ pub async fn person_events(
 ) -> Result<Vec<EventRow>> {
     let src = source(map);
     let since = (Utc::now() - Duration::days(90)).format("%Y-%m-%d");
+    let mut params = openlens_sqlgen::Params::new();
     let sql = format!(
         "SELECT CAST(timestamp AS VARCHAR) AS ts, event, distinct_id, role, path, feature, release, session_id \
          FROM {src} WHERE date >= '{since}' AND distinct_id = {} ORDER BY timestamp DESC LIMIT {}",
-        lit(distinct_id)?,
+        crate::bind(&mut params, distinct_id)?,
         limit.min(200)
     );
+    let q = &q.with_params(&params);
     Ok(q.sql(project, &sql)
         .await?
         .rows

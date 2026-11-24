@@ -61,17 +61,23 @@ pub async fn event_list(
     map: Option<&FeatureMap>,
     eq: &EventQuery,
 ) -> Result<Vec<EventRow>> {
-    let q = &q.with_params(&f.params()?);
+    let mut params = f.params()?;
     let src = source(map);
     let mut w = f.clause(eq.days.unwrap_or(30).clamp(1, 90))?;
     if let Some(e) = &eq.event {
-        w.push_str(&format!(" AND event = {}", lit(e)?));
+        w.push_str(&format!(" AND event = {}", crate::bind(&mut params, e)?));
     }
     if let Some(p) = &eq.person {
-        w.push_str(&format!(" AND distinct_id = {}", lit(p)?));
+        w.push_str(&format!(
+            " AND distinct_id = {}",
+            crate::bind(&mut params, p)?
+        ));
     }
     if let Some(p) = &eq.path {
-        w.push_str(&format!(" AND strpos(path, {}) > 0", lit(p)?));
+        w.push_str(&format!(
+            " AND strpos(path, {}) > 0",
+            crate::bind(&mut params, p)?
+        ));
     }
     if let Some(fam) = eq.family.as_deref() {
         let known = |names: &[&str]| -> Result<String> {
@@ -104,11 +110,15 @@ pub async fn event_list(
         Some("person") => "distinct_id, timestamp DESC",
         _ => {
             if let Some(b) = &eq.before {
-                w.push_str(&format!(" AND timestamp < CAST({} AS TIMESTAMP)", lit(b)?));
+                w.push_str(&format!(
+                    " AND timestamp < CAST({} AS TIMESTAMP)",
+                    crate::bind(&mut params, b)?
+                ));
             }
             "timestamp DESC"
         }
     };
+    let q = &q.with_params(&params);
     let skip = if eq
         .sort
         .as_deref()
