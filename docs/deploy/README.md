@@ -36,6 +36,13 @@ The image `ghcr.io/philippe-arnd/openlens` is public. Binaries for `x86_64` and 
 
 `openlens backup` writes a consistent copy of the data directory, safe while the server runs. `openlens backup --into <dir> --keep 7` names the copy after the UTC time and keeps the newest seven: run it from cron, a systemd timer, a Kubernetes CronJob or your panel's scheduled tasks, then copy the directory off the machine (rsync, rclone, or the optional S3 copy below). **Or from the dashboard:** *Projects → Storage and backups* schedules daily or weekly backups at an hour (UTC), keeps the newest N in a folder (default `<data>/backups`) and optionally on S3 as `.tar.gz`, with a history, *Back up now* and a download of the latest copy. Failures are emailed to admins when SMTP is set. **To restore:** stop OpenLens, replace the data directory with the backup, start it again. If the admin token came from `OPENLENS_ADMIN_TOKEN`, keep the same value.
 
+## Watching it run
+
+- `GET /readyz`: `ready`, or 503 with the reason (metadata store, data volume not writable, volume almost full). The Helm chart's readiness probe uses it; `/healthz` stays a bare liveness `ok`.
+- `GET /metrics`: Prometheus text, with the admin token or a `read` API token (`openlens-cli tokens create --scope read`): requests and events captured, rejected and rate-limited, writes refused for disk, flushes and their duration, age of the last flush, buffered events, WAL size, board computations and cache, free disk.
+- Every response carries `x-request-id` (the proxy's, when it sent one), also in the log line of the request.
+- Ingestion requests time out after 10 s, the rest after 2 minutes (408).
+
 ## Optional settings (D-016)
 
 None of these is needed. Each feature stays off until its variables are set.

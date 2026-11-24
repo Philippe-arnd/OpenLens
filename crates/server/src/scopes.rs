@@ -6,8 +6,9 @@
 //! that passes gets an internal header that [`crate::auth::has_bearer`]
 //! accepts, so the handlers' own bearer check stays as it is. The header
 //! is removed from every incoming request first, and its value is signed
-//! with the session key, so a client cannot set it. Outside `/api/` it is
-//! never added: scoped tokens do not open dashboard pages.
+//! with the session key, so a client cannot set it. Outside `/api/` (and
+//! `/metrics`, which a `read` token may scrape) it is never added: scoped
+//! tokens do not open dashboard pages.
 
 use axum::extract::{Request, State};
 use axum::http::{HeaderValue, Method, StatusCode};
@@ -81,7 +82,7 @@ fn denied(msg: &str) -> Response {
 pub(crate) async fn layer(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
     req.headers_mut().remove(MARK);
     let path = req.uri().path().to_owned();
-    if !path.starts_with("/api/") {
+    if !path.starts_with("/api/") && path != "/metrics" {
         return next.run(req).await;
     }
     let Some(given) = req

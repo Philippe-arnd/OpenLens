@@ -254,5 +254,6 @@ fn build_state() -> Result<openlens_server::AppState, String> {
         session_key: session_key.into(),
         boards: Default::default(),
         flushing: Default::default(),
+        metrics: Default::default(),
     })
 }

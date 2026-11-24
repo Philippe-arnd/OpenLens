@@ -34,6 +34,7 @@ fn harness() -> Harness {
         session_key: "session-key-for-tests".into(),
         boards: Default::default(),
         flushing: Default::default(),
+        metrics: Default::default(),
     };
     Harness {
         _dir: dir,
@@ -1562,6 +1563,44 @@ async fn scoped_tokens_reach_only_their_scope_and_projects() {
             .0,
         StatusCode::UNAUTHORIZED
     );
+}
+
+#[tokio::test]
+async fn operators_get_metrics_readiness_and_request_ids() {
+    let h = harness();
+    let ready = get(&h, "/readyz", None, false).await;
+    assert_eq!(ready.status(), StatusCode::OK);
+    assert!(ready.headers().contains_key("x-request-id"));
+    assert_eq!(
+        get(&h, "/metrics", None, false).await.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let count = |text: &str| -> u64 {
+        text.lines()
+            .find_map(|l| l.strip_prefix("openlens_events_accepted_total "))
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let before = count(&body_text(get(&h, "/metrics", None, true).await).await);
+    let (status, _) = post(&h, "/capture", batch(&h.key), false).await;
+    assert_eq!(status, StatusCode::OK);
+    let after = body_text(get(&h, "/metrics", None, true).await).await;
+    assert!(count(&after) > before, "{after}");
+    assert!(
+        after.contains("openlens_buffered_events") && after.contains("openlens_disk_free_bytes")
+    );
+    // An id sent by the proxy comes back as is.
+    let r = router(h.state.clone())
+        .oneshot(
+            Request::get("/healthz")
+                .header("x-request-id", "req-42")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.headers()["x-request-id"], "req-42");
 }
 
 /// Through a proxy, one client address gets a burst, then 429 with
@@ -4192,6 +4231,8 @@ const ROUTES: &[(&str, &str, Access)] = &[
     ("GET", "/flags", Public),
     ("POST", "/r", Public),
     ("GET", "/healthz", Public),
+    ("GET", "/readyz", Public),
+    ("GET", "/metrics", Api),
     ("GET", "/version", Public),
     ("GET", "/c.js", Public),
     ("GET", "/r.js", Public),

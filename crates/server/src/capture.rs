@@ -266,10 +266,15 @@ pub(crate) async fn capture(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    use crate::metrics::Metrics;
+    let m = state.metrics.clone();
+    Metrics::add(&m.capture_requests, 1);
     if ip_limited(&peer, &headers) {
+        Metrics::add(&m.rate_limited, 1);
         return too_many();
     }
     if let Some(r) = disk_full(&state) {
+        Metrics::add(&m.disk_refused, 1);
         return r;
     }
     // Up to 8 MB to gunzip and parse: off the async threads (#295).
@@ -315,6 +320,7 @@ pub(crate) async fn capture(
         && key_limited(&project.api_key, normalized.events.len())
     {
         tracing::warn!(project = %project.id, "capture rate limited");
+        Metrics::add(&m.rate_limited, 1);
         return too_many();
     }
     // Crawlers and monitors posting directly (the SDK already skips them in
@@ -339,6 +345,8 @@ pub(crate) async fn capture(
     crate::audience::init(&state.data_dir);
     crate::audience::enrich(&mut normalized.events, &headers);
     let accepted = normalized.events.len();
+    Metrics::add(&m.events_accepted, accepted as u64);
+    Metrics::add(&m.events_rejected, normalized.rejected.len() as u64);
     let rejected: Vec<_> = normalized
         .rejected
         .iter()
