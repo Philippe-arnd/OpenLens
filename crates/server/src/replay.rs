@@ -68,6 +68,15 @@ pub(crate) async fn ingest(
         Ok(p) => p,
         Err(resp) => return *resp,
     };
+    // Forgotten people stay forgotten: their recordings are dropped too
+    // (#230, review of v0.3.0).
+    if state
+        .meta
+        .is_forgotten(&project.id, &chunk.distinct_id)
+        .unwrap_or(false)
+    {
+        return StatusCode::OK.into_response();
+    }
     let root = state.data_dir.clone();
     let res = tokio::task::spawn_blocking(move || {
         openlens_replay::append(

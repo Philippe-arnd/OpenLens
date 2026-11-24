@@ -221,7 +221,16 @@ pub(crate) async fn export(
     if let Some((cfg, _)) = crate::s3::configured(&state.meta, &state.data_dir) {
         let root = state.data_dir.clone();
         let p = project.clone();
+        let space = state.disk_space;
         let back = tokio::task::spawn_blocking(move || {
+            // Room for the cold days twice over, or nothing is fetched
+            // (review of v0.3.0): an export must not fill the disk.
+            let need = crate::cold::project_bytes(&cfg, &root, &p)?;
+            if let Some((free, _)) = space(&root)
+                && free < need.saturating_mul(2)
+            {
+                return Err(format!("{need} bytes on S3 do not fit on this disk"));
+            }
             let _guard = MAINTENANCE
                 .lock()
                 .map_err(|_| "maintenance lock poisoned".to_owned())?;
@@ -256,6 +265,13 @@ pub(crate) async fn export(
         },
     );
     let events = match engine.with_params(&params).sql(&project, &sql).await {
+        // A right-of-access export is all or nothing (review of v0.3.0).
+        Ok(r) if r.truncated => {
+            return crate::apierr::json(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "more than 200,000 events for this person: export them day by day with `openlens-cli export`",
+            );
+        }
         Ok(r) => r.rows,
         Err(e) => {
             return crate::apierr::json(StatusCode::BAD_REQUEST, e.to_string());

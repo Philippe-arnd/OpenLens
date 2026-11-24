@@ -182,10 +182,11 @@ pub(crate) fn run(state: &AppState, how: &str) -> Result<Run, String> {
                 .unwrap_or_default();
             let tmp = into.join(format!(".{name}.tar.gz.tmp"));
             archive(&dest, &tmp)?;
-            let body = std::fs::read(&tmp).map_err(|e| e.to_string());
-            let _ = std::fs::remove_file(&tmp);
             let key = format!("backups/{name}.tar.gz");
-            crate::s3::put(&cfg, &key, &body?)?;
+            // Streamed from disk, never held in memory (review of v0.3.0).
+            let sent = crate::s3::put_file(&cfg, &key, &tmp);
+            let _ = std::fs::remove_file(&tmp);
+            sent?;
             prune_s3(&cfg, plan.keep)?;
             s3 = Some(key);
         }
@@ -193,7 +194,11 @@ pub(crate) fn run(state: &AppState, how: &str) -> Result<Run, String> {
     })();
     RUNNING.store(false, Ordering::SeqCst);
     let at = chrono::Utc::now().to_rfc3339();
-    let _ = state.meta.set_setting("backup:last", &at);
+    // Only a good run moves the schedule on: a failed one is tried again at
+    // the next tick (review of v0.3.0). Failures stay in the history.
+    if res.is_ok() {
+        let _ = state.meta.set_setting("backup:last", &at);
+    }
     let run = match res {
         Ok((dest, files, bytes, s3)) => Run {
             at,
@@ -296,7 +301,13 @@ fn tar_header(name: &str, size: u64) -> Result<[u8; 512], String> {
     let (prefix, base) = if name.len() <= 100 {
         ("", name)
     } else {
-        let cut = name[..name.len().min(156)]
+        // Cut on a character boundary: a byte index inside a multi-byte
+        // character would panic (review of v0.3.0).
+        let mut end = name.len().min(156);
+        while !name.is_char_boundary(end) {
+            end -= 1;
+        }
+        let cut = name[..end]
             .rfind('/')
             .filter(|&i| name.len() - i - 1 <= 100)
             .ok_or_else(|| format!("path too long for the archive: {name}"))?;

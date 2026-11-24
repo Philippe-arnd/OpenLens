@@ -215,11 +215,25 @@ pub(crate) fn public(ip: IpAddr) -> bool {
                 return public(IpAddr::V4(v4));
             }
             let s = v.segments();
+            let o = v.octets();
+            let embedded = |a: u8, b: u8, c: u8, d: u8| public(IpAddr::V4([a, b, c, d].into()));
+            // IPv4 hidden in IPv6 (review of v0.3.0): NAT64 64:ff9b::/96,
+            // 6to4 2002::/16 and the old IPv4-compatible ::a.b.c.d.
+            if s[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
+                return embedded(o[12], o[13], o[14], o[15]);
+            }
+            if s[0] == 0x2002 {
+                return embedded(o[2], o[3], o[4], o[5]);
+            }
+            if s[..6] == [0; 6] {
+                return embedded(o[12], o[13], o[14], o[15]);
+            }
             !(v.is_loopback()
                 || v.is_unspecified()
                 || v.is_multicast()
                 || (s[0] & 0xfe00) == 0xfc00
-                || (s[0] & 0xffc0) == 0xfe80)
+                || (s[0] & 0xffc0) == 0xfe80
+                || (s[0] & 0xffc0) == 0xfec0)
         }
     }
 }
@@ -374,6 +388,22 @@ pub(crate) fn absolute(origin: &str, href: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ipv4_hidden_in_ipv6_is_checked_as_ipv4() {
+        for a in [
+            "64:ff9b::a9fe:a9fe",
+            "2002:a9fe:a9fe::1",
+            "::10.0.0.1",
+            "fec0::1",
+            "::ffff:127.0.0.1",
+        ] {
+            assert!(!public(a.parse().unwrap()), "{a}");
+        }
+        for a in ["2001:4860:4860::8888", "64:ff9b::808:808", "8.8.8.8"] {
+            assert!(public(a.parse().unwrap()), "{a}");
+        }
+    }
 
     #[test]
     fn finds_the_declared_icon() {

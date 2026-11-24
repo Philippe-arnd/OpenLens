@@ -140,7 +140,7 @@ Append-only. Each entry: id, date, decision, why, consequences.
 
 **Why:** the project key is public, and a limit that only applied to proxied traffic left a directly exposed server (`docker run -p`, a systemd binary) with none, while a client could pick a new address for every request by forging the header.
 
-**Consequences:** a proxy on a public address in front of OpenLens makes every client look like the proxy; put it on a private network, as every supported deployment does.
+**Consequences:** a proxy on a public address in front of OpenLens makes every client look like the proxy; put it on a private network, as every supported deployment does. Without a proxy, publish the port so the server sees real client addresses (`docker run -p` with Docker's userland proxy makes every client come from the bridge gateway, a private address, whose `X-Forwarded-For` is then believed): put a reverse proxy in front, as the deploy guides do. The same rule now gives the country and the cookieless visitor (review of v0.3.0).
 
 ## D-023 (2026-11-24, agent for #321) The board's snapshot cap stays at 4 M rows; larger apps wait for daily rollups
 

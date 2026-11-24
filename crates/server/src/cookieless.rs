@@ -41,6 +41,7 @@ pub(crate) fn visitor(salt: &str, project: &str, ip: &str, ua: &str) -> String {
 pub(crate) fn resolve(
     state: &crate::AppState,
     events: &mut [openlens_event::Event],
+    peer: &crate::capture::Peer,
     headers: &HeaderMap,
 ) {
     let marked = |e: &openlens_event::Event| {
@@ -59,7 +60,7 @@ pub(crate) fn resolve(
         return;
     };
     // Without an address (no proxy in front), each request is its own visitor.
-    let id = match crate::audience::client_ip(headers) {
+    let id = match crate::audience::client_ip(peer, headers) {
         Some(ip) => visitor(&salt(&state.meta, &today), &project, &ip.to_string(), ua),
         None => format!("ck_{}", random_hex(10)),
     };

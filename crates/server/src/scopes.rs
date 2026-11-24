@@ -20,6 +20,31 @@ use crate::AppState;
 /// The internal header that marks a request whose scoped token was checked.
 pub(crate) const MARK: &str = "x-openlens-scope-checked";
 
+/// The internal header carrying a checked token's projects (comma-separated),
+/// set only next to [`MARK`], for handlers that list projects.
+pub(crate) const PROJECTS: &str = "x-openlens-scope-projects";
+
+/// Calls with no project in their path that a token limited to some
+/// projects may still make; every other install-wide call needs a token
+/// for every project (review of v0.3.0).
+fn open_to_limited(method: &Method, path: &str) -> bool {
+    (*method == Method::GET && (path == "/api/projects" || path == "/api/openapi.json"))
+        || (*method == Method::POST && path == "/api/feature-map/validate")
+}
+
+/// The projects a checked, project-limited token may see; `None` for any
+/// other request.
+pub(crate) fn limited_to(state: &AppState, headers: &axum::http::HeaderMap) -> Option<Vec<String>> {
+    let marked = headers.get(MARK).and_then(|v| v.to_str().ok()) == Some(mark(state).as_str());
+    let list = headers.get(PROJECTS)?.to_str().ok()?;
+    marked.then(|| {
+        list.split(',')
+            .filter(|p| !p.is_empty())
+            .map(str::to_owned)
+            .collect()
+    })
+}
+
 /// What a request needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Scope {
@@ -81,6 +106,7 @@ fn denied(msg: &str) -> Response {
 /// The middleware.
 pub(crate) async fn layer(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
     req.headers_mut().remove(MARK);
+    req.headers_mut().remove(PROJECTS);
     let path = req.uri().path().to_owned();
     if !path.starts_with("/api/") && path != "/metrics" {
         return next.run(req).await;
@@ -112,10 +138,21 @@ pub(crate) async fn layer(State(state): State<AppState>, mut req: Request, next:
     if has < needs {
         return denied(&format!("this token is {:?}; this needs {:?}", has, needs));
     }
-    if let (Some(list), Some(p)) = (&token.projects, project_of(&path))
-        && !list.iter().any(|x| x == p)
-    {
-        return denied("this token is not for this project");
+    if let Some(list) = &token.projects {
+        match project_of(&path) {
+            Some(p) if !list.iter().any(|x| x == p) => {
+                return denied("this token is not for this project");
+            }
+            None if !open_to_limited(req.method(), &path) => {
+                return denied(
+                    "this token is limited to some projects; this needs a token for all of them",
+                );
+            }
+            _ => {}
+        }
+        if let Ok(v) = HeaderValue::from_str(&list.join(",")) {
+            req.headers_mut().insert(PROJECTS, v);
+        }
     }
     if let Ok(v) = HeaderValue::from_str(&mark(&state)) {
         req.headers_mut().insert(MARK, v);

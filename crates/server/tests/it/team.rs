@@ -874,3 +874,74 @@ async fn viewers_comment_on_replays_and_delete_only_their_own() {
             .is_empty()
     );
 }
+
+/// A token or an admin limited to some projects cannot reach the rest of
+/// the install (review of v0.3.0): no other project's key, no install-wide
+/// call, no install-wide page.
+#[tokio::test]
+async fn project_limited_tokens_and_admins_stay_in_their_projects() {
+    let h = harness();
+    let (_, v) = api_as(
+        &h,
+        "POST",
+        "/api/projects",
+        "adm_test",
+        r#"{"name":"Other"}"#,
+    )
+    .await;
+    let other = v["id"].as_str().unwrap().to_owned();
+    let (_, v) = api_as(
+        &h,
+        "POST",
+        "/api/tokens",
+        "adm_test",
+        r#"{"scope":"admin","projects":["default"]}"#,
+    )
+    .await;
+    let limited = v["token"].as_str().unwrap().to_owned();
+    let (s, v) = api_as(&h, "GET", "/api/projects", &limited, "").await;
+    assert_eq!(s, StatusCode::OK);
+    let ids: Vec<&str> = v["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|p| p["id"].as_str())
+        .collect();
+    assert_eq!(ids, ["default"], "{v}");
+    for (m, p, body) in [
+        ("GET", "/api/users", ""),
+        ("POST", "/api/tokens", r#"{"scope":"admin"}"#),
+        ("POST", "/api/projects", r#"{"name":"x"}"#),
+    ] {
+        assert_eq!(
+            api_as(&h, m, p, &limited, body).await.0,
+            StatusCode::FORBIDDEN,
+            "{m} {p}"
+        );
+    }
+    assert_eq!(
+        api_as(
+            &h,
+            "GET",
+            &format!("/api/projects/{other}/board"),
+            &limited,
+            ""
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    // An admin of one project gets 403 on install-wide pages.
+    let admin_a = invite(
+        &h,
+        serde_json::json!({"email": "a@example.com", "role": "admin", "projects": ["default"]}),
+    )
+    .await;
+    for uri in ["/settings/tokens", "/settings/storage", "/users"] {
+        assert_eq!(
+            get(&h, uri, Some(&admin_a), false).await.status(),
+            StatusCode::FORBIDDEN,
+            "{uri}"
+        );
+    }
+}

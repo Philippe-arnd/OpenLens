@@ -202,16 +202,22 @@ pub(crate) fn authorization_q(
     )
 }
 
-/// One signed request: `(status, body)`. `key` is under the prefix;
-/// `query` pairs are sorted and encoded here.
-pub(crate) fn request(
+/// The URL, date and `Authorization` of a request whose body hashes to
+/// `hash`. `key` is under the prefix; `query` pairs are sorted and encoded
+/// here.
+fn prepare(
     cfg: &Config,
     method: &str,
     key: &str,
     query: &[(&str, &str)],
-    body: &[u8],
-) -> Result<(u16, Vec<u8>), String> {
-    let key = format!("{}{key}", cfg.prefix);
+    hash: &str,
+) -> (String, String, String) {
+    // A list call targets the bucket root: its prefix travels in the query.
+    let key = if key.is_empty() {
+        String::new()
+    } else {
+        format!("{}{key}", cfg.prefix)
+    };
     let (base, host, path) = match &cfg.endpoint {
         Some(ep) => {
             let host = ep.split("://").nth(1).unwrap_or(ep).to_owned();
@@ -238,7 +244,6 @@ pub(crate) fn request(
         .collect::<Vec<_>>()
         .join("&");
     let now = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
-    let hash = sha_hex(body);
     let auth = authorization_q(
         &cfg.access_key,
         &cfg.secret_key,
@@ -248,16 +253,30 @@ pub(crate) fn request(
         &qs,
         &[
             ("host", &host),
-            ("x-amz-content-sha256", &hash),
+            ("x-amz-content-sha256", hash),
             ("x-amz-date", &now),
         ],
-        &hash,
+        hash,
     );
     let url = format!(
         "{base}{}{}{qs}",
         uri_encode(&path, true),
         if qs.is_empty() { "" } else { "?" }
     );
+    (url, now, auth)
+}
+
+/// One signed request: `(status, body)`. `key` is under the prefix;
+/// `query` pairs are sorted and encoded here.
+pub(crate) fn request(
+    cfg: &Config,
+    method: &str,
+    key: &str,
+    query: &[(&str, &str)],
+    body: &[u8],
+) -> Result<(u16, Vec<u8>), String> {
+    let hash = sha_hex(body);
+    let (url, now, auth) = prepare(cfg, method, key, query, &hash);
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(std::time::Duration::from_secs(60)))
         .http_status_as_error(false)
@@ -312,6 +331,47 @@ fn ok(r: (u16, Vec<u8>), what: &str) -> Result<Vec<u8>, String> {
 /// Upload one object.
 pub(crate) fn put(cfg: &Config, key: &str, body: &[u8]) -> Result<(), String> {
     ok(request(cfg, "PUT", key, &[], body)?, "upload").map(|_| ())
+}
+
+/// Upload a file without holding it in memory: hashed in a first pass,
+/// then streamed (a backup archive can be larger than RAM; review of
+/// v0.3.0).
+pub(crate) fn put_file(cfg: &Config, key: &str, path: &std::path::Path) -> Result<(), String> {
+    use sha2::Digest;
+    use std::io::Read;
+    let mut f = fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut h = sha2::Sha256::new();
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = f.read(&mut buf).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        h.update(&buf[..n]);
+    }
+    let hash = hex::encode(h.finalize());
+    let (url, now, auth) = prepare(cfg, "PUT", key, &[], &hash);
+    let file = fs::File::open(path).map_err(|e| e.to_string())?;
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(6 * 3600)))
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let mut r = agent
+        .put(&url)
+        .header("x-amz-date", &now)
+        .header("x-amz-content-sha256", &hash)
+        .header("authorization", &auth)
+        .send(file)
+        .map_err(|e| e.to_string())?;
+    let status = r.status().as_u16();
+    let body = r
+        .body_mut()
+        .with_config()
+        .limit(1024 * 1024)
+        .read_to_vec()
+        .map_err(|e| e.to_string())?;
+    ok((status, body), "upload").map(|_| ())
 }
 
 /// Read one object.

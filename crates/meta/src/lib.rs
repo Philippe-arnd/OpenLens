@@ -83,6 +83,9 @@ pub struct Meta {
     /// Per project, the people forgotten (#295): capture checks every event
     /// against it, so it is read once and kept until the next `forget`.
     forgotten: Mutex<HashMap<String, Arc<HashSet<String>>>>,
+    /// Bumped by every forget, so a set read before it is not cached after
+    /// it (review of v0.3.0).
+    forgotten_gen: std::sync::atomic::AtomicU64,
 }
 
 const SCHEMA: &str = "
@@ -499,6 +502,7 @@ impl Meta {
             readers,
             next_reader: Default::default(),
             forgotten: Mutex::default(),
+            forgotten_gen: std::sync::atomic::AtomicU64::new(0),
         })
     }
 
@@ -522,6 +526,7 @@ impl Meta {
             readers: Vec::new(),
             next_reader: Default::default(),
             forgotten: Mutex::default(),
+            forgotten_gen: std::sync::atomic::AtomicU64::new(0),
         })
     }
 

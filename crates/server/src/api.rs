@@ -203,9 +203,11 @@ async fn list_projects(State(state): State<AppState>, headers: HeaderMap) -> Res
         return r;
     }
     let meta = state.meta.clone();
+    // A token limited to some projects lists only those (review of v0.3.0).
+    let only = crate::scopes::limited_to(&state, &headers);
     match tokio::task::spawn_blocking(move || meta.projects()).await {
         Ok(Ok(ps)) => Json(json!({
-            "projects": ps.iter().map(|p| json!({"id": p.id, "name": p.name, "key": p.api_key, "timezone": p.timezone})).collect::<Vec<_>>()
+            "projects": ps.iter().filter(|p| only.as_ref().is_none_or(|l| l.contains(&p.id))).map(|p| json!({"id": p.id, "name": p.name, "key": p.api_key, "timezone": p.timezone})).collect::<Vec<_>>()
         }))
         .into_response(),
         _ => err(StatusCode::INTERNAL_SERVER_ERROR, "metadata store unavailable"),

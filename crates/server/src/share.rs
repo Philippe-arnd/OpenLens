@@ -38,9 +38,19 @@ pub(crate) fn origins(raw: &str) -> Result<Option<String>, String> {
         return Ok(None);
     }
     for o in &list {
-        let ok = (o.starts_with("https://")
-            || o.starts_with("http://localhost")
-            || o.starts_with("http://127.0.0.1"))
+        // Plain http only for the machine itself, by exact host: a prefix
+        // test let `http://localhost.example.com` through (review of v0.3.0).
+        let local = o.strip_prefix("http://").is_some_and(|rest| {
+            let host = rest.rsplit_once(':').map_or(rest, |(h, port)| {
+                if port.bytes().all(|b| b.is_ascii_digit()) {
+                    h
+                } else {
+                    rest
+                }
+            });
+            host == "localhost" || host == "127.0.0.1"
+        });
+        let ok = (o.starts_with("https://") || local)
             && crate::icon::origin(o).as_deref() == Some(o.as_str());
         if !ok {
             return Err(format!(
@@ -226,6 +236,13 @@ mod tests {
     #[test]
     fn embed_origins_are_exact_and_https() {
         assert_eq!(super::origins("").unwrap(), None);
+        for bad in [
+            "http://localhost.evil.com",
+            "http://127.0.0.1.evil.com",
+            "http://example.com",
+        ] {
+            assert!(super::origins(bad).is_err(), "{bad}");
+        }
         assert_eq!(
             super::origins("https://intranet.example.com/, http://localhost:3000")
                 .unwrap()

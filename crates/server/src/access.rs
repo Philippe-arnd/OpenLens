@@ -73,7 +73,7 @@ impl FromRequestParts<AppState> for ProjectWrite {
     }
 }
 
-/// An admin (or the bearer token, which is the owner's).
+/// An admin of every project (or the bearer token, which is the owner's).
 pub(crate) struct Admin;
 
 impl FromRequestParts<AppState> for Admin {
@@ -86,6 +86,14 @@ impl FromRequestParts<AppState> for Admin {
                 StatusCode::FORBIDDEN,
                 "Admins only",
                 "This page is for admins. Ask one.",
+            )),
+            // Install-wide pages (team, tokens, storage, AI) are for admins
+            // of every project: one limited to some projects could else
+            // widen their own reach (review of v0.3.0).
+            Some(v) if v.projects.is_some() => Err(page(
+                StatusCode::FORBIDDEN,
+                "Admins of every project only",
+                "This page changes the whole install. Ask an admin of every project.",
             )),
             Some(_) => Ok(Self),
         }

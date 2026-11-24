@@ -348,7 +348,7 @@ pub(crate) async fn capture(
             ev.environment = BOT_ENVIRONMENT.to_owned();
         }
     }
-    crate::cookieless::resolve(&state, &mut normalized.events, &headers);
+    crate::cookieless::resolve(&state, &mut normalized.events, &peer, &headers);
     // Forgotten people stay forgotten (#230).
     normalized.events.retain(|e| {
         !state
@@ -357,7 +357,7 @@ pub(crate) async fn capture(
             .unwrap_or(false)
     });
     crate::audience::init(&state.data_dir);
-    crate::audience::enrich(&mut normalized.events, &headers);
+    crate::audience::enrich(&mut normalized.events, &peer, &headers);
     let accepted = normalized.events.len();
     Metrics::add(&m.events_accepted, accepted as u64);
     Metrics::add(&m.events_rejected, normalized.rejected.len() as u64);
