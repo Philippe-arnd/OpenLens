@@ -707,6 +707,23 @@ async fn new_data_in_another_project_keeps_this_board_cached() {
 }
 
 #[tokio::test]
+async fn instance_pages_keep_the_project_menu_and_a_breadcrumb() {
+    let h = harness();
+    let owner = login_cookie(&h).await;
+    for page in ["/settings/ai", "/settings/storage", "/team", "/me"] {
+        let html = body_text(get(&h, page, Some(&owner), false).await).await;
+        // The only project's menu (#403), the instance tabs and the trail.
+        assert!(html.contains("class=\"side-nav\""), "{page}");
+        assert!(html.contains("href=\"/p/default/events\""), "{page}");
+        assert!(html.contains("aria-label=\"Instance\""), "{page}");
+        assert!(html.contains("aria-label=\"Breadcrumb\""), "{page}");
+    }
+    let settings = body_text(get(&h, "/p/default/settings", Some(&owner), false).await).await;
+    assert!(settings.contains("list=\"tz-all\"") && settings.contains("Europe/Paris"));
+    assert!(settings.contains("name=\"quiet_start\""));
+}
+
+#[tokio::test]
 async fn errors_pages_and_events_pages_do_not_compute_the_board() {
     let h = harness();
     let (status, _) = post(&h, "/capture", batch(&h.key), false).await;

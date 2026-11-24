@@ -195,6 +195,107 @@ fn section_tabs(title: &str, p: &ProjectInfo<'_>) -> Markup {
     components::tabs(g.label, &items)
 }
 
+/// The instance pages, as one tab group (#403): path, label, titles.
+const INSTANCE_TABS: &[(&str, &str, &[&str])] = &[
+    ("/settings/tokens", "API tokens", &["API tokens"]),
+    ("/settings/ai", "AI", &["AI"]),
+    ("/settings/storage", "Storage", &["Storage and backups"]),
+    ("/team", "Team", &["Team"]),
+    ("/me", "My profile", &["My profile"]),
+];
+
+fn instance_tabs(title: &str) -> Markup {
+    if !INSTANCE_TABS.iter().any(|t| t.2.contains(&title)) {
+        return html! {};
+    }
+    let items: Vec<(String, &str, bool)> = INSTANCE_TABS
+        .iter()
+        .map(|(href, label, titles)| ((*href).to_owned(), *label, titles.contains(&title)))
+        .collect();
+    components::tabs("Instance", &items)
+}
+
+/// The project whose menu the instance pages keep (#403), decided by the
+/// server per request: the last one visited, if the viewer still sees it,
+/// else their only project.
+#[derive(Debug, Clone, Default)]
+pub struct NavProject {
+    /// Id.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Capture key.
+    pub key: String,
+}
+
+static NAV_PROJECT: std::sync::OnceLock<fn() -> Option<NavProject>> = std::sync::OnceLock::new();
+
+/// Where instance pages read the request's [`NavProject`]. Set once.
+pub fn set_nav_project_source(source: fn() -> Option<NavProject>) {
+    let _ = NAV_PROJECT.set(source);
+}
+
+fn nav_project() -> Option<NavProject> {
+    NAV_PROJECT.get().and_then(|f| f())
+}
+
+/// A breadcrumb (#403): one shared component for every page; the last
+/// crumb is the current page.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Crumbs(pub Vec<(String, Option<String>)>);
+
+impl Crumbs {
+    /// The default trail of a page: `Projects › <project> › <section> ›
+    /// <tab>`, or `Instance › <page>`.
+    pub(crate) fn of(title: &str, project: Option<&ProjectInfo<'_>>) -> Self {
+        let mut c = Vec::new();
+        if let Some(t) = INSTANCE_TABS.iter().find(|t| t.2.contains(&title)) {
+            c.push(("Instance".to_owned(), None));
+            c.push((t.1.to_owned(), None));
+            return Self(c);
+        }
+        let Some(p) = project else {
+            return Self(c);
+        };
+        c.push(("Projects".to_owned(), Some("/projects".to_owned())));
+        c.push((p.name.to_owned(), Some(format!("/p/{}", p.id))));
+        if let Some(g) = group_of(title, p.name) {
+            if g.label != "Focus board" {
+                let first = format!("/p/{}{}", p.id, g.tabs[0].0);
+                c.push((g.label.to_owned(), (g.tabs.len() > 1).then_some(first)));
+            }
+            if g.tabs.len() > 1
+                && let Some(t) = g.tabs.iter().find(|t| t.2.contains(&title))
+            {
+                c.push((t.1.to_owned(), None));
+            }
+        } else if title != p.name {
+            c.push((title.to_owned(), None));
+        }
+        Self(c)
+    }
+
+    fn render(&self) -> Markup {
+        if self.0.len() < 2 {
+            return html! {};
+        }
+        let last = self.0.len() - 1;
+        html! {
+            nav.crumbs aria-label="Breadcrumb" { ol {
+                @for (i, (label, href)) in self.0.iter().enumerate() {
+                    li {
+                        @match (href, i == last) {
+                            (_, true) => span aria-current="page" { (label) },
+                            (Some(h), false) => a href=(h) { (label) },
+                            (None, false) => span { (label) },
+                        }
+                    }
+                }
+            } }
+        }
+    }
+}
+
 /// Format a count compactly: 1,284 / 12.9K / 4.2M.
 pub fn compact(n: i64) -> String {
     let a = n.unsigned_abs() as f64;
@@ -345,6 +446,30 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
     if shared() {
         return shared_layout(title, project, body);
     }
+    // Instance pages keep the last project's menu (#403).
+    let remembered = if project.is_none() && INSTANCE_TABS.iter().any(|t| t.2.contains(&title)) {
+        nav_project()
+    } else {
+        None
+    };
+    let held = remembered.as_ref().map(|n| ProjectInfo {
+        id: &n.id,
+        name: &n.name,
+        key: &n.key,
+    });
+    let project = project.or(held.as_ref());
+    let crumbs = Crumbs::of(title, project);
+    layout_with(title, project, &crumbs, body)
+}
+
+/// [`layout`] with an explicit breadcrumb (#403; the feature pages, #411,
+/// pass their own).
+fn layout_with(
+    title: &str,
+    project: Option<&ProjectInfo<'_>>,
+    crumbs: &Crumbs,
+    body: Markup,
+) -> Markup {
     let p = prefs();
     html! {
         (DOCTYPE)
@@ -396,7 +521,9 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                     }
                     div.content {
                         main {
+                            (crumbs.render())
                             @if let Some(p) = project { (section_tabs(title, p)) }
+                            (instance_tabs(title))
                             (body)
                         }
                         footer {
@@ -526,6 +653,22 @@ mod tests {
         assert!(sec.contains("class=\"update-security\""));
         assert!(sec.contains("Security update available: v0.5.0"));
         assert!(sec.contains("releases/tag/v0.5.0"));
+    }
+
+    #[test]
+    fn breadcrumbs_follow_the_section_and_the_instance_pages() {
+        let p = ProjectInfo { id: "d", name: "Demo", key: "k" };
+        let c = Crumbs::of("Heatmap", Some(&p)).render().into_string();
+        assert!(c.contains("aria-label=\"Breadcrumb\""));
+        assert!(c.contains("href=\"/projects\""));
+        assert!(c.contains("href=\"/p/d\""));
+        assert!(c.contains("href=\"/p/d/events\">Behaviour"));
+        assert!(c.contains("aria-current=\"page\">Pages"));
+        let i = Crumbs::of("Storage and backups", None).render().into_string();
+        assert!(i.contains("Instance") && i.contains("aria-current=\"page\">Storage"));
+        assert!(Crumbs::of("Demo", Some(&p)).render().into_string().contains("aria-current=\"page\">Demo"));
+        assert!(instance_tabs("AI").into_string().contains("href=\"/settings/ai\" aria-current=\"page\""));
+        assert!(instance_tabs("Events").into_string().is_empty());
     }
 
     #[test]
