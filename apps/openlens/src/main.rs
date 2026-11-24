@@ -22,6 +22,11 @@ mod upgrade;
 
 use std::process::ExitCode;
 
+/// jemalloc with a short decay (`.cargo/config.toml`) gives memory back to
+/// the OS soon after a large board, where glibc kept the peak (#418).
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 const DEFAULT_ADDR: &str = "0.0.0.0:8686";
 
 fn main() -> ExitCode {

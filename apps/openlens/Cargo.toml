@@ -9,6 +9,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+tikv-jemallocator.workspace = true
 openlens-server = { path = "../../crates/server" }
 openlens-meta = { path = "../../crates/meta" }
 openlens-storage = { path = "../../crates/storage" }
