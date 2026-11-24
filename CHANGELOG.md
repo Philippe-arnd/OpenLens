@@ -19,6 +19,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- **Replays show their active time** (#404, part 1): the list shows the time with user input ("3 min active · open 2 h") instead of the time the tab stayed open. Pauses over 2 minutes without input don't count, and neither do changes the page makes on its own. Older recordings get it on their first listing, and it is cached in `info.json`.
 - **AI settings: pick a provider, paste the key** (#406): presets for Anthropic, OpenAI, Google (Gemini), Mistral, OpenRouter and Ollama fill the protocol and address. Saving checks the key by listing the provider's models, then picks the main and fast models from that list. Custom still offers every field, and existing settings map to their preset or to Custom.
 - **KPI definitions on hover** (#405): every tile has an ⓘ next to its label that shows what it counts and over which window, on hover, keyboard focus or tap, with no script. The glossary is one table in the UI crate, and a test fails when a tile has no entry.
 - **Shorter sidebar** (#402): eight entries (Focus board, Ask, Live, Behaviour, Quality, People, Product, Settings), each with its own icon. A section's pages are tabs at the top of the page, every old URL keeps working, and the bottom block (theme, profile, collapse) stays on screen.

@@ -63,6 +63,38 @@ pub struct Info {
     pub distinct_id: String,
     /// When the first chunk arrived.
     pub started: DateTime<Utc>,
+    /// Seconds with user input, and the chunk count it was computed from
+    /// (#404): recomputed when chunks were added since.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active: Option<(u64, usize)>,
+}
+
+/// A stretch without user input longer than this is idle, not active time
+/// (#404; the SDK pauses the recorder after the same delay).
+pub const IDLE_MS: i64 = 2 * 60 * 1000;
+
+/// Seconds of active use in rrweb events: the time between consecutive
+/// user inputs (mouse, clicks, scroll, typing, touch), counting no gap
+/// longer than [`IDLE_MS`]. DOM changes the page makes on its own (a
+/// clock, polling) are not input.
+pub fn active_secs(chunks: &[Vec<serde_json::Value>]) -> u64 {
+    let mut times: Vec<i64> = chunks
+        .iter()
+        .flatten()
+        .filter(|e| {
+            let source = e["data"]["source"].as_i64();
+            // 2 = full snapshot (page load), 3 = incremental with an input source.
+            e["type"] == 2 || (e["type"] == 3 && matches!(source, Some(1 | 2 | 3 | 5 | 6)))
+        })
+        .filter_map(|e| e["timestamp"].as_i64())
+        .collect();
+    times.sort_unstable();
+    let ms: i64 = times
+        .windows(2)
+        .map(|w| w[1] - w[0])
+        .filter(|d| *d <= IDLE_MS)
+        .sum();
+    (ms / 1000).max(0) as u64
 }
 
 /// One recording in a listing.
@@ -80,6 +112,8 @@ pub struct Summary {
     pub chunks: usize,
     /// Stored size, compressed, in bytes.
     pub bytes: u64,
+    /// Seconds with user input (#404), when they could be read.
+    pub active_secs: Option<u64>,
 }
 
 /// Is `s` usable as a path component?
@@ -157,6 +191,7 @@ pub fn append(
             &serde_json::to_vec(&Info {
                 distinct_id: id,
                 started: now,
+                active: None,
             })?,
         )?;
     }
@@ -215,11 +250,36 @@ pub fn list(root: &Path, project: &str, distinct_id: Option<&str>) -> Result<Vec
             updated: DateTime::<Utc>::from(last),
             chunks: chunks.len(),
             bytes: chunks.iter().map(|c| c.2).sum(),
+            active_secs: info
+                .active
+                .filter(|(_, n)| *n == chunks.len())
+                .map(|(s, _)| s),
         });
     }
     out.sort_by_key(|s| std::cmp::Reverse(s.updated));
     out.truncate(LIST_LIMIT);
+    // Active time, computed once per new chunk count and kept in
+    // info.json (#404), so old recordings get it on their first listing.
+    // At most 20 per listing, so a first listing of a long history stays quick.
+    for s in out.iter_mut().filter(|s| s.active_secs.is_none()).take(20) {
+        s.active_secs = cache_active(&dir.join(&s.session_id)).ok();
+    }
     Ok(out)
+}
+
+fn cache_active(path: &Path) -> Result<u64> {
+    let mut decoded = Vec::new();
+    let files = chunk_files(path)?;
+    for (_, file, _, _) in &files {
+        let raw = zstd::decode_all(fs::File::open(file)?)?;
+        decoded.push(serde_json::from_slice::<Vec<serde_json::Value>>(&raw).unwrap_or_default());
+    }
+    let secs = active_secs(&decoded);
+    let info_path = path.join("info.json");
+    let mut info: Info = serde_json::from_slice(&fs::read(&info_path)?)?;
+    info.active = Some((secs, files.len()));
+    write_atomic(&info_path, &serde_json::to_vec(&info)?)?;
+    Ok(secs)
 }
 
 /// Delete every recording of one person (#230). Returns how many.
@@ -318,6 +378,43 @@ pub fn load(root: &Path, project: &str, session: &str) -> Result<Option<(Info, S
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
+
+    #[test]
+    fn active_time_counts_input_and_skips_idle_gaps() {
+        let input = |t: i64| serde_json::json!({"type": 3, "timestamp": t, "data": {"source": 2}});
+        let page_change = |t: i64| serde_json::json!({"type": 3, "timestamp": t, "data": {"source": 0}});
+        let min = 60_000;
+        // 3 minutes of use, an hour open with only a clock ticking, 1 more minute.
+        let mut a = vec![serde_json::json!({"type": 2, "timestamp": 0})];
+        a.extend((1..=6).map(|i| input(i * 30_000)));
+        a.extend((4..60).map(|m| page_change(m * min)));
+        let b: Vec<_> = (0..=2).map(|i| input(60 * min + i * 30_000)).collect();
+        assert_eq!(active_secs(&[a, b]), 3 * 60 + 60);
+    }
+
+    #[test]
+    fn the_list_shows_and_caches_active_time() {
+        let d = tempfile::tempdir().unwrap();
+        let chunk = serde_json::value::RawValue::from_string(
+            r#"[{"type":2,"timestamp":0},{"type":3,"timestamp":90000,"data":{"source":1}}]"#.into(),
+        )
+        .unwrap();
+        append(d.path(), "p", "s1", "ann", 0, &chunk, Utc::now()).unwrap();
+        let l = list(d.path(), "p", None).unwrap();
+        assert_eq!(l[0].active_secs, Some(90));
+        let info: Info = serde_json::from_slice(
+            &fs::read(d.path().join("replay/project=p/s1/info.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(info.active, Some((90, 1)), "cached");
+        // A new chunk: recomputed.
+        let more = serde_json::value::RawValue::from_string(
+            r#"[{"type":3,"timestamp":120000,"data":{"source":5}}]"#.into(),
+        )
+        .unwrap();
+        append(d.path(), "p", "s1", "ann", 1, &more, Utc::now()).unwrap();
+        assert_eq!(list(d.path(), "p", None).unwrap()[0].active_secs, Some(120));
+    }
     use serde_json::value::RawValue;
 
     fn raw(s: &str) -> Box<RawValue> {
