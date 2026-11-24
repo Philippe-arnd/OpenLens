@@ -10,6 +10,10 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 - **Scoped API tokens:** `read`, `write` or `admin`, optionally limited to projects, stored hashed, made with `openlens-cli tokens create --scope read --project <id>` (or `POST /api/tokens`), listed and revoked with `tokens list|revoke`. A `read` token gets 403 on every write and is enough for `openlens-cli mcp`; scoped tokens never open dashboard pages.
 
+- **Access by type, not by path** (#339, part 1): a handler that changes a project now takes `ProjectWrite` (an admin who may see the project, or the bearer token), and Team pages take `Admin`. The middleware keeps only "a `/p/*` request needs a session that may see the project": its path exceptions for comments, timeline notes and Ask are gone, and those routes stay open to read-only roles because their handlers ask for no write access.
+
+- **`xtask bench --with-board PROJECT`** (#344, part 2): measures ingestion while two readers compute a board in a loop (docs/benchmarks.md), and warns when the capture p99 goes above 50 ms.
+
 - **Group commit for ingestion** (#333): a capture request writes its events under the writer's lock and waits for the disk outside it, so one `fsync` serves every request that arrived in the meantime (a lone request still syncs at once). A resent batch dropped as a duplicate now waits until its first copy is on disk before its 200. `/metrics` counts `openlens_wal_syncs_total`.
 
 - **Dashboard reads no longer queue behind each other** (#344, part 1): metadata reads (settings, users, projects, tokens, flags and the like) go to 4 read-only SQLite connections next to the one writer.

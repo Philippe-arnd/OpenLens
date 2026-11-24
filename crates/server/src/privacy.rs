@@ -144,6 +144,7 @@ pub(crate) struct ConfirmForm {
 
 /// `POST /p/{id}/people/{who}/forget` (admins; the id typed again).
 pub(crate) async fn forget(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((project, who)): Path<(String, String)>,

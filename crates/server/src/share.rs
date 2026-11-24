@@ -62,6 +62,7 @@ pub(crate) fn origins(raw: &str) -> Result<Option<String>, String> {
 
 /// `POST /p/{id}/settings/share` (admins).
 pub(crate) async fn create(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
@@ -123,6 +124,7 @@ pub(crate) async fn create(
 
 /// `POST /p/{id}/settings/share/{lid}/revoke` (admins).
 pub(crate) async fn revoke(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((id, lid)): Path<(String, String)>,

@@ -275,6 +275,7 @@ struct FlagForm {
 }
 
 async fn page_update(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((id, key)): Path<(String, String)>,

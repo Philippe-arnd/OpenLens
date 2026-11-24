@@ -181,6 +181,7 @@ pub(crate) struct SqlForm {
 /// `POST /p/{id}/sql`: run it (read-only, the API's limits); `format=csv`
 /// downloads the result.
 pub(crate) async fn sql_run(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
@@ -620,6 +621,7 @@ pub(crate) struct AudienceForm {
 /// users at risk now with a control group, for a win-back nudge behind
 /// `openlens.isEnabled(key)`.
 pub(crate) async fn make_audience(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,

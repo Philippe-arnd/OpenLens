@@ -900,6 +900,7 @@ fn project_blocking(state: &AppState, id: &str) -> Option<openlens_meta::Project
 
 /// `POST /p/{id}/ask/confirm` (admins).
 pub(crate) async fn confirm(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
@@ -1217,6 +1218,7 @@ pub(crate) struct PrivacyForm {
 
 /// `POST /p/{id}/ask/privacy` (admins): allow person-level detail or not.
 pub(crate) async fn privacy(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,

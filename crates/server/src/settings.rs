@@ -157,6 +157,7 @@ pub(crate) struct SaveForm {
 
 /// `POST /p/{id}/settings`: name, app address, time zone.
 pub(crate) async fn save(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
@@ -217,6 +218,7 @@ pub(crate) struct ConfirmForm {
 
 /// `POST /p/{id}/settings/rotate-key`.
 pub(crate) async fn rotate(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
@@ -238,6 +240,7 @@ pub(crate) async fn rotate(
 
 /// `POST /p/{id}/settings/delete`: the id must be typed again.
 pub(crate) async fn delete(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
@@ -392,6 +395,7 @@ pub(crate) struct AlertsForm {
 
 /// `POST /p/{id}/settings/alerts` (#256).
 pub(crate) async fn alerts(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
@@ -438,7 +442,11 @@ pub(crate) async fn alerts(
 }
 
 /// `POST /p/{id}/settings/alerts/test`: one message on every channel.
-pub(crate) async fn alerts_test(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+pub(crate) async fn alerts_test(
+    _: crate::access::ProjectWrite,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Response {
     let Some(p) = load(&state, &id).await else {
         return oops("No such project.");
     };
