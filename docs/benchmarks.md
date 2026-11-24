@@ -41,4 +41,6 @@ taskset -c 1-3 ./target/perf/xtask bench http://127.0.0.1:18740 "$KEY" 10 4 50  
 
 `xtask bench` prints JSON (events/s and latency percentiles), and exits non-zero if any request failed.
 
+**Every night** (#314): `perf.yml` runs the perf build on demo data, one minute of ingestion and one minute with `--with-board`, keeps the JSON as an artifact, and compares it with the average of the last 7 runs (`scripts/perf/compare.py`). A metric more than 20 % worse opens or comments on one issue. The figures on this page are still measured by hand.
+
 **Ingestion while the dashboard is read** (#344): add `--with-board PROJECT` to compute that project's board in a loop on two more connections. Give it a session in `OPENLENS_BENCH_COOKIE` (for example `ol_session=…`, from the `set-cookie` of `curl -i -XPOST $URL/login -d token=$TOKEN`). The JSON gains a `board` entry (pages computed, p50 and max), and the bench warns when the capture p99 goes above 50 ms. Delete the data dir and the `perf` build afterwards: see the disk rule in `docs/development.md`.

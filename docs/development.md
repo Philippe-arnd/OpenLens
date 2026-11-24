@@ -25,6 +25,10 @@ cargo xtask bench http://127.0.0.1:PORT KEY   # ingestion load test, see docs/be
 - The screenshots are in the `dashboard-screens` artifact: `gh run download <run-id> -n dashboard-screens`.
 - **Image** (`release.yml`): Docker build, compose, smoke test, then publish to GHCR. It runs nightly, on tags, on demand, or when packaging changes.
 
+## Coverage and mutants
+
+`coverage.yml` (#313) measures line coverage on every push to `main` and on demand (`cargo llvm-cov`). The job summary has the table per crate, with `engine` and `storage` first, and the JSON is an artifact. It reports only: a floor will be set once the numbers are known. Every Sunday, `cargo mutants -p openlens-engine` lists the code changes no test catches in one rolling issue, *Surviving mutants (engine)*.
+
 ## Crash test
 
 `cargo xtask crash` proves durability (#331). It starts the real server (`target/debug/openlens`, so build it first; `--bin` for another), ingests batches with known uuids, SIGKILLs the server at seeded random intervals and restarts it. It resends every batch that got no 200, as the SDK does. At the end it reads the stored uuids back through the SQL API. It passes when no acknowledged event is missing, none is stored twice, and the run reached its kill count:

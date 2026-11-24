@@ -1,0 +1,116 @@
+name: coverage
+
+# How much of the code the tests run (#313). Line coverage of every crate,
+# with crates/engine and crates/storage in the job summary, on each push to
+# main (not on PRs, to keep the PR gate fast) and on demand. Report only:
+# the floor comes once the first numbers are known. Every week,
+# cargo-mutants changes the engine's code one mutation at a time; the
+# mutants no test catches are listed in one rolling issue.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 4 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  coverage:
+    name: line coverage
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: coverage
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2
+        with:
+          tool: cargo-llvm-cov
+      - name: run the tests with coverage
+        run: cargo llvm-cov --workspace --all-targets --json --summary-only --output-path coverage.json
+      - name: summary
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, os
+          d = json.load(open("coverage.json"))["data"][0]
+          crates = {}
+          for f in d["files"]:
+              parts = f["filename"].split(os.sep)
+              if "crates" in parts:
+                  name = parts[parts.index("crates") + 1]
+              elif "apps" in parts:
+                  name = "apps/" + parts[parts.index("apps") + 1]
+              else:
+                  continue
+              l = f["summary"]["lines"]
+              c = crates.setdefault(name, [0, 0])
+              c[0] += l["covered"]; c[1] += l["count"]
+          print("## Line coverage\n\n| Crate | Lines | Covered |\n| --- | ---: | ---: |")
+          for name in sorted(crates, key=lambda n: (n not in ("engine", "storage"), n)):
+              cov, n = crates[name]
+              print(f"| {'**' + name + '**' if name in ('engine', 'storage') else name} | {n} | {100 * cov / max(n, 1):.1f} % |")
+          t = d["totals"]["lines"]
+          print(f"| all | {t['count']} | {t['percent']:.1f} % |")
+          PY
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: coverage
+          path: coverage.json
+
+  mutants:
+    name: surviving mutants (engine)
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: mutants
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2
+        with:
+          tool: cargo-mutants
+      - name: mutate the engine
+        # Exit code 2 means "some mutants survived": that is the report, not a failure.
+        run: cargo mutants -p openlens-engine --no-shuffle -j 2 || [ $? -eq 2 ]
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: mutants
+          path: mutants.out/
+          if-no-files-found: ignore
+      - name: update the rolling issue
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Surviving mutants (engine)"
+          n=$(wc -l < mutants.out/missed.txt 2>/dev/null || echo 0)
+          {
+            echo "Weekly \`cargo mutants -p openlens-engine\` on ${GITHUB_SHA::7} ($RUN): **$n** mutants no test catches. Each line is a change to the code that every test still passes: add a test that fails on it, or say why it is harmless (#313)."
+            echo
+            echo '```'
+            head -n 200 mutants.out/missed.txt 2>/dev/null || true
+            echo '```'
+          } > body.md
+          open=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "$title in:title" --json number -q '.[0].number')
+          if [ -n "$open" ]; then gh issue edit "$open" -R "$GITHUB_REPOSITORY" --body-file body.md; else gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body-file body.md; fi

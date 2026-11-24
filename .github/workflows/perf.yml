@@ -1,0 +1,77 @@
+name: perf
+
+# Nightly benchmark (#314): the perf build on a demo data dir, one minute
+# of ingestion, then one minute of ingestion while two readers compute
+# the board (`xtask bench --with-board`). The JSON is kept as an artifact
+# and compared with the average of the last 7 successful runs: a metric
+# more than 20 % worse opens (or comments on) one issue.
+on:
+  schedule:
+    - cron: "47 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  bench:
+    name: ingestion and board
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: perf
+      - run: cargo build --profile perf -p openlens -p xtask
+      - name: run
+        run: |
+          set -euo pipefail
+          D="$RUNNER_TEMP/data"; ./target/perf/xtask demo "$D"
+          OPENLENS_DATA_DIR="$D" OPENLENS_ADDR=127.0.0.1:18740 OPENLENS_ADMIN_TOKEN=perf ./target/perf/openlens > server.log 2>&1 &
+          for _ in $(seq 60); do curl -sf 127.0.0.1:18740/healthz > /dev/null && break; sleep 1; done
+          KEY=$(curl -sf -H "authorization: Bearer perf" 127.0.0.1:18740/api/projects | python3 -c 'import json,sys; d=json.load(sys.stdin); d=d.get("projects", d); print(next(p for p in d if p["id"]=="default")["key"])')
+          ./target/perf/xtask bench http://127.0.0.1:18740 "$KEY" 60 4 50 > ingest.json
+          export OPENLENS_BENCH_COOKIE=$(curl -si -XPOST 127.0.0.1:18740/login -d token=perf | tr -d '\r' | sed -n 's/^[Ss]et-[Cc]ookie: \(ol_session=[^;]*\).*/\1/p')
+          ./target/perf/xtask bench http://127.0.0.1:18740 "$KEY" 60 4 50 --with-board default > with_board.json
+          python3 -c 'import json; print(json.dumps({"sha": "'"$GITHUB_SHA"'", "ingest": json.load(open("ingest.json")), "with_board": json.load(open("with_board.json"))}))' > perf.json
+          cat perf.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: perf
+          path: |
+            perf.json
+            server.log
+      - name: compare with the last 7 runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p earlier
+          for id in $(gh run list -R "$GITHUB_REPOSITORY" --workflow perf.yml --status success --limit 7 --json databaseId -q '.[].databaseId'); do
+            gh run download "$id" -R "$GITHUB_REPOSITORY" -n perf -D "earlier/$id" || true
+          done
+          set +e; python3 scripts/perf/compare.py perf.json earlier > report.md; code=$?; set -e
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+          echo "regressed=$code" >> "$GITHUB_ENV"
+      - name: open or update the issue
+        if: env.regressed == '1' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="perf: nightly benchmark regressed"
+          { cat report.md; echo; echo "Run: $RUN (${GITHUB_SHA::7})."; } > body.md
+          open=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "$title in:title" --json number -q '.[0].number')
+          if [ -n "$open" ]; then gh issue comment "$open" -R "$GITHUB_REPOSITORY" --body-file body.md; else gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body-file body.md; fi
+          exit 1
