@@ -394,8 +394,17 @@ async fn sql(
         Ok(p) => p,
         Err(r) => return *r,
     };
-    match state.query.sql(&p.id, &body.sql).await {
+    // Free-form SQL is a cold query: one at a time (#326).
+    match state.query.cold().sql(&p.id, &body.sql).await {
         Ok(res) => Json(res).into_response(),
+        Err(e @ openlens_query::QueryError::Busy) => {
+            let mut r = err(StatusCode::SERVICE_UNAVAILABLE, &e.to_string());
+            r.headers_mut().insert(
+                axum::http::header::RETRY_AFTER,
+                axum::http::HeaderValue::from_static("5"),
+            );
+            r
+        }
         Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()),
     }
 }

@@ -344,3 +344,55 @@ fn old_clicks_are_trimmed_once_rolled_up() {
     );
     assert_eq!(count_rows(root, "p").unwrap(), 2);
 }
+
+/// A compacted day is ordered by event then time (#326), so row-group
+/// statistics let a query on one event skip the rest.
+#[test]
+fn compacted_days_are_sorted_by_event_then_time() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let t = Utc.with_ymd_and_hms(2026, 11, 20, 9, 0, 0).unwrap();
+    let (mut w, _) = Writer::open(root, FlushPolicy::default()).unwrap();
+    for (i, name) in ["b", "a", "c", "a"].iter().enumerate() {
+        let mut e = ev("p", t - Duration::minutes(i as i64));
+        e.event = (*name).into();
+        w.append(&[e]).unwrap();
+        w.flush().unwrap();
+    }
+    assert!(compact(root, "p", t + Duration::days(2)).unwrap() > 0);
+    use arrow::array::{Array, StringArray, TimestampMicrosecondArray};
+    let day = openlens_storage::project_dir(root, "p")
+        .unwrap()
+        .join("date=2026-11-20");
+    let file = std::fs::read_dir(day)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().is_some_and(|x| x == "parquet"))
+        .unwrap();
+    let b = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(
+        std::fs::File::open(file).unwrap(),
+    )
+    .unwrap()
+    .build()
+    .unwrap()
+    .next()
+    .unwrap()
+    .unwrap();
+    let ev = b
+        .column_by_name("event")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap()
+        .clone();
+    let ts = b
+        .column_by_name("timestamp")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<TimestampMicrosecondArray>()
+        .unwrap()
+        .clone();
+    let names: Vec<&str> = (0..ev.len()).map(|i| ev.value(i)).collect();
+    assert_eq!(names, ["a", "a", "b", "c"]);
+    assert!(ts.value(0) < ts.value(1), "the two a's in time order");
+}

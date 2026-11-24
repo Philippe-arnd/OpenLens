@@ -128,7 +128,17 @@ pub enum QueryError {
     /// Storage problem.
     #[error("storage: {0}")]
     Storage(String),
+    /// Another long (cold) query is running: one at a time (#326).
+    #[error("another long query is running; try again in a few seconds")]
+    Busy,
+    /// The query needs more memory than the server gives queries (#326).
+    #[error("this query needs more memory than the server allows: narrow the dates or the filters")]
+    TooBig,
 }
+
+/// One long query at a time, so the board and ingestion never wait behind
+/// two of them (#326).
+static COLD: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
 
 /// Limits applied to every query.
 #[derive(Debug, Clone, Copy)]
@@ -185,6 +195,9 @@ pub struct QueryEngine {
     timeouts: Arc<std::sync::atomic::AtomicU64>,
     /// Values for the `$name` placeholders of this copy's queries (#310).
     params: Arc<openlens_sqlgen::Params>,
+    /// Queries of this copy are cold: free-form SQL from Ask, the SQL page
+    /// or the API, which may scan anything (#326).
+    cold: bool,
 }
 
 impl QueryEngine {
@@ -199,6 +212,17 @@ impl QueryEngine {
             aliases: AliasCache::default(),
             timeouts: Arc::default(),
             params: Arc::default(),
+            cold: false,
+        }
+    }
+
+    /// This engine, for free-form queries that may scan any range (Ask,
+    /// the SQL page, the API): at most one runs at a time, and another one
+    /// fails at once with [`QueryError::Busy`] instead of waiting (#326).
+    pub fn cold(&self) -> Self {
+        Self {
+            cold: true,
+            ..self.clone()
         }
     }
 
@@ -554,12 +578,18 @@ impl QueryEngine {
         if sql.len() > 20_000 {
             return Err(QueryError::Rejected("query is too long".into()));
         }
+        let _turn = if self.cold {
+            Some(COLD.try_acquire().map_err(|_| QueryError::Busy)?)
+        } else {
+            None
+        };
         let limit = self.limits.timeout;
         let started = Instant::now();
         let out = match tokio::time::timeout(limit, run).await {
             Ok(r) => r,
             Err(_) => Err(self.timed_out(limit)),
-        };
+        }
+        .map_err(friendly);
         // `RUST_LOG=openlens_query=debug` shows what each query costs.
         tracing::debug!(ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX), sql = %sql.chars().take(160).collect::<String>(), "query");
         out
@@ -598,6 +628,16 @@ async fn offload<T: Send + 'static>(
 }
 
 /// Plan read-only SQL: no DDL, DML or statements.
+/// DataFusion's out-of-memory error, said plainly (#326).
+fn friendly(e: QueryError) -> QueryError {
+    match &e {
+        QueryError::Rejected(m) | QueryError::Storage(m) if m.contains("Resources exhausted") => {
+            QueryError::TooBig
+        }
+        _ => e,
+    }
+}
+
 /// Fill the `$name` placeholders from `params` (#310).
 fn bind(
     df: datafusion::dataframe::DataFrame,
@@ -679,4 +719,38 @@ async fn drain(
         rows,
         truncated,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn one_cold_query_at_a_time_and_hot_ones_never_wait() {
+        let dir = tempfile::tempdir().unwrap();
+        let q = QueryEngine::new(dir.path(), Limits::default());
+        let held = COLD.try_acquire().unwrap();
+        assert!(matches!(
+            q.cold().sql("a", "SELECT 1 AS n").await,
+            Err(QueryError::Busy)
+        ));
+        assert_eq!(q.sql("a", "SELECT 1 AS n").await.unwrap().rows[0]["n"], 1);
+        drop(held);
+        assert_eq!(
+            q.cold().sql("a", "SELECT 1 AS n").await.unwrap().rows[0]["n"],
+            1
+        );
+    }
+
+    #[test]
+    fn running_out_of_memory_is_said_plainly() {
+        let e = friendly(QueryError::Rejected(
+            "Resources exhausted: Failed to allocate 1 GB for HashJoin".into(),
+        ));
+        assert!(matches!(e, QueryError::TooBig));
+        assert!(matches!(
+            friendly(QueryError::Rejected("syntax".into())),
+            QueryError::Rejected(_)
+        ));
+    }
 }
