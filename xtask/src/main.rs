@@ -13,11 +13,14 @@
 //!   stored twice (#331).
 //! - `cargo xtask env-docs`: every `OPENLENS_*` variable the server reads is
 //!   in docs/deploy/README.md (#318; part of `ci`).
+//! - `cargo xtask file-length`: no Rust file above 1,000 lines (#307; part
+//!   of `ci`).
 
 mod bench;
 mod bench_gen;
 mod crash;
 mod env_docs;
+mod file_length;
 mod layers;
 
 use std::process::{Command, ExitCode};
@@ -32,8 +35,9 @@ fn main() -> ExitCode {
         "bench-gen" => bench_gen::bench_gen(&std::env::args().skip(2).collect::<Vec<_>>()),
         "crash" => crash::crash(&std::env::args().skip(2).collect::<Vec<_>>()),
         "env-docs" => env_docs::check(),
+        "file-length" => file_length::check(),
         _ => Err(
-            "usage: cargo xtask <ci|layers|env-docs|demo DIR|bench URL KEY|bench-gen DIR|crash [--secs N] [--kills N] [--seed N]>"
+            "usage: cargo xtask <ci|layers|env-docs|file-length|demo DIR|bench URL KEY|bench-gen DIR|crash [--secs N] [--kills N] [--seed N]>"
                 .to_owned(),
         ),
     };
@@ -75,6 +79,7 @@ fn ci() -> Result<(), String> {
     run("cargo", &["test", "--workspace", "--all-targets"])?;
     check_layers()?;
     env_docs::check()?;
+    file_length::check()?;
     // cargo-deny is optional locally; CI installs it. Say so instead of
     // silently skipping.
     if Command::new("cargo")
