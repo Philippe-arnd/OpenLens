@@ -1400,10 +1400,10 @@ pub(crate) async fn access_layer(
     let path = req.uri().path().to_owned();
     let viewer = auth::viewer(&state, req.headers());
     // Project pages need a session (or the bearer token): fail closed here
-    // rather than in each handler (#294). The icon is decided apart.
+    // rather than in each handler (#294). The icon too: it would tell who
+    // a project id belongs to, and it fetches from the app's site.
     if viewer.is_none()
         && path.starts_with("/p/")
-        && !path.ends_with("/icon")
         && !auth::has_bearer(&state, req.headers())
     {
         // Data files (JSON, CSV) answer 401; pages send to the login.
