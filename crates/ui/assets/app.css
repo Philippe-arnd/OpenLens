@@ -67,7 +67,12 @@ img.picon { flex: none; width: 24px; height: 24px; border-radius: 7px; object-fi
 .side-nav a:hover, .side-link:hover { background: var(--line-2); color: var(--ink); text-decoration: none; }
 .side-nav a[aria-current="page"] { background: color-mix(in srgb, var(--violet) var(--tint), transparent); color: var(--violet); font-weight: 600; }
 .side-nav svg, .side-link svg { flex: none; }
-.side-bottom { margin-top: auto; display: flex; flex-direction: column; gap: 4px; padding-top: 10px; border-top: 1px solid var(--line-2); }
+.side-bottom { margin-top: auto; display: flex; flex-direction: column; gap: 4px; padding-top: 10px; border-top: 1px solid var(--line-2);
+  position: sticky; bottom: -14px; background: var(--surface); padding-bottom: 4px; }
+.section-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin: 0 0 14px; border-bottom: 1px solid var(--line); }
+.section-tabs a { padding: 8px 12px; min-height: 24px; color: var(--ink-2); font-size: 14px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.section-tabs a:hover { color: var(--ink); text-decoration: none; }
+.section-tabs a[aria-current="page"] { color: var(--violet); border-bottom-color: var(--violet); font-weight: 600; }
 .side-bottom .theme { align-self: flex-start; margin: 0 4px 4px; }
 .side .label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .side .expand { display: none; }
