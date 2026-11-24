@@ -125,5 +125,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue create --title "Kubernetes chart broken on main ($(date -u +%F))" \
-            --body "The kind install/upgrade check failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" || true
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # One issue per break, not one per failing run (NOPS-01, #400/#407).
+          existing=$(gh issue list --search "Kubernetes chart broken on main in:title" \
+            --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "Failed again: $run_url" || true
+          else
+            gh issue create --title "Kubernetes chart broken on main ($(date -u +%F))" \
+              --body "The kind install/upgrade check failed: $run_url" || true
+          fi
