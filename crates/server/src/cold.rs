@@ -118,7 +118,8 @@ pub(crate) fn authoritative_cold_days(
     Ok(cold_days(root))
 }
 
-fn rel(project: &str, day: NaiveDate) -> String {
+/// The S3 key prefix of a cold day (also written to backup manifests).
+pub(crate) fn rel(project: &str, day: NaiveDate) -> String {
     format!("events/project={project}/date={}", day.format("%Y-%m-%d"))
 }
 

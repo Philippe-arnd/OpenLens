@@ -8,6 +8,11 @@
 //!   leave an event in both copies, or in neither, so the file lists are
 //!   compared before and after, and the copy starts over if they changed.
 //!
+//! - `sourcemaps` (original-source frames of older releases) and `cold`
+//!   (markers of the days whose only copy is on S3, D-031) are copied too,
+//!   and `cold-manifest.json` lists those days with their S3 prefixes
+//!   (#419), empty when there are none.
+//!
 //! Restore: stop the server, replace the data dir with the backup, start.
 //!
 //! `openlens backup --into <dir> [--keep N]` names the copy after the UTC
@@ -19,7 +24,32 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 // `rollups` too: they outlive the events and cannot be rebuilt (D-026).
-const TREES: [&str; 4] = ["wal", "events", "replay", "rollups"];
+// `sourcemaps` and `cold` (#419): source frames and S3-only day markers.
+const TREES: [&str; 6] = ["wal", "events", "replay", "rollups", "sourcemaps", "cold"];
+
+/// The manifest of the cold days in a backup.
+pub const COLD_MANIFEST: &str = "cold-manifest.json";
+
+/// Write [`COLD_MANIFEST`] into `dest` from the `cold` markers copied there.
+fn write_cold_manifest(dest: &Path) -> Result<(), String> {
+    let days: Vec<serde_json::Value> = crate::cold::cold_days(dest)
+        .into_iter()
+        .map(|(project, day)| {
+            serde_json::json!({
+                "project": project,
+                "date": day.format("%Y-%m-%d").to_string(),
+                "s3_prefix": crate::cold::rel(&project, day),
+            })
+        })
+        .collect();
+    let doc = serde_json::json!({
+        "version": 1,
+        "created": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        "days": days,
+    });
+    let text = serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?;
+    fs::write(dest.join(COLD_MANIFEST), text).map_err(|e| format!("{COLD_MANIFEST}: {e}"))
+}
 
 fn files(root: &Path) -> BTreeSet<PathBuf> {
     let mut out = BTreeSet::new();
@@ -74,11 +104,12 @@ pub fn run(src: &Path, dest: &Path) -> Result<usize, String> {
             }
         }
         if files(&src) == before {
+            write_cold_manifest(&dest)?;
             let meta =
                 openlens_meta::Meta::open(&src.join("meta.db")).map_err(|e| e.to_string())?;
             meta.backup_to(&dest.join("meta.db"))
                 .map_err(|e| format!("meta.db: {e}"))?;
-            return Ok(copied + 1);
+            return Ok(copied + 2);
         }
         tracing::info!(
             attempt,
@@ -165,12 +196,29 @@ mod tests {
             b"r",
         )
         .unwrap();
+        fs::create_dir_all(data.join("sourcemaps/project=p/release=r")).unwrap();
+        fs::write(data.join("sourcemaps/project=p/release=r/app.js.map"), b"{}").unwrap();
+        fs::create_dir_all(data.join("cold/project=p")).unwrap();
+        fs::write(data.join("cold/project=p/date=2025-06-01"), b"a.parquet\n").unwrap();
         let meta = openlens_meta::Meta::open(&data.join("meta.db")).unwrap();
         meta.ensure_default_project(None).unwrap();
         drop(meta);
 
         let out = d.path().join("backup");
-        assert_eq!(run(&data, &out).unwrap(), 5);
+        assert_eq!(run(&data, &out).unwrap(), 8);
+        assert!(out.join("sourcemaps/project=p/release=r/app.js.map").exists());
+        assert!(out.join("cold/project=p/date=2025-06-01").exists());
+        let manifest: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(out.join(COLD_MANIFEST)).unwrap()).unwrap();
+        assert_eq!(manifest["version"], 1);
+        assert_eq!(
+            manifest["days"],
+            serde_json::json!([{
+                "project": "p",
+                "date": "2025-06-01",
+                "s3_prefix": "events/project=p/date=2025-06-01",
+            }])
+        );
         assert!(
             out.join("rollups/v1/project=p/date=2025-01-01/person_q.parquet")
                 .exists()
@@ -188,6 +236,7 @@ mod tests {
             run(&data, &data.join("events/x")).is_err(),
             "inside the data"
         );
+        assert!(run(&data, &data.join("cold/x")).is_err(), "inside cold");
     }
 
     #[test]
@@ -228,6 +277,10 @@ mod tests {
         let (a, _, _) = rotate(&data, &into, 5, now).unwrap();
         let (b, _, _) = rotate(&data, &into, 5, now).unwrap();
         assert_ne!(a, b);
+        // No cold day: the manifest is there, with an empty list.
+        let m: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(a.join(COLD_MANIFEST)).unwrap()).unwrap();
+        assert_eq!(m["days"], serde_json::json!([]));
         assert!(b.exists());
     }
 }
