@@ -382,7 +382,8 @@ mod tests {
     #[test]
     fn active_time_counts_input_and_skips_idle_gaps() {
         let input = |t: i64| serde_json::json!({"type": 3, "timestamp": t, "data": {"source": 2}});
-        let page_change = |t: i64| serde_json::json!({"type": 3, "timestamp": t, "data": {"source": 0}});
+        let page_change =
+            |t: i64| serde_json::json!({"type": 3, "timestamp": t, "data": {"source": 0}});
         let min = 60_000;
         // 3 minutes of use, an hour open with only a clock ticking, 1 more minute.
         let mut a = vec![serde_json::json!({"type": 2, "timestamp": 0})];

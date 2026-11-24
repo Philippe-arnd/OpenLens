@@ -19,6 +19,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- **A visual pass on every page**: a clearer type scale (28 px page titles, 15 px card titles), more space between cards and tiles, tabular numbers, quieter table headers with row hover, visible focus rings, and settings forms on one aligned grid.
 - **Settings keep their place** (#403, part 1): the instance pages (API tokens, AI, Storage, Team, My profile) keep the menu of the last project you opened (or your only project) and share an *Instance* tab group. Every page has a breadcrumb (`Projects › project › section › page`). Time zones offer every IANA zone, quiet hours are hour pickers, and the health path and embed address suggest values.
 - **Replays show their active time** (#404, part 1): the list shows the time with user input ("3 min active · open 2 h") instead of the time the tab stayed open. Pauses over 2 minutes without input don't count, and neither do changes the page makes on its own. Older recordings get it on their first listing, and it is cached in `info.json`.
 - **AI settings: pick a provider, paste the key** (#406): presets for Anthropic, OpenAI, Google (Gemini), Mistral, OpenRouter and Ollama fill the protocol and address. Saving checks the key by listing the provider's models, then picks the main and fast models from that list. Custom still offers every field, and existing settings map to their preset or to Custom.

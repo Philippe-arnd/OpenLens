@@ -657,17 +657,32 @@ mod tests {
 
     #[test]
     fn breadcrumbs_follow_the_section_and_the_instance_pages() {
-        let p = ProjectInfo { id: "d", name: "Demo", key: "k" };
+        let p = ProjectInfo {
+            id: "d",
+            name: "Demo",
+            key: "k",
+        };
         let c = Crumbs::of("Heatmap", Some(&p)).render().into_string();
         assert!(c.contains("aria-label=\"Breadcrumb\""));
         assert!(c.contains("href=\"/projects\""));
         assert!(c.contains("href=\"/p/d\""));
         assert!(c.contains("href=\"/p/d/events\">Behaviour"));
         assert!(c.contains("aria-current=\"page\">Pages"));
-        let i = Crumbs::of("Storage and backups", None).render().into_string();
+        let i = Crumbs::of("Storage and backups", None)
+            .render()
+            .into_string();
         assert!(i.contains("Instance") && i.contains("aria-current=\"page\">Storage"));
-        assert!(Crumbs::of("Demo", Some(&p)).render().into_string().contains("aria-current=\"page\">Demo"));
-        assert!(instance_tabs("AI").into_string().contains("href=\"/settings/ai\" aria-current=\"page\""));
+        assert!(
+            Crumbs::of("Demo", Some(&p))
+                .render()
+                .into_string()
+                .contains("aria-current=\"page\">Demo")
+        );
+        assert!(
+            instance_tabs("AI")
+                .into_string()
+                .contains("href=\"/settings/ai\" aria-current=\"page\"")
+        );
         assert!(instance_tabs("Events").into_string().is_empty());
     }
 

@@ -654,13 +654,22 @@ pub(crate) async fn nav_layer(
         .map(|rest| rest.split('/').next().unwrap_or(""))
         .filter(|id| openlens_replay::valid_id(id))
         .map(str::to_owned);
-    let instance = ["/settings/tokens", "/settings/ai", "/settings/storage", "/team", "/me"]
-        .iter()
-        .any(|p| path == *p || path.starts_with(&format!("{p}/")));
+    let instance = [
+        "/settings/tokens",
+        "/settings/ai",
+        "/settings/storage",
+        "/team",
+        "/me",
+    ]
+    .iter()
+    .any(|p| path == *p || path.starts_with(&format!("{p}/")));
     let nav = if instance {
         auth::viewer(&state, req.headers()).and_then(|viewer| {
             let projects = state.meta.projects().ok()?;
-            let seen: Vec<_> = projects.into_iter().filter(|p| viewer.can_see(&p.id)).collect();
+            let seen: Vec<_> = projects
+                .into_iter()
+                .filter(|p| viewer.can_see(&p.id))
+                .collect();
             let last = auth::cookie(req.headers(), "ol_last");
             let pick = seen
                 .iter()
@@ -685,7 +694,7 @@ pub(crate) async fn nav_layer(
                     .is_some_and(|v| v.starts_with("text/html")) =>
         {
             with_cookie(
-            r,
+                r,
                 &format!("ol_last={id}; Path=/; SameSite=Lax; HttpOnly; Max-Age=31536000"),
             )
         }
