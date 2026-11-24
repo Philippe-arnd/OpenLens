@@ -4,6 +4,8 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-24
+
 ### Changed
 
 - **Kubernetes readiness follows `/readyz`** (#353): the chart and the Kustomize base take a pod out of the Service when its metadata store or data volume fails, instead of only when the process is down.
@@ -365,7 +367,8 @@ These changes concern instances that ran pre-release builds:
 - Every input is treated as hostile: bounded sizes, a rejection list per event, no `unwrap`/`panic` in production code, and read-only SQL scoped to one project with time, memory and row caps.
 - HMAC session cookies (`HttpOnly`, `SameSite=Lax`), and origin checks on dashboard forms.
 
-[Unreleased]: https://github.com/Philippe-arnd/OpenLens/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Philippe-arnd/OpenLens/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Philippe-arnd/OpenLens/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Philippe-arnd/OpenLens/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Philippe-arnd/OpenLens/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Philippe-arnd/OpenLens/releases/tag/v0.1.0
