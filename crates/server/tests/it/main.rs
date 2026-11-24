@@ -35,6 +35,7 @@ fn harness() -> Harness {
         boards: Default::default(),
         flushing: Default::default(),
         metrics: Default::default(),
+        disk_space: openlens_server::disk_space,
     };
     Harness {
         _dir: dir,
@@ -4577,4 +4578,82 @@ async fn the_admin_token_cannot_forge_a_session() {
         get(&h, "/p/default", Some(&owner), false).await.status(),
         StatusCode::OK
     );
+}
+
+#[tokio::test]
+async fn a_nearly_full_disk_stops_writes_and_readiness() {
+    let mut h = harness();
+    let ready = |h: &Harness| {
+        let state = h.state.clone();
+        async move {
+            router(state)
+                .oneshot(Request::get("/readyz").body(Body::empty()).unwrap())
+                .await
+                .unwrap()
+                .status()
+        }
+    };
+    assert_eq!(ready(&h).await, StatusCode::OK);
+    assert_eq!(
+        post(&h, "/capture", batch(&h.key), false).await.0,
+        StatusCode::OK
+    );
+
+    // 1 byte free out of 100: under the fixed 5 % floor.
+    h.state.disk_space = |_| Some((1, 100));
+    assert_eq!(ready(&h).await, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        post(&h, "/capture", batch(&h.key), false).await.0,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    let chunk = format!(
+        r#"{{"key":"{}","session_id":"s-1","distinct_id":"u1","seq":0,"events":[{{"t":1}}]}}"#,
+        h.key
+    );
+    assert_eq!(
+        post(&h, "/r", chunk.into_bytes(), false).await.0,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+}
+
+#[tokio::test]
+async fn the_server_closes_connections_that_never_finish_their_headers() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let h = harness();
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let server = tokio::spawn(openlens_server::serve(l, router(h.state.clone()), async {
+        let _ = stopped.await;
+    }));
+
+    // A normal request is served, and handlers still see the client address.
+    let mut ok = tokio::net::TcpStream::connect(addr).await.unwrap();
+    ok.write_all(b"GET /healthz HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let mut reply = String::new();
+    ok.read_to_string(&mut reply).await.unwrap();
+    assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+
+    // Half the headers, then nothing: cut off after the header timeout.
+    let mut slow = tokio::net::TcpStream::connect(addr).await.unwrap();
+    slow.write_all(b"GET /healthz HTTP/1.1\r\nhost: x\r\n")
+        .await
+        .unwrap();
+    let started = std::time::Instant::now();
+    let mut buf = Vec::new();
+    let read = tokio::time::timeout(
+        openlens_server::HEADER_READ_TIMEOUT + std::time::Duration::from_secs(5),
+        slow.read_to_end(&mut buf),
+    )
+    .await;
+    assert!(read.is_ok(), "the connection was still open");
+    assert!(
+        started.elapsed()
+            >= openlens_server::HEADER_READ_TIMEOUT - std::time::Duration::from_secs(1)
+    );
+
+    stop.send(()).unwrap();
+    server.await.unwrap().unwrap();
 }

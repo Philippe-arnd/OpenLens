@@ -10,7 +10,10 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 - **Scoped API tokens:** `read`, `write` or `admin`, optionally limited to projects, stored hashed, made with `openlens-cli tokens create --scope read --project <id>` (or `POST /api/tokens`), listed and revoked with `tokens list|revoke`. A `read` token gets 403 on every write and is enough for `openlens-cli mcp`; scoped tokens never open dashboard pages.
 
+- **Slow clients are cut off** (#346): a client gets 10 seconds to send its request headers, then the connection closes (it used to stay open indefinitely). `/metrics` counts SQL queries that hit their time limit (`openlens_query_timeouts_total`).
+
 - **Login links survive link previews** (#315): opening `/l/<token>` shows a *Continue* button and only that POST uses the link, so Slack, Teams or Outlook Safe Links no longer burn it before the recipient clicks. An owner link is now valid 24 hours (invites: 7 days).
+
 - **Contributing and security policy** (#319): `docs/contributing.md` covers the environment, build time and disk, e2e and maintainers. `SECURITY.md` gives response times (acknowledgement within 3 business days, first assessment within 7 days), a 90-day coordinated disclosure, and supported versions (latest minor only).
 
 - **From finding to ticket to measured effect** (#245, the DMAIC loop):

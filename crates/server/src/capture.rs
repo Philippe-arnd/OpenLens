@@ -196,7 +196,7 @@ pub(crate) fn space_low(available: u64, total: u64) -> bool {
 
 /// Free and total bytes of the volume holding `dir`.
 #[cfg(unix)]
-pub(crate) fn disk_space(dir: &std::path::Path) -> Option<(u64, u64)> {
+pub fn disk_space(dir: &std::path::Path) -> Option<(u64, u64)> {
     let s = rustix::fs::statvfs(dir).ok()?;
     Some((
         s.f_bavail.saturating_mul(s.f_frsize),
@@ -206,13 +206,13 @@ pub(crate) fn disk_space(dir: &std::path::Path) -> Option<(u64, u64)> {
 
 /// Free and total bytes of the volume holding `dir` (unknown here).
 #[cfg(not(unix))]
-pub(crate) fn disk_space(_dir: &std::path::Path) -> Option<(u64, u64)> {
+pub fn disk_space(_dir: &std::path::Path) -> Option<(u64, u64)> {
     None
 }
 
 /// 503 when the data volume is nearly full; logged once a minute at most.
 pub(crate) fn disk_full(state: &AppState) -> Option<Response> {
-    let (available, total) = disk_space(&state.data_dir)?;
+    let (available, total) = (state.disk_space)(&state.data_dir)?;
     if !space_low(available, total) {
         return None;
     }
