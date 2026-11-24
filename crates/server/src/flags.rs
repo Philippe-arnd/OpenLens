@@ -246,13 +246,10 @@ pub(crate) fn same_origin(headers: &HeaderMap) -> bool {
 }
 
 async fn page(
+    _: crate::access::Session,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return Redirect::to("/login").into_response();
-    }
     let Some(p) = project_exists(&state, &id).await else {
         return crate::web::html_page(
             StatusCode::NOT_FOUND,
@@ -275,15 +272,12 @@ struct FlagForm {
 }
 
 async fn page_update(
+    _: crate::access::Session,
     _: crate::access::ProjectWrite,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path((id, key)): Path<(String, String)>,
     Form(form): Form<FlagForm>,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return Redirect::to("/login").into_response();
-    }
     let mut flags = load(&state, &id).await;
     let Some(f) = flags.iter_mut().find(|f| f.key == key) else {
         return err(StatusCode::NOT_FOUND, "no such flag");

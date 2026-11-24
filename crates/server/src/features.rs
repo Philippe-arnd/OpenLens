@@ -284,14 +284,11 @@ pub(crate) struct DownloadQuery {
 
 /// `GET /p/{id}/features/map.yaml` and `/features/map.json` (`?v=N` for a version).
 pub(crate) async fn download(
+    _: crate::access::Session,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path((id, file)): Path<(String, String)>,
     Query(q): Query<DownloadQuery>,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return Redirect::to("/login").into_response();
-    }
     let yaml = match q.v {
         Some(n) => state.meta.feature_map_version(&id, n).ok().flatten(),
         None => state.meta.feature_map(&id).ok().flatten().map(|(_, y)| y),

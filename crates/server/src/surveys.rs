@@ -132,13 +132,10 @@ async fn admin_delete(
 }
 
 async fn page(
+    _: crate::access::Session,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return Redirect::to("/login").into_response();
-    }
     let Some(p) = project(&state, &id).await else {
         return crate::web::html_page(
             StatusCode::NOT_FOUND,
@@ -161,15 +158,12 @@ struct SurveyForm {
 }
 
 async fn page_update(
+    _: crate::access::Session,
     _: crate::access::ProjectWrite,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path((id, key)): Path<(String, String)>,
     Form(form): Form<SurveyForm>,
 ) -> Response {
-    if !auth::has_session(&state, &headers) {
-        return Redirect::to("/login").into_response();
-    }
     let mut all = load(&state, &id).await;
     let Some(s) = all.iter_mut().find(|s| s.key == key) else {
         return err(StatusCode::NOT_FOUND, "no such survey");
