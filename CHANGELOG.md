@@ -99,6 +99,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- **Board queries no longer slow ingestion down** (#295): DataFusion runs on its own threads, apart from the ones serving HTTP; `/capture` gunzips and parses batches off the async threads; the forgotten people of a project are kept in memory instead of one lookup per event.
 - **Project pages need a session** (#294): the flag and survey edit pages were readable without signing in. Every `/p/…` page now refuses anonymous visitors in one place (login redirect, or 401 for JSON and CSV), and a test walks every route of the router as an anonymous visitor, a viewer of another project and a viewer.
 - **Ingestion limits follow the connection** (D-022): `/capture`, `/r` and `/flags` count clients by their connection address and trust `X-Forwarded-For` only from a private proxy; the check runs before the body is read. Writes get 503 when less than 5 % of the data volume is free.
 - **One cross-site check for every dashboard form** (#294): a middleware refuses any state-changing request that the browser marks as cross-site (`Sec-Fetch-Site`), or whose `Origin` is another site, instead of a check repeated in each handler. Ingestion and the bearer API are not affected; clients that send neither header (curl, the CLI) are let through.
