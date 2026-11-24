@@ -21,7 +21,7 @@
   <a href="https://github.com/Philippe-arnd/OpenLens/actions/workflows/k8s.yml"><img alt="Kubernetes" src="https://github.com/Philippe-arnd/OpenLens/actions/workflows/k8s.yml/badge.svg?branch=main"></a>
   <a href="https://github.com/Philippe-arnd/OpenLens/releases"><img alt="Release" src="https://img.shields.io/github/v/release/Philippe-arnd/OpenLens?color=6d5efc"></a>
   <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-6d5efc"></a>
-  <img alt="SDK 4.7 kB gz" src="https://img.shields.io/badge/SDK-4.7%20kB%20gz-0e9f6e">
+  <img alt="SDK 5.5 kB gz" src="https://img.shields.io/badge/SDK-5.5%20kB%20gz-0e9f6e">
   <img alt="No configuration" src="https://img.shields.io/badge/config-none%20required-d99400">
 </p>
 
@@ -163,7 +163,7 @@ Measured on 2026-11-22, on one core of a 4-vCPU VPS ([docs/benchmarks.md](docs/b
 - **Ingestion:** about **80,000 events/s on one vCPU**, p99 under 9 ms.
 - **Storage:** about **11 bytes per event** on disk (2.3 M events took 25 MB).
 - **Board:** about **0.8 s on 368k events and 3.7 s on 2.2 M**, on one vCPU, with identities. It keeps up to 4 M events of the 90-day window in memory (about 160 bytes each), and reads the files beyond that.
-- **SDK:** **4.7 kB** gzipped. The replay recorder loads separately, once the page is idle.
+- **SDK:** **5.5 kB** gzipped. The replay recorder loads separately, once the page is idle.
 - **Footprint:** one process, 256 MiB requested on Kubernetes, and no Kafka, ClickHouse or Redis to run next to it.
 
 ## 🚧 Known limits

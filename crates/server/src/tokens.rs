@@ -23,9 +23,17 @@ fn guard(state: &AppState, headers: &HeaderMap) -> Result<auth::Viewer, Response
     }
 }
 
-async fn render(state: &AppState, created: Option<String>, notice: Option<&str>, error: Option<&str>) -> Response {
+async fn render(
+    state: &AppState,
+    created: Option<String>,
+    notice: Option<&str>,
+    error: Option<&str>,
+) -> Response {
     let meta = state.meta.clone();
-    let loaded = tokio::task::spawn_blocking(move || Ok::<_, openlens_meta::MetaError>((meta.api_tokens()?, meta.projects()?))).await;
+    let loaded = tokio::task::spawn_blocking(move || {
+        Ok::<_, openlens_meta::MetaError>((meta.api_tokens()?, meta.projects()?))
+    })
+    .await;
     let Ok(Ok((tokens, projects))) = loaded else {
         return html_page(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -88,14 +96,29 @@ pub(crate) async fn create(
         }
     }
     if label.is_empty() {
-        return render(&state, None, None, Some("Give the token a label: what it is for.")).await;
+        return render(
+            &state,
+            None,
+            None,
+            Some("Give the token a label: what it is for."),
+        )
+        .await;
     }
     let projects = (!picked.is_empty()).then_some(picked);
     let meta = state.meta.clone();
-    let made = tokio::task::spawn_blocking(move || meta.create_api_token(&scope, projects.as_deref(), &label)).await;
+    let made = tokio::task::spawn_blocking(move || {
+        meta.create_api_token(&scope, projects.as_deref(), &label)
+    })
+    .await;
     match made {
         Ok(Ok((t, plain))) => {
-            crate::privacy::audit(&state, &headers, None, "token.create", &format!("{} {}", t.id, t.scope));
+            crate::privacy::audit(
+                &state,
+                &headers,
+                None,
+                "token.create",
+                &format!("{} {}", t.id, t.scope),
+            );
             render(&state, Some(plain), None, None).await
         }
         Ok(Err(e)) => render(&state, None, None, Some(&e.to_string())).await,
@@ -104,7 +127,11 @@ pub(crate) async fn create(
 }
 
 /// `POST /settings/tokens/{id}/revoke`.
-pub(crate) async fn revoke(State(state): State<AppState>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+pub(crate) async fn revoke(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
     if let Err(r) = guard(&state, &headers) {
         return r;
     }
@@ -122,21 +149,43 @@ pub(crate) async fn revoke(State(state): State<AppState>, headers: HeaderMap, Pa
 /// `POST /settings/sessions/revoke`: every session cookie issued so far
 /// stops working; the admin's own session is issued again so they stay in.
 /// API tokens and the admin token keep working.
-pub(crate) async fn sign_out_everywhere(State(state): State<AppState>, headers: HeaderMap) -> Response {
+pub(crate) async fn sign_out_everywhere(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Response {
     let v = match guard(&state, &headers) {
         Ok(v) => v,
         Err(r) => return r,
     };
     let next = state.session_gen.load(Ordering::Relaxed).saturating_add(1);
     let meta = state.meta.clone();
-    let saved = tokio::task::spawn_blocking(move || meta.set_setting("session_generation", &next.to_string())).await;
+    let saved = tokio::task::spawn_blocking(move || {
+        meta.set_setting("session_generation", &next.to_string())
+    })
+    .await;
     if !matches!(saved, Ok(Ok(()))) {
-        return render(&state, None, None, Some("Could not sign out the other sessions.")).await;
+        return render(
+            &state,
+            None,
+            None,
+            Some("Could not sign out the other sessions."),
+        )
+        .await;
     }
     state.session_gen.store(next, Ordering::Relaxed);
     crate::privacy::audit(&state, &headers, None, "sessions.revoke", &next.to_string());
-    let cookie = auth::set_cookie(&auth::new_session(&state, &v.id), &headers, auth::SESSION_SECS);
-    let mut r = render(&state, None, Some("Every other session is signed out."), None).await;
+    let cookie = auth::set_cookie(
+        &auth::new_session(&state, &v.id),
+        &headers,
+        auth::SESSION_SECS,
+    );
+    let mut r = render(
+        &state,
+        None,
+        Some("Every other session is signed out."),
+        None,
+    )
+    .await;
     if let Ok(c) = axum::http::HeaderValue::from_str(&cookie) {
         r.headers_mut().append(axum::http::header::SET_COOKIE, c);
     }

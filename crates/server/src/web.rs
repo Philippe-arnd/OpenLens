@@ -105,10 +105,7 @@ pub(crate) fn routes() -> Router<AppState> {
             "/settings/tokens",
             get(crate::tokens::page).post(crate::tokens::create),
         )
-        .route(
-            "/settings/tokens/{id}/revoke",
-            post(crate::tokens::revoke),
-        )
+        .route("/settings/tokens/{id}/revoke", post(crate::tokens::revoke))
         .route(
             "/settings/sessions/revoke",
             post(crate::tokens::sign_out_everywhere),

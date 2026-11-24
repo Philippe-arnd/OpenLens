@@ -6,8 +6,15 @@
 //!   users, planted patterns) into the `default` project of a data dir, to
 //!   look at the board: `OPENLENS_DATA_DIR=<data-dir> cargo run -p openlens`.
 //! - `cargo xtask bench <url> <key>`: ingestion load test (docs/benchmarks.md).
+//! - `cargo xtask crash [--secs N] [--kills N] [--seed N]`: SIGKILL the real
+//!   server while it ingests, and check no acknowledged event is lost or
+//!   stored twice (#331).
+//! - `cargo xtask env-docs`: every `OPENLENS_*` variable the server reads is
+//!   in docs/deploy/README.md (#318; part of `ci`).
 
 mod bench;
+mod crash;
+mod env_docs;
 mod layers;
 
 use std::process::{Command, ExitCode};
@@ -19,7 +26,12 @@ fn main() -> ExitCode {
         "layers" => check_layers(),
         "demo" => demo(std::env::args().nth(2)),
         "bench" => bench::bench(&std::env::args().skip(2).collect::<Vec<_>>()),
-        _ => Err("usage: cargo xtask <ci|layers|demo DIR|bench URL KEY>".to_owned()),
+        "crash" => crash::crash(&std::env::args().skip(2).collect::<Vec<_>>()),
+        "env-docs" => env_docs::check(),
+        _ => Err(
+            "usage: cargo xtask <ci|layers|env-docs|demo DIR|bench URL KEY|crash [--secs N] [--kills N] [--seed N]>"
+                .to_owned(),
+        ),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -58,6 +70,7 @@ fn ci() -> Result<(), String> {
     )?;
     run("cargo", &["test", "--workspace", "--all-targets"])?;
     check_layers()?;
+    env_docs::check()?;
     // cargo-deny is optional locally; CI installs it. Say so instead of
     // silently skipping.
     if Command::new("cargo")

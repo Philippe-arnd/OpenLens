@@ -242,7 +242,9 @@ fn build_state() -> Result<openlens_server::AppState, String> {
                         let owner_link = format!("{}/l/{link}", base.trim_end_matches('/'));
                         tracing::info!(%owner_link, "generated admin token, stored hashed and never shown. Open this single-use owner link within 1 hour, then create API tokens in Settings → API tokens (or set OPENLENS_ADMIN_TOKEN to choose your own token)");
                     }
-                    Err(err) => tracing::error!(%err, "generated admin token, but no owner link could be made: set OPENLENS_ADMIN_TOKEN and restart"),
+                    Err(err) => {
+                        tracing::error!(%err, "generated admin token, but no owner link could be made: set OPENLENS_ADMIN_TOKEN and restart")
+                    }
                 }
             }
             hash

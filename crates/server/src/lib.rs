@@ -1,7 +1,7 @@
 //! HTTP server: capture and flag endpoints, query API, health checks and the
 //! dashboard.
 //!
-//! Layer: L4 (see `docs/architecture.md`).
+//! Layer: L5 (see `docs/architecture.md`).
 
 mod alerts;
 mod api;
@@ -34,12 +34,12 @@ pub mod secrets;
 mod serve;
 mod settings;
 mod share;
-pub mod tokens;
 mod storage;
 mod surveys;
 mod tickets;
 mod timeline;
 mod tls;
+pub mod tokens;
 mod users;
 mod web;
 

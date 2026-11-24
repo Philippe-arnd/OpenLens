@@ -10,6 +10,10 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 - **Scoped API tokens:** `read`, `write` or `admin`, optionally limited to projects, stored hashed, made with `openlens-cli tokens create --scope read --project <id>` (or `POST /api/tokens`), listed and revoked with `tokens list|revoke`. A `read` token gets 403 on every write and is enough for `openlens-cli mcp`; scoped tokens never open dashboard pages.
 
+- **Crash test** (#331): `cargo xtask crash` SIGKILLs the real server while it ingests, resends what was not acknowledged, and checks that no acknowledged event is lost or stored twice (docs/development.md, *Crash test*).
+
+- **Documentation matches the code** (#318): every `OPENLENS_*` variable the server reads is listed in docs/deploy/README.md, and `cargo xtask env-docs` (in `cargo xtask ci`) fails when one is not. The SDK size is now measured (5.5 kB gzipped), and D-014 is amended to point to the full list.
+
 - **API tokens in the dashboard, no secret in the log, sign out everywhere** (#342): *Settings → API tokens* lists, creates (the value is shown once) and revokes scoped tokens. On first start without `OPENLENS_ADMIN_TOKEN`, the log prints a single-use owner link valid 1 hour instead of the generated admin token. *Sign out everywhere* refuses every session cookie issued so far (yours is renewed); API tokens and the admin token keep working. **Changed:** session cookies from before user accounts (`<expiry>.<hmac>`, before v0.1) are refused.
 
 - **Slow clients are cut off** (#346): a client gets 10 seconds to send its request headers, then the connection closes (it used to stay open indefinitely). `/metrics` counts SQL queries that hit their time limit (`openlens_query_timeouts_total`).

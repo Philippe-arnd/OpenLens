@@ -50,6 +50,7 @@ Append-only. Each entry: id, date, decision, why, consequences.
 ## D-014 (2026-11-21) Almost no configuration: a methodology, not a toolbox
 **Why:** OpenLens is a method carried out by a tool. Every knob is a decision pushed onto the user, and a way for two projects to stop being comparable. **Consequences:**
 - The server needs **no** environment variables. The few it reads (`OPENLENS_DATA_DIR`, `OPENLENS_ADMIN_TOKEN`, `OPENLENS_PROJECT_KEY`, `OPENLENS_ADDR`) are optional overrides for deploy templates.
+  - *Amended 2026-11-24 (#318):* optional features added since (D-016: SMTP, LLM, OIDC, S3, GitHub, GeoIP, alerts, the update check) read their own variables, and are all off until set. The full list is in `docs/deploy/README.md`. `cargo xtask env-docs` (part of `cargo xtask ci`) fails when the server reads a variable that page does not document.
 - The **feature map is the only project configuration**, and agents write it. Its one tunable is `churn_after_days`.
 - Sessions (30-minute gap), the task timeout (30 minutes), UTC days and KPI definitions are fixed (docs/kpis.md).
 - There is no dashboard builder or chart configurator. A request for a new knob needs a decision entry explaining why a fixed default cannot work.

@@ -25,6 +25,19 @@ cargo xtask bench http://127.0.0.1:PORT KEY   # ingestion load test, see docs/be
 - The screenshots are in the `dashboard-screens` artifact: `gh run download <run-id> -n dashboard-screens`.
 - **Image** (`release.yml`): Docker build, compose, smoke test, then publish to GHCR. It runs nightly, on tags, on demand, or when packaging changes.
 
+## Crash test
+
+`cargo xtask crash` proves durability (#331). It starts the real server (`target/debug/openlens`, so build it first; `--bin` for another), ingests batches with known uuids, SIGKILLs the server at seeded random intervals and restarts it. It resends every batch that got no 200, as the SDK does. At the end it reads the stored uuids back through the SQL API. It passes when no acknowledged event is missing, none is stored twice, and the run reached its kill count:
+
+```sh
+cargo build -p openlens
+cargo xtask crash                          # 5 minutes, at least 50 kills
+cargo xtask crash --secs 60 --kills 10     # quick local run
+cargo xtask crash --seed 1234              # replay a failure (the seed is in its report)
+```
+
+It prints a JSON report. On failure, it keeps the data directory and the server log in the temp directory. The run does not shorten the 10-minute compaction interval (no setting, D-014), so a 5-minute run never kills the server during a compaction.
+
 ## Fuzzing
 
 `fuzz/` holds coverage-guided targets for what strangers send (#299): `capture_batch` (a `/capture` body after decompression), `feature_map` (a pushed map), `error_stack` (a browser stack) and `page_url` (URL cleaning). It is not a workspace member; it needs a nightly toolchain and `cargo-fuzz`:
