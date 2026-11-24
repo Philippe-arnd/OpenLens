@@ -323,7 +323,13 @@ impl QueryEngine {
             .filter(|(k, _)| sql.contains(&format!("${k}")))
             .map(|(k, v)| (k.to_owned(), v.to_owned()))
             .collect();
-        let key: SnapKey = (project.to_owned(), name.to_owned(), sql.to_owned(), used, share);
+        let key: SnapKey = (
+            project.to_owned(),
+            name.to_owned(),
+            sql.to_owned(),
+            used,
+            share,
+        );
         let slot = {
             let mut slots = self
                 .shared

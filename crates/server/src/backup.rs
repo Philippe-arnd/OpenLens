@@ -197,7 +197,11 @@ mod tests {
         )
         .unwrap();
         fs::create_dir_all(data.join("sourcemaps/project=p/release=r")).unwrap();
-        fs::write(data.join("sourcemaps/project=p/release=r/app.js.map"), b"{}").unwrap();
+        fs::write(
+            data.join("sourcemaps/project=p/release=r/app.js.map"),
+            b"{}",
+        )
+        .unwrap();
         fs::create_dir_all(data.join("cold/project=p")).unwrap();
         fs::write(data.join("cold/project=p/date=2025-06-01"), b"a.parquet\n").unwrap();
         let meta = openlens_meta::Meta::open(&data.join("meta.db")).unwrap();
@@ -206,7 +210,10 @@ mod tests {
 
         let out = d.path().join("backup");
         assert_eq!(run(&data, &out).unwrap(), 8);
-        assert!(out.join("sourcemaps/project=p/release=r/app.js.map").exists());
+        assert!(
+            out.join("sourcemaps/project=p/release=r/app.js.map")
+                .exists()
+        );
         assert!(out.join("cold/project=p/date=2025-06-01").exists());
         let manifest: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(out.join(COLD_MANIFEST)).unwrap()).unwrap();

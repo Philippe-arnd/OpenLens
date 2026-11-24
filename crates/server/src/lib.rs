@@ -310,7 +310,10 @@ fn release_update(body: &serde_json::Value, current: &str) -> Option<openlens_ui
         .is_some_and(|notes| {
             notes.lines().any(|l| {
                 let l = l.trim();
-                l.starts_with('#') && l.trim_start_matches('#').trim().eq_ignore_ascii_case("security")
+                l.starts_with('#')
+                    && l.trim_start_matches('#')
+                        .trim()
+                        .eq_ignore_ascii_case("security")
             })
         });
     Some(openlens_ui::Update { tag, security })
@@ -838,16 +841,23 @@ mod version_tests {
     fn a_security_heading_makes_a_security_update() {
         use super::release_update as r;
         let plain = serde_json::json!({"tag_name": "v0.5.0", "body": "## Added\n- things"});
-        let sec = serde_json::json!({"tag_name": "v0.5.0", "body": "## Added\n\n### Security\n- GHSA-x"});
+        let sec =
+            serde_json::json!({"tag_name": "v0.5.0", "body": "## Added\n\n### Security\n- GHSA-x"});
         assert!(!r(&plain, "0.4.0").unwrap().security);
         assert!(r(&sec, "0.4.0").unwrap().security);
         assert_eq!(r(&sec, "0.4.0").unwrap().tag, "v0.5.0");
         assert!(r(&sec, "0.5.0").is_none(), "same version");
-        assert!(r(&serde_json::json!({"body": "x"}), "0.4.0").is_none(), "no tag");
+        assert!(
+            r(&serde_json::json!({"body": "x"}), "0.4.0").is_none(),
+            "no tag"
+        );
         let no_body = serde_json::json!({"tag_name": "v0.5.0"});
         assert!(!r(&no_body, "0.4.0").unwrap().security);
         let mention = serde_json::json!({"tag_name": "v0.5.0", "body": "Security is great"});
-        assert!(!r(&mention, "0.4.0").unwrap().security, "only a heading counts");
+        assert!(
+            !r(&mention, "0.4.0").unwrap().security,
+            "only a heading counts"
+        );
     }
 }
 

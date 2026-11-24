@@ -73,7 +73,10 @@ fn update_available() -> Option<Update> {
 
 /// The footer's update notice: louder for a security release.
 fn update_notice(u: &Update) -> Markup {
-    let href = format!("https://github.com/Philippe-arnd/OpenLens/releases/tag/{}", u.tag);
+    let href = format!(
+        "https://github.com/Philippe-arnd/OpenLens/releases/tag/{}",
+        u.tag
+    );
     html! {
         @if u.security {
             " · " a.update-security href=(href) { "Security update available: " (u.tag) " — fixes published advisories, upgrade soon" }
@@ -418,8 +421,16 @@ mod tests {
 
     #[test]
     fn a_security_release_gets_a_louder_notice() {
-        let plain = update_notice(&Update { tag: "v0.5.0".into(), security: false }).into_string();
-        let sec = update_notice(&Update { tag: "v0.5.0".into(), security: true }).into_string();
+        let plain = update_notice(&Update {
+            tag: "v0.5.0".into(),
+            security: false,
+        })
+        .into_string();
+        let sec = update_notice(&Update {
+            tag: "v0.5.0".into(),
+            security: true,
+        })
+        .into_string();
         assert!(plain.contains("Update available: v0.5.0"));
         assert!(!plain.contains("update-security"));
         assert!(sec.contains("class=\"update-security\""));

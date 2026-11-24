@@ -78,7 +78,10 @@ impl Default for BoardCache {
 impl std::fmt::Debug for BoardCache {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BoardCache")
-            .field("projects", &self.inner.generations.lock().map_or(0, |m| m.len()))
+            .field(
+                "projects",
+                &self.inner.generations.lock().map_or(0, |m| m.len()),
+            )
             .field("computed", &self.computed())
             .finish_non_exhaustive()
     }

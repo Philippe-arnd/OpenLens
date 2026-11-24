@@ -184,7 +184,11 @@ async fn concurrent_shared_snapshots_are_built_once() {
         let n = s.sql("a", "SELECT count(*) AS n FROM snap").await.unwrap();
         assert!(n.rows[0]["n"].as_i64().unwrap() > 0);
     }
-    assert_eq!(q.snapshots_built(), before + 1, "one build for four callers");
+    assert_eq!(
+        q.snapshots_built(),
+        before + 1,
+        "one build for four callers"
+    );
     // A new data generation builds a new one.
     q.shared_snapshot("a", "snap", sql, 100, 8)
         .await
@@ -192,8 +196,18 @@ async fn concurrent_shared_snapshots_are_built_once() {
         .unwrap();
     assert_eq!(q.snapshots_built(), before + 2);
     // Too large: remembered, not retried at once.
-    assert!(q.shared_snapshot("a", "big", sql, 1, 7).await.unwrap().is_none());
-    assert!(q.shared_snapshot("a", "big", sql, 1, 7).await.unwrap().is_none());
+    assert!(
+        q.shared_snapshot("a", "big", sql, 1, 7)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        q.shared_snapshot("a", "big", sql, 1, 7)
+            .await
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(q.snapshots_built(), before + 2);
 }
 
