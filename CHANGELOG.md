@@ -4,6 +4,8 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-24
+
 ### Added
 
 - **Setup progress** (#403, part 2): project settings show the required steps as a bar (first event, app address, one alert channel), with the optional ones listed (releases, source maps, S3, SMTP, AI key). Each step links to where it is fixed. While a required step is left, admins see a one-line *Finish in Settings* strip on the Focus board.
@@ -399,7 +401,8 @@ These changes concern instances that ran pre-release builds:
 - Every input is treated as hostile: bounded sizes, a rejection list per event, no `unwrap`/`panic` in production code, and read-only SQL scoped to one project with time, memory and row caps.
 - HMAC session cookies (`HttpOnly`, `SameSite=Lax`), and origin checks on dashboard forms.
 
-[Unreleased]: https://github.com/Philippe-arnd/OpenLens/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Philippe-arnd/OpenLens/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Philippe-arnd/OpenLens/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Philippe-arnd/OpenLens/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Philippe-arnd/OpenLens/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Philippe-arnd/OpenLens/compare/v0.1.0...v0.2.0
