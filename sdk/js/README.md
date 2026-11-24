@@ -68,12 +68,13 @@ Flags are fetched at init and after `identify`. The active flags travel with eve
 
 ## Privacy
 
-- Do Not Track is respected.
+- Do Not Track and Global Privacy Control are respected: nothing is sent.
+- Page URLs are sent without their query string and fragment, except `utm_*`, `ref` and `gclid`.
 - `consent: "pending"` holds events until `setConsent(true)` is called.
 - `data-openlens-ignore`: nothing in that subtree is captured.
 - **Session replay** is on by default. Once the page is idle and consent is granted, the recorder (`/r.js`, rrweb under MIT) loads from your OpenLens server.
-- Every input value is masked in replays.
-- `data-openlens-mask` masks text, both in replays and in the `$text`/`$href` of clicks.
+- Every input value and every text is masked in replays; `data-openlens-unmask` shows the text of a subtree (menus, labels).
+- `data-openlens-mask` masks text, both in replays and in the `$text`/`$href` of clicks. Outside `data-feature`, a click text with an `@` or more than 6 digits in a row is not sent.
 - `data-openlens-block` subtrees are not recorded at all.
 - To turn replay off, pass `replay: false` or add `data-replay="off"` to the script tag.
 

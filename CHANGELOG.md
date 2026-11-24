@@ -93,6 +93,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- **Browser SDK sends less by default** (#297): page URLs without their query string (campaign tags kept); click text only under `data-feature` or when it holds no `@` and no long number; replays mask every text unless the app marks a part `data-openlens-unmask`; Global Privacy Control is treated like Do Not Track. docs/privacy.md describes a consent-exempt setup (cookieless, no replay).
 - **The admin token is stored hashed** (SHA-256): a token stored in clear by an older release is hashed at the first start, so neither `meta.db` nor a backup holds it. A lost generated token cannot be read back; set `OPENLENS_ADMIN_TOKEN` to choose a new one.
 - **Sessions are signed with their own key**, `<data>/.session.key` (made on first start, mode 0600, not in backups), instead of the admin token. Upgrading signs everyone out once.
 - The sidebar's project switch lost its arrow (#214), and gained *Settings*.

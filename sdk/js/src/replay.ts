@@ -6,8 +6,9 @@
  * changes with rrweb (MIT) and sends them to `POST /r` in numbered chunks,
  * keyed by the same session id as the analytics events.
  *
- * Privacy defaults: every input value is masked; elements with
- * `data-openlens-mask` have their text masked; elements with
+ * Privacy defaults: every input value and every text is masked, except
+ * text inside `data-openlens-unmask` (and not inside `data-openlens-mask`)
+ * that the app marks as safe to show; elements with
  * `data-openlens-block` (and `data-openlens-ignore`) are not recorded at all.
  */
 import { record } from "rrweb";
@@ -80,7 +81,13 @@ function start(b: Bridge): void {
       if (buf.length >= MAX_EVENTS) flush();
     },
     maskAllInputs: true,
-    maskTextSelector: "[data-openlens-mask]",
+    // Every text is masked unless the app opts a part in with
+    // data-openlens-unmask (data-openlens-mask inside it still wins).
+    maskTextSelector: "*",
+    maskTextFn: (text, el) =>
+      el?.closest("[data-openlens-unmask]") && !el.closest("[data-openlens-mask]")
+        ? text
+        : text.replace(/\S/g, "*"),
     blockSelector: "[data-openlens-block],[data-openlens-ignore]",
     slimDOMOptions: "all",
     recordCanvas: false,

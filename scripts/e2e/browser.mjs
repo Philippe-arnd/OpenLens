@@ -18,6 +18,7 @@ if (admin) {
 const page = `<!doctype html><html><head><meta name="openlens-release" content="e2e-1"></head><body>
 <button data-feature="export">Export</button>
 <div data-openlens-mask><button id="secret">Dear diary, private words</button></div>
+<button id="mail">jean@exemple.fr</button>
 <lens-card data-feature="share"></lens-card>
 <script>customElements.define("lens-card", class extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML =
@@ -63,7 +64,8 @@ await tab.route("**/capture*", (r) => {
 // Wait for the flags answer (it carries the surveys) before clicking.
 await Promise.all([
   tab.waitForResponse((r) => r.url().includes("/flags?"), { timeout: 10000 }).catch(() => null),
-  tab.goto(`http://localhost:${port}/`),
+  // A reset link: its token must never leave the page; campaign tags may.
+  tab.goto(`http://localhost:${port}/?token=abc123&utm_source=e2e`),
 ]);
 await tab.evaluate(() => openlens.flush());
 await tab.waitForTimeout(300);
@@ -71,6 +73,7 @@ await tab.click("button[data-feature=export]");
 // Hash routers: a #/route change is a page view of that route.
 await tab.evaluate(() => { location.hash = "#/notes"; });
 await tab.click("#secret");
+await tab.click("#mail");
 // Web components: clicks inside an open shadow root keep their feature.
 await tab.click("#share-btn");
 await tab.click("#like-btn");
@@ -175,6 +178,14 @@ if (admin) {
     process.exit(1);
   }
   console.log("survey answered");
+}
+if (sent.some((b) => b.includes("abc123") || b.includes("jean@exemple.fr"))) {
+  console.error("a query-string token or an e-mail shown on the page was sent");
+  process.exit(1);
+}
+if (!sent.some((b) => b.includes("utm_source=e2e"))) {
+  console.error("campaign tags were dropped from the page URL");
+  process.exit(1);
 }
 if (sent.some((b) => b.includes("private words"))) {
   console.error("masked text was sent");
