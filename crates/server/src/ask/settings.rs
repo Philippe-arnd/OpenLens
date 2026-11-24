@@ -21,7 +21,12 @@ pub(super) fn ai_view(state: &AppState, notice: Option<String>, error: Option<St
                     c.fast_model
                 )
             }),
-            preset: crate::llm_presets::detect(&s("ai_preset"), &s("ai_provider"), &s("ai_base_url")).to_owned(),
+            preset: crate::llm_presets::detect(
+                &s("ai_preset"),
+                &s("ai_provider"),
+                &s("ai_base_url"),
+            )
+            .to_owned(),
             presets: crate::llm_presets::PRESETS
                 .iter()
                 .map(|p| openlens_ui::AiPreset {
@@ -117,7 +122,9 @@ pub(crate) async fn ai_save(
             crate::privacy::audit(&state, &headers, None, "ai.key_removed", "");
             ai_view(&state, Some("The key is removed.".into()), None)
         }
-        _ if crate::llm_presets::preset(&f.preset).is_some() => save_preset(&state, &headers, f).await,
+        _ if crate::llm_presets::preset(&f.preset).is_some() => {
+            save_preset(&state, &headers, f).await
+        }
         _ => {
             if f.preset == "off" {
                 let _ = state.meta.set_setting("ai_provider", "");
@@ -173,11 +180,19 @@ async fn save_preset(state: &AppState, headers: &HeaderMap, f: AiForm) -> Respon
     let Some(p) = crate::llm_presets::preset(&f.preset) else {
         return ai_view(state, None, Some("Pick a provider.".into()));
     };
-    let base = match f.base_url.trim() {
-        "" => p.base.to_owned(),
-        b if b.starts_with("https://") || b.starts_with("http://") => b.to_owned(),
-        _ => return ai_view(state, None, Some("The base URL starts with https:// (or http:// for a server on this network).".into())),
-    };
+    let base =
+        match f.base_url.trim() {
+            "" => p.base.to_owned(),
+            b if b.starts_with("https://") || b.starts_with("http://") => b.to_owned(),
+            _ => return ai_view(
+                state,
+                None,
+                Some(
+                    "The base URL starts with https:// (or http:// for a server on this network)."
+                        .into(),
+                ),
+            ),
+        };
     let stored = state
         .meta
         .setting("ai_key")
@@ -190,7 +205,11 @@ async fn save_preset(state: &AppState, headers: &HeaderMap, f: AiForm) -> Respon
         k => Some(k.to_owned()),
     };
     if key.is_none() && p.id != "ollama" {
-        return ai_view(state, None, Some(format!("Paste the {} API key ({}).", p.label, p.key_hint)));
+        return ai_view(
+            state,
+            None,
+            Some(format!("Paste the {} API key ({}).", p.label, p.key_hint)),
+        );
     }
     let (protocol, b2, k2) = (p.protocol, base.clone(), key.clone());
     let listed = tokio::task::spawn_blocking(move || {
@@ -237,13 +256,18 @@ async fn save_preset(state: &AppState, headers: &HeaderMap, f: AiForm) -> Respon
     match check {
         None => ai_view(
             state,
-            Some(format!("Connected: {}, model {main}, fast model {fast}.", p.label)),
+            Some(format!(
+                "Connected: {}, model {main}, fast model {fast}.",
+                p.label
+            )),
             None,
         ),
         Some(e) => ai_view(
             state,
             None,
-            Some(format!("Saved with the default models ({main}, {fast}), but the check failed: {e}.")),
+            Some(format!(
+                "Saved with the default models ({main}, {fast}), but the check failed: {e}."
+            )),
         ),
     }
 }

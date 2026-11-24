@@ -33,8 +33,19 @@ pub(crate) struct Preset {
 }
 
 const NOT_CHAT: &[&str] = &[
-    "embed", "tts", "whisper", "dall", "image", "audio", "realtime", "moderation", "transcribe",
-    "search", "ocr", "aqa", "instruct",
+    "embed",
+    "tts",
+    "whisper",
+    "dall",
+    "image",
+    "audio",
+    "realtime",
+    "moderation",
+    "transcribe",
+    "search",
+    "ocr",
+    "aqa",
+    "instruct",
 ];
 
 /// Every preset; `custom` shows every field.
@@ -149,7 +160,9 @@ pub(crate) fn pick(p: &Preset, ids: &[String]) -> (String, String) {
                 .iter()
                 .filter(|id| id.contains(pat))
                 .filter(|id| {
-                    !avoid_small || pat.contains("mini") || !(id.contains("mini") || id.contains("nano"))
+                    !avoid_small
+                        || pat.contains("mini")
+                        || !(id.contains("mini") || id.contains("nano"))
                 })
                 .max();
             if let Some(h) = hit {
@@ -248,21 +261,38 @@ mod tests {
         let a = preset("anthropic").unwrap();
         let got = pick(
             a,
-            &ids(&["claude-haiku-5-5", "claude-opus-4-1", "claude-opus-5-5", "claude-sonnet-5-5"]),
+            &ids(&[
+                "claude-haiku-5-5",
+                "claude-opus-4-1",
+                "claude-opus-5-5",
+                "claude-sonnet-5-5",
+            ]),
         );
         assert_eq!(got, ("claude-opus-5-5".into(), "claude-haiku-5-5".into()));
         let o = preset("openai").unwrap();
         let got = pick(
             o,
-            &ids(&["gpt-4.1", "gpt-4.1-mini", "text-embedding-3-large", "gpt-4o-realtime", "whisper-1"]),
+            &ids(&[
+                "gpt-4.1",
+                "gpt-4.1-mini",
+                "text-embedding-3-large",
+                "gpt-4o-realtime",
+                "whisper-1",
+            ]),
         );
         assert_eq!(got, ("gpt-4.1".into(), "gpt-4.1-mini".into()));
         let g = preset("google").unwrap();
-        let got = pick(g, &model_ids(&serde_json::json!({"data": [
-            {"id": "models/gemini-2.5-pro"}, {"id": "models/gemini-2.5-flash"},
-            {"id": "models/gemini-2.5-flash-lite"}, {"id": "models/text-embedding-004"}
-        ]})));
-        assert_eq!(got, ("gemini-2.5-pro".into(), "gemini-2.5-flash-lite".into()));
+        let got = pick(
+            g,
+            &model_ids(&serde_json::json!({"data": [
+                {"id": "models/gemini-2.5-pro"}, {"id": "models/gemini-2.5-flash"},
+                {"id": "models/gemini-2.5-flash-lite"}, {"id": "models/text-embedding-004"}
+            ]})),
+        );
+        assert_eq!(
+            got,
+            ("gemini-2.5-pro".into(), "gemini-2.5-flash-lite".into())
+        );
         // Nothing matches: the first listed, then the fallback.
         let l = preset("ollama").unwrap();
         assert_eq!(pick(l, &ids(&["qwen3"])), ("qwen3".into(), "qwen3".into()));
@@ -272,8 +302,14 @@ mod tests {
     #[test]
     fn stored_settings_map_to_their_preset_or_custom() {
         assert_eq!(detect("", "anthropic", ""), "anthropic");
-        assert_eq!(detect("", "openai-compatible", "https://api.openai.com/v1/"), "openai");
-        assert_eq!(detect("", "openai-compatible", "http://litellm:4000/v1"), "custom");
+        assert_eq!(
+            detect("", "openai-compatible", "https://api.openai.com/v1/"),
+            "openai"
+        );
+        assert_eq!(
+            detect("", "openai-compatible", "http://litellm:4000/v1"),
+            "custom"
+        );
         assert_eq!(detect("custom", "anthropic", ""), "custom");
         assert_eq!(detect("mistral", "openai-compatible", "x"), "mistral");
         assert_eq!(detect("", "", ""), "");

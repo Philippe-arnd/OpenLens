@@ -98,8 +98,16 @@ struct NavGroup {
 /// The project sidebar: eight entries instead of twenty-one (#402). Every
 /// page keeps its URL; a section opens its first tab.
 const NAV: &[NavGroup] = &[
-    NavGroup { label: "Focus board", icon: "board", tabs: &[("", "Focus board", &["Focus board"])] },
-    NavGroup { label: "Ask", icon: "spark", tabs: &[("/ask", "Ask", &["Ask"])] },
+    NavGroup {
+        label: "Focus board",
+        icon: "board",
+        tabs: &[("", "Focus board", &["Focus board"])],
+    },
+    NavGroup {
+        label: "Ask",
+        icon: "spark",
+        tabs: &[("/ask", "Ask", &["Ask"])],
+    },
     NavGroup {
         label: "Live",
         icon: "pulse",
@@ -148,13 +156,21 @@ const NAV: &[NavGroup] = &[
             ("/digest", "Digest", &["Weekly digest"]),
         ],
     },
-    NavGroup { label: "Settings", icon: "gear", tabs: &[("/settings", "Settings", &["Settings"])] },
+    NavGroup {
+        label: "Settings",
+        icon: "gear",
+        tabs: &[("/settings", "Settings", &["Settings"])],
+    },
 ];
 
 /// The section and tab index a page title belongs to. The project's own
 /// name is the board's title.
 fn group_of(title: &str, project: &str) -> Option<&'static NavGroup> {
-    let title = if title == project { "Focus board" } else { title };
+    let title = if title == project {
+        "Focus board"
+    } else {
+        title
+    };
     NAV.iter()
         .find(|g| g.tabs.iter().any(|(_, _, titles)| titles.contains(&title)))
 }
@@ -168,7 +184,13 @@ fn section_tabs(title: &str, p: &ProjectInfo<'_>) -> Markup {
     let items: Vec<(String, &str, bool)> = g
         .tabs
         .iter()
-        .map(|(href, label, titles)| (format!("/p/{}{href}", p.id), *label, titles.contains(&title)))
+        .map(|(href, label, titles)| {
+            (
+                format!("/p/{}{href}", p.id),
+                *label,
+                titles.contains(&title),
+            )
+        })
         .collect();
     components::tabs(g.label, &items)
 }
@@ -511,11 +533,32 @@ mod tests {
         let icons: std::collections::HashSet<_> = NAV.iter().map(|g| g.icon).collect();
         assert_eq!(icons.len(), NAV.len(), "one distinct icon per entry");
         assert!(NAV.len() <= 8);
-        let paths: Vec<_> = NAV.iter().flat_map(|g| g.tabs.iter().map(|t| t.0)).collect();
+        let paths: Vec<_> = NAV
+            .iter()
+            .flat_map(|g| g.tabs.iter().map(|t| t.0))
+            .collect();
         for old in [
-            "", "/ask", "/live", "/uptime", "/events", "/pages", "/errors", "/replays", "/flags",
-            "/surveys", "/audience", "/acquisition", "/forms", "/churn", "/goals", "/tickets",
-            "/timeline", "/flows", "/features", "/digest", "/settings",
+            "",
+            "/ask",
+            "/live",
+            "/uptime",
+            "/events",
+            "/pages",
+            "/errors",
+            "/replays",
+            "/flags",
+            "/surveys",
+            "/audience",
+            "/acquisition",
+            "/forms",
+            "/churn",
+            "/goals",
+            "/tickets",
+            "/timeline",
+            "/flows",
+            "/features",
+            "/digest",
+            "/settings",
         ] {
             assert!(paths.contains(&old), "{old} is reachable");
         }
@@ -523,14 +566,27 @@ mod tests {
 
     #[test]
     fn a_page_shows_its_section_tabs_with_the_current_one_marked() {
-        let p = ProjectInfo { id: "default", name: "Demo", key: "k" };
+        let p = ProjectInfo {
+            id: "default",
+            name: "Demo",
+            key: "k",
+        };
         let html = section_tabs("Heatmap", &p).into_string();
         assert!(html.contains("aria-label=\"Behaviour\""));
         assert!(html.contains("href=\"/p/default/pages\" aria-current=\"page\""));
         assert!(html.contains("href=\"/p/default/forms\""));
-        assert!(section_tabs("Ask", &p).into_string().is_empty(), "one page, no tabs");
-        assert!(section_tabs("Demo", &p).into_string().is_empty(), "the board");
-        assert_eq!(group_of("Demo", "Demo").map(|g| g.label), Some("Focus board"));
+        assert!(
+            section_tabs("Ask", &p).into_string().is_empty(),
+            "one page, no tabs"
+        );
+        assert!(
+            section_tabs("Demo", &p).into_string().is_empty(),
+            "the board"
+        );
+        assert_eq!(
+            group_of("Demo", "Demo").map(|g| g.label),
+            Some("Focus board")
+        );
     }
 
     #[test]

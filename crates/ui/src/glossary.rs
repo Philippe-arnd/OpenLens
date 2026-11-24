@@ -7,23 +7,74 @@ use maud::{Markup, html};
 /// (tile label, definition). Labels with a variable part (the currency of
 /// *Revenue*) are matched on the text before ` (`.
 pub(crate) const KPI: &[(&str, &str)] = &[
-    ("Daily active users", "Distinct identified users with at least one event today, in your time zone. Robots and, unless ticked, the team are left out."),
-    ("Stickiness", "Daily active users ÷ monthly active users (last 30 days). Higher means people come back more often."),
-    ("Avg session", "Mean session length over the last 7 days. A session ends after 30 minutes without an event. Bounce = sessions with a single page view."),
-    ("Tasks per user per day", "Feature uses per active user per day, over the last 7 days."),
-    ("Sessions with errors", "Share of the last 7 days' sessions with at least one captured error."),
-    ("Changes that moved their metric", "Releases and changes whose target metric moved the expected way, measured 14 days after they shipped."),
-    ("Active now", "Distinct users with an event in the last 5 minutes."),
-    ("Last 30 minutes", "Distinct users with an event in the last 30 minutes."),
-    ("Errors", "Errors captured in the last 30 minutes, all users."),
-    ("Last 24 hours", "Share of uptime checks of the app address that succeeded in the last 24 hours."),
-    ("Last 7 days", "Share of uptime checks of the app address that succeeded in the last 7 days."),
-    ("Response time", "Median (p50) response time of the uptime checks, last 24 hours."),
-    ("Churn rate", "Users active at the start of the window who have had no event since, ÷ users active at the start."),
-    ("Net change", "New users + users back after a gap − users gone, over the window."),
-    ("At risk now", "Users quiet for over half the churn window and less active than their own usual rhythm."),
-    ("Median lifetime", "Time after which half the users of a cohort have churned (Kaplan–Meier median)."),
-    ("Revenue", "Sum of the purchase events' amounts in the period, in the project's currency; payers are distinct users who paid."),
+    (
+        "Daily active users",
+        "Distinct identified users with at least one event today, in your time zone. Robots and, unless ticked, the team are left out.",
+    ),
+    (
+        "Stickiness",
+        "Daily active users ÷ monthly active users (last 30 days). Higher means people come back more often.",
+    ),
+    (
+        "Avg session",
+        "Mean session length over the last 7 days. A session ends after 30 minutes without an event. Bounce = sessions with a single page view.",
+    ),
+    (
+        "Tasks per user per day",
+        "Feature uses per active user per day, over the last 7 days.",
+    ),
+    (
+        "Sessions with errors",
+        "Share of the last 7 days' sessions with at least one captured error.",
+    ),
+    (
+        "Changes that moved their metric",
+        "Releases and changes whose target metric moved the expected way, measured 14 days after they shipped.",
+    ),
+    (
+        "Active now",
+        "Distinct users with an event in the last 5 minutes.",
+    ),
+    (
+        "Last 30 minutes",
+        "Distinct users with an event in the last 30 minutes.",
+    ),
+    (
+        "Errors",
+        "Errors captured in the last 30 minutes, all users.",
+    ),
+    (
+        "Last 24 hours",
+        "Share of uptime checks of the app address that succeeded in the last 24 hours.",
+    ),
+    (
+        "Last 7 days",
+        "Share of uptime checks of the app address that succeeded in the last 7 days.",
+    ),
+    (
+        "Response time",
+        "Median (p50) response time of the uptime checks, last 24 hours.",
+    ),
+    (
+        "Churn rate",
+        "Users active at the start of the window who have had no event since, ÷ users active at the start.",
+    ),
+    (
+        "Net change",
+        "New users + users back after a gap − users gone, over the window.",
+    ),
+    (
+        "At risk now",
+        "Users quiet for over half the churn window and less active than their own usual rhythm.",
+    ),
+    (
+        "Median lifetime",
+        "Time after which half the users of a cohort have churned (Kaplan–Meier median).",
+    ),
+    (
+        "Revenue",
+        "Sum of the purchase events' amounts in the period, in the project's currency; payers are distinct users who paid.",
+    ),
 ];
 
 /// The definition of a tile label, if there is one.
@@ -42,7 +93,11 @@ pub(crate) fn info(label: &str) -> Markup {
         "def-{}",
         label
             .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+            .map(|c| if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            })
             .collect::<String>()
     );
     html! {
@@ -97,7 +152,11 @@ mod tests {
         assert!(html.contains("tabindex=\"0\""));
         assert!(html.contains("aria-describedby=\"def-stickiness\""));
         assert!(html.contains("id=\"def-stickiness\""));
-        assert!(super::info("Revenue (EUR)").into_string().contains("purchase"));
+        assert!(
+            super::info("Revenue (EUR)")
+                .into_string()
+                .contains("purchase")
+        );
         assert!(super::info("Nothing").into_string().is_empty());
     }
 }

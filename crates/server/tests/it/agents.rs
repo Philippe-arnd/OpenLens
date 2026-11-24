@@ -47,7 +47,8 @@ async fn a_preset_needs_only_the_provider_and_picks_the_models() {
     let h = harness();
     let owner = login_cookie(&h).await;
     // A hosted preset without a key is refused, with the key format.
-    let (s, page) = post_form_body(&h, "/settings/ai", &owner, "action=save&preset=anthropic").await;
+    let (s, page) =
+        post_form_body(&h, "/settings/ai", &owner, "action=save&preset=anthropic").await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
     assert!(page.contains("Paste the Anthropic API key"), "{page}");
     // Ollama, pointed at a local server: the model comes from its list.
@@ -60,8 +61,14 @@ async fn a_preset_needs_only_the_provider_and_picks_the_models() {
     )
     .await;
     assert_eq!(s, StatusCode::OK, "{page}");
-    assert!(page.contains("Connected: Ollama (local), model qwen3, fast model qwen3"), "{page}");
-    assert!(page.contains("<option value=\"qwen3\">"), "the list feeds the model field");
+    assert!(
+        page.contains("Connected: Ollama (local), model qwen3, fast model qwen3"),
+        "{page}"
+    );
+    assert!(
+        page.contains("<option value=\"qwen3\">"),
+        "the list feeds the model field"
+    );
     assert!(page.contains("value=\"ollama\" selected"), "{page}");
     // A provider that does not answer: saved with the fallback, and said so.
     let (s, page) = post_form_body(
