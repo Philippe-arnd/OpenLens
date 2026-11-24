@@ -4779,3 +4779,27 @@ async fn sign_out_everywhere_refuses_every_earlier_cookie() {
     // The admin token still works.
     assert!(login_cookie(&h).await.starts_with("ol_session="));
 }
+
+#[tokio::test]
+async fn errors_pages_and_events_pages_do_not_compute_the_board() {
+    let h = harness();
+    let (status, _) = post(&h, "/capture", batch(&h.key), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let owner = login_cookie(&h).await;
+    for page in ["/p/default/errors", "/p/default/pages", "/p/default/events"] {
+        let r = get(&h, page, Some(&owner), false).await;
+        assert_eq!(r.status(), StatusCode::OK, "{page}");
+    }
+    // Only their filter bar's options were read (#329).
+    assert_eq!(h.state.boards.computed(), 0);
+    assert_eq!(
+        get(&h, "/p/default", Some(&owner), false).await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        h.state.boards.computed(),
+        1,
+        "the board page still computes it"
+    );
+}

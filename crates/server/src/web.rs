@@ -724,7 +724,7 @@ async fn events(
     };
     let map = crate::load_map(&state, &p.id).await;
     let (b, rows) = tokio::join!(
-        crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
+        openlens_engine::filter_options(&state.query, &p.id, &f, map.as_ref().map(|(m, _)| m)),
         openlens_engine::event_list(&state.query, &p.id, &f, map.as_ref().map(|(m, _)| m), &eq)
     );
     match (b, rows) {
@@ -885,7 +885,7 @@ async fn errors_page(
         key: &p.api_key,
     };
     let (b, groups) = tokio::join!(
-        crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
+        openlens_engine::filter_options(&state.query, &p.id, &f, map.as_ref().map(|(m, _)| m)),
         openlens_engine::error_groups(&state.query, &p.id, &src, &f)
     );
     match (b, groups) {
@@ -927,7 +927,7 @@ async fn pages_page(
         key: &p.api_key,
     };
     let (b, list) = tokio::join!(
-        crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
+        openlens_engine::filter_options(&state.query, &p.id, &f, map.as_ref().map(|(m, _)| m)),
         openlens_engine::pages(&state.query, &p.id, &src, &f)
     );
     match (b, list) {
