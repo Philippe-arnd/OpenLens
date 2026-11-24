@@ -171,6 +171,7 @@ pub async fn flows(
     f: &Filters,
     fq: &FlowQuery,
 ) -> Result<Flow> {
+    let q = &q.with_params(&f.params()?);
     let src = source(map);
     let w = f.clause(30)?;
     let successes: Vec<String> = map

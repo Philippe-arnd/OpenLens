@@ -23,7 +23,7 @@ A crate depends only on crates in strictly lower layers. `cargo xtask layers` en
 
 | Layer | Crates | Role |
 | --- | --- | --- |
-| L0 | `event` | Event schema, ids, validation of hostile input |
+| L0 | `event`, `sqlgen` | Event schema, ids, validation of hostile input; the one place SQL values are bound or quoted (D-027) |
 | L1 | `storage`, `meta` | WAL, Parquet segments, compaction, retention; SQLite metadata |
 | L2 | `query`, `flags`, `replay`, `errors`, `featuremap` | Feature logic, each independent of the others |
 | L3 | `engine` | Board, insights, KPIs, pages (scroll, clicks), error groups: the only API the upper layers use |

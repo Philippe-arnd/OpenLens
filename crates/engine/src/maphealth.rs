@@ -507,6 +507,7 @@ pub async fn map_health(
     m: &FeatureMap,
     f: &Filters,
 ) -> Result<MapHealth> {
+    let q = &q.with_params(&f.params()?);
     let src = source(Some(m));
     let w60 = f.clause(60)?;
     let w30 = f.clause(30)?;
@@ -640,6 +641,7 @@ pub async fn feature_context(
     f: &Filters,
     key: &str,
 ) -> Result<Option<FeatureContext>> {
+    let q = &q.with_params(&f.params()?);
     let Some(key) = m.current_key(key).map(str::to_owned) else {
         return Ok(None);
     };

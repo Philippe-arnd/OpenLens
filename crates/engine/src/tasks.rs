@@ -29,6 +29,7 @@ pub(crate) async fn task_times(
     f: &Filters,
     successes: &[(String, String)],
 ) -> Result<Vec<TaskTime>> {
+    let q = &q.with_params(&f.params()?);
     if successes.is_empty() {
         return Ok(Vec::new());
     }
@@ -76,6 +77,7 @@ pub(crate) async fn resurrected(
     f: &Filters,
     churn: i64,
 ) -> Result<i64> {
+    let q = &q.with_params(&f.params()?);
     let w = f.clause(90)?;
     let day = f.day()?;
     let today = f.local("now()")?;
@@ -114,6 +116,7 @@ pub(crate) async fn retention(
     f: &Filters,
     ident: &str,
 ) -> Result<Vec<RetentionRow>> {
+    let q = &q.with_params(&f.params()?);
     let w = f.clause(90)?;
     // Weeks start on Monday in the project's time zone (D-017).
     let first = f.local("least(min(ev.timestamp), min(p.first_seen))")?;

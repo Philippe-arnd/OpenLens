@@ -79,6 +79,7 @@ pub(crate) async fn compute(
     churn: i64,
     successes: &[(String, String)],
 ) -> Result<(Vec<Insight>, Readiness)> {
+    let q = &q.with_params(&f.params()?);
     let w = f.clause(90)?;
     let base = cohort_base(src, &w, ident, churn);
     let totals_sql = format!("{base} SELECT count(*) AS n, sum(retained) AS kept FROM cohort");
@@ -127,9 +128,9 @@ pub(crate) async fn compute(
             .iter()
             .map(|(k, e)| {
                 format!(
-                    "(feature = '{}' AND event = '{}')",
-                    k.replace('\'', "''"),
-                    e.replace('\'', "''")
+                    "(feature = {} AND event = {})",
+                    openlens_sqlgen::quote(k),
+                    openlens_sqlgen::quote(e)
                 )
             })
             .collect::<Vec<_>>()
@@ -442,16 +443,17 @@ pub(crate) async fn journeys(
     f: &Filters,
     successes: &[(String, String)],
 ) -> Result<Vec<Journey>> {
+    let q = &q.with_params(&f.params()?);
     let w = f.clause(30)?;
     let mut out = Vec::new();
     let runs = successes.iter().take(4).map(|(feature, ev)| {
-        let ev_lit = ev.replace('\'', "''");
+        let ev_lit = openlens_sqlgen::quote(ev);
         let sql = format!(
             "WITH ev AS (SELECT distinct_id, timestamp, event, coalesce(feature, path) AS place FROM {src} WHERE {w}), \
-             firsts AS (SELECT distinct_id, min(timestamp) AS t FROM ev WHERE event = '{ev_lit}' GROUP BY distinct_id), \
+             firsts AS (SELECT distinct_id, min(timestamp) AS t FROM ev WHERE event = {ev_lit} GROUP BY distinct_id), \
              before AS (SELECT e.distinct_id, e.timestamp, e.place FROM ev e JOIN firsts f ON e.distinct_id = f.distinct_id \
                         WHERE e.timestamp < f.t AND e.timestamp >= f.t - INTERVAL '1 day' AND e.place IS NOT NULL \
-                        AND e.event <> '{ev_lit}'), \
+                        AND e.event <> {ev_lit}), \
              dedup AS (SELECT distinct_id, timestamp, place, \
                        lag(place) OVER (PARTITION BY distinct_id ORDER BY timestamp) AS prev FROM before), \
              ranked AS (SELECT distinct_id, place, \
@@ -532,6 +534,7 @@ pub(crate) async fn flag_cohorts(
     src: &str,
     f: &Filters,
 ) -> Result<Vec<FlagCohort>> {
+    let q = &q.with_params(&f.params()?);
     let w = f.clause(30)?;
     let seen = q
         .sql(
@@ -700,9 +703,10 @@ pub(crate) async fn funnels(
     f: &Filters,
     defs: &[(String, Vec<String>)],
 ) -> Result<Vec<Funnel>> {
+    let q = &q.with_params(&f.params()?);
     let w = f.clause(30)?;
     let runs = defs.iter().take(4).filter(|(_, s)| (2..=8).contains(&s.len())).map(|(feature, steps)| {
-        let lit = |e: &str| format!("'{}'", e.replace('\'', "''"));
+        let lit = |e: &str| openlens_sqlgen::quote(e);
         // Each step carries the first step's time (t0) so every later step
         // must happen within a day of starting.
         let mut ctes = vec![format!(

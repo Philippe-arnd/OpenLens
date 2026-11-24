@@ -132,6 +132,21 @@ async fn hostile_filter_values_cannot_break_out_of_the_literal() {
     };
     let b = board(&q, "p", &f, None).await.unwrap();
     assert_eq!(b.users.mau, 0);
+    // Bound as values (#310): quotes, backslashes and `$` stay data.
+    for v in [
+        r"a\' OR 1=1 --",
+        "$env",
+        "'; DROP TABLE events; --",
+        "rôle ✓",
+    ] {
+        let f = Filters {
+            release: Some(v.into()),
+            environment: v.into(),
+            ..Filters::default()
+        };
+        let b = board(&q, "p", &f, None).await.unwrap();
+        assert_eq!(b.users.mau, 0, "{v}");
+    }
     let bad = Filters {
         role: Some("a\nb".into()),
         ..Filters::default()

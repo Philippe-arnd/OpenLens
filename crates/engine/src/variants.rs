@@ -84,6 +84,7 @@ pub async fn variant_readout(
     flag: &str,
     order: &[String],
 ) -> Result<Vec<VariantRow>> {
+    let q = &q.with_params(&f.params()?);
     if flag.is_empty()
         || !flag
             .bytes()

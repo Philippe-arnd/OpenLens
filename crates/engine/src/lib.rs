@@ -93,13 +93,24 @@ impl Default for Filters {
 /// Quote a user-supplied value as a SQL string literal. Values are bounded
 /// and restricted to printable characters, then single quotes are doubled.
 fn lit(v: &str) -> Result<String> {
-    if v.is_empty() || v.len() > 200 || v.chars().any(char::is_control) {
-        return Err(EngineError::InvalidFilter("value"));
-    }
-    Ok(format!("'{}'", v.replace('\'', "''")))
+    openlens_sqlgen::lit(v).map_err(|_| EngineError::InvalidFilter("value"))
 }
 
 impl Filters {
+    /// The values of `clause`'s placeholders (#310).
+    pub(crate) fn params(&self) -> Result<openlens_sqlgen::Params> {
+        let mut p = openlens_sqlgen::Params::new();
+        let bad = |_| EngineError::InvalidFilter("value");
+        p.set("env", &self.environment).map_err(bad)?;
+        if let Some(r) = &self.role {
+            p.set("role", r).map_err(bad)?;
+        }
+        if let Some(r) = &self.release {
+            p.set("release", r).map_err(bad)?;
+        }
+        Ok(p)
+    }
+
     /// WHERE clause for these filters plus a time window of `days`.
     /// `expr` (a UTC timestamp) as wall-clock time in the project's zone,
     /// for `date_trunc` and casts to a date.
@@ -137,15 +148,16 @@ impl Filters {
         let since = (Utc::now() - Duration::days(days))
             .format("%Y-%m-%d")
             .to_string();
+        // The values are placeholders, filled from `params()` (#310): the
+        // engine runs every query of a function on `q.with_params`.
         let mut w = format!(
-            "date >= '{since}' AND timestamp >= now() - INTERVAL '{days} days' AND environment = {}",
-            lit(&self.environment)?
+            "date >= '{since}' AND timestamp >= now() - INTERVAL '{days} days' AND environment = $env"
         );
-        if let Some(r) = &self.role {
-            w.push_str(&format!(" AND role = {}", lit(r)?));
+        if self.role.is_some() {
+            w.push_str(" AND role = $role");
         }
-        if let Some(r) = &self.release {
-            w.push_str(&format!(" AND release = {}", lit(r)?));
+        if self.release.is_some() {
+            w.push_str(" AND release = $release");
         }
         if !self.internal {
             w.push_str(" AND distinct_id NOT IN (SELECT person FROM persons WHERE internal)");
@@ -433,6 +445,7 @@ pub async fn filter_options(
     f: &Filters,
     map: Option<&FeatureMap>,
 ) -> Result<Board> {
+    let q = &q.with_params(&f.params()?);
     let src = source(map);
     let roles_sql = format!(
         "SELECT role, count(DISTINCT distinct_id) AS users FROM {src} WHERE {} \
@@ -497,6 +510,7 @@ pub async fn board(
     f: &Filters,
     map: Option<(&FeatureMap, i64)>,
 ) -> Result<Board> {
+    let q = &q.with_params(&f.params()?);
     // Every board query reads the same projection (roles and features
     // resolved from the map) over at most 90 days: compute it once, in
     // memory, unless it is too large, then each query only filters it.

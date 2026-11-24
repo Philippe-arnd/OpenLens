@@ -50,6 +50,7 @@ pub async fn digest(
     map: Option<(&FeatureMap, i64)>,
 ) -> Result<Digest> {
     let f = Filters::default();
+    let q = &q.with_params(&f.params()?);
     let src = source(map.map(|(m, _)| m));
     let w = f.clause(14)?;
     let now = "timestamp >= now() - INTERVAL '7 days'";

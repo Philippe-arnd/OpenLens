@@ -61,6 +61,7 @@ pub async fn event_list(
     map: Option<&FeatureMap>,
     eq: &EventQuery,
 ) -> Result<Vec<EventRow>> {
+    let q = &q.with_params(&f.params()?);
     let src = source(map);
     let mut w = f.clause(eq.days.unwrap_or(30).clamp(1, 90))?;
     if let Some(e) = &eq.event {

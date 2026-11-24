@@ -10,6 +10,7 @@ publish.workspace = true
 
 [dependencies]
 openlens-storage = { path = "../storage" }
+openlens-sqlgen = { path = "../sqlgen" }
 datafusion.workspace = true
 arrow.workspace = true
 serde.workspace = true
