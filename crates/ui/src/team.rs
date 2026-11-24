@@ -317,7 +317,6 @@ pub fn user_edit(u: &openlens_meta::User, status: &str, projects: &[String]) -> 
     )
 }
 
-/// My profile: the time zone I read times in, and my name (#215, #216).
 /// The password card of *My profile* (#428).
 pub struct MePassword {
     /// Password sign-in is on.
@@ -330,6 +329,8 @@ pub struct MePassword {
     pub error: bool,
 }
 
+/// My profile: the time zone I read times in, my name (#215, #216) and my
+/// password (#428).
 pub fn me(
     name: Option<&str>,
     email: Option<&str>,
