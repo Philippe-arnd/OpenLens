@@ -4,6 +4,8 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-24
+
 ### Added
 
 - **Cold tier on S3** (#326, part B): with S3 set, event days older than 120 days leave the disk once S3 holds every file, verified. Forgetting someone and a person's export still cover them, and they are deleted from S3 after 400 days (D-031).
@@ -359,6 +361,7 @@ These changes concern instances that ran pre-release builds:
 - Every input is treated as hostile: bounded sizes, a rejection list per event, no `unwrap`/`panic` in production code, and read-only SQL scoped to one project with time, memory and row caps.
 - HMAC session cookies (`HttpOnly`, `SameSite=Lax`), and origin checks on dashboard forms.
 
-[Unreleased]: https://github.com/Philippe-arnd/OpenLens/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Philippe-arnd/OpenLens/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Philippe-arnd/OpenLens/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Philippe-arnd/OpenLens/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Philippe-arnd/OpenLens/releases/tag/v0.1.0
