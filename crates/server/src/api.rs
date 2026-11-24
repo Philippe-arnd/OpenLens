@@ -364,6 +364,9 @@ pub(crate) fn purge_project(st: &AppState, project: &str) -> Result<bool, String
         if let Ok(d) = openlens_storage::project_dir(&st.data_dir, project) {
             dirs.push(d);
         }
+        if let Ok(d) = openlens_storage::rollup::rollups_dir(&st.data_dir, project) {
+            dirs.push(d);
+        }
         for d in dirs {
             if d.exists() {
                 std::fs::remove_dir_all(&d).map_err(|e| e.to_string())?;

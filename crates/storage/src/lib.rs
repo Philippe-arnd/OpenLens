@@ -664,10 +664,10 @@ pub fn erase(root: &Path, project: &str, ids: &HashSet<String>) -> Result<usize>
         let gone = b.num_rows() - keep.true_count();
         Ok((arrow::compute::filter_record_batch(b, &keep)?, gone))
     })?;
-    // The rollups held these people too: rebuild them from what is left.
-    if removed > 0 {
+    // The rollups hold these people too, also past retention (D-026).
+    let days = rollup::erase(root, project, ids)?;
+    if removed > 0 || days > 0 {
         rollup::bump();
-        rollup::drop_project(root, project)?;
     }
     Ok(removed)
 }
@@ -784,8 +784,7 @@ pub fn prune(root: &Path, project: &str, now: DateTime<Utc>) -> Result<usize> {
         "date={}",
         (now - chrono::Duration::days(EVENT_RETENTION_DAYS)).format("%Y-%m-%d")
     );
-    // Rollups go with their day: they never outlive the events (#322).
-    rollup::prune(root, project, &cutoff)?;
+    // Rollups stay: they hold counts for looking further back (D-026).
     if !pdir.is_dir() {
         return Ok(0);
     }

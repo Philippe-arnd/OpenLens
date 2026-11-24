@@ -1,29 +1,32 @@
 //! Rollups of closed days (#322): two small Parquet files per project and
-//! UTC day, written once the day is closed and rebuilt from the events
-//! whenever those change. The query crate computes them; this module owns
-//! where they live and when they go away.
+//! UTC day, written once the day is closed. The query crate computes them;
+//! this module owns where they live and how people are erased from them.
 //!
 //! Layout: `rollups/v<ROLLUP_VERSION>/project=<p>/date=<YYYY-MM-DD>/`
-//! holding `person_q.parquet` and `metric_q.parquet`. The version is in the
-//! path, so a new schema starts from an empty tree and every closed day is
-//! rolled up again; older trees are deleted.
+//! holding `person_q.parquet` and `metric_q.parquet`. Rollups outlive the
+//! events (D-026), so a day past retention can never be rolled up again:
+//! change the schema by adding nullable columns only, and a new version
+//! must convert the old tree, never drop it.
 //!
-//! Rollups never outlive the events they come from: retention drops them
-//! with their day, and erasing anyone drops the project's rollups so they
-//! are rebuilt without that person (docs/privacy.md stays true).
+//! Erasing someone removes them from every rollup: a day whose events are
+//! still stored is rolled up again without them, and an older day loses
+//! that person's `person_q` rows (its `metric_q` keeps only counts, with no
+//! one in them).
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use arrow::array::RecordBatch;
+use arrow::array::{Array, BooleanArray, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef, TimeUnit};
 use chrono::{DateTime, NaiveDate, Utc};
+use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
 use crate::{Result, project_dir, sync_dir, valid_project, write_parquet_as};
 
-/// Bumped when a rollup schema changes: the tree moves to a new path.
+/// The rollup tree's version (see the module docs before changing it).
 pub const ROLLUP_VERSION: u32 = 1;
 
 /// Width of a rollup bucket. Every real time zone offset is a multiple of
@@ -172,34 +175,54 @@ pub fn drop_project(root: &Path, project: &str) -> Result<()> {
     Ok(())
 }
 
-/// Delete the rollups of days before `cutoff` (`date=YYYY-MM-DD`), and the
-/// trees of older rollup versions.
-pub(crate) fn prune(root: &Path, project: &str, cutoff: &str) -> Result<()> {
-    let base = root.join("rollups");
-    if base.is_dir() {
-        let current = format!("v{ROLLUP_VERSION}");
-        for entry in fs::read_dir(&base)? {
-            let path = entry?.path();
-            if path.is_dir() && path.file_name().and_then(|s| s.to_str()) != Some(current.as_str())
-            {
-                fs::remove_dir_all(&path)?;
-            }
-        }
-    }
+/// Remove `ids` from the project's rollups. A day that still has its
+/// events is deleted, to be rolled up again from them; an older day keeps
+/// its rollup without those people's `person_q` rows. Returns the days
+/// changed. The caller holds the maintenance lock.
+pub(crate) fn erase(root: &Path, project: &str, ids: &HashSet<String>) -> Result<usize> {
     let dir = rollups_dir(root, project)?;
-    if !dir.is_dir() {
-        return Ok(());
+    if ids.is_empty() || !dir.is_dir() {
+        return Ok(0);
     }
+    let events = project_dir(root, project)?;
+    let mut changed = 0;
     for entry in fs::read_dir(&dir)? {
-        let path = entry?.path();
-        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+        let day = entry?.path();
+        let file = day.join("person_q.parquet");
+        if !file.is_file() {
             continue;
-        };
-        if path.is_dir() && name.starts_with("date=") && name.len() == 15 && name < cutoff {
-            fs::remove_dir_all(&path)?;
+        }
+        let mut kept = Vec::new();
+        let mut gone = 0;
+        for b in ParquetRecordBatchReaderBuilder::try_new(fs::File::open(&file)?)?.build()? {
+            let b = b?;
+            let Some(col) = b
+                .column_by_name("person")
+                .and_then(|c| c.as_any().downcast_ref::<StringArray>())
+            else {
+                kept.push(b);
+                continue;
+            };
+            let keep: BooleanArray = (0..col.len())
+                .map(|i| Some(col.is_null(i) || !ids.contains(col.value(i))))
+                .collect();
+            gone += b.num_rows() - keep.true_count();
+            kept.push(arrow::compute::filter_record_batch(&b, &keep)?);
+        }
+        if gone == 0 {
+            continue;
+        }
+        changed += 1;
+        let name = day.file_name().unwrap_or_default();
+        if events.join(name).is_dir() {
+            fs::remove_dir_all(&day)?;
+            sync_dir(&dir)?;
+        } else {
+            let merged = arrow::compute::concat_batches(&person_schema(), &kept)?;
+            write_parquet_as(&day, "person_q", &merged)?;
         }
     }
-    Ok(())
+    Ok(changed)
 }
 
 #[cfg(test)]
@@ -252,18 +275,68 @@ mod tests {
     }
 
     #[test]
-    fn prune_drops_old_days_and_old_versions() {
+    fn erasing_rebuilds_stored_days_and_trims_older_ones() {
+        use arrow::array::{Int64Array, TimestampMicrosecondArray};
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        fs::create_dir_all(root.join("rollups/v0/project=p/date=2026-01-01")).unwrap();
-        let base = rollups_dir(root, "p").unwrap();
-        fs::create_dir_all(base.join("date=2026-01-01")).unwrap();
-        fs::create_dir_all(base.join("date=2026-06-01")).unwrap();
-        prune(root, "p", "date=2026-03-01").unwrap();
-        assert!(!root.join("rollups/v0").exists());
-        assert!(!base.join("date=2026-01-01").exists());
-        assert!(base.join("date=2026-06-01").exists());
+        let batch = |people: &[&str]| {
+            let n = people.len();
+            let ts = || Arc::new(TimestampMicrosecondArray::from(vec![0; n]).with_timezone("UTC"));
+            let txt = |v: Option<&str>| Arc::new(StringArray::from(vec![v; n]));
+            RecordBatch::try_new(
+                person_schema(),
+                vec![
+                    ts(),
+                    Arc::new(StringArray::from(people.to_vec())),
+                    txt(Some("production")),
+                    txt(None),
+                    txt(None),
+                    Arc::new(Int64Array::from(vec![1; n])),
+                    Arc::new(Int64Array::from(vec![0; n])),
+                    ts(),
+                    ts(),
+                ],
+            )
+            .unwrap()
+        };
+        let metric = RecordBatch::new_empty(metric_schema());
+        // The 1st is past retention (no events left), the 2nd still stored.
+        fs::create_dir_all(root.join("events/project=p/date=2026-01-02")).unwrap();
+        for d in ["2026-01-01", "2026-01-02"] {
+            let tables = [
+                ("person_q", batch(&["bob", "ann"])),
+                ("metric_q", metric.clone()),
+            ];
+            assert!(write(root, "p", day(d), generation(), &tables).unwrap());
+        }
+        let ids: HashSet<String> = ["bob".to_owned()].into();
+        assert_eq!(erase(root, "p", &ids).unwrap(), 2);
+        assert!(!has(root, "p", day("2026-01-02")).unwrap());
+        let old = rollups_dir(root, "p")
+            .unwrap()
+            .join("date=2026-01-01/person_q.parquet");
+        let people: Vec<String> =
+            ParquetRecordBatchReaderBuilder::try_new(fs::File::open(old).unwrap())
+                .unwrap()
+                .build()
+                .unwrap()
+                .flat_map(|b| {
+                    let b = b.unwrap();
+                    let c = b
+                        .column(1)
+                        .as_any()
+                        .downcast_ref::<StringArray>()
+                        .unwrap()
+                        .clone();
+                    (0..c.len())
+                        .map(|i| c.value(i).to_owned())
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+        assert_eq!(people, ["ann"]);
+        // Done once: a second pass changes nothing.
+        assert_eq!(erase(root, "p", &ids).unwrap(), 0);
         drop_project(root, "p").unwrap();
-        assert!(!base.exists());
+        assert!(!rollups_dir(root, "p").unwrap().exists());
     }
 }

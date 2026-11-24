@@ -166,3 +166,11 @@ Append-only. Each entry: id, date, decision, why, consequences.
 
 **Consequences:** the tables are about as many rows as person-sessions, far fewer than events. No setting is added; older installs roll up their history on their own, seven days per project every ten minutes.
 
+## D-026 (2026-11-24, owner for #322) Rollups outlive the events
+
+**Decision:** event days are still deleted after 400 days, but their rollups (`person_q`, `metric_q`) stay as long as the project does, so the board and investigations can look further back (#323, #325). Erasing someone removes them from every rollup: a day that still has its events is rolled up again without them, and an older day loses their `person_q` rows; its `metric_q` keeps only counts. Deleting a project deletes its rollups. Rollups are backed up with the rest. This replaces the "gone with the events" part of D-025.
+
+**Why:** the owner wants to look back further than the raw retention. Rollups hold no URL, property or session id: per person only counts, the role, release and environment.
+
+**Consequences:** rollups cannot be rebuilt once their events are gone, so their schema only gains nullable columns; a new rollup version converts the old tree instead of dropping it. docs/privacy.md says what is kept, and for how long.
+
