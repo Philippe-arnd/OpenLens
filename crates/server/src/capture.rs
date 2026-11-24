@@ -272,14 +272,22 @@ pub(crate) async fn capture(
     if let Some(r) = disk_full(&state) {
         return r;
     }
-    let raw = match inflate(&headers, &body) {
-        Ok(r) => r,
-        Err(resp) => return *resp,
-    };
-
-    let batch: CaptureBatch = match serde_json::from_slice(&raw) {
-        Ok(b) => b,
-        Err(_) => return error(StatusCode::BAD_REQUEST, "body is not a valid capture batch"),
+    // Up to 8 MB to gunzip and parse: off the async threads (#295).
+    let h = headers.clone();
+    let parsed = tokio::task::spawn_blocking(move || -> Result<CaptureBatch, Box<Response>> {
+        let raw = inflate(&h, &body)?;
+        serde_json::from_slice(&raw).map_err(|_| {
+            Box::new(error(
+                StatusCode::BAD_REQUEST,
+                "body is not a valid capture batch",
+            ))
+        })
+    })
+    .await;
+    let batch = match parsed {
+        Ok(Ok(b)) => b,
+        Ok(Err(resp)) => return *resp,
+        Err(_) => return error(StatusCode::INTERNAL_SERVER_ERROR, "capture task failed"),
     };
 
     let key = headers
@@ -293,9 +301,13 @@ pub(crate) async fn capture(
         Err(resp) => return *resp,
     };
 
-    let mut normalized = match normalize_batch(&project.id, batch, Utc::now()) {
-        Ok(n) => n,
-        Err(e) => return error(StatusCode::PAYLOAD_TOO_LARGE, &e.to_string()),
+    let pid = project.id.clone();
+    let normalized =
+        tokio::task::spawn_blocking(move || normalize_batch(&pid, batch, Utc::now())).await;
+    let mut normalized = match normalized {
+        Ok(Ok(n)) => n,
+        Ok(Err(e)) => return error(StatusCode::PAYLOAD_TOO_LARGE, &e.to_string()),
+        Err(_) => return error(StatusCode::INTERNAL_SERVER_ERROR, "capture task failed"),
     };
     // Direct local traffic (server SDKs on the host, benchmarks) has no
     // per-key budget either.

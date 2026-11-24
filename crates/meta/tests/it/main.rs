@@ -266,3 +266,13 @@ fn replay_comments_are_pinned_and_owned() {
     assert!(m.delete_project(&p.id).unwrap());
     assert!(m.replay_comments(&p.id, "s1").unwrap().is_empty());
 }
+
+#[test]
+fn a_person_forgotten_after_a_lookup_is_seen_at_once() {
+    let meta = Meta::in_memory().unwrap();
+    assert!(!meta.is_forgotten("p", "u1").unwrap());
+    meta.forget("p", &["u1".to_owned()]).unwrap();
+    assert!(meta.is_forgotten("p", "u1").unwrap());
+    assert!(!meta.is_forgotten("p", "u2").unwrap());
+    assert!(!meta.is_forgotten("other", "u1").unwrap());
+}

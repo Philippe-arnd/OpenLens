@@ -5,8 +5,9 @@
 //!
 //! Layer: L1 (see `docs/architecture.md`).
 
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 use rand::Rng;
@@ -63,6 +64,9 @@ pub struct Person {
 /// The metadata store.
 pub struct Meta {
     conn: Mutex<Connection>,
+    /// Per project, the people forgotten (#295): capture checks every event
+    /// against it, so it is read once and kept until the next `forget`.
+    forgotten: Mutex<HashMap<String, Arc<HashSet<String>>>>,
 }
 
 const SCHEMA: &str = "
@@ -427,6 +431,7 @@ impl Meta {
         migrate(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
+            forgotten: Mutex::default(),
         })
     }
 
@@ -447,6 +452,7 @@ impl Meta {
         migrate(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
+            forgotten: Mutex::default(),
         })
     }
 
@@ -1019,19 +1025,30 @@ impl Meta {
             }
             tx.commit()?;
             Ok(())
-        })
+        })?;
+        if let Ok(mut cache) = self.forgotten.lock() {
+            cache.remove(project);
+        }
+        Ok(())
     }
 
     /// Is this person forgotten?
     pub fn is_forgotten(&self, project: &str, id: &str) -> Result<bool> {
-        self.with(|c| {
-            Ok(
-                c.prepare_cached(
-                    "SELECT 1 FROM forgotten WHERE project = ?1 AND distinct_id = ?2",
-                )?
-                .exists(params![project, id])?,
-            )
-        })
+        if let Ok(cache) = self.forgotten.lock()
+            && let Some(set) = cache.get(project)
+        {
+            return Ok(set.contains(id));
+        }
+        let set: HashSet<String> = self.with(|c| {
+            let mut st = c.prepare("SELECT distinct_id FROM forgotten WHERE project = ?1")?;
+            let rows = st.query_map([project], |r| r.get::<_, String>(0))?;
+            Ok(rows.collect::<rusqlite::Result<HashSet<_>>>()?)
+        })?;
+        let found = set.contains(id);
+        if let Ok(mut cache) = self.forgotten.lock() {
+            cache.insert(project.to_owned(), Arc::new(set));
+        }
+        Ok(found)
     }
 
     /// People forgotten since `since` (Unix seconds).

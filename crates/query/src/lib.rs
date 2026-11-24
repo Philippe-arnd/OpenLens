@@ -203,6 +203,18 @@ impl QueryEngine {
         sql: &str,
         max_rows: usize,
     ) -> Result<Option<QueryEngine>, QueryError> {
+        let this = self.clone();
+        let (project, name, sql) = (project.to_owned(), name.to_owned(), sql.to_owned());
+        offload(async move { this.snapshot_here(&project, &name, &sql, max_rows).await }).await
+    }
+
+    async fn snapshot_here(
+        &self,
+        project: &str,
+        name: &str,
+        sql: &str,
+        max_rows: usize,
+    ) -> Result<Option<QueryEngine>, QueryError> {
         if name.is_empty() || !name.bytes().all(|b| b.is_ascii_lowercase() || b == b'_') {
             return Err(QueryError::Rejected("invalid snapshot name".into()));
         }
@@ -327,6 +339,12 @@ impl QueryEngine {
 
     /// Run one read-only SQL query on `project`'s events.
     pub async fn sql(&self, project: &str, sql: &str) -> Result<QueryResult, QueryError> {
+        let this = self.clone();
+        let (project, sql) = (project.to_owned(), sql.to_owned());
+        offload(async move { this.sql_here(&project, &sql).await }).await
+    }
+
+    async fn sql_here(&self, project: &str, sql: &str) -> Result<QueryResult, QueryError> {
         self.timed(
             sql,
             Box::pin(async {
@@ -341,6 +359,17 @@ impl QueryEngine {
     /// `SELECT` over `events` aliased `AS events` (the feature map's
     /// projection, from `openlens_engine::source`).
     pub async fn sql_over(
+        &self,
+        project: &str,
+        source: &str,
+        sql: &str,
+    ) -> Result<QueryResult, QueryError> {
+        let this = self.clone();
+        let (project, source, sql) = (project.to_owned(), source.to_owned(), sql.to_owned());
+        offload(async move { this.sql_over_here(&project, &source, &sql).await }).await
+    }
+
+    async fn sql_over_here(
         &self,
         project: &str,
         source: &str,
@@ -372,6 +401,23 @@ impl QueryEngine {
     /// `key`, one per project), the result must be an aggregate, and groups
     /// of fewer than [`MIN_USERS`] people are dropped.
     pub async fn sql_aggregate(
+        &self,
+        project: &str,
+        source: &str,
+        key: &[u8],
+        sql: &str,
+    ) -> Result<QueryResult, QueryError> {
+        let this = self.clone();
+        let (project, source, key, sql) = (
+            project.to_owned(),
+            source.to_owned(),
+            key.to_vec(),
+            sql.to_owned(),
+        );
+        offload(async move { this.sql_aggregate_here(&project, &source, &key, &sql).await }).await
+    }
+
+    async fn sql_aggregate_here(
         &self,
         project: &str,
         source: &str,
@@ -435,6 +481,37 @@ impl QueryEngine {
         // `RUST_LOG=openlens_query=debug` shows what each query costs.
         tracing::debug!(ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX), sql = %sql.chars().take(160).collect::<String>(), "query");
         out
+    }
+}
+
+/// The runtime DataFusion work runs on, apart from the one that serves
+/// HTTP and ingestion (#295): a board computation keeps its threads busy
+/// for seconds, and `/capture` must not wait behind it. One per process,
+/// never dropped; if it cannot be made, queries run where they are called.
+fn query_runtime() -> Option<&'static tokio::runtime::Runtime> {
+    static RT: std::sync::OnceLock<Option<tokio::runtime::Runtime>> = std::sync::OnceLock::new();
+    RT.get_or_init(|| {
+        let threads = std::thread::available_parallelism().map_or(2, |n| n.get().clamp(1, 8));
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(threads)
+            .thread_name("openlens-query")
+            .enable_all()
+            .build()
+            .ok()
+    })
+    .as_ref()
+}
+
+/// Run a query future on [`query_runtime`] and wait for it here.
+async fn offload<T: Send + 'static>(
+    fut: impl std::future::Future<Output = Result<T, QueryError>> + Send + 'static,
+) -> Result<T, QueryError> {
+    match query_runtime() {
+        Some(rt) => rt
+            .spawn(fut)
+            .await
+            .map_err(|e| QueryError::Storage(format!("query task: {e}")))?,
+        None => fut.await,
     }
 }
 
