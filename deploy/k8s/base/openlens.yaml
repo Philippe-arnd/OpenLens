@@ -7,7 +7,7 @@ metadata:
   labels:
     app.kubernetes.io/name: openlens
     app.kubernetes.io/instance: openlens
-    app.kubernetes.io/version: "v0.1.0"
+    app.kubernetes.io/version: "v0.3.0"
 spec:
   type: ClusterIP
   selector:
@@ -26,7 +26,7 @@ metadata:
   labels:
     app.kubernetes.io/name: openlens
     app.kubernetes.io/instance: openlens
-    app.kubernetes.io/version: "v0.1.0"
+    app.kubernetes.io/version: "v0.3.0"
 spec:
   replicas: 1
   serviceName: openlens
@@ -49,7 +49,7 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: openlens
-          image: "ghcr.io/philippe-arnd/openlens:v0.1.0"
+          image: "ghcr.io/philippe-arnd/openlens:v0.3.0"
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

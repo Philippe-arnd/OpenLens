@@ -9,7 +9,7 @@ components:
   - ../components/ingress
 images:
   - name: ghcr.io/philippe-arnd/openlens
-    newTag: v0.1.0
+    newTag: v0.3.0
 patches:
   - target: { kind: Ingress, name: openlens }
     patch: |
