@@ -4,6 +4,10 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Fixed
+
+- **Kustomize base on the current image** (#400, #407): the plain manifests and the example overlay pinned `v0.1.0`, which has no `/readyz`, so with the new readiness probe the pod never became ready. They now pin `v0.3.0`, and so does the chart's default `appVersion`.
+
 ### Changed
 
 - **Kubernetes readiness follows `/readyz`** (#353): the chart and the Kustomize base take a pod out of the Service when its metadata store or data volume fails, instead of only when the process is down.
