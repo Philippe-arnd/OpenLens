@@ -187,9 +187,28 @@ impl Client {
             Some(Body::Json(json!({ "sql": query }))),
         )?;
         if status != 200 {
-            return Err(format!("sql failed ({status}): {v}"));
+            return Err(format!("sql failed: {}", api_error(status, &v)));
         }
         Ok(v["rows"].as_array().cloned().unwrap_or_default())
+    }
+}
+
+/// An API error as one line, from its stable `code` (#312): texts may
+/// change between releases, codes do not.
+pub(crate) fn api_error(status: u16, v: &Value) -> String {
+    let message = v["message"]
+        .as_str()
+        .or_else(|| v["error"].as_str())
+        .map_or_else(|| v.to_string(), str::to_owned);
+    match v["code"].as_str() {
+        Some("unauthorized") => format!("the token was refused (HTTP {status}): {message}"),
+        Some("forbidden") => format!("this token may not do that (HTTP {status}): {message}"),
+        Some("not_found") => format!("not found (HTTP {status}): {message}"),
+        Some("busy" | "rate_limited" | "unavailable") => {
+            format!("the server is busy, try again shortly (HTTP {status}): {message}")
+        }
+        Some(code) => format!("{message} ({code}, HTTP {status})"),
+        None => format!("HTTP {status}: {message}"),
     }
 }
 
@@ -436,7 +455,7 @@ fn run(cli: Cli) -> Result<bool, String> {
                     None,
                 )?;
                 if status != 200 {
-                    return Err(format!("export of {day} failed ({status}): {v}"));
+                    return Err(format!("export of {day} failed: {}", api_error(status, &v)));
                 }
                 let text = match &v {
                     Value::String(s) => s.clone(),
@@ -724,7 +743,18 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod http_tests {
-    use super::plain_http_ok;
+    use super::{api_error, plain_http_ok};
+
+    #[test]
+    fn errors_are_read_from_their_code_not_their_text() {
+        let v =
+            serde_json::json!({"code": "not_found", "message": "unknown project", "error": "x"});
+        assert_eq!(api_error(404, &v), "not found (HTTP 404): unknown project");
+        let old = serde_json::json!({"error": "boom"});
+        assert_eq!(api_error(400, &old), "HTTP 400: boom");
+        let busy = serde_json::json!({"code": "busy", "message": "m"});
+        assert!(api_error(503, &busy).starts_with("the server is busy"));
+    }
 
     #[test]
     fn plain_http_only_stays_inside() {

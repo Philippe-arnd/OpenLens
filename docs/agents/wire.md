@@ -20,6 +20,8 @@ API quick reference (send `Authorization: Bearer <admin token>` on every call):
 | `GET /api/projects/<id>/board` | The Focus board numbers as JSON. |
 | `POST /api/login-links` | A one-time login link for the PM, valid 24 hours (an invite with `email`: 7 days). Opening it shows a "Continue" button; only that POST uses the link, so link previews do not burn it. |
 
+Errors are JSON: `{"code": "...", "message": "..."}`. Act on `code`, which is one of `invalid_request`, `unauthorized`, `forbidden`, `not_found`, `conflict`, `too_large`, `rate_limited`, `busy` (another long query is running: retry after `Retry-After`), `unavailable` and `internal`. Messages may change between releases. The old `error` field repeats the message for one more release.
+
 1. **Project.** `openlens-cli init --name <app> --timezone <IANA zone>` (or `POST /api/projects`) creates the project and returns its capture key and snippet. Days and weeks of every KPI start in that zone: use the team's, from the app's config (a `TZ` or locale setting) or the commit history, `UTC` if unknown. `openlens-cli timezone <project> <zone>` changes it later. Put the key and the server URL in the app's existing config mechanism (env file, settings module). Never hard-code the key anywhere else.
 2. **SDK.** Pick one:
    - Server-rendered app: add `<script src="<url>/c.js" data-key="<key>" defer></script>` to the main layout.

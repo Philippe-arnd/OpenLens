@@ -104,7 +104,7 @@ const IMPORT_MAX: usize = 16 * 1024 * 1024;
 const IMPORT_MAX_LINES: usize = 20_000;
 
 fn err(status: StatusCode, msg: &str) -> Response {
-    (status, Json(json!({ "error": msg }))).into_response()
+    crate::apierr::json(status, msg)
 }
 
 #[derive(Deserialize)]
@@ -398,7 +398,7 @@ async fn sql(
     match state.query.cold().sql(&p.id, &body.sql).await {
         Ok(res) => Json(res).into_response(),
         Err(e @ openlens_query::QueryError::Busy) => {
-            let mut r = err(StatusCode::SERVICE_UNAVAILABLE, &e.to_string());
+            let mut r = crate::apierr::with_code(StatusCode::SERVICE_UNAVAILABLE, "busy", &e);
             r.headers_mut().insert(
                 axum::http::header::RETRY_AFTER,
                 axum::http::HeaderValue::from_static("5"),

@@ -94,11 +94,7 @@ pub(crate) async fn api_list(
     Path((project, session)): Path<(String, String)>,
 ) -> Response {
     if !auth::has_bearer(&state, &headers) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "admin bearer token required"})),
-        )
-            .into_response();
+        return crate::apierr::json(StatusCode::UNAUTHORIZED, "admin bearer token required");
     }
     let meta = state.meta.clone();
     match tokio::task::spawn_blocking(move || meta.replay_comments(&project, &session)).await {
@@ -123,18 +119,10 @@ pub(crate) async fn api_add(
     Json(b): Json<ApiComment>,
 ) -> Response {
     if !auth::has_bearer(&state, &headers) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "admin bearer token required"})),
-        )
-            .into_response();
+        return crate::apierr::json(StatusCode::UNAUTHORIZED, "admin bearer token required");
     }
     if !openlens_replay::valid_id(&session) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "invalid session id"})),
-        )
-            .into_response();
+        return crate::apierr::json(StatusCode::BAD_REQUEST, "invalid session id");
     }
     let meta = state.meta.clone();
     let at = (b.at.max(0.0) * 1000.0) as i64;
@@ -144,11 +132,7 @@ pub(crate) async fn api_add(
     .await
     {
         Ok(Ok(c)) => (StatusCode::CREATED, Json(json!({ "comment": c }))).into_response(),
-        Ok(Err(e)) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": e.to_string()})),
-        )
-            .into_response(),
+        Ok(Err(e)) => crate::apierr::json(StatusCode::BAD_REQUEST, e.to_string()),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }

@@ -636,18 +636,10 @@ pub(crate) async fn api(
     Path(id): Path<String>,
 ) -> Response {
     if !auth::has_bearer(&state, &headers) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "admin bearer token required"})),
-        )
-            .into_response();
+        return crate::apierr::json(StatusCode::UNAUTHORIZED, "admin bearer token required");
     }
     let Some(p) = project(&state, &id).await else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "unknown project"})),
-        )
-            .into_response();
+        return crate::apierr::json(StatusCode::NOT_FOUND, "unknown project");
     };
     match evaluate(&state, &p, &p.timezone).await {
         Ok(ev) => Json(json!({
@@ -670,7 +662,7 @@ pub(crate) async fn api(
             })).collect::<Vec<_>>(),
         }))
         .into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": e}))).into_response(),
+        Err(e) => crate::apierr::json(StatusCode::BAD_REQUEST, e),
     }
 }
 
@@ -733,7 +725,7 @@ pub(crate) async fn api_set(
     Path(id): Path<String>,
     Json(g): Json<ApiGoal>,
 ) -> Response {
-    let bad = |s: StatusCode, m: &str| (s, Json(json!({ "error": m }))).into_response();
+    let bad = |s: StatusCode, m: &str| crate::apierr::json(s, m);
     if !auth::has_bearer(&state, &headers) {
         return bad(StatusCode::UNAUTHORIZED, "admin bearer token required");
     }

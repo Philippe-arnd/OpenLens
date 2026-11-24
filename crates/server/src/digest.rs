@@ -44,27 +44,15 @@ pub(crate) async fn api(
     Path(id): Path<String>,
 ) -> Response {
     if !auth::has_bearer(&state, &headers) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "error": "admin bearer token required" })),
-        )
-            .into_response();
+        return crate::apierr::json(StatusCode::UNAUTHORIZED, "admin bearer token required");
     }
     let meta = state.meta.clone();
     let Ok(Ok(Some(p))) = tokio::task::spawn_blocking(move || meta.project(&id)).await else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": "unknown project" })),
-        )
-            .into_response();
+        return crate::apierr::json(StatusCode::NOT_FOUND, "unknown project");
     };
     match compute(&state, &p, &crate::base_url(&headers)).await {
         Ok((d, md)) => Json(json!({ "digest": d, "markdown": md })).into_response(),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Err(e) => crate::apierr::json(StatusCode::BAD_REQUEST, e.to_string()),
     }
 }
 

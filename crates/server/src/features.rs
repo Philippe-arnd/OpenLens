@@ -345,9 +345,7 @@ async fn api_guard(
     headers: &HeaderMap,
     id: &str,
 ) -> Result<(openlens_meta::Project, openlens_featuremap::FeatureMap), Box<Response>> {
-    let bad = |s: StatusCode, m: &str| {
-        Box::new((s, axum::Json(serde_json::json!({ "error": m }))).into_response())
-    };
+    let bad = |s: StatusCode, m: &str| Box::new(crate::apierr::json(s, m));
     if !auth::has_bearer(state, headers) {
         return Err(bad(StatusCode::UNAUTHORIZED, "admin bearer token required"));
     }
@@ -377,11 +375,7 @@ pub(crate) async fn api_health(
     };
     match openlens_engine::map_health(&state.query, &p.id, &m, &q.filters(&p.timezone)).await {
         Ok(h) => axum::Json(h).into_response(),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            axum::Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Err(e) => crate::apierr::json(StatusCode::BAD_REQUEST, e.to_string()),
     }
 }
 
@@ -401,16 +395,11 @@ pub(crate) async fn api_feature(
         .await
     {
         Ok(Some(c)) => axum::Json(c).into_response(),
-        Ok(None) => (
+        Ok(None) => crate::apierr::json(
             StatusCode::NOT_FOUND,
-            axum::Json(serde_json::json!({ "error": format!("no feature `{key}` in the map") })),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            axum::Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+            format!("no feature `{key}` in the map"),
+        ),
+        Err(e) => crate::apierr::json(StatusCode::BAD_REQUEST, e.to_string()),
     }
 }
 

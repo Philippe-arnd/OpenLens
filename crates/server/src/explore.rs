@@ -644,18 +644,10 @@ pub(crate) async fn api_churn(
     Path(id): Path<String>,
 ) -> Response {
     if !auth::has_bearer(&state, &headers) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            axum::Json(serde_json::json!({"error": "admin bearer token required"})),
-        )
-            .into_response();
+        return crate::apierr::json(StatusCode::UNAUTHORIZED, "admin bearer token required");
     }
     let Some(p) = project(&state, &id).await else {
-        return (
-            StatusCode::NOT_FOUND,
-            axum::Json(serde_json::json!({"error": "unknown project"})),
-        )
-            .into_response();
+        return crate::apierr::json(StatusCode::NOT_FOUND, "unknown project");
     };
     let f = openlens_engine::Filters {
         tz: p.timezone.clone(),
@@ -664,11 +656,7 @@ pub(crate) async fn api_churn(
     let map = crate::load_map(&state, &p.id).await;
     match openlens_engine::churn(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f).await {
         Ok(c) => axum::Json(c).into_response(),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            axum::Json(serde_json::json!({"error": e.to_string()})),
-        )
-            .into_response(),
+        Err(e) => crate::apierr::json(StatusCode::BAD_REQUEST, e.to_string()),
     }
 }
 
@@ -789,25 +777,13 @@ pub(crate) async fn api_flows(
     axum::extract::RawQuery(raw): axum::extract::RawQuery,
 ) -> Response {
     if !auth::has_bearer(&state, &headers) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            axum::Json(serde_json::json!({"error": "admin bearer token required"})),
-        )
-            .into_response();
+        return crate::apierr::json(StatusCode::UNAUTHORIZED, "admin bearer token required");
     }
     let Some(p) = project(&state, &id).await else {
-        return (
-            StatusCode::NOT_FOUND,
-            axum::Json(serde_json::json!({"error": "unknown project"})),
-        )
-            .into_response();
+        return crate::apierr::json(StatusCode::NOT_FOUND, "unknown project");
     };
     let Ok(q) = serde_urlencoded::from_str::<FlowParams>(&raw.unwrap_or_default()) else {
-        return (
-            StatusCode::BAD_REQUEST,
-            axum::Json(serde_json::json!({"error": "bad query"})),
-        )
-            .into_response();
+        return crate::apierr::json(StatusCode::BAD_REQUEST, "bad query");
     };
     let f = q.f.filters(&p.timezone);
     let map = crate::load_map(&state, &p.id).await;
@@ -821,11 +797,7 @@ pub(crate) async fn api_flows(
     .await
     {
         Ok(flow) => axum::Json(flow).into_response(),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            axum::Json(serde_json::json!({"error": e.to_string()})),
-        )
-            .into_response(),
+        Err(e) => crate::apierr::json(StatusCode::BAD_REQUEST, e.to_string()),
     }
 }
 

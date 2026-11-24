@@ -185,11 +185,7 @@ pub(crate) async fn api_forget(
     Path((project, who)): Path<(String, String)>,
 ) -> Response {
     if !auth::has_bearer(&state, &headers) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "admin bearer token required"})),
-        )
-            .into_response();
+        return crate::apierr::json(StatusCode::UNAUTHORIZED, "admin bearer token required");
     }
     let linked = linked_ids(&state, &project, &who).await;
     let (st, p, w) = (state.clone(), project.clone(), who.clone());
@@ -204,9 +200,7 @@ pub(crate) async fn api_forget(
             );
             Json(json!({ "forgotten": ids, "events_removed": events, "recordings_removed": replays })).into_response()
         }
-        Ok(Err(e)) => {
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))).into_response()
-        }
+        Ok(Err(e)) => crate::apierr::json(StatusCode::INTERNAL_SERVER_ERROR, e),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
@@ -245,11 +239,7 @@ pub(crate) async fn export(
     let events = match engine.with_params(&params).sql(&project, &sql).await {
         Ok(r) => r.rows,
         Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": e.to_string()})),
-            )
-                .into_response();
+            return crate::apierr::json(StatusCode::BAD_REQUEST, e.to_string());
         }
     };
     let person = state.meta.person(&project, &who).ok().flatten();
@@ -309,11 +299,7 @@ pub(crate) async fn audit_page(_: crate::access::Admin, State(state): State<AppS
 /// `GET /api/audit` (bearer).
 pub(crate) async fn api_audit(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if !auth::has_bearer(&state, &headers) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "admin bearer token required"})),
-        )
-            .into_response();
+        return crate::apierr::json(StatusCode::UNAUTHORIZED, "admin bearer token required");
     }
     let rows: Vec<_> = state
         .meta

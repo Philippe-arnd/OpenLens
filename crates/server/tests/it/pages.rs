@@ -810,3 +810,18 @@ async fn weekly_digest_compares_this_week_with_last() {
     .unwrap();
     assert!(html.contains("This week vs last") && !html.contains(" style="));
 }
+
+/// API errors carry a stable code from a closed list, with the message,
+/// and `error` for older clients (#312).
+#[tokio::test]
+async fn api_errors_carry_a_stable_code() {
+    let h = harness();
+    let r = get(&h, "/api/projects/nope/board", None, true).await;
+    assert_eq!(r.status(), StatusCode::NOT_FOUND);
+    let v: serde_json::Value =
+        serde_json::from_slice(&axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap())
+            .unwrap();
+    assert_eq!(v["code"], "not_found", "{v}");
+    assert_eq!(v["message"], v["error"]);
+    assert!(v["message"].as_str().is_some_and(|m| !m.is_empty()));
+}
