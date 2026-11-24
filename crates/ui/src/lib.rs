@@ -14,6 +14,7 @@ mod board;
 mod components;
 mod explore;
 mod features;
+mod glossary;
 mod goals;
 mod icons;
 mod manage;
@@ -84,6 +85,114 @@ fn update_notice(u: &Update) -> Markup {
             " · " a href=(href) { "Update available: " (u.tag) }
         }
     }
+}
+
+/// One sidebar entry (#402): a section whose pages are tabs. `tabs` are
+/// (path under `/p/<id>`, tab label, the page titles that belong to it).
+struct NavGroup {
+    label: &'static str,
+    icon: &'static str,
+    tabs: &'static [(&'static str, &'static str, &'static [&'static str])],
+}
+
+/// The project sidebar: eight entries instead of twenty-one (#402). Every
+/// page keeps its URL; a section opens its first tab.
+const NAV: &[NavGroup] = &[
+    NavGroup {
+        label: "Focus board",
+        icon: "board",
+        tabs: &[("", "Focus board", &["Focus board"])],
+    },
+    NavGroup {
+        label: "Ask",
+        icon: "spark",
+        tabs: &[("/ask", "Ask", &["Ask"])],
+    },
+    NavGroup {
+        label: "Live",
+        icon: "pulse",
+        tabs: &[
+            ("/live", "Live", &["Live"]),
+            ("/uptime", "Uptime", &["Uptime"]),
+            ("/timeline", "Timeline", &["Timeline"]),
+        ],
+    },
+    NavGroup {
+        label: "Behaviour",
+        icon: "events",
+        tabs: &[
+            ("/events", "Events", &["Events"]),
+            ("/pages", "Pages", &["Pages", "Heatmap"]),
+            ("/forms", "Forms", &["Forms"]),
+            ("/flows", "Feature flow", &["Feature flow"]),
+        ],
+    },
+    NavGroup {
+        label: "Quality",
+        icon: "alert",
+        tabs: &[
+            ("/errors", "Errors", &["Errors"]),
+            ("/replays", "Replays", &["Replays", "Replay"]),
+        ],
+    },
+    NavGroup {
+        label: "People",
+        icon: "globe",
+        tabs: &[
+            ("/audience", "Audience", &["Audience", "Person"]),
+            ("/acquisition", "Acquisition", &["Acquisition"]),
+            ("/churn", "Churn", &["Churn"]),
+            ("/goals", "Goals", &["Goals"]),
+        ],
+    },
+    NavGroup {
+        label: "Product",
+        icon: "layers",
+        tabs: &[
+            ("/features", "Feature map", &["Feature map"]),
+            ("/flags", "Flags", &["Flags"]),
+            ("/surveys", "Surveys", &["Surveys"]),
+            ("/tickets", "Tickets", &["Tickets", "New ticket"]),
+            ("/digest", "Digest", &["Weekly digest"]),
+        ],
+    },
+    NavGroup {
+        label: "Settings",
+        icon: "gear",
+        tabs: &[("/settings", "Settings", &["Settings"])],
+    },
+];
+
+/// The section and tab index a page title belongs to. The project's own
+/// name is the board's title.
+fn group_of(title: &str, project: &str) -> Option<&'static NavGroup> {
+    let title = if title == project {
+        "Focus board"
+    } else {
+        title
+    };
+    NAV.iter()
+        .find(|g| g.tabs.iter().any(|(_, _, titles)| titles.contains(&title)))
+}
+
+/// The tabs of the current page's section, when it has more than one.
+/// Plain links with `aria-current`, so the keyboard and no-JS just work.
+fn section_tabs(title: &str, p: &ProjectInfo<'_>) -> Markup {
+    let Some(g) = group_of(title, p.name).filter(|g| g.tabs.len() > 1) else {
+        return html! {};
+    };
+    let items: Vec<(String, &str, bool)> = g
+        .tabs
+        .iter()
+        .map(|(href, label, titles)| {
+            (
+                format!("/p/{}{href}", p.id),
+                *label,
+                titles.contains(&title),
+            )
+        })
+        .collect();
+    components::tabs(g.label, &items)
 }
 
 /// Format a count compactly: 1,284 / 12.9K / 4.2M.
@@ -262,31 +371,9 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                                 span.label { (p.name) }
                             }
                             nav.side-nav aria-label="Project" {
-                                @for (href, glyph, label) in [
-                                    ("", "board", "Focus board"),
-                                    ("/ask", "spark", "Ask"),
-                                    ("/live", "pulse", "Live"),
-                                    ("/uptime", "shield", "Uptime"),
-                                    ("/events", "events", "Events"),
-                                    ("/pages", "layers", "Pages"),
-                                    ("/errors", "alert", "Errors"),
-                                    ("/replays", "play", "Replays"),
-                                    ("/flags", "flag", "Flags"),
-                                    ("/surveys", "idea", "Surveys"),
-                                    ("/audience", "globe", "Audience"),
-                                    ("/acquisition", "route", "Acquisition"),
-                                    ("/forms", "task", "Forms"),
-                                    ("/churn", "ban", "Churn"),
-                                    ("/goals", "star", "Goals"),
-                                    ("/tickets", "task", "Tickets"),
-                                    ("/timeline", "clock", "Timeline"),
-                                    ("/flows", "funnel", "Feature flow"),
-                                    ("/features", "route", "Feature map"),
-                                    ("/digest", "mail", "Digest"),
-                                    ("/settings", "gear", "Settings"),
-                                ] {
-                                    a href={ "/p/" (p.id) (href) } title=(label) aria-current=[(title == label || (href.is_empty() && title == p.name)).then_some("page")] {
-                                        (icon(glyph)) span.label { (label) }
+                                @for g in NAV {
+                                    a href={ "/p/" (p.id) (g.tabs[0].0) } title=(g.label) aria-current=[group_of(title, p.name).is_some_and(|c| c.label == g.label).then_some("page")] {
+                                        (icon(g.icon)) span.label { (g.label) }
                                     }
                                 }
                             }
@@ -308,7 +395,10 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                         }
                     }
                     div.content {
-                        main { (body) }
+                        main {
+                            @if let Some(p) = project { (section_tabs(title, p)) }
+                            (body)
+                        }
                         footer {
                             "OpenLens " (env!("CARGO_PKG_VERSION")) " · map → measure → focus → act → compare"
                             @if let Some(u) = update_available() {
@@ -436,6 +526,67 @@ mod tests {
         assert!(sec.contains("class=\"update-security\""));
         assert!(sec.contains("Security update available: v0.5.0"));
         assert!(sec.contains("releases/tag/v0.5.0"));
+    }
+
+    #[test]
+    fn the_sidebar_has_distinct_icons_and_every_page_keeps_its_url() {
+        let icons: std::collections::HashSet<_> = NAV.iter().map(|g| g.icon).collect();
+        assert_eq!(icons.len(), NAV.len(), "one distinct icon per entry");
+        assert!(NAV.len() <= 8);
+        let paths: Vec<_> = NAV
+            .iter()
+            .flat_map(|g| g.tabs.iter().map(|t| t.0))
+            .collect();
+        for old in [
+            "",
+            "/ask",
+            "/live",
+            "/uptime",
+            "/events",
+            "/pages",
+            "/errors",
+            "/replays",
+            "/flags",
+            "/surveys",
+            "/audience",
+            "/acquisition",
+            "/forms",
+            "/churn",
+            "/goals",
+            "/tickets",
+            "/timeline",
+            "/flows",
+            "/features",
+            "/digest",
+            "/settings",
+        ] {
+            assert!(paths.contains(&old), "{old} is reachable");
+        }
+    }
+
+    #[test]
+    fn a_page_shows_its_section_tabs_with_the_current_one_marked() {
+        let p = ProjectInfo {
+            id: "default",
+            name: "Demo",
+            key: "k",
+        };
+        let html = section_tabs("Heatmap", &p).into_string();
+        assert!(html.contains("aria-label=\"Behaviour\""));
+        assert!(html.contains("href=\"/p/default/pages\" aria-current=\"page\""));
+        assert!(html.contains("href=\"/p/default/forms\""));
+        assert!(
+            section_tabs("Ask", &p).into_string().is_empty(),
+            "one page, no tabs"
+        );
+        assert!(
+            section_tabs("Demo", &p).into_string().is_empty(),
+            "the board"
+        );
+        assert_eq!(
+            group_of("Demo", "Demo").map(|g| g.label),
+            Some("Focus board")
+        );
     }
 
     #[test]

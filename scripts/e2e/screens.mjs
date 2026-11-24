@@ -53,6 +53,19 @@ const current = await tab.locator('.side-nav a[aria-current="page"]').count();
 if (current !== 1) problems.push(`the current page is not marked in the sidebar (${current})`);
 await tab.screenshot({ path: `${out}/events-collapsed-light.png`, fullPage: true });
 await tab.goto(`${server}/nav/expanded`);
+// The sidebar fits without scrolling at laptop sizes (#402): Collapse stays on screen.
+for (const [w, h] of [[1366, 768], [1280, 720]]) {
+  await tab.setViewportSize({ width: w, height: h });
+  await tab.goto(`${server}/p/default/events`);
+  const fit = await tab.evaluate(() => {
+    const side = document.querySelector(".side");
+    const c = document.querySelector(".side .collapse")?.getBoundingClientRect();
+    return { scrolls: side ? side.scrollHeight > side.clientHeight + 1 : true, visible: !!c && c.bottom <= innerHeight && c.height > 0 };
+  });
+  if (fit.scrolls || !fit.visible) problems.push(`sidebar does not fit at ${w}x${h} (scrolls: ${fit.scrolls}, collapse visible: ${fit.visible})`);
+  const tabs = await tab.locator('nav.section-tabs a[aria-current="page"]').count();
+  if (tabs !== 1) problems.push(`the current tab is not marked at ${w}x${h} (${tabs})`);
+}
 for (const g of global) {
   const r = await tab.goto(`${server}${g}`);
   if (!r || r.status() !== 200) problems.push(`${g}: HTTP ${r ? r.status() : "none"}`);

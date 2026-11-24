@@ -30,10 +30,56 @@ async fn fake_llm(seen: Arc<Mutex<Vec<String>>>) -> String {
             }
         }),
     );
+    let app = app.route(
+        "/v1/models",
+        axum::routing::get(|| async {
+            axum::Json(serde_json::json!({"data": [{"id": "nomic-embed-text"}, {"id": "qwen3"}]}))
+        }),
+    );
     let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = l.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(l, app).await.unwrap() });
     format!("http://{addr}/v1")
+}
+
+#[tokio::test]
+async fn a_preset_needs_only_the_provider_and_picks_the_models() {
+    let h = harness();
+    let owner = login_cookie(&h).await;
+    // A hosted preset without a key is refused, with the key format.
+    let (s, page) =
+        post_form_body(&h, "/settings/ai", &owner, "action=save&preset=anthropic").await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert!(page.contains("Paste the Anthropic API key"), "{page}");
+    // Ollama, pointed at a local server: the model comes from its list.
+    let base = fake_llm(Arc::new(Mutex::new(Vec::new()))).await;
+    let (s, page) = post_form_body(
+        &h,
+        "/settings/ai",
+        &owner,
+        &format!("action=save&preset=ollama&base_url={base}"),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{page}");
+    assert!(
+        page.contains("Connected: Ollama (local), model qwen3, fast model qwen3"),
+        "{page}"
+    );
+    assert!(
+        page.contains("<option value=\"qwen3\">"),
+        "the list feeds the model field"
+    );
+    assert!(page.contains("value=\"ollama\" selected"), "{page}");
+    // A provider that does not answer: saved with the fallback, and said so.
+    let (s, page) = post_form_body(
+        &h,
+        "/settings/ai",
+        &owner,
+        "action=save&preset=ollama&base_url=http://127.0.0.1:9/v1",
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert!(page.contains("the check failed"), "{page}");
 }
 
 #[tokio::test]
