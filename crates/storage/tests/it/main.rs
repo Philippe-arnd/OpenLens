@@ -274,3 +274,73 @@ fn a_resent_batch_is_dropped_but_its_ticket_covers_the_first_copy() {
     w.durable().wait(again).unwrap();
     assert_eq!(w.buffered(), 2, "the resent events were dropped");
 }
+
+/// Every stored `properties` value of project `p`.
+fn all_properties(root: &std::path::Path) -> Vec<String> {
+    use arrow::array::{Array, StringArray};
+    let mut out = Vec::new();
+    let pdir = openlens_storage::project_dir(root, "p").unwrap();
+    for day in std::fs::read_dir(pdir).unwrap() {
+        for f in std::fs::read_dir(day.unwrap().path()).unwrap() {
+            let f = f.unwrap().path();
+            if f.extension().is_none_or(|x| x != "parquet") {
+                continue;
+            }
+            let r = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(
+                std::fs::File::open(&f).unwrap(),
+            )
+            .unwrap()
+            .build()
+            .unwrap();
+            for b in r {
+                let b = b.unwrap();
+                let c = b
+                    .column_by_name("properties")
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap()
+                    .clone();
+                out.extend((0..c.len()).map(|i| c.value(i).to_owned()));
+            }
+        }
+    }
+    out
+}
+
+/// Clicks older than 30 days lose their label and position once the day
+/// is rolled up (#324); `$rage` and other events stay, and a day is read
+/// again only when its files change.
+#[test]
+fn old_clicks_are_trimmed_once_rolled_up() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let now = Utc::now();
+    let old = now - Duration::days(40);
+    let (mut w, _) = Writer::open(root, FlushPolicy::default()).unwrap();
+    let mut click = ev("p", old);
+    click.event = "$click".into();
+    click.properties = r#"{"$text":"Pay Ada","$x":0.5,"$y":120,"$vw":1280,"$rage":true}"#.into();
+    let mut view = ev("p", old);
+    view.properties = r#"{"$text":"kept"}"#.into();
+    w.append(&[click, view]).unwrap();
+    w.flush().unwrap();
+    let day = old.date_naive();
+    // No rollup yet: nothing is trimmed.
+    assert_eq!(openlens_storage::trim_clicks(root, "p", now).unwrap(), 0);
+    let tables: Vec<_> = openlens_storage::rollup::tables()
+        .into_iter()
+        .map(|(n, s)| (n, arrow::array::RecordBatch::new_empty(s)))
+        .collect();
+    let g = openlens_storage::rollup::generation();
+    assert!(openlens_storage::rollup::write(root, "p", day, g, &tables).unwrap());
+    assert_eq!(openlens_storage::trim_clicks(root, "p", now).unwrap(), 1);
+    assert_eq!(openlens_storage::trim_clicks(root, "p", now).unwrap(), 0);
+    let props = all_properties(root);
+    assert!(props.contains(&r#"{"$rage":true}"#.to_owned()), "{props:?}");
+    assert!(
+        props.contains(&r#"{"$text":"kept"}"#.to_owned()),
+        "{props:?}"
+    );
+    assert_eq!(count_rows(root, "p").unwrap(), 2);
+}

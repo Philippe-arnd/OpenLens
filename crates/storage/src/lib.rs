@@ -723,35 +723,142 @@ fn rewrite_files(
     let mut total = 0;
     for date in fs::read_dir(&pdir)? {
         let date = date?.path();
-        if !date.is_dir() {
-            continue;
-        }
-        let files: Vec<PathBuf> = fs::read_dir(&date)?
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| p.extension().is_some_and(|x| x == "parquet"))
-            .collect();
-        for file in files {
-            let reader = ParquetRecordBatchReaderBuilder::try_new(File::open(&file)?)?.build()?;
-            let mut out = Vec::new();
-            let mut changed = 0;
-            for b in reader {
-                let (nb, n) = f(&b?)?;
-                changed += n;
-                out.push(nb);
-            }
-            if changed == 0 {
-                continue;
-            }
-            total += changed;
-            let merged = arrow::compute::concat_batches(&event_schema(), &out)?;
-            if merged.num_rows() > 0 {
-                write_parquet(&date, &merged)?;
-            }
-            fs::remove_file(&file)?;
-            sync_dir(&date)?;
+        if date.is_dir() {
+            total += rewrite_day(&date, &mut f)?;
         }
     }
     Ok(total)
+}
+
+/// [`rewrite_files`] for one day directory.
+fn rewrite_day(
+    date: &Path,
+    f: &mut impl FnMut(&RecordBatch) -> Result<(RecordBatch, usize)>,
+) -> Result<usize> {
+    let mut total = 0;
+    let files: Vec<PathBuf> = fs::read_dir(date)?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "parquet"))
+        .collect();
+    for file in files {
+        let reader = ParquetRecordBatchReaderBuilder::try_new(File::open(&file)?)?.build()?;
+        let mut out = Vec::new();
+        let mut changed = 0;
+        for b in reader {
+            let (nb, n) = f(&b?)?;
+            changed += n;
+            out.push(nb);
+        }
+        if changed == 0 {
+            continue;
+        }
+        total += changed;
+        let merged = arrow::compute::concat_batches(&event_schema(), &out)?;
+        if merged.num_rows() > 0 {
+            write_parquet(date, &merged)?;
+        }
+        fs::remove_file(&file)?;
+        sync_dir(date)?;
+    }
+    Ok(total)
+}
+
+/// Days a raw click keeps its label and position (#324). After that the
+/// day's `click_q`, `label_q` and `scroll_q` rollups hold them; the event
+/// row and `$rage` stay.
+pub const CLICK_DETAIL_DAYS: i64 = 30;
+
+/// Click properties dropped after [`CLICK_DETAIL_DAYS`].
+const CLICK_DETAIL: [&str; 7] = ["$text", "$tag", "$id", "$href", "$x", "$y", "$vw"];
+
+const TRIMMED: &str = ".clicks-trimmed";
+
+/// Drop the label and position of `$click` events older than
+/// [`CLICK_DETAIL_DAYS`], once the day has its rollups. Returns the clicks
+/// trimmed. A day is read again only when its files changed. Same
+/// preconditions as [`erase`].
+pub fn trim_clicks(root: &Path, project: &str, now: DateTime<Utc>) -> Result<usize> {
+    let pdir = project_dir(root, project)?;
+    if !pdir.is_dir() {
+        return Ok(0);
+    }
+    let cutoff = (now - chrono::Duration::days(CLICK_DETAIL_DAYS)).date_naive();
+    let mut total = 0;
+    for entry in fs::read_dir(&pdir)? {
+        let date = entry?.path();
+        let Some(day) = date
+            .file_name()
+            .and_then(|s| s.to_str())
+            .and_then(|n| n.strip_prefix("date="))
+            .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+        else {
+            continue;
+        };
+        if !date.is_dir() || day >= cutoff || !rollup::has(root, project, day)? {
+            continue;
+        }
+        let listing = || -> Result<String> {
+            let mut names: Vec<String> = fs::read_dir(&date)?
+                .filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .filter(|n| n.ends_with(".parquet"))
+                .collect();
+            names.sort();
+            Ok(names.join("\n"))
+        };
+        if fs::read_to_string(date.join(TRIMMED)).ok() == Some(listing()?) {
+            continue;
+        }
+        total += rewrite_day(&date, &mut trim_batch)?;
+        fs::write(date.join(TRIMMED), listing()?)?;
+    }
+    Ok(total)
+}
+
+/// `batch` with the click detail removed from `$click` properties.
+fn trim_batch(b: &RecordBatch) -> Result<(RecordBatch, usize)> {
+    let (Some(ev), Some((idx, props))) = (
+        b.column_by_name("event")
+            .and_then(|c| c.as_any().downcast_ref::<arrow::array::StringArray>()),
+        b.schema().index_of("properties").ok().and_then(|i| {
+            b.column(i)
+                .as_any()
+                .downcast_ref::<arrow::array::StringArray>()
+                .map(|c| (i, c.clone()))
+        }),
+    ) else {
+        return Ok((b.clone(), 0));
+    };
+    let mut changed = 0;
+    let out: arrow::array::StringArray = (0..b.num_rows())
+        .map(|i| {
+            if props.is_null(i) {
+                return None;
+            }
+            let raw = props.value(i);
+            if ev.is_null(i) || ev.value(i) != "$click" {
+                return Some(raw.to_owned());
+            }
+            let Ok(serde_json::Value::Object(mut m)) = serde_json::from_str(raw) else {
+                return Some(raw.to_owned());
+            };
+            let before = m.len();
+            for k in CLICK_DETAIL {
+                m.remove(k);
+            }
+            if m.len() == before {
+                return Some(raw.to_owned());
+            }
+            changed += 1;
+            Some(serde_json::Value::Object(m).to_string())
+        })
+        .collect();
+    if changed == 0 {
+        return Ok((b.clone(), 0));
+    }
+    let mut cols = b.columns().to_vec();
+    cols[idx] = Arc::new(out) as ArrayRef;
+    Ok((RecordBatch::try_new(b.schema(), cols)?, changed))
 }
 
 /// Keep the first row of each uuid (a resent event is stored once).

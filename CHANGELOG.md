@@ -6,6 +6,8 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Added
 
+- **Page rollups, shorter click detail** (#324): each closed day is also rolled up into `click_q`, `label_q` and `scroll_q`. After 30 days, clicks keep only their page, time and rage flag: their label and position go (D-028).
+
 - **Rollups in the S3 copy** (D-026): the hourly S3 copy now includes the daily rollups, which can no longer be rebuilt once their events expire, and sends a day again when an erasure rewrites it.
 
 - **Access by type, the last pages** (#339): storage and backups, API tokens, AI settings, the audit log, SQL, exports and project creation take `Admin` or `ProjectWrite` instead of their own checks. The admin token now opens admin pages too, as it already did for project changes.

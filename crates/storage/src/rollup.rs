@@ -3,7 +3,7 @@
 //! this module owns where they live and how people are erased from them.
 //!
 //! Layout: `rollups/v<ROLLUP_VERSION>/project=<p>/date=<YYYY-MM-DD>/`
-//! holding `person_q.parquet` and `metric_q.parquet`. Rollups outlive the
+//! holding one file per table of [`tables`] (`person_q.parquet`…). Rollups outlive the
 //! events (D-026), so a day past retention can never be rolled up again:
 //! change the schema by adding nullable columns only, and a new version
 //! must convert the old tree, never drop it.
@@ -86,9 +86,67 @@ pub fn metric_schema() -> SchemaRef {
     ]))
 }
 
-/// The two rollup tables: name and schema.
-pub fn tables() -> [(&'static str, SchemaRef); 2] {
-    [("person_q", person_schema()), ("metric_q", metric_schema())]
+/// The dimensions every page rollup is split by.
+fn page_dims() -> Vec<Field> {
+    vec![
+        Field::new("path", DataType::Utf8, true),
+        Field::new("environment", DataType::Utf8, true),
+        Field::new("release", DataType::Utf8, true),
+        Field::new("role", DataType::Utf8, true),
+    ]
+}
+
+fn with_dims(rest: Vec<Field>) -> SchemaRef {
+    let mut f = page_dims();
+    f.extend(rest);
+    Arc::new(Schema::new(f))
+}
+
+/// `click_q` (#324): clicks per page and click-map cell (50 columns of 2 %
+/// of the viewport, 20-pixel rows), with rage clicks and the viewport
+/// widths to average.
+pub fn click_schema() -> SchemaRef {
+    with_dims(vec![
+        Field::new("cx", DataType::Int64, true),
+        Field::new("cy", DataType::Int64, true),
+        Field::new("clicks", DataType::Int64, true),
+        Field::new("rages", DataType::Int64, true),
+        Field::new("vw_sum", DataType::Float64, true),
+        Field::new("vw_n", DataType::Int64, true),
+    ])
+}
+
+/// `label_q` (#324): the most clicked labels of each page (at most
+/// [`TOP_LABELS`] rows per page and day), the hotspots of the pages view.
+pub fn label_schema() -> SchemaRef {
+    with_dims(vec![
+        Field::new("label", DataType::Utf8, true),
+        Field::new("clicks", DataType::Int64, true),
+        Field::new("rages", DataType::Int64, true),
+    ])
+}
+
+/// `scroll_q` (#324): sessions per page by deepest scroll, in 10 % steps
+/// (`depth` 0 to 10), which add up exactly across days.
+pub fn scroll_schema() -> SchemaRef {
+    with_dims(vec![
+        Field::new("depth", DataType::Int64, true),
+        Field::new("sessions", DataType::Int64, true),
+    ])
+}
+
+/// Labels kept per page and day in `label_q`.
+pub const TOP_LABELS: usize = 20;
+
+/// The rollup tables: name and schema.
+pub fn tables() -> [(&'static str, SchemaRef); 5] {
+    [
+        ("person_q", person_schema()),
+        ("metric_q", metric_schema()),
+        ("click_q", click_schema()),
+        ("label_q", label_schema()),
+        ("scroll_q", scroll_schema()),
+    ]
 }
 
 fn tree(root: &Path) -> PathBuf {
@@ -229,6 +287,17 @@ pub(crate) fn erase(root: &Path, project: &str, ids: &HashSet<String>) -> Result
 mod tests {
     use super::*;
 
+    /// Every rollup table, empty, with `person_q` replaced when given.
+    fn all(person: Option<RecordBatch>) -> Vec<(&'static str, RecordBatch)> {
+        tables()
+            .into_iter()
+            .map(|(n, schema)| match (&person, n) {
+                (Some(b), "person_q") => (n, b.clone()),
+                _ => (n, RecordBatch::new_empty(schema)),
+            })
+            .collect()
+    }
+
     fn day(s: &str) -> NaiveDate {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
     }
@@ -245,32 +314,12 @@ mod tests {
             missing(dir.path(), "p", now).unwrap(),
             [day("2026-03-01"), day("2026-03-08")]
         );
-        let empty = RecordBatch::new_empty(person_schema());
-        let metric = RecordBatch::new_empty(metric_schema());
         let g = generation();
-        assert!(
-            write(
-                dir.path(),
-                "p",
-                day("2026-03-01"),
-                g,
-                &[("person_q", empty.clone()), ("metric_q", metric.clone())]
-            )
-            .unwrap()
-        );
+        assert!(write(dir.path(), "p", day("2026-03-01"), g, &all(None)).unwrap());
         assert_eq!(missing(dir.path(), "p", now).unwrap(), [day("2026-03-08")]);
         // An erasure in between: the stale rollup is not written.
         bump();
-        assert!(
-            !write(
-                dir.path(),
-                "p",
-                day("2026-03-08"),
-                g,
-                &[("person_q", empty), ("metric_q", metric)]
-            )
-            .unwrap()
-        );
+        assert!(!write(dir.path(), "p", day("2026-03-08"), g, &all(None)).unwrap());
         assert!(!has(dir.path(), "p", day("2026-03-08")).unwrap());
     }
 
@@ -299,14 +348,10 @@ mod tests {
             )
             .unwrap()
         };
-        let metric = RecordBatch::new_empty(metric_schema());
         // The 1st is past retention (no events left), the 2nd still stored.
         fs::create_dir_all(root.join("events/project=p/date=2026-01-02")).unwrap();
         for d in ["2026-01-01", "2026-01-02"] {
-            let tables = [
-                ("person_q", batch(&["bob", "ann"])),
-                ("metric_q", metric.clone()),
-            ];
+            let tables = all(Some(batch(&["bob", "ann"])));
             assert!(write(root, "p", day(d), generation(), &tables).unwrap());
         }
         let ids: HashSet<String> = ["bob".to_owned()].into();

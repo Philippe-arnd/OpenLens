@@ -481,3 +481,70 @@ async fn rollups_match_raw_queries_in_every_zone() {
         .unwrap();
     assert_eq!(empty.rows[0]["n"], 0);
 }
+
+/// The page rollups (#324) hold the click map, the hotspots and the scroll
+/// depth of a day as the raw events give them.
+#[tokio::test]
+async fn page_rollups_match_the_raw_clicks_and_scrolls() {
+    use chrono::{DateTime, NaiveDate};
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let t: DateTime<Utc> = "2026-03-01T10:00:00Z".parse().unwrap();
+    let mut evs = Vec::new();
+    for (i, (x, y, text, rage)) in [
+        (0.10, 40, "Pay", false),
+        (0.11, 45, "Pay", true),
+        (0.90, 400, "Help", false),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let mut e = ev("a", "member", 0);
+        e.event = "$click".into();
+        e.timestamp = t + Duration::seconds(i as i64);
+        e.received_at = e.timestamp;
+        e.path = Some("/bill".into());
+        e.properties =
+            format!(r#"{{"$text":"{text}","$x":{x},"$y":{y},"$vw":1000,"$rage":{rage}}}"#);
+        evs.push(e);
+    }
+    for (s, d) in [("s1", 35), ("s1", 72), ("s2", 100)] {
+        let mut e = ev("a", "member", 0);
+        e.event = "$scroll".into();
+        e.session_id = Some(s.into());
+        e.timestamp = t;
+        e.received_at = t;
+        e.path = Some("/bill".into());
+        e.properties = format!(r#"{{"$depth":{d}}}"#);
+        evs.push(e);
+    }
+    w.append(&evs).unwrap();
+    w.flush().unwrap();
+    let q = QueryEngine::new(dir.path(), Limits::default());
+    let batches = q.rollup_day("a", "2026-03-01").await.unwrap();
+    let d = NaiveDate::parse_from_str("2026-03-01", "%Y-%m-%d").unwrap();
+    let g = openlens_storage::rollup::generation();
+    assert!(openlens_storage::rollup::write(dir.path(), "a", d, g, &batches).unwrap());
+
+    let one = |sql: &'static str| {
+        let q = q.clone();
+        async move {
+            let r = q.sql("a", sql).await.unwrap();
+            serde_json::Value::Array(r.rows.into_iter().map(serde_json::Value::Object).collect())
+                .to_string()
+        }
+    };
+    assert_eq!(
+        one("SELECT cx, cy, sum(clicks) AS n, sum(rages) AS r, sum(vw_sum) / sum(vw_n) AS vw FROM click_q GROUP BY 1, 2 ORDER BY 1, 2").await,
+        r#"[{"cx":5,"cy":2,"n":2,"r":1,"vw":1000.0},{"cx":45,"cy":20,"n":1,"r":0,"vw":1000.0}]"#
+    );
+    assert_eq!(
+        one("SELECT label, sum(clicks) AS n, sum(rages) AS r FROM label_q GROUP BY 1 ORDER BY 1")
+            .await,
+        r#"[{"label":"Help","n":1,"r":0},{"label":"Pay","n":2,"r":1}]"#
+    );
+    assert_eq!(
+        one("SELECT depth, sum(sessions) AS n FROM scroll_q GROUP BY 1 ORDER BY 1").await,
+        r#"[{"depth":7,"n":1},{"depth":10,"n":1}]"#
+    );
+}
