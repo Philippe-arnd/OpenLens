@@ -710,7 +710,7 @@ async fn new_data_in_another_project_keeps_this_board_cached() {
 async fn instance_pages_keep_the_project_menu_and_a_breadcrumb() {
     let h = harness();
     let owner = login_cookie(&h).await;
-    for page in ["/settings/ai", "/settings/storage", "/team", "/me"] {
+    for page in ["/settings/ai", "/settings/storage", "/users", "/me"] {
         let html = body_text(get(&h, page, Some(&owner), false).await).await;
         // The only project's menu (#403), the instance tabs and the trail.
         assert!(html.contains("class=\"side-nav\""), "{page}");

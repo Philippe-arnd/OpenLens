@@ -200,7 +200,7 @@ const INSTANCE_TABS: &[(&str, &str, &[&str])] = &[
     ("/settings/tokens", "API tokens", &["API tokens"]),
     ("/settings/ai", "AI", &["AI"]),
     ("/settings/storage", "Storage", &["Storage and backups"]),
-    ("/team", "Team", &["Team"]),
+    ("/users", "Team", &["Team"]),
     ("/me", "My profile", &["My profile"]),
 ];
 
