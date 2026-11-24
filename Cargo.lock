@@ -2367,7 +2367,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "openlens"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "axum",
  "chrono",
@@ -2385,7 +2385,7 @@ dependencies = [
 
 [[package]]
 name = "openlens-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "clap",
@@ -2401,7 +2401,7 @@ dependencies = [
 
 [[package]]
 name = "openlens-engine"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -2421,7 +2421,7 @@ dependencies = [
 
 [[package]]
 name = "openlens-errors"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2431,7 +2431,7 @@ dependencies = [
 
 [[package]]
 name = "openlens-event"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "openlens-testkit",
@@ -2443,7 +2443,7 @@ dependencies = [
 
 [[package]]
 name = "openlens-featuremap"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "openlens-sqlgen",
  "serde",
@@ -2453,7 +2453,7 @@ dependencies = [
 
 [[package]]
 name = "openlens-flags"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2462,14 +2462,14 @@ dependencies = [
 
 [[package]]
 name = "openlens-mcp"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "openlens-meta"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "hex",
@@ -2483,7 +2483,7 @@ dependencies = [
 
 [[package]]
 name = "openlens-query"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "arrow",
  "chrono",
@@ -2504,7 +2504,7 @@ dependencies = [
 
 [[package]]
 name = "openlens-replay"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "serde",
@@ -2516,7 +2516,7 @@ dependencies = [
 
 [[package]]
 name = "openlens-server"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "axum",
  "chrono",
@@ -2563,11 +2563,11 @@ dependencies = [
 
 [[package]]
 name = "openlens-sqlgen"
-version = "0.3.0"
+version = "0.4.0"
 
 [[package]]
 name = "openlens-storage"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "arrow",
  "chrono",
@@ -2582,7 +2582,7 @@ dependencies = [
 
 [[package]]
 name = "openlens-testkit"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "openlens-event",
@@ -2590,7 +2590,7 @@ dependencies = [
 
 [[package]]
 name = "openlens-ui"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -3942,7 +3942,7 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
 name = "xtask"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "openlens-meta",
