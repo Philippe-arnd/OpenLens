@@ -198,3 +198,11 @@ Append-only. Each entry: id, date, decision, why, consequences.
 
 **Consequences:** no setting (D-014). The S3 cold tier is part B of #326.
 
+## D-030 (2026-11-24, agent for #312) The API contract: `/api/v1`, a typed route table, closed error codes
+
+**Decision:** `/api/v1/...` is the versioned API, and `/api/...` is the same routes under an alias that stays. The contract is a hand-written table in `crates/server/src/openapi.rs` (method, path, token scope, summary), served as OpenAPI 3.1 at `/api/openapi.json`. A test fails when the table and the routes in the source differ. Errors are `{"code", "message"}` with a code from a closed list (`crates/server/src/apierr.rs`), plus `error` for one release. The ingestion endpoints keep answering SDKs with status codes only.
+
+**Why:** a table checked against the source costs less than annotating every handler with a new dependency, and it cannot drift. Clients act on codes, so messages can improve without breaking them.
+
+**Consequences:** a new API route needs a line in the table, and CI says so. Removing a route or a field from `/api/v1` follows D-024: one minor release of deprecation first.
+

@@ -78,6 +78,7 @@ use Access::*;
 
 const ROUTES: &[(&str, &str, Access)] = &[
     ("GET", "/api/projects", Api),
+    ("GET", "/api/openapi.json", Public),
     ("DELETE", "/api/projects/{project}", Api),
     ("DELETE", "/api/projects/{project}/people/{who}/forget", Api),
     ("DELETE", "/api/users/{id}", Api),
@@ -272,7 +273,7 @@ const ROUTES: &[(&str, &str, Access)] = &[
 ];
 
 /// `(method, path)` of every `.route(…)` in the server's source.
-fn routes_in_source() -> std::collections::BTreeSet<(String, String)> {
+pub(crate) fn routes_in_source() -> std::collections::BTreeSet<(String, String)> {
     let mut out = std::collections::BTreeSet::new();
     // Every source file, modules in subdirectories included (#307).
     let mut dirs = vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src")];
@@ -761,4 +762,42 @@ async fn admin_pages_take_the_owner_token_and_refuse_viewers() {
             "{uri}"
         );
     }
+}
+
+/// The OpenAPI document lists every `/api` route of the source and nothing
+/// else, and `/api/v1` serves the same routes (#312).
+#[tokio::test]
+async fn the_api_contract_matches_the_routes_and_v1_serves_them() {
+    let h = harness();
+    let r = get(&h, "/api/v1/openapi.json", None, false).await;
+    assert_eq!(r.status(), StatusCode::OK);
+    let doc: serde_json::Value =
+        serde_json::from_slice(&axum::body::to_bytes(r.into_body(), 1 << 22).await.unwrap())
+            .unwrap();
+    let mut documented = std::collections::BTreeSet::new();
+    for (path, ops) in doc["paths"].as_object().unwrap() {
+        for method in ops.as_object().unwrap().keys() {
+            documented.insert((method.to_ascii_uppercase(), format!("/api{path}")));
+        }
+    }
+    let in_source: std::collections::BTreeSet<(String, String)> = routes_in_source()
+        .into_iter()
+        .filter(|(_, p)| p.starts_with("/api/"))
+        .collect();
+    assert_eq!(
+        documented, in_source,
+        "openapi.rs ROUTES and the source differ"
+    );
+    // The versioned prefix answers like the alias.
+    let a = get(&h, "/api/projects", None, true).await;
+    let b = get(&h, "/api/v1/projects", None, true).await;
+    assert_eq!((a.status(), b.status()), (StatusCode::OK, StatusCode::OK));
+    let body = |r: axum::response::Response| async {
+        axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap()
+    };
+    assert_eq!(body(a).await, body(b).await);
+    assert_eq!(
+        get(&h, "/api/v1/projects", None, false).await.status(),
+        StatusCode::UNAUTHORIZED
+    );
 }

@@ -28,6 +28,7 @@ mod llm;
 mod manage;
 pub mod metrics;
 mod oidc;
+mod openapi;
 mod privacy;
 mod replay;
 mod reword;
@@ -114,7 +115,7 @@ pub fn router(state: AppState) -> Router {
             axum::http::StatusCode::REQUEST_TIMEOUT,
             Duration::from_secs(10),
         ));
-    Router::new()
+    let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(metrics::readyz))
         .route("/metrics", get(metrics::metrics))
@@ -125,6 +126,7 @@ pub fn router(state: AppState) -> Router {
         .route("/agents.md", get(agents_guide))
         .merge(capture)
         .route("/api/projects/{project}/digest", get(digest::api))
+        .route("/api/openapi.json", get(openapi::serve))
         .route("/oidc/start", get(oidc::start))
         .route("/oidc/callback", get(oidc::callback))
         .merge(api::routes())
@@ -165,7 +167,17 @@ pub fn router(state: AppState) -> Router {
         .layer(tower_http::request_id::SetRequestIdLayer::x_request_id(
             tower_http::request_id::MakeRequestUuid,
         ))
-        .with_state(state)
+        .with_state(state);
+    // `/api/v1/...` is the versioned prefix of the same routes (#312): the
+    // request goes through the whole app again as `/api/...`.
+    let v1 = tower::ServiceExt::map_request(app.clone(), |mut req: axum::extract::Request| {
+        let rest = req.uri().path_and_query().map_or("/", |p| p.as_str());
+        if let Ok(uri) = format!("/api{rest}").parse() {
+            *req.uri_mut() = uri;
+        }
+        req
+    });
+    app.nest_service("/api/v1", v1)
 }
 
 /// The browser SDK, embedded at build time (`sdk/js/dist`, committed).
