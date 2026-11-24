@@ -180,8 +180,11 @@ pub(crate) async fn send_mail(
     let msg = b.body(body.to_owned()).map_err(|e| e.to_string())?;
     let url = url.to_owned();
     tokio::task::spawn_blocking(move || {
+        // A server that accepts and never answers gives up after 30 s,
+        // instead of holding a blocking thread for lettre's default (#311).
         let transport = SmtpTransport::from_url(&url)
             .map_err(|e| e.to_string())?
+            .timeout(Some(std::time::Duration::from_secs(30)))
             .build();
         transport.send(&msg).map(|_| ()).map_err(|e| e.to_string())
     })

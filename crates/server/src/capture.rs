@@ -77,19 +77,36 @@ pub(crate) async fn project_for_key(
 
 /// Token buckets: `rate` tokens a second, up to `burst`.
 #[derive(Default)]
-struct Buckets {
+pub(crate) struct Buckets {
     map: HashMap<String, (f64, std::time::Instant)>,
 }
 
+/// Keys a [`Buckets`] holds at most (then idle ones go, then the oldest).
+const MAX_BUCKETS: usize = 50_000;
+
 impl Buckets {
+    /// Keys held now.
+    pub(crate) fn len(&self) -> usize {
+        self.map.len()
+    }
+
     /// Take `cost` tokens from `key`'s bucket; false when it is empty.
     fn take(&mut self, key: &str, cost: f64, rate: f64, burst: f64) -> bool {
         let now = std::time::Instant::now();
-        if self.map.len() > 50_000 {
+        if self.map.len() > MAX_BUCKETS {
             // Forget idle keys (a full bucket is the same as no entry).
             self.map.retain(|_, (tokens, at)| {
                 *tokens + now.duration_since(*at).as_secs_f64() * rate < burst
             });
+            // Still too many busy keys (a flood from many addresses): keep
+            // the most recently seen, so memory stays bounded (#309).
+            if self.map.len() > MAX_BUCKETS {
+                let mut seen: Vec<std::time::Instant> =
+                    self.map.values().map(|(_, at)| *at).collect();
+                seen.sort_unstable();
+                let cut = seen[seen.len() - MAX_BUCKETS / 2];
+                self.map.retain(|_, (_, at)| *at >= cut);
+            }
         }
         let (tokens, at) = self.map.entry(key.to_owned()).or_insert((burst, now));
         *tokens = (*tokens + now.duration_since(*at).as_secs_f64() * rate).min(burst);
@@ -152,22 +169,21 @@ pub(crate) fn client_ip(peer: &Peer, headers: &HeaderMap) -> Option<String> {
 }
 
 /// Whether this client sent too many requests (checked before any parsing).
-pub(crate) fn ip_limited(peer: &Peer, headers: &HeaderMap) -> bool {
-    use std::sync::{Mutex, OnceLock};
-    static IPS: OnceLock<Mutex<Buckets>> = OnceLock::new();
+pub(crate) fn ip_limited(state: &AppState, peer: &Peer, headers: &HeaderMap) -> bool {
     let Some(ip) = client_ip(peer, headers) else {
         return false;
     };
-    !IPS.get_or_init(Mutex::default)
+    !state
+        .caches
+        .ip_buckets
         .lock()
         .is_ok_and(|mut b| b.take(&ip, 1.0, IP_RATE, IP_BURST))
 }
 
-fn key_limited(key: &str, events: usize) -> bool {
-    use std::sync::{Mutex, OnceLock};
-    static KEYS: OnceLock<Mutex<Buckets>> = OnceLock::new();
-    !KEYS
-        .get_or_init(Mutex::default)
+fn key_limited(state: &AppState, key: &str, events: usize) -> bool {
+    !state
+        .caches
+        .key_buckets
         .lock()
         .is_ok_and(|mut b| b.take(key, events as f64, KEY_RATE, KEY_BURST))
 }
@@ -216,9 +232,7 @@ pub(crate) fn disk_full(state: &AppState) -> Option<Response> {
     if !space_low(available, total) {
         return None;
     }
-    use std::sync::Mutex;
-    static LAST: Mutex<Option<std::time::Instant>> = Mutex::new(None);
-    if let Ok(mut last) = LAST.lock()
+    if let Ok(mut last) = state.caches.disk_logged.lock()
         && last.is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(60))
     {
         *last = Some(std::time::Instant::now());
@@ -269,7 +283,7 @@ pub(crate) async fn capture(
     use crate::metrics::Metrics;
     let m = state.metrics.clone();
     Metrics::add(&m.capture_requests, 1);
-    if ip_limited(&peer, &headers) {
+    if ip_limited(&state, &peer, &headers) {
         Metrics::add(&m.rate_limited, 1);
         return too_many();
     }
@@ -317,7 +331,7 @@ pub(crate) async fn capture(
     // Direct local traffic (server SDKs on the host, benchmarks) has no
     // per-key budget either.
     if client_ip(&peer, &headers).is_some()
-        && key_limited(&project.api_key, normalized.events.len())
+        && key_limited(&state, &project.api_key, normalized.events.len())
     {
         tracing::warn!(project = %project.id, "capture rate limited");
         Metrics::add(&m.rate_limited, 1);
@@ -334,7 +348,7 @@ pub(crate) async fn capture(
             ev.environment = BOT_ENVIRONMENT.to_owned();
         }
     }
-    crate::cookieless::resolve(&state.meta, &mut normalized.events, &headers);
+    crate::cookieless::resolve(&state, &mut normalized.events, &headers);
     // Forgotten people stay forgotten (#230).
     normalized.events.retain(|e| {
         !state
@@ -416,6 +430,17 @@ mod tests {
         assert!(b.take("other", 10.0, 1.0, 10.0), "buckets are per key");
         std::thread::sleep(std::time::Duration::from_millis(1100));
         assert!(b.take("k", 1.0, 1.0, 10.0), "refilled at the rate");
+    }
+
+    #[test]
+    fn buckets_stay_bounded_under_a_flood_of_addresses() {
+        let mut b = super::Buckets::default();
+        // Every key spends tokens, so none is idle and the first sweep
+        // alone would keep them all.
+        for i in 0..(super::MAX_BUCKETS + 5_000) {
+            b.take(&format!("ip-{i}"), 5.0, 1.0, 10.0);
+            assert!(b.len() <= super::MAX_BUCKETS + 1);
+        }
     }
 
     #[test]

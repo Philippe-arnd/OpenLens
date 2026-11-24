@@ -5,17 +5,12 @@
 //! within 30 minutes. The salt changes every UTC day and the previous one
 //! is overwritten, so a visitor can't be followed from one day to the next.
 
-use std::collections::HashMap;
-use std::sync::Mutex;
-
 use axum::http::HeaderMap;
 use ring::rand::{SecureRandom, SystemRandom};
 use sha2::{Digest, Sha256};
 
 const PLACEHOLDER: &str = "$cookieless";
 const SESSION_GAP: i64 = 30 * 60;
-
-static SESSIONS: Mutex<Option<HashMap<String, (String, i64)>>> = Mutex::new(None);
 
 pub(crate) fn random_hex(n: usize) -> String {
     let mut b = vec![0u8; n];
@@ -44,7 +39,7 @@ pub(crate) fn visitor(salt: &str, project: &str, ip: &str, ua: &str) -> String {
 
 /// Replace the placeholders of cookieless events (no-op otherwise).
 pub(crate) fn resolve(
-    meta: &openlens_meta::Meta,
+    state: &crate::AppState,
     events: &mut [openlens_event::Event],
     headers: &HeaderMap,
 ) {
@@ -65,24 +60,20 @@ pub(crate) fn resolve(
     };
     // Without an address (no proxy in front), each request is its own visitor.
     let id = match crate::audience::client_ip(headers) {
-        Some(ip) => visitor(&salt(meta, &today), &project, &ip.to_string(), ua),
+        Some(ip) => visitor(&salt(&state.meta, &today), &project, &ip.to_string(), ua),
         None => format!("ck_{}", random_hex(10)),
     };
-    let sid = {
-        let Ok(mut g) = SESSIONS.lock() else { return };
-        let m = g.get_or_insert_with(HashMap::new);
-        let t = now.timestamp();
-        if m.len() > 100_000 {
-            m.retain(|_, (_, last)| t - *last < SESSION_GAP);
-        }
-        let e = m
-            .entry(id.clone())
-            .or_insert_with(|| (format!("cks_{}", random_hex(8)), t));
+    let t = now.timestamp();
+    let Some(sid) = state.caches.cookieless.update(id.clone(), |e| {
+        let mut e = e.unwrap_or_else(|| (format!("cks_{}", random_hex(8)), t));
         if t - e.1 > SESSION_GAP {
             e.0 = format!("cks_{}", random_hex(8));
         }
         e.1 = t;
-        e.0.clone()
+        let sid = e.0.clone();
+        (Some(e), sid)
+    }) else {
+        return;
     };
     for e in events.iter_mut() {
         if e.distinct_id == PLACEHOLDER {

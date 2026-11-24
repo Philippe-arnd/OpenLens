@@ -37,6 +37,7 @@ fn harness() -> Harness {
         metrics: Default::default(),
         disk_space: openlens_server::disk_space,
         session_gen: Default::default(),
+        caches: Default::default(),
     };
     Harness {
         _dir: dir,

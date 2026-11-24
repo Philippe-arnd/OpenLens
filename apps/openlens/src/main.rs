@@ -271,5 +271,6 @@ fn build_state() -> Result<openlens_server::AppState, String> {
         metrics: Default::default(),
         disk_space: openlens_server::disk_space,
         session_gen: Arc::new(std::sync::atomic::AtomicU64::new(session_gen)),
+        caches: Default::default(),
     })
 }

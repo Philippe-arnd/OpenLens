@@ -357,23 +357,33 @@ fn email_login() -> Option<(String, String, String)> {
 }
 
 /// At most one email per address every 10 minutes, and 30 an hour in all.
-fn email_allowed(email: &str) -> bool {
-    use std::sync::{Mutex, OnceLock};
+fn email_allowed(state: &AppState, email: &str) -> bool {
     use std::time::{Duration, Instant};
-    type Sent = (Vec<Instant>, std::collections::HashMap<String, Instant>);
-    static SENT: OnceLock<Mutex<Sent>> = OnceLock::new();
-    let Ok(mut s) = SENT.get_or_init(Mutex::default).lock() else {
-        return false;
-    };
     let now = Instant::now();
-    s.0.retain(|t| now.duration_since(*t) < Duration::from_secs(3600));
-    s.1.retain(|_, t| now.duration_since(*t) < Duration::from_secs(600));
-    if s.0.len() >= 30 || s.1.contains_key(email) {
+    let sent = &state.caches.login_emails;
+    let lately = sent
+        .get(&email.to_owned())
+        .and_then(|v| v.last().copied())
+        .is_some_and(|t| now.duration_since(t) < Duration::from_secs(600));
+    if lately {
         return false;
     }
-    s.0.push(now);
-    s.1.insert(email.to_owned(), now);
-    true
+    // The empty key holds every send of the last hour.
+    let ok = sent
+        .update(String::new(), |all| {
+            let mut all = all.unwrap_or_default();
+            all.retain(|t| now.duration_since(*t) < Duration::from_secs(3600));
+            if all.len() >= 30 {
+                return (Some(all), false);
+            }
+            all.push(now);
+            (Some(all), true)
+        })
+        .unwrap_or(false);
+    if ok {
+        sent.insert(email.to_owned(), vec![now]);
+    }
+    ok
 }
 
 #[derive(Deserialize)]
@@ -395,7 +405,7 @@ async fn login_email(State(state): State<AppState>, Form(f): Form<EmailForm>) ->
         return done;
     };
     let email = f.email.trim().to_lowercase();
-    if email.len() > 200 || !email.contains('@') || !email_allowed(&email) {
+    if email.len() > 200 || !email.contains('@') || !email_allowed(&state, &email) {
         return done;
     }
     tokio::spawn(async move {
@@ -638,7 +648,7 @@ async fn board(
                 &b,
                 &f,
                 &crate::base_url(&headers),
-                &crate::reword::plain(&b.insights)
+                &crate::reword::plain(&state, &b.insights)
                     .unwrap_or_default()
                     .into_iter()
                     .map(|p| (p.title, p.next_step))

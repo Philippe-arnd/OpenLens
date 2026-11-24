@@ -187,6 +187,11 @@ pub(crate) async fn metrics(State(state): State<AppState>, headers: HeaderMap) -
     ] {
         line(&mut out, name, kind, help, v);
     }
+    // Entries per in-memory cache (#309), one labelled series.
+    out.push_str("# HELP openlens_cache_entries Entries held by each in-memory cache.\n# TYPE openlens_cache_entries gauge\n");
+    for (name, n) in state.caches.sizes() {
+        out.push_str(&format!("openlens_cache_entries{{cache=\"{name}\"}} {n}\n"));
+    }
     ([("content-type", "text/plain; version=0.0.4")], out).into_response()
 }
 
