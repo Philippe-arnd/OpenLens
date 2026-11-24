@@ -134,6 +134,7 @@ fn parse_variants(s: &str) -> Result<Vec<openlens_flags::Variant>, String> {
 
 /// `POST /p/{id}/flags-edit`: create or update; errors show on the form.
 pub(crate) async fn flag_save(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
@@ -222,6 +223,7 @@ pub(crate) struct ConfirmForm {
 
 /// `POST /p/{id}/flags/{key}/delete`: the key must be typed again.
 pub(crate) async fn flag_delete(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((id, key)): Path<(String, String)>,
@@ -285,6 +287,7 @@ pub(crate) struct SurveyForm {
 
 /// `POST /p/{id}/surveys-edit`.
 pub(crate) async fn survey_save(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
@@ -343,6 +346,7 @@ pub(crate) async fn survey_save(
 /// `POST /p/{id}/surveys/{key}/delete`: the key must be typed again (the
 /// answers, which are events, stay).
 pub(crate) async fn survey_delete(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((id, key)): Path<(String, String)>,

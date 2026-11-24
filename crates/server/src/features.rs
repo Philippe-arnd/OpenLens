@@ -184,6 +184,7 @@ pub(crate) struct EditForm {
 
 /// `POST /p/{id}/features`: check (lint and diff) or save an edit (admins).
 pub(crate) async fn edit(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,

@@ -472,6 +472,7 @@ pub(crate) struct NewGoal {
 
 /// `POST /p/{id}/goals` (admins).
 pub(crate) async fn create(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
@@ -544,6 +545,7 @@ pub(crate) struct NewObjective {
 /// `POST /p/{id}/objectives` (admins, #272): an objective with 1–3 goals
 /// as key results, from today to `end`.
 pub(crate) async fn create_objective(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
@@ -602,6 +604,7 @@ pub(crate) async fn create_objective(
 
 /// `POST /p/{id}/objectives/{oid}/delete` (admins).
 pub(crate) async fn delete_objective(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((id, oid)): Path<(String, String)>,
@@ -615,6 +618,7 @@ pub(crate) async fn delete_objective(
 
 /// `POST /p/{id}/goals/{gid}/delete` (admins).
 pub(crate) async fn delete(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((id, gid)): Path<(String, String)>,

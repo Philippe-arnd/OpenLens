@@ -5,6 +5,13 @@
 //! thread per connection, each posting batches of realistic SDK events to
 //! `/capture` as fast as the server answers. Prints accepted events per
 //! second and latency percentiles as JSON. Only `http://` (local) targets.
+//!
+//! `--with-board PROJECT` (#344) also computes that project's board in a
+//! loop on two more connections, as two people reading the dashboard
+//! would, to see what reads cost ingestion. It needs a dashboard session:
+//! put the `ol_session=…` cookie in `OPENLENS_BENCH_COOKIE`. The capture
+//! p99 should stay under 50 ms; above, the bench warns (it does not fail
+//! until a reference machine is defined, #314).
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -83,8 +90,74 @@ fn post(conn: &mut BufReader<TcpStream>, host: &str, body: &str) -> Result<u16, 
     Ok(status)
 }
 
+/// GET `path` with the session cookie on a fresh connection; the status.
+fn get_page(host: &str, path: &str, cookie: &str) -> Result<u16, String> {
+    let mut s = TcpStream::connect(host).map_err(|e| e.to_string())?;
+    s.set_read_timeout(Some(Duration::from_secs(120)))
+        .map_err(|e| e.to_string())?;
+    let req = format!(
+        "GET {path} HTTP/1.1\r\nHost: {host}\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n"
+    );
+    s.write_all(req.as_bytes()).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    s.read_to_end(&mut out).map_err(|e| e.to_string())?;
+    String::from_utf8_lossy(&out)
+        .split_whitespace()
+        .nth(1)
+        .and_then(|c| c.parse().ok())
+        .ok_or_else(|| "no status line".to_owned())
+}
+
+/// Two readers computing `project`'s board until `deadline`: (pages, ms each).
+fn boards(host: &str, project: &str, cookie: &str, deadline: Instant) -> Result<Vec<u128>, String> {
+    let readers: Vec<_> = (0..2)
+        .map(|r| {
+            let (host, cookie) = (host.to_owned(), cookie.to_owned());
+            // Alternate filters, so the board cache (#291) does not answer
+            // every request from memory.
+            let paths = [
+                format!("/p/{project}"),
+                format!("/p/{project}?env=production"),
+                format!("/p/{project}?role=member"),
+            ];
+            std::thread::spawn(move || -> Result<Vec<u128>, String> {
+                let mut ms = Vec::new();
+                let mut i = r;
+                while Instant::now() < deadline {
+                    let t = Instant::now();
+                    let status = get_page(&host, &paths[i % paths.len()], &cookie)?;
+                    if status != 200 {
+                        return Err(format!(
+                            "board answered {status}: is OPENLENS_BENCH_COOKIE a valid session?"
+                        ));
+                    }
+                    ms.push(t.elapsed().as_millis());
+                    i += 1;
+                }
+                Ok(ms)
+            })
+        })
+        .collect();
+    let mut all = Vec::new();
+    for r in readers {
+        all.extend(r.join().map_err(|_| "board reader crashed")??);
+    }
+    Ok(all)
+}
+
 pub(crate) fn bench(args: &[String]) -> Result<(), String> {
-    let usage = "usage: cargo xtask bench http://HOST:PORT KEY [secs=60] [conns=4] [batch=50]";
+    let usage = "usage: cargo xtask bench http://HOST:PORT KEY [secs=60] [conns=4] [batch=50] [--with-board PROJECT]";
+    let (board_project, args): (Option<String>, Vec<String>) =
+        match args.iter().position(|a| a == "--with-board") {
+            Some(i) => {
+                let project = args.get(i + 1).ok_or(usage)?.clone();
+                let mut rest = args.to_vec();
+                rest.drain(i..=i + 1);
+                (Some(project), rest)
+            }
+            None => (None, args.to_vec()),
+        };
+    let args = &args;
     let url = args.first().ok_or(usage)?;
     let key = args.get(1).ok_or(usage)?.clone();
     let num = |i: usize, d: u64| args.get(i).and_then(|s| s.parse().ok()).unwrap_or(d);
@@ -95,6 +168,17 @@ pub(crate) fn bench(args: &[String]) -> Result<(), String> {
         .trim_end_matches('/')
         .to_owned();
     let deadline = Instant::now() + Duration::from_secs(secs);
+    let board = match &board_project {
+        Some(project) => {
+            let cookie = std::env::var("OPENLENS_BENCH_COOKIE")
+                .map_err(|_| "--with-board needs OPENLENS_BENCH_COOKIE (ol_session=…)")?;
+            let (host, project) = (host.clone(), project.clone());
+            Some(std::thread::spawn(move || {
+                boards(&host, &project, &cookie, deadline)
+            }))
+        }
+        None => None,
+    };
     let workers: Vec<_> = (0..conns)
         .map(|c| {
             let (host, key) = (host.clone(), key.clone());
@@ -134,6 +218,19 @@ pub(crate) fn bench(args: &[String]) -> Result<(), String> {
             .unwrap_or(0) as f64
             / 1000.0
     };
+    let board = match board {
+        Some(t) => {
+            let mut ms = t.join().map_err(|_| "board readers crashed")??;
+            ms.sort_unstable();
+            let q = |f: f64| {
+                ms.get(((ms.len() as f64 * f) as usize).min(ms.len().saturating_sub(1)))
+                    .copied()
+                    .unwrap_or(0)
+            };
+            Some(serde_json::json!({ "pages": ms.len(), "ms": { "p50": q(0.5), "max": q(1.0) } }))
+        }
+        None => None,
+    };
     println!(
         "{}",
         serde_json::json!({
@@ -144,8 +241,15 @@ pub(crate) fn bench(args: &[String]) -> Result<(), String> {
             "connections": conns,
             "seconds": secs,
             "latency_ms": { "p50": p(0.5), "p95": p(0.95), "p99": p(0.99), "p99_9": p(0.999), "max": p(1.0) },
+            "board": board,
         })
     );
+    if board.is_some() && p(0.99) > 50.0 {
+        eprintln!(
+            "xtask: warning: capture p99 is {:.1} ms with two boards computing (target: under 50 ms, #344)",
+            p(0.99)
+        );
+    }
     if failed > 0 {
         return Err(format!("{failed} requests failed"));
     }

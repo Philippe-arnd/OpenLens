@@ -243,7 +243,7 @@ fn html(status: StatusCode, m: Markup) -> Response {
     r
 }
 
-fn to_login() -> Response {
+pub(crate) fn to_login() -> Response {
     Redirect::to("/login").into_response()
 }
 
@@ -1462,32 +1462,8 @@ pub(crate) async fn access_layer(
                 openlens_ui::message("Not for you", "You do not have access to this project."),
             );
         }
-        if req.method() != axum::http::Method::GET
-            && !v.admin
-            && !crate::comments::is_comment_path(&path)
-            && !path.contains("/timeline")
-            && !(path.ends_with("/ask") || path.ends_with("/ask/clear"))
-        {
-            return html(
-                StatusCode::FORBIDDEN,
-                openlens_ui::message(
-                    "Read-only",
-                    "Your role can look but not change things. Ask an admin.",
-                ),
-            );
-        }
-    }
-    if path == "/users" || path.starts_with("/users/") {
-        match &viewer {
-            None => return to_login(),
-            Some(v) if !v.admin => {
-                return html(
-                    StatusCode::FORBIDDEN,
-                    openlens_ui::message("Admins only", "Ask an admin to invite people."),
-                );
-            }
-            _ => {}
-        }
+        // Who may change what is the handler's to say: a handler that
+        // changes a project takes `access::ProjectWrite` (#339).
     }
     next.run(req).await
 }

@@ -4519,6 +4519,45 @@ async fn no_route_serves_someone_it_should_not() {
     assert!(leaks.is_empty(), "{leaks:#?}");
 }
 
+#[tokio::test]
+async fn read_only_roles_post_on_shared_routes_only() {
+    // Comments, timeline notes and Ask are open to every role that sees
+    // the project (#339): no path rule says so, only the handler's
+    // extractor (or its absence).
+    let h = harness();
+    let viewer = invite(
+        &h,
+        serde_json::json!({"email": "viewer@example.com", "role": "viewer", "projects": ["default"]}),
+    )
+    .await;
+    let mut refused = Vec::new();
+    for (method, path, access) in ROUTES {
+        if *method == "GET" || !matches!(access, Shared) {
+            continue;
+        }
+        if refused_as(&h, method, path, Some(&viewer)).await.is_ok() {
+            let r = router(h.state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(*method)
+                        .uri(sample(path))
+                        .header("cookie", &viewer)
+                        .header("sec-fetch-site", "same-origin")
+                        .header("content-type", "application/x-www-form-urlencoded")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            // A 400 or 422 (an empty form) is fine; a 403 or the login is not.
+            if r.status() == StatusCode::FORBIDDEN || r.status() == StatusCode::UNAUTHORIZED {
+                refused.push(format!("{method} {path}: {}", r.status()));
+            }
+        }
+    }
+    assert!(refused.is_empty(), "{refused:#?}");
+}
+
 async fn burst_from(h: &Harness, uri: &str, body: &str, peer: &str, forged: bool) -> usize {
     let app = router(h.state.clone());
     let mut limited = 0;

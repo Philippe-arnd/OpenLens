@@ -13,13 +13,6 @@ use crate::AppState;
 use crate::auth;
 use crate::web::html_page;
 
-/// Is this a comment path (`/p/{p}/replays/{s}/comments…`)? Viewers may
-/// post there, unlike elsewhere under a project.
-pub(crate) fn is_comment_path(path: &str) -> bool {
-    let parts: Vec<&str> = path.trim_start_matches('/').split('/').collect();
-    matches!(parts.as_slice(), ["p", _, "replays", _, "comments", ..])
-}
-
 #[derive(Deserialize)]
 pub(crate) struct NewComment {
     /// Playback position, milliseconds.

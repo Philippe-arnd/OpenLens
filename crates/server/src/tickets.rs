@@ -656,6 +656,7 @@ pub(crate) async fn new(
 
 /// `POST /p/{id}/tickets` (admins): open or update the GitHub issue.
 pub(crate) async fn create(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
@@ -743,6 +744,7 @@ pub(crate) struct TargetForm {
 /// `POST /p/{id}/tickets/target` (admins): the GitHub repository (and the
 /// token, shared by every project, stored sealed).
 pub(crate) async fn target(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,

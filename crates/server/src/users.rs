@@ -50,7 +50,11 @@ pub(crate) struct ListQuery {
 }
 
 /// `GET /users?q=`.
-pub(crate) async fn page(State(state): State<AppState>, Query(q): Query<ListQuery>) -> Response {
+pub(crate) async fn page(
+    _: crate::access::Admin,
+    State(state): State<AppState>,
+    Query(q): Query<ListQuery>,
+) -> Response {
     let notice = match q.done.as_deref() {
         Some("removed") => Some("Removed. Their sessions ended."),
         _ => None,
@@ -124,6 +128,7 @@ pub(crate) struct InviteForm {
 
 /// `POST /users`: invite (or update) someone and show their login link.
 pub(crate) async fn invite(
+    _: crate::access::Admin,
     State(state): State<AppState>,
     headers: HeaderMap,
     Form(f): Form<InviteForm>,
@@ -170,7 +175,11 @@ async fn load(state: &AppState, id: &str) -> Option<openlens_meta::User> {
 }
 
 /// `GET /users/{id}`.
-pub(crate) async fn edit_page(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+pub(crate) async fn edit_page(
+    _: crate::access::Admin,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Response {
     let Some(u) = load(&state, &id).await else {
         return html_page(
             StatusCode::NOT_FOUND,
@@ -200,6 +209,7 @@ pub(crate) struct UpdateForm {
 
 /// `POST /users/{id}`: name, email, role and projects.
 pub(crate) async fn update(
+    _: crate::access::Admin,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
@@ -243,6 +253,7 @@ pub(crate) struct ConfirmForm {
 
 /// `POST /users/{id}/{link|revoke|disable|enable|delete}`.
 pub(crate) async fn action(
+    _: crate::access::Admin,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((id, action)): Path<(String, String)>,

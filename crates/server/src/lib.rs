@@ -3,6 +3,7 @@
 //!
 //! Layer: L5 (see `docs/architecture.md`).
 
+mod access;
 mod alerts;
 mod api;
 mod ask;
