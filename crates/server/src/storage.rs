@@ -9,19 +9,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use serde::Deserialize;
 
 use crate::AppState;
-use crate::auth;
 use crate::web::html_page;
-
-fn guard(state: &AppState, headers: &HeaderMap) -> Option<Response> {
-    match auth::viewer(state, headers) {
-        None => Some(Redirect::to("/login").into_response()),
-        Some(v) if !v.admin => Some(html_page(
-            StatusCode::FORBIDDEN,
-            openlens_ui::message("Admins only", "Storage and backups are for admins."),
-        )),
-        _ => None,
-    }
-}
 
 async fn render(state: &AppState, notice: Option<String>, error: Option<String>) -> Response {
     let meta = &state.meta;
@@ -91,10 +79,7 @@ async fn render(state: &AppState, notice: Option<String>, error: Option<String>)
 }
 
 /// `GET /settings/storage`.
-pub(crate) async fn page(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Some(r) = guard(&state, &headers) {
-        return r;
-    }
+pub(crate) async fn page(_: crate::access::Admin, State(state): State<AppState>) -> Response {
     render(&state, None, None).await
 }
 
@@ -119,13 +104,11 @@ pub(crate) struct S3Form {
 
 /// `POST /settings/storage/s3`: `save`, `test` or `remove`.
 pub(crate) async fn s3(
+    _: crate::access::Admin,
     State(state): State<AppState>,
     headers: HeaderMap,
     Form(f): Form<S3Form>,
 ) -> Response {
-    if let Some(r) = guard(&state, &headers) {
-        return r;
-    }
     if crate::s3::config().is_some() && f.action != "test" {
         return render(
             &state,
@@ -251,13 +234,11 @@ pub(crate) struct PlanForm {
 
 /// `POST /settings/storage/backups`: the plan.
 pub(crate) async fn plan(
+    _: crate::access::Admin,
     State(state): State<AppState>,
     headers: HeaderMap,
     Form(f): Form<PlanForm>,
 ) -> Response {
-    if let Some(r) = guard(&state, &headers) {
-        return r;
-    }
     let p = crate::backups::Plan {
         schedule: f.schedule,
         hour: f.hour,
@@ -280,10 +261,11 @@ pub(crate) async fn plan(
 }
 
 /// `POST /settings/storage/backups/run`: back up now (in the background).
-pub(crate) async fn run_now(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Some(r) = guard(&state, &headers) {
-        return r;
-    }
+pub(crate) async fn run_now(
+    _: crate::access::Admin,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Response {
     if crate::backups::running() {
         return render(&state, None, Some("A backup is already running.".into())).await;
     }
@@ -296,10 +278,7 @@ pub(crate) async fn run_now(State(state): State<AppState>, headers: HeaderMap) -
 }
 
 /// `GET /settings/storage/backups/latest.tar.gz`.
-pub(crate) async fn latest(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Some(r) = guard(&state, &headers) {
-        return r;
-    }
+pub(crate) async fn latest(_: crate::access::Admin, State(state): State<AppState>) -> Response {
     let st = state.clone();
     let made = tokio::task::spawn_blocking(move || {
         let dir = crate::backups::latest(&st).ok_or("no local backup yet")?;

@@ -721,3 +721,44 @@ async fn a_cold_board_streams_its_shell_first_and_a_warm_one_does_not() {
     let warm = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
     assert!(warm.contains("Daily active users") && !warm.contains("page-loading"));
 }
+
+/// Admin pages take the typed extractors (#339): the bearer token is the
+/// owner there too, a viewer gets 403, and nobody signed in goes to login.
+#[tokio::test]
+async fn admin_pages_take_the_owner_token_and_refuse_viewers() {
+    let h = harness();
+    for uri in ["/settings/storage", "/settings/tokens", "/audit"] {
+        assert_eq!(
+            get(&h, uri, None, true).await.status(),
+            StatusCode::OK,
+            "{uri}"
+        );
+        assert!(
+            get(&h, uri, None, false).await.status().is_redirection(),
+            "{uri}"
+        );
+    }
+    let owner = login_cookie(&h).await;
+    let viewer = invite(
+        &h,
+        serde_json::json!({"email": "v@example.com", "role": "viewer"}),
+    )
+    .await;
+    for uri in [
+        "/settings/storage",
+        "/settings/tokens",
+        "/audit",
+        "/p/default/sql",
+    ] {
+        assert_eq!(
+            get(&h, uri, Some(&owner), false).await.status(),
+            StatusCode::OK,
+            "{uri}"
+        );
+        assert_eq!(
+            get(&h, uri, Some(&viewer), false).await.status(),
+            StatusCode::FORBIDDEN,
+            "{uri}"
+        );
+    }
+}

@@ -34,14 +34,12 @@ pub(crate) struct Notice {
 
 /// `GET /p/{id}/settings`.
 pub(crate) async fn page(
+    crate::access::Signed(viewer): crate::access::Signed,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
     Query(nq): Query<Notice>,
 ) -> Response {
-    let Some(viewer) = crate::auth::viewer(&state, &headers) else {
-        return Redirect::to("/login").into_response();
-    };
     let Some(p) = load(&state, &id).await else {
         return html_page(
             StatusCode::NOT_FOUND,
@@ -280,21 +278,11 @@ pub(crate) struct ExportQuery {
 /// `GET /p/{id}/export?date=YYYY-MM-DD`: one day as an NDJSON download
 /// (admins: the export holds every event property).
 pub(crate) async fn export(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path(id): Path<String>,
     Query(q): Query<ExportQuery>,
 ) -> Response {
-    match crate::auth::viewer(&state, &headers) {
-        None => return Redirect::to("/login").into_response(),
-        Some(v) if !v.admin => {
-            return html_page(
-                StatusCode::FORBIDDEN,
-                openlens_ui::message("Admins only", "Ask an admin for an export."),
-            );
-        }
-        _ => {}
-    }
     let Some(p) = load(&state, &id).await else {
         return oops("No such project.");
     };
@@ -320,20 +308,11 @@ pub(crate) struct NewForm {
 
 /// `POST /projects`: a new project (admins), then its settings page.
 pub(crate) async fn create(
+    _: crate::access::Admin,
     State(state): State<AppState>,
     headers: HeaderMap,
     Form(f): Form<NewForm>,
 ) -> Response {
-    match crate::auth::viewer(&state, &headers) {
-        None => return Redirect::to("/login").into_response(),
-        Some(v) if !v.admin => {
-            return html_page(
-                StatusCode::FORBIDDEN,
-                openlens_ui::message("Admins only", "Ask an admin to create a project."),
-            );
-        }
-        _ => {}
-    }
     let tz = if f.timezone.trim().is_empty() {
         None
     } else {

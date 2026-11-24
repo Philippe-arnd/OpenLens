@@ -73,19 +73,19 @@ impl FromRequestParts<AppState> for ProjectWrite {
     }
 }
 
-/// An admin.
+/// An admin (or the bearer token, which is the owner's).
 pub(crate) struct Admin;
 
 impl FromRequestParts<AppState> for Admin {
     type Rejection = Response;
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Response> {
-        match auth::viewer(state, &parts.headers) {
+        match who(parts, state) {
             None => Err(crate::web::to_login()),
             Some(v) if !v.admin => Err(page(
                 StatusCode::FORBIDDEN,
                 "Admins only",
-                "Ask an admin to invite people.",
+                "This page is for admins. Ask one.",
             )),
             Some(_) => Ok(Self),
         }

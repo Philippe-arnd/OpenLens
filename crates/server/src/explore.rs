@@ -135,26 +135,12 @@ pub(crate) async fn breakdown(
     }
 }
 
-fn admin_only(state: &AppState, headers: &HeaderMap) -> Option<Response> {
-    match auth::viewer(state, headers) {
-        None => Some(Redirect::to("/login").into_response()),
-        Some(v) if !v.admin => Some(html_page(
-            StatusCode::FORBIDDEN,
-            openlens_ui::message("Admins only", "SQL shows every property of every event."),
-        )),
-        _ => None,
-    }
-}
-
 /// `GET /p/{id}/sql`: the query box and the schema (admins).
 pub(crate) async fn sql_page(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Response {
-    if let Some(r) = admin_only(&state, &headers) {
-        return r;
-    }
     let Some(p) = project(&state, &id).await else {
         return not_found("No such project.");
     };
@@ -178,14 +164,11 @@ pub(crate) struct SqlForm {
 /// downloads the result.
 pub(crate) async fn sql_run(
     _: crate::access::ProjectWrite,
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path(id): Path<String>,
     Form(f): Form<SqlForm>,
 ) -> Response {
-    if let Some(r) = admin_only(&state, &headers) {
-        return r;
-    }
     let Some(p) = project(&state, &id).await else {
         return not_found("No such project.");
     };
@@ -524,13 +507,11 @@ async fn audiences(state: &AppState, project: &str) -> Vec<openlens_ui::Audience
 /// `GET /p/{id}/churn/at-risk.csv` or `.json` (admins, #269): the users at
 /// risk now, for a CRM or a mailing.
 pub(crate) async fn at_risk_export(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((id, file)): Path<(String, String)>,
 ) -> Response {
-    if !auth::viewer(&state, &headers).is_some_and(|v| v.admin) {
-        return StatusCode::FORBIDDEN.into_response();
-    }
     let Some(p) = project(&state, &id).await else {
         return StatusCode::NOT_FOUND.into_response();
     };
