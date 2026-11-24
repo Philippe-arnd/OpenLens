@@ -113,16 +113,26 @@ jobs:
           cold=$(curl -s -o /dev/null -w '%{time_total}' -H "cookie: $C" 127.0.0.1:18741/p/default)
           warm=$(curl -s -o /dev/null -w '%{time_total}' -H "cookie: $C" 127.0.0.1:18741/p/default)
           role=$(curl -s -o /dev/null -w '%{time_total}' -H "cookie: $C" "127.0.0.1:18741/p/default?role=admin")
+          # Four filtered boards at once (#418): they should share one snapshot.
+          ( for r in member viewer owner guest; do
+              curl -s -o /dev/null -w '%{time_total}\n' -H "cookie: $C" "127.0.0.1:18741/p/default?role=$r" &
+            done; wait ) > concurrent.txt
+          concurrent_max=$(sort -n concurrent.txt | tail -1)
+          snapshots=$(curl -s -H "authorization: Bearer perf" 127.0.0.1:18741/metrics | awk '/^openlens_board_snapshots_total/ {print $2}')
           peak=$(awk '/VmHWM/ {print $2}' /proc/$PID/status)
+          sleep 30
+          rest=$(awk '/VmRSS/ {print $2}' /proc/$PID/status)
           disk=$(du -sm "$D" | cut -f1)
-          python3 - "$gen_secs" "$cold" "$warm" "$role" "$peak" "$disk" <<'PY' > scale.json
+          python3 - "$gen_secs" "$cold" "$warm" "$role" "$peak" "$disk" "$concurrent_max" "${snapshots:-0}" "$rest" <<'PY' > scale.json
           import json, sys
-          gen, cold, warm, role, peak, disk = sys.argv[1:]
+          gen, cold, warm, role, peak, disk, conc, snaps, rest = sys.argv[1:]
           print(json.dumps({
               "generator": json.load(open("gen.json")),
               "generate_seconds": int(gen),
               "board_cold_s": float(cold), "board_warm_s": float(warm), "board_role_filter_cold_s": float(role),
-              "server_peak_rss_mb": int(peak) // 1024, "data_dir_mb": int(disk),
+              "four_filtered_boards_max_s": float(conc), "board_snapshots_built": int(float(snaps)),
+              "server_peak_rss_mb": int(peak) // 1024, "server_rss_after_30s_mb": int(rest) // 1024,
+              "data_dir_mb": int(disk),
           }, indent=2))
           PY
           cat scale.json
