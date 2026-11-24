@@ -69,7 +69,10 @@ pub(crate) async fn metrics(State(state): State<AppState>, headers: HeaderMap) -
     }
     let m = &state.metrics;
     let get = |c: &AtomicU64| c.load(Ordering::Relaxed);
-    let buffered = state.writer.lock().map_or(0, |w| w.buffered() as u64);
+    let (buffered, wal_syncs) = state
+        .writer
+        .lock()
+        .map_or((0, 0), |w| (w.buffered() as u64, w.durable().syncs()));
     let (free, total) = (state.disk_space)(&state.data_dir).unwrap_or((0, 0));
     let last = get(&m.last_flush_unix);
     let now = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or(0);
@@ -98,6 +101,12 @@ pub(crate) async fn metrics(State(state): State<AppState>, headers: HeaderMap) -
             "counter",
             "Requests answered 429.",
             get(&m.rate_limited),
+        ),
+        (
+            "wal_syncs_total",
+            "counter",
+            "WAL fsyncs; fewer than capture requests under load (group commit).",
+            wal_syncs,
         ),
         (
             "query_timeouts_total",

@@ -225,3 +225,52 @@ fn a_failed_flush_write_is_retried_by_the_next_one() {
     assert_eq!(recovered, 0, "both WAL files were removed");
     assert_eq!(count_rows(dir.path(), "p").unwrap(), 2);
 }
+
+#[test]
+fn concurrent_appends_share_fsyncs_and_all_survive_a_restart() {
+    use std::sync::{Arc, Mutex};
+    let dir = tempfile::tempdir().unwrap();
+    let (w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let w = Arc::new(Mutex::new(w));
+    let t = Utc.with_ymd_and_hms(2026, 11, 24, 9, 0, 0).unwrap();
+    let (threads, each) = (8u64, 50u64);
+    std::thread::scope(|s| {
+        for _ in 0..threads {
+            let w = w.clone();
+            s.spawn(move || {
+                for _ in 0..each {
+                    // As capture does (#333): write under the lock, wait for
+                    // the disk outside it.
+                    let (ticket, durable) = {
+                        let mut g = w.lock().unwrap();
+                        (g.write(&[ev("p1", t)]).unwrap(), g.durable())
+                    };
+                    durable.wait(ticket).unwrap();
+                }
+            });
+        }
+    });
+    let syncs = w.lock().unwrap().durable().syncs();
+    assert!(
+        syncs < threads * each,
+        "{syncs} fsyncs for {} writes",
+        threads * each
+    );
+    drop(w);
+    // Nothing flushed to Parquet: everything comes back from the WAL.
+    let (_, recovered) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    assert_eq!(recovered as u64, threads * each);
+}
+
+#[test]
+fn a_resent_batch_is_dropped_but_its_ticket_covers_the_first_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let t = Utc.with_ymd_and_hms(2026, 11, 24, 9, 0, 0).unwrap();
+    let batch = [ev("p1", t), ev("p1", t)];
+    let first = w.write(&batch).unwrap();
+    let again = w.write(&batch).unwrap();
+    assert!(again >= first, "the retry waits for the first copy's fsync");
+    w.durable().wait(again).unwrap();
+    assert_eq!(w.buffered(), 2, "the resent events were dropped");
+}
