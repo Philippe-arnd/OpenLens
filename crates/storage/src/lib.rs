@@ -359,6 +359,12 @@ impl Writer {
 
     /// Write buffered events to Parquet and start a fresh WAL. Returns the
     /// number of events flushed.
+    /// The distinct projects of the events buffered now (#420: a flush
+    /// invalidates only these projects' cached boards).
+    pub fn buffered_projects(&self) -> std::collections::BTreeSet<String> {
+        projects_of(&self.buffer)
+    }
+
     pub fn flush(&mut self) -> Result<usize> {
         let Some(pending) = self.take()? else {
             return Ok(0);
@@ -421,7 +427,16 @@ pub struct Pending {
     old_wals: Vec<PathBuf>,
 }
 
+fn projects_of(events: &[Event]) -> std::collections::BTreeSet<String> {
+    events.iter().map(|e| e.project.clone()).collect()
+}
+
 impl Pending {
+    /// The distinct projects these events belong to.
+    pub fn projects(&self) -> std::collections::BTreeSet<String> {
+        projects_of(&self.events)
+    }
+
     /// Write the segments, then remove the WAL that covered them. Returns
     /// the number of events written. On error the WAL stays: hand the
     /// events back with [`Writer::restore`].

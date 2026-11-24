@@ -460,7 +460,9 @@ fn flush(state: &AppState) -> Result<(), String> {
                 Ok(n) => {
                     state.metrics.flushed(n, started.elapsed().as_millis());
                     tracing::debug!(n, "flushed events to parquet");
-                    state.boards.bump();
+                    for project in pending.projects() {
+                        state.boards.bump(&project);
+                    }
                 }
                 Err(e) => {
                     if let Ok(mut w) = state.writer.lock() {
@@ -483,7 +485,7 @@ fn compact(state: &AppState) -> Result<(), String> {
         let now = chrono::Utc::now();
         clean_stored_urls(state, &p.id);
         // Compaction, erasure and retention below rewrite files.
-        state.boards.bump();
+        state.boards.bump(&p.id);
         if let Err(err) = openlens_storage::compact(&state.data_dir, &p.id, now) {
             tracing::warn!(project = %p.id, %err, "compaction failed");
         }
@@ -645,8 +647,11 @@ fn clean_stored_urls(state: &AppState, project: &str) {
 pub fn flush_now(state: &AppState) -> Result<usize, String> {
     let _flushing = state.flushing.lock().map_err(|_| "flush lock poisoned")?;
     let mut w = state.writer.lock().map_err(|_| "writer lock poisoned")?;
+    let projects = w.buffered_projects();
     let n = w.flush().map_err(|e| e.to_string())?;
-    state.boards.bump();
+    for project in projects {
+        state.boards.bump(&project);
+    }
     Ok(n)
 }
 
