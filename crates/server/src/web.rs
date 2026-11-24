@@ -345,8 +345,9 @@ async fn board(
     let f = q.filters(&auth::tz_for(&state, &headers, &p.timezone));
     let map = crate::load_map(&state, &p.id).await;
     let host = crate::public_url(&headers);
+    let admin = auth::viewer(&state, &headers).is_some_and(|v| v.admin);
     if crate::boards::warm(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))) {
-        return board_page(state, p, f, map, host).await;
+        return board_page(state, p, f, map, host, admin).await;
     }
     // A cold cache means seconds of computing: send the page shell at once
     // (head, sidebar, a loading line), then the board when it is ready
@@ -359,11 +360,11 @@ async fn board(
     };
     let shell = openlens_ui::board_shell(&info).into_string();
     let Some(cut) = shell.rfind("</main>") else {
-        return board_page(state, p, f, map, host).await;
+        return board_page(state, p, f, map, host, admin).await;
     };
     let (open, close) = (shell[..cut].to_owned(), shell[cut..].to_owned());
     let rest = async move {
-        let page = board_page(state, p, f, map, host).await;
+        let page = board_page(state, p, f, map, host, admin).await;
         let bytes = axum::body::to_bytes(page.into_body(), 64 * 1024 * 1024)
             .await
             .unwrap_or_default();
@@ -393,6 +394,7 @@ async fn board_page(
     f: openlens_engine::Filters,
     map: Option<(openlens_featuremap::FeatureMap, i64)>,
     host: String,
+    admin: bool,
 ) -> Response {
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
@@ -407,7 +409,7 @@ async fn board_page(
     let mut board = board;
     if let Ok(b) = board.as_mut() {
         b.objectives_at_risk = crate::goals::snapshot(&state, &p.id).0;
-        if auth::viewer(&state, &headers).is_some_and(|v| v.admin) {
+        if admin {
             b.setup = crate::settings::setup_left(&state, &p.id);
         }
         let st = crate::alerts::status(&state, &p.id);
