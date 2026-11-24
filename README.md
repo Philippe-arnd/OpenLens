@@ -21,8 +21,8 @@
   <a href="https://github.com/Philippe-arnd/OpenLens/actions/workflows/k8s.yml"><img alt="Kubernetes" src="https://github.com/Philippe-arnd/OpenLens/actions/workflows/k8s.yml/badge.svg?branch=main"></a>
   <a href="https://github.com/Philippe-arnd/OpenLens/releases"><img alt="Release" src="https://img.shields.io/github/v/release/Philippe-arnd/OpenLens?color=6d5efc"></a>
   <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-6d5efc"></a>
-  <img alt="SDK size, gzipped" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fphilippe-arnd.github.io%2FOpenLens%2Fbadges%2Fsdk-size.json">
-  <img alt="No configuration" src="https://img.shields.io/badge/config-none%20required-d99400">
+  <a href=".github/workflows/pages.yml"><img alt="SDK size, gzipped" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fphilippe-arnd.github.io%2FOpenLens%2Fbadges%2Fsdk-size.json"></a>
+  <a href="docs/deploy/README.md#optional-settings-d-016"><img alt="No setting required" src="https://img.shields.io/badge/settings-none%20required-d99400"></a>
 </p>
 
 OpenLens is self-hosted product analytics in **one Rust binary**: ingestion, storage, queries, dashboard and an MCP server for agents. It follows one method, **map → measure → focus → act → compare** ([the method](docs/method.md)), so there is nothing to configure.
@@ -104,7 +104,7 @@ openlens.identify(user.id, { role: user.role, account: user.orgId, plan: user.pl
   - clicks named by `data-feature`, including inside web components;
   - submits, errors, Web Vitals, failed requests and scroll depth.
 - **Privacy:**
-  - no cookies;
+  - no cookies; its state is in `localStorage`, or nowhere with `data-cookieless` ([privacy](docs/privacy.md));
   - input values are never sent;
   - Do Not Track and consent are respected;
   - `data-openlens-mask` and `data-openlens-block` for what replays may show.
@@ -160,9 +160,9 @@ The [self-hosting guide](docs/deploy/README.md) covers requirements, release cha
 
 Measured on 2026-11-22, on one core of a 4-vCPU VPS ([docs/benchmarks.md](docs/benchmarks.md)):
 
-- **Ingestion:** about **80,000 events/s on one vCPU**, p99 under 9 ms.
+- **Ingestion:** about **80,000 events/s on one vCPU**, p99 under 9 ms (measured by hand; the nightly benchmark tracks it on GitHub's runners).
 - **Storage:** about **11 bytes per event** on disk (2.3 M events took 25 MB).
-- **Board:** about **0.8 s on 368k events and 3.7 s on 2.2 M**, on one vCPU, with identities. It keeps up to 4 M events of the 90-day window in memory (about 160 bytes each), and reads the files beyond that.
+- **Board:** computed in about **0.8 s on 368k events and 3.7 s on 2.2 M** (one vCPU, with identities), then served from memory until new data lands, so most page views wait for no computation. A board takes up to 4 M events of the 90-day window in memory (about 160 bytes each) when the 768 MB query memory pool can hold them, and reads the files otherwise. The [nightly benchmark](.github/workflows/perf.yml) re-measures ingestion and the board every night.
 - **SDK:** **5.5 kB** gzipped. The replay recorder loads separately, once the page is idle.
 - **Footprint:** one process, 256 MiB requested on Kubernetes, and no Kafka, ClickHouse or Redis to run next to it.
 
