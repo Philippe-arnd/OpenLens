@@ -2709,7 +2709,7 @@ pub fn churn(
                 @if c.last_place.is_empty() { p.muted { "Nobody has churned in the window." } }
                 @else {
                     div.table-scroll { table.plain {
-                        thead { tr { th { "Feature or page" } th.num { "Churned users" } th.num { "Share" } th.num { "Users who stayed" } th {} } }
+                        thead { tr { th { "Feature or page" } th.num { "Churned users" } th.num { "Share" } th.num { "Users who stayed" } th { span.sr-only { "Actions" } } } }
                         tbody { @for (place, n, share, base) in &c.last_place {
                             tr {
                                 th scope="row" { span.mono { (place) } }
@@ -3052,7 +3052,7 @@ pub fn goals(
                 section.card.wide {
                     h2.mint { (icon("plus")) "Set a goal" }
                     div.table-scroll { table.plain {
-                        thead { tr { th { "KPI" } th.num { "Now" } th { "Target" } th { "By" } th { "Owner" } th {} } }
+                        thead { tr { th { "KPI" } th.num { "Now" } th { "Target" } th { "By" } th { "Owner" } th { span.sr-only { "Actions" } } } }
                         tbody { @for c in choices {
                             tr {
                                 th scope="row" { (c.label) span.muted.small { " · " (if c.up { "higher is better" } else { "lower is better" }) } }
@@ -3246,7 +3246,7 @@ pub fn flags(p: &ProjectInfo<'_>, flags: &[openlens_flags::Flag]) -> Markup {
             } @else {
                 section.card.wide {
                     table.plain {
-                        thead { tr { th { "Flag" } th { "Who" } th { "Rollout" } th { "On" } th {} } }
+                        thead { tr { th { "Flag" } th { "Who" } th { "Rollout" } th { "On" } th { span.sr-only { "Actions" } } } }
                         tbody { @for f in flags {
                             tr {
                                 th scope="row" { a href={ "/p/" (p.id) "/flags-edit?key=" (f.key) } title="Edit" { code { (f.key) } } @if !f.description.is_empty() { br; span.muted.small { (f.description) } } }
@@ -3943,7 +3943,7 @@ pub fn digest(p: &ProjectInfo<'_>, d: &openlens_engine::Digest, mailed: bool) ->
             } }
             section.card.wide {
                 table.plain {
-                    thead { tr { th {} th.num { "This week" } th.num { "Last week" } th.num { "Change" } } }
+                    thead { tr { th { span.sr-only { "Metric" } } th.num { "This week" } th.num { "Last week" } th.num { "Change" } } }
                     tbody {
                         (row("Active users", &d.users))
                         (row("Sessions", &d.sessions))
@@ -4302,7 +4302,7 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
                     }
                     @if !v.shares.is_empty() {
                         div.table-scroll { table.plain {
-                            thead { tr { th { "What" } th { "Release" } th { "Embed" } th { "Expires" } th { "By" } th {} } }
+                            thead { tr { th { "What" } th { "Release" } th { "Embed" } th { "Expires" } th { "By" } th { span.sr-only { "Actions" } } } }
                             tbody { @for l in &v.shares {
                                 tr {
                                     td { (l.scope) } td.small { (l.release.as_deref().unwrap_or("all")) } td.small { (l.embed.as_deref().unwrap_or("no")) }
