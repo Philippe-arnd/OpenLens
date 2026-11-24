@@ -99,6 +99,7 @@ await phone.close();
 
 // Accessibility (#161): axe-core on every page, light and dark. Injecting a
 // script needs a context that bypasses the CSP; the checks above ran under it.
+const advice = [];
 const a11y = await browser.newContext({ viewport: { width: 1360, height: 900 }, bypassCSP: true, reducedMotion: "reduce" });
 const at = await a11y.newPage();
 await at.goto(`${server}/login`);
@@ -113,17 +114,40 @@ for (const theme of ["light", "dark"]) {
     found.push(...(await audit(at, `${p} (${theme})`)));
   }
 }
+// WCAG 2.2 AA (#303): every impact fails, minor included. Best practices
+// are listed as warnings and do not fail the run.
 async function audit(page, label) {
   await page.addScriptTag({ path: axePath });
-  const res = await page.evaluate(() => window.axe.run(document, { runOnly: ["wcag2a", "wcag2aa"], resultTypes: ["violations"] }));
-  return res.violations
-    .filter((v) => v.impact === "serious" || v.impact === "critical")
-    .map((v) => `${label}: ${v.id} (${v.impact}) x${v.nodes.length}: ${v.help}; e.g. ${v.nodes[0]?.target?.join(" ")}`);
+  const res = await page.evaluate(() =>
+    window.axe.run(document, { runOnly: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-practice"], resultTypes: ["violations"] }),
+  );
+  const line = (v) => `${label}: ${v.id} (${v.impact}) x${v.nodes.length}: ${v.help}; e.g. ${v.nodes[0]?.target?.join(" ")}`;
+  const wcag = (v) => v.tags.some((t) => /^wcag2(1|2)?a{1,2}$/.test(t));
+  advice.push(...res.violations.filter((v) => !wcag(v)).map(line));
+  return res.violations.filter(wcag).map(line);
 }
+// Keyboard (#303): every sidebar link and the board's filter button can be
+// reached with Tab, and Enter on a sidebar link opens its page.
+const keys = await a11y.newPage();
+await keys.goto(`${server}/p/default`);
+const targets = await keys.$$eval("nav.side-nav a, form.filters button", (els) => els.map((e) => e.getAttribute("href") || e.textContent.trim()));
+const reached = new Set();
+for (let i = 0; i < 80 && reached.size < targets.length; i++) {
+  await keys.keyboard.press("Tab");
+  const t = await keys.evaluate(() => { const e = document.activeElement; return e ? e.getAttribute("href") || e.textContent.trim() : ""; });
+  if (targets.includes(t)) reached.add(t);
+}
+const missed = targets.filter((t) => !reached.has(t));
+if (missed.length) problems.push(`keyboard: not reachable with Tab: ${missed.join(", ")}`);
+await keys.focus("nav.side-nav a[href$='/events']").catch(() => {});
+await Promise.all([keys.waitForNavigation().catch(() => {}), keys.keyboard.press("Enter")]);
+if (!keys.url().endsWith("/events")) problems.push(`keyboard: Enter on the Events link stayed on ${keys.url()}`);
+console.log(`keyboard: ${reached.size}/${targets.length} controls reached with Tab`);
+if (advice.length) console.log("accessibility advice (best practice, not failing):\n" + advice.join("\n"));
 if (found.length) {
-  problems.push("accessibility (axe, serious or critical):", ...found);
+  problems.push("accessibility (axe, WCAG 2.2 AA):", ...found);
 } else {
-  console.log("accessibility: no serious or critical axe violation");
+  console.log("accessibility: no WCAG 2.2 AA axe violation");
 }
 await browser.close();
 

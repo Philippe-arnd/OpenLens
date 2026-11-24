@@ -18,6 +18,8 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 - **`xtask bench --with-board PROJECT`** (#344, part 2): measures ingestion while two readers compute a board in a loop (docs/benchmarks.md), and warns when the capture p99 goes above 50 ms.
 
+- **WCAG 2.2 AA** (#303): the browser check now runs axe with the WCAG 2.1 and 2.2 AA rules and fails on any impact (best practices are listed, not failing), and walks the sidebar and the filters with the keyboard. Small text links are at least 24 × 24 px, and every table column has a header.
+
 - **Theme without rewriting pages** (#300): the theme and sidebar cookies are read once per request, and the page template writes them on `<html>`; no middleware reads a response back any more.
 
 - **The board page shows at once** (#301): when its board is not cached yet, the page head, the sidebar and a *Computing the board…* line are sent at once, and the board follows in the same page when it is ready (no script: the line hides itself in CSS). A cached board is sent whole, as before.
