@@ -33,6 +33,11 @@ const page = `<!doctype html><html><head><meta name="openlens-release" content="
 // as with an ad-blocker proxy: no host attribute, only the key.
 const proxied = `<!doctype html><html><body><button data-feature="export">Export</button>
 <script src="/_l/c.js" data-key="${key}" data-replay="off"></script></body></html>`;
+// The privacy profiles of docs/privacy.md (#316): what each one keeps on
+// the device and sends, checked below.
+const profiles = { exempt: 'data-cookieless data-replay="off"', standard: 'data-replay="off"' };
+const profilePage = (attrs) => `<!doctype html><html><body><button data-feature="export">Export</button>
+<script src="${server}/c.js" data-key="${key}" ${attrs}></script></body></html>`;
 const site = http
   .createServer((req, res) => {
     if (req.url.startsWith("/_l/")) {
@@ -43,6 +48,7 @@ const site = http
       req.pipe(up);
       return;
     }
+    if (profiles[req.url.slice(1)]) return res.end(profilePage(profiles[req.url.slice(1)]));
     res.end(req.url === "/proxied" ? proxied : page);
   })
   .listen(0);
@@ -167,6 +173,36 @@ if (admin) {
     process.exit(1);
   }
   console.log("proxied capture ok");
+}
+{
+  const b = await chromium.launch();
+  for (const [name, storesState] of [["exempt", false], ["standard", true]]) {
+    const ctx = await b.newContext();
+    const t = await ctx.newPage();
+    const urls = [];
+    const bodies = [];
+    t.on("request", (r) => { urls.push(r.url()); if (r.url().includes("/capture")) bodies.push(r.postData() || ""); });
+    await t.goto(`http://localhost:${port}/${name}`);
+    await t.click("button[data-feature=export]");
+    await t.evaluate(() => openlens.flush());
+    await t.waitForTimeout(3000);
+    const stored = await t.evaluate(() => localStorage.length);
+    const cookies = (await ctx.cookies()).length;
+    const replay = urls.some((u) => u.includes("/r.js") || u.includes("/r?"));
+    const ids = bodies.flatMap((x) => { try { return JSON.parse(x).batch.map((e) => e.distinct_id); } catch { return []; } });
+    const problems = [];
+    if (cookies) problems.push(`${cookies} cookie(s)`);
+    if (storesState !== stored > 0) problems.push(storesState ? "no state in localStorage" : `${stored} localStorage item(s)`);
+    if (replay) problems.push("the replay recorder loaded");
+    if (!ids.length) problems.push("no event sent");
+    if (name === "exempt" && ids.some((d) => d !== "$cookieless")) problems.push("a device id was sent");
+    if (problems.length) {
+      console.error(`privacy profile "${name}": ${problems.join("; ")}`);
+      process.exit(1);
+    }
+    console.log(`privacy profile "${name}" ok: ${stored} localStorage item(s), no cookie, no replay`);
+  }
+  await b.close();
 }
 site.close();
 

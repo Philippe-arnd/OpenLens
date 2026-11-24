@@ -35,6 +35,33 @@ What OpenLens stores, for how long, where, and what it never stores. Everything 
 - **Access:** a person's profile → *Export their data (JSON)* (admins), or `GET /p/{project}/people/{id}/export.json` with the admin token. Each export is in the audit log.
 - **Erasure:** a person's profile → *Forget this person* (admins), or `DELETE /api/projects/{project}/people/{id}/forget`. Their events (and those of the anonymous ids linked to them by `identify`) are rewritten out of the files at once, their recordings and profile are deleted, and anything they send later is dropped. The list of forgotten ids stays in the metadata, so a restore from an older backup is cleaned again at the next compaction (within 10 minutes). The S3 copy and backups age out under your own retention.
 
+## Three profiles
+
+*This page is not legal advice.* It says what OpenLens does in each profile, so that you, your DPO or your lawyer can decide which one fits. `scripts/e2e/browser.mjs` checks the device side of the first two every night: cookies, `localStorage`, replay requests and the id sent.
+
+| | **Exempt** | **Standard** | **Full** |
+|---|---|---|---|
+| Script tag | `data-cookieless data-replay="off"` | `data-replay="off"` | (nothing to add) |
+| On the device | nothing: no cookie, no `localStorage` | `localStorage`: anonymous id, session, what `identify` was given, flags, answered surveys | the same as Standard |
+| Visitor id | a daily hash on the server: a visitor can't be followed from one day to the next | a random id kept on the device, linked to the user on `identify` | the same as Standard |
+| Session recordings | none | none | yes: inputs and texts masked unless the app unmasks them |
+| `/flags` query string | `plan`, `country` and the `properties` given to `identify`, if you call it (not stored) | the same | the same |
+| Typical basis | designed to meet the conditions of the CNIL audience-measurement exemption (below); you check that they hold | consent, where `localStorage` is treated like a cookie | consent |
+
+**Exempt, the conditions to check** (CNIL, audience measurement exempt from consent). OpenLens is designed to meet them, but only you can confirm they hold for your site:
+- the purpose is limited to audience measurement for the site itself (no cross-site tracking, no advertising, no data shared with others);
+- nothing is stored on the device, and the visitor id lasts one day;
+- the data is not used to follow a single person, which means no `identify` on pages measured this way, or a reasoned assessment if you call it;
+- no session is recorded;
+- visitors are told about the measurement (your privacy notice) and can object;
+- the data is kept for a limited time (events 400 days here, D-015: check it against your own rule).
+
+Templates to copy: a [record of processing](privacy-record-of-processing.md) and a [data-processing clause](privacy-dpa-clause.md) for a provider who hosts OpenLens for you.
+
+## What Ask sends to the model
+
+Ask (off until an admin configures a model) sends the configured provider a project brief (feature map, headline KPIs, latest releases, top insights, goals), the question and the six previous ones, and the results of the tools it calls: tables of at most 20 rows, from an aggregate-only view where people are counted, never listed, and groups of fewer than 5 are left out (D-021). It never sends event properties, page URLs, replays, emails, or user or session ids, unless an admin allows person-level detail for that project. Admins can see the exact last request on the Ask page. The provider's own retention applies to what it receives; a local model (Ollama, through an OpenAI-compatible URL) keeps everything on your network. Details: [docs/ai.md](ai.md).
+
 ## Audience measurement without consent
 
 Some EU regulators exempt audience measurement from consent when it stores nothing on the device, keeps no person-level trail and records no session. With OpenLens, that is the cookieless mode below with replay off: `<script src=".../c.js" data-key="pk_…" data-cookieless data-replay="off">`. Whether it applies to you is for your DPO or lawyer to decide; this page is not legal advice.
