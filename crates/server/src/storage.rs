@@ -72,6 +72,10 @@ async fn render(state: &AppState, notice: Option<String>, error: Option<String>)
         running: crate::backups::running(),
         has_latest: crate::backups::latest(state).is_some(),
         data_dir: state.data_dir.display().to_string(),
+        cold_on: crate::cold::enabled(meta),
+        cold_from_env: crate::cold::from_env(),
+        cold_blocked: crate::cold::blocked(meta),
+        cold_days: crate::cold::cold_days(&state.data_dir).len(),
         notice,
         error,
     };
@@ -81,6 +85,46 @@ async fn render(state: &AppState, notice: Option<String>, error: Option<String>)
 /// `GET /settings/storage`.
 pub(crate) async fn page(_: crate::access::Admin, State(state): State<AppState>) -> Response {
     render(&state, None, None).await
+}
+
+#[derive(Deserialize)]
+pub(crate) struct ColdForm {
+    #[serde(default)]
+    on: Option<String>,
+}
+
+/// `POST /settings/storage/cold`: the cold tier opt-in (#417).
+pub(crate) async fn cold(
+    _: crate::access::Admin,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(f): Form<ColdForm>,
+) -> Response {
+    if crate::cold::from_env() {
+        return render(
+            &state,
+            None,
+            Some("OPENLENS_S3_COLD sets the cold tier; change it there.".into()),
+        )
+        .await;
+    }
+    let on = f.on.is_some();
+    let _ = state
+        .meta
+        .set_setting(crate::cold::OPT_IN, if on { "on" } else { "" });
+    crate::privacy::audit(
+        &state,
+        &headers,
+        None,
+        "storage.cold",
+        if on { "on" } else { "off" },
+    );
+    let notice = if on {
+        "Cold tier on: from the next hourly S3 pass, days older than 120 days live on S3 only, once the bucket's lifecycle rules are checked."
+    } else {
+        "Cold tier off: no more days leave the disk. Days already on S3 stay readable there."
+    };
+    render(&state, Some(notice.into()), None).await
 }
 
 #[derive(Deserialize)]

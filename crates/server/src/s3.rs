@@ -328,6 +328,38 @@ fn ok(r: (u16, Vec<u8>), what: &str) -> Result<Vec<u8>, String> {
     }
 }
 
+/// The shortest enabled expiration among the bucket's lifecycle rules, in
+/// days (#417): `None` when the bucket has no lifecycle rule. Every rule
+/// counts, whatever its prefix filter (the safe reading).
+pub(crate) fn min_expiration_days(cfg: &Config) -> Result<Option<u32>, String> {
+    let (status, body) = request(cfg, "GET", "", &[("lifecycle", "")], &[])?;
+    let text = String::from_utf8_lossy(&body).into_owned();
+    if status == 404 && text.contains("NoSuchLifecycleConfiguration") {
+        return Ok(None);
+    }
+    ok((status, body), "lifecycle rules")?;
+    Ok(parse_min_expiration(&text))
+}
+
+/// Read `GetBucketLifecycleConfiguration`: the smallest `<Expiration>
+/// <Days>` of an enabled rule. An expiration at a fixed `<Date>` counts as
+/// 0 days (it may already have passed).
+pub(crate) fn parse_min_expiration(xml: &str) -> Option<u32> {
+    let between = |t: &str, open: &str, close: &str| -> Option<String> {
+        Some(t.split(open).nth(1)?.split(close).next()?.to_owned())
+    };
+    xml.split("<Rule>")
+        .skip(1)
+        .filter_map(|r| r.split("</Rule>").next())
+        .filter(|r| r.contains("<Status>Enabled</Status>"))
+        .filter_map(|r| between(r, "<Expiration>", "</Expiration>"))
+        .filter_map(|e| match between(&e, "<Days>", "</Days>") {
+            Some(d) => d.trim().parse().ok(),
+            None => e.contains("<Date>").then_some(0),
+        })
+        .min()
+}
+
 /// Upload one object.
 pub(crate) fn put(cfg: &Config, key: &str, body: &[u8]) -> Result<(), String> {
     ok(request(cfg, "PUT", key, &[], body)?, "upload").map(|_| ())

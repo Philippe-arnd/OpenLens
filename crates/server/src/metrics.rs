@@ -179,6 +179,12 @@ pub(crate) async fn metrics(State(state): State<AppState>, headers: HeaderMap) -
             state.boards.len() as u64,
         ),
         (
+            "cold_tier_blocked",
+            "gauge",
+            "1 when the cold tier is on but moves nothing (bucket lifecycle too short or unreadable).",
+            u64::from(crate::cold::blocked(&state.meta).is_some()),
+        ),
+        (
             "disk_free_bytes",
             "gauge",
             "Free space on the data volume.",

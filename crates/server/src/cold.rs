@@ -21,6 +21,79 @@ use crate::s3::{self, Config};
 /// reads raw events for (goals read 112 days).
 pub(crate) const COLD_AFTER_DAYS: i64 = 120;
 
+/// The shortest bucket expiration the tier accepts (#417): the 400-day
+/// retention, so S3 never drops a day OpenLens still promises to keep.
+pub(crate) const MIN_BUCKET_EXPIRY_DAYS: u32 = 400;
+
+/// The owner's opt-in (#417, D-032): off by default. `OPENLENS_S3_COLD`
+/// (`on` / `off`) wins over the Storage page.
+pub(crate) const OPT_IN: &str = "s3_cold";
+/// Why no day moves although the tier is on (empty: nothing in the way).
+pub(crate) const BLOCKED: &str = "s3_cold_blocked";
+
+/// Is the cold tier on?
+pub(crate) fn enabled(meta: &openlens_meta::Meta) -> bool {
+    match std::env::var("OPENLENS_S3_COLD")
+        .ok()
+        .as_deref()
+        .map(str::trim)
+    {
+        Some("on") => true,
+        Some("off") => false,
+        _ => meta.setting(OPT_IN).ok().flatten().as_deref() == Some("on"),
+    }
+}
+
+/// Is the opt-in set by the environment (read-only on the page)?
+pub(crate) fn from_env() -> bool {
+    std::env::var("OPENLENS_S3_COLD").is_ok_and(|v| matches!(v.trim(), "on" | "off"))
+}
+
+/// Why the tier is on but moves nothing, if it is blocked.
+pub(crate) fn blocked(meta: &openlens_meta::Meta) -> Option<String> {
+    meta.setting(BLOCKED)
+        .ok()
+        .flatten()
+        .filter(|v| !v.is_empty())
+}
+
+/// [`offload`], only when the owner opted in and the bucket keeps objects
+/// long enough (#417). The bucket's lifecycle rules are read first; when
+/// they cannot be read, nothing moves (fail closed). The reason is kept for
+/// the Storage page and `/metrics`.
+pub(crate) fn offload_checked(
+    cfg: &Config,
+    root: &Path,
+    meta: &openlens_meta::Meta,
+    today: NaiveDate,
+) -> Result<usize, String> {
+    if !enabled(meta) {
+        let _ = meta.set_setting(BLOCKED, "");
+        return Ok(0);
+    }
+    static ANNOUNCED: std::sync::Once = std::sync::Once::new();
+    ANNOUNCED.call_once(|| {
+        tracing::warn!(
+            "cold tier on: event days older than {COLD_AFTER_DAYS} days live only on S3 (D-031, D-032)"
+        );
+    });
+    let reason = match s3::min_expiration_days(cfg) {
+        Ok(Some(d)) if d < MIN_BUCKET_EXPIRY_DAYS => Some(format!(
+            "the bucket expires objects after {d} days, under the {MIN_BUCKET_EXPIRY_DAYS}-day retention: no day leaves the disk"
+        )),
+        Ok(_) => None,
+        Err(e) => Some(format!(
+            "the bucket's lifecycle rules cannot be read ({e}): no day leaves the disk"
+        )),
+    };
+    let _ = meta.set_setting(BLOCKED, reason.as_deref().unwrap_or(""));
+    if let Some(r) = reason {
+        tracing::warn!(reason = %r, "cold tier blocked");
+        return Ok(0);
+    }
+    offload(cfg, root, today)
+}
+
 /// The upload mark `s3::sync` leaves in a day directory.
 const MARK: &str = ".s3-uploaded";
 
@@ -217,6 +290,50 @@ pub(crate) fn offload(cfg: &Config, root: &Path, today: NaiveDate) -> Result<usi
         }
     }
     Ok(moved)
+}
+
+/// The cold tier, after a good S3 copy (#326, D-031): people forgotten
+/// since the last pass are erased from cold days too, then old days move
+/// to S3 and cold days past retention go.
+pub(crate) fn run(cfg: &Config, root: &Path, meta: &openlens_meta::Meta) {
+    const DONE: &str = "cold_erased_at";
+    let Ok(_guard) = crate::privacy::MAINTENANCE.lock() else {
+        return;
+    };
+    let now = chrono::Utc::now();
+    for p in meta.projects().unwrap_or_default() {
+        let since = meta
+            .project_setting(&p.id, DONE)
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(0);
+        let ids: std::collections::HashSet<String> = meta
+            .forgotten_since(&p.id, since)
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        if !ids.is_empty() {
+            match erase(cfg, root, &p.id, &ids) {
+                Ok(n) => tracing::info!(project = %p.id, events = n, "erased from cold days"),
+                Err(err) => {
+                    tracing::warn!(project = %p.id, %err, "cold erasure failed; retried next hour");
+                    continue;
+                }
+            }
+        }
+        let _ = meta.set_project_setting(&p.id, DONE, &now.timestamp().to_string());
+    }
+    match offload_checked(cfg, root, meta, now.date_naive()) {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(days = n, "moved old event days to S3"),
+        Err(err) => tracing::warn!(%err, "cold tier: move to S3 failed"),
+    }
+    match expire(cfg, root, now.date_naive()) {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(days = n, "expired cold days on S3"),
+        Err(err) => tracing::warn!(%err, "cold tier: expiry failed"),
+    }
 }
 
 /// Bring a cold day back to the disk, as it was uploaded. Returns the
@@ -418,6 +535,13 @@ mod tests {
                         store.remove(&key);
                         ("204 No Content", Vec::new())
                     }
+                    "GET" if query.starts_with("lifecycle") => match store.get("__lifecycle__") {
+                        Some(v) => ("200 OK", v.clone()),
+                        None => (
+                            "404 Not Found",
+                            b"<Code>NoSuchLifecycleConfiguration</Code>".to_vec(),
+                        ),
+                    },
                     // A real bucket lists only at its root (`/bucket`).
                     "GET" if query.contains("list-type=2") && !key.is_empty() => {
                         ("404 Not Found", b"<Code>NoSuchKey</Code>".to_vec())
@@ -517,6 +641,83 @@ mod tests {
             flags: None,
             properties: "{}".into(),
         }
+    }
+
+    #[test]
+    fn lifecycle_rules_are_read_safely() {
+        let r = |days: &str, status: &str| {
+            format!(
+                "<Rule><ID>x</ID><Status>{status}</Status><Expiration>{days}</Expiration></Rule>"
+            )
+        };
+        let doc = |rules: &[String]| {
+            format!(
+                "<LifecycleConfiguration>{}</LifecycleConfiguration>",
+                rules.concat()
+            )
+        };
+        assert_eq!(s3::parse_min_expiration(&doc(&[])), None);
+        assert_eq!(
+            s3::parse_min_expiration(&doc(&[r("<Days>30</Days>", "Enabled")])),
+            Some(30)
+        );
+        assert_eq!(
+            s3::parse_min_expiration(&doc(&[
+                r("<Days>30</Days>", "Disabled"),
+                r("<Days>500</Days>", "Enabled")
+            ])),
+            Some(500)
+        );
+        assert_eq!(
+            s3::parse_min_expiration(&doc(&[r("<Date>2027-01-01T00:00:00Z</Date>", "Enabled")])),
+            Some(0)
+        );
+        let noncurrent = "<LifecycleConfiguration><Rule><Status>Enabled</Status><NoncurrentVersionExpiration><NoncurrentDays>7</NoncurrentDays></NoncurrentVersionExpiration></Rule></LifecycleConfiguration>";
+        assert_eq!(
+            s3::parse_min_expiration(noncurrent),
+            None,
+            "old versions only"
+        );
+    }
+
+    #[test]
+    fn the_tier_is_opt_in_and_refuses_a_bucket_that_forgets_too_soon() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        let today = NaiveDate::from_ymd_opt(2026, 11, 24).unwrap();
+        let old = today - chrono::Duration::days(COLD_AFTER_DAYS + 5);
+        let (mut w, _) =
+            openlens_storage::Writer::open(root, openlens_storage::FlushPolicy::default()).unwrap();
+        w.append(&[event(old, "ann", 1)]).unwrap();
+        w.flush().unwrap();
+        let g = openlens_storage::rollup::generation();
+        assert!(
+            openlens_storage::rollup::write(root, "p", old, g, &openlens_storage::rollup::empty())
+                .unwrap()
+        );
+        let (url, store) = fake_store();
+        let cfg = cfg(url);
+        let meta = openlens_meta::Meta::in_memory().unwrap();
+        s3::sync(&cfg, root, &meta, &today.to_string()).unwrap();
+        let old_dir = root.join(rel("p", old));
+
+        // Off by default: S3 is a second copy, nothing leaves the disk.
+        assert_eq!(offload_checked(&cfg, root, &meta, today).unwrap(), 0);
+        assert!(old_dir.is_dir());
+        // On, but the bucket expires objects after 30 days: refused, said why.
+        meta.set_setting(OPT_IN, "on").unwrap();
+        store.lock().unwrap().insert(
+            "__lifecycle__".into(),
+            b"<LifecycleConfiguration><Rule><Status>Enabled</Status><Expiration><Days>30</Days></Expiration></Rule></LifecycleConfiguration>".to_vec(),
+        );
+        assert_eq!(offload_checked(&cfg, root, &meta, today).unwrap(), 0);
+        assert!(old_dir.is_dir(), "no local file removed");
+        assert!(blocked(&meta).unwrap().contains("30 days"));
+        // No lifecycle rule: the day moves, and the warning clears.
+        store.lock().unwrap().remove("__lifecycle__");
+        assert_eq!(offload_checked(&cfg, root, &meta, today).unwrap(), 1);
+        assert!(!old_dir.exists());
+        assert_eq!(blocked(&meta), None);
     }
 
     #[test]

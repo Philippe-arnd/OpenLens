@@ -423,7 +423,7 @@ async fn run_jobs(state: AppState, digest: Job, digest_first: Duration) {
                 let r = s3::sync(&cfg, &root, &meta, &today);
                 s3::record(&meta, &r);
                 if r.is_ok() {
-                    cold_tier(&cfg, &root, &meta);
+                    cold::run(&cfg, &root, &meta);
                 }
                 r
             })
@@ -549,50 +549,6 @@ fn compact(state: &AppState) -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-/// The cold tier, after a good S3 copy (#326, D-031): people forgotten
-/// since the last pass are erased from cold days too, then old days move
-/// to S3 and cold days past retention go.
-fn cold_tier(cfg: &s3::Config, root: &std::path::Path, meta: &openlens_meta::Meta) {
-    const DONE: &str = "cold_erased_at";
-    let Ok(_guard) = privacy::MAINTENANCE.lock() else {
-        return;
-    };
-    let now = chrono::Utc::now();
-    for p in meta.projects().unwrap_or_default() {
-        let since = meta
-            .project_setting(&p.id, DONE)
-            .ok()
-            .flatten()
-            .and_then(|v| v.parse::<i64>().ok())
-            .unwrap_or(0);
-        let ids: std::collections::HashSet<String> = meta
-            .forgotten_since(&p.id, since)
-            .unwrap_or_default()
-            .into_iter()
-            .collect();
-        if !ids.is_empty() {
-            match cold::erase(cfg, root, &p.id, &ids) {
-                Ok(n) => tracing::info!(project = %p.id, events = n, "erased from cold days"),
-                Err(err) => {
-                    tracing::warn!(project = %p.id, %err, "cold erasure failed; retried next hour");
-                    continue;
-                }
-            }
-        }
-        let _ = meta.set_project_setting(&p.id, DONE, &now.timestamp().to_string());
-    }
-    match cold::offload(cfg, root, now.date_naive()) {
-        Ok(0) => {}
-        Ok(n) => tracing::info!(days = n, "moved old event days to S3"),
-        Err(err) => tracing::warn!(%err, "cold tier: move to S3 failed"),
-    }
-    match cold::expire(cfg, root, now.date_naive()) {
-        Ok(0) => {}
-        Ok(n) => tracing::info!(days = n, "expired cold days on S3"),
-        Err(err) => tracing::warn!(%err, "cold tier: expiry failed"),
-    }
 }
 
 /// Closed days rolled up per project and pass, so a first pass over a

@@ -19,6 +19,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- **Breaking: the cold tier is now opt-in** (#417, D-032). Since 0.3.0, configuring S3 also moved event days older than 120 days off the disk, which made S3 their only copy. From this release nothing leaves the disk until an admin turns the cold tier on in *Storage and backups* (or sets `OPENLENS_S3_COLD=on`). Days already on S3 stay readable. With the tier on, OpenLens first reads the bucket's lifecycle rules and moves nothing when one expires objects in under 400 days or when they cannot be read. The reason shows on the Storage page and as `openlens_cold_tier_blocked`. A banner says how many days live on S3 only.
 - **A visual pass on every page**: a clearer type scale (28 px page titles, 15 px card titles), more space between cards and tiles, tabular numbers, quieter table headers with row hover, visible focus rings, and settings forms on one aligned grid.
 - **Settings keep their place** (#403, part 1): the instance pages (API tokens, AI, Storage, Team, My profile) keep the menu of the last project you opened (or your only project) and share an *Instance* tab group. Every page has a breadcrumb (`Projects › project › section › page`). Time zones offer every IANA zone, quiet hours are hour pickers, and the health path and embed address suggest values.
 - **Replays show their active time** (#404, part 1): the list shows the time with user input ("3 min active · open 2 h") instead of the time the tab stayed open. Pauses over 2 minutes without input don't count, and neither do changes the page makes on its own. Older recordings get it on their first listing, and it is cached in `info.json`.
@@ -32,7 +33,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Added
 
-- **Cold tier on S3** (#326, part B): with S3 set, event days older than 120 days leave the disk once S3 holds every file, verified. Forgetting someone and a person's export still cover them, and they are deleted from S3 after 400 days (D-031).
+- **Cold tier on S3** (#326, part B; opt-in since 0.5.0, see #417 / D-032): with S3 set, event days older than 120 days leave the disk once S3 holds every file, verified. Forgetting someone and a person's export still cover them, and they are deleted from S3 after 400 days (D-031).
 
 - **The CLI checked against the API contract** (#312, part 3): a test fails when the CLI or its MCP tools call a path that `/api/openapi.json` does not list.
 

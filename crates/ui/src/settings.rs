@@ -78,6 +78,14 @@ pub struct StorageView {
     pub has_latest: bool,
     /// The data folder.
     pub data_dir: String,
+    /// The cold tier is on (#417): old days live on S3 only.
+    pub cold_on: bool,
+    /// Its switch comes from `OPENLENS_S3_COLD`.
+    pub cold_from_env: bool,
+    /// Why it moves nothing although on.
+    pub cold_blocked: Option<String>,
+    /// Days whose only copy is on S3 now.
+    pub cold_days: usize,
     /// After an action.
     pub notice: Option<String>,
     /// After a failed action.
@@ -583,8 +591,11 @@ pub fn storage(v: &StorageView) -> Markup {
         html! {
             div.heading { div {
                 h1 { "Storage and backups" }
-                p.muted { "Local disk (" code { (v.data_dir) } ") is the source of truth. S3 keeps a second copy; backups are point-in-time copies you can restore." }
+                p.muted { "Local disk (" code { (v.data_dir) } ") holds your data. S3 keeps a copy of closed days, and, only if you turn the cold tier on, becomes the only copy of days older than 120 days. Backups are point-in-time copies you can restore." }
             } }
+            @if v.cold_days > 0 {
+                p.alert role="status" { strong { (v.cold_days) " event days live only on S3." } " Losing the bucket, or a lifecycle rule that expires its objects, loses them. Keep the bucket and its versioning." }
+            }
             @if let Some(n) = &v.notice { p.notice role="status" { (n) } }
             @if let Some(e) = &v.error { p.alert role="alert" { (e) } }
             section.card.wide {
@@ -607,6 +618,19 @@ pub fn storage(v: &StorageView) -> Markup {
                     @if let Some(e) = &v.last_error { br; span.status.bad { "Last error" } " " (e) }
                 }
                 p.muted.small { "Copied hourly: every closed day of events, and a daily snapshot of the metadata. The secret is stored sealed and never shown again." }
+            }
+            section.card.wide #cold {
+                h2.violet { (icon("layers")) "Cold tier: old days on S3 only" }
+                p.small { "Off by default. When on, event days older than 120 days leave the disk once S3 holds every file of them, checked. S3 then becomes their " strong { "only" } " copy (D-031). OpenLens first reads the bucket's lifecycle rules and moves nothing if one expires objects in under 400 days, or if they cannot be read." }
+                @if let Some(b) = &v.cold_blocked { p.alert role="alert" { "Nothing moves: " (b) "." } }
+                @if v.cold_from_env {
+                    p.small { span.chip { "set by environment" } " " code { "OPENLENS_S3_COLD" } " is " strong { (if v.cold_on { "on" } else { "off" }) } "." }
+                } @else {
+                    form.settings method="post" action="/settings/storage/cold" {
+                        label.check { input type="checkbox" name="on" checked[v.cold_on]; " Move days older than 120 days to S3 and remove them from the disk" }
+                        button type="submit" { "Save" }
+                    }
+                }
             }
             section.card.wide {
                 h2.mint { (icon("clock")) "Backups" }

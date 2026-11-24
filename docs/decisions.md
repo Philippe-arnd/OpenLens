@@ -71,7 +71,7 @@ Append-only. Each entry: id, date, decision, why, consequences.
   - S3 (bucket and credentials) as a second copy of closed partitions.
 
   Each one is skipped silently when it is not configured.
-- Local disk remains the source of truth. S3 receives closed days and backups, so losing the bucket never loses data.
+- Local disk remains the source of truth. S3 receives closed days and backups, so losing the bucket never loses data. *Amended by D-031 and D-032: with the cold tier turned on, days older than 120 days live on S3 only.*
 
 ## D-017 (2026-11-22, Phil) A time zone per project
 
@@ -213,4 +213,12 @@ Append-only. Each entry: id, date, decision, why, consequences.
 **Why:** a long-lived install keeps its disk to the last four months of raw events, while rollups (D-026) and S3 keep the rest.
 
 **Consequences:** local backups (`openlens backup`) hold only the days on disk; S3 holds the rest. Restoring a backup without the S3 bucket loses the cold days. Queries on raw events never read cold days; investigations further back (#325) will bring them back on demand.
+
+## D-032 (2026-11-25, agent for #417, owner's delegation) The cold tier is an explicit opt-in, guarded by the bucket's lifecycle
+
+**Decision:** D-031's move to S3 no longer starts because S3 is configured. It is **off by default** and turned on in *Storage and backups* (or `OPENLENS_S3_COLD=on`, which wins). Installs that already have cold days keep reading, erasing and expiring them; only new moves stop until the owner opts in. Before each pass, OpenLens reads the bucket's lifecycle rules and moves nothing when an enabled rule expires objects in under 400 days (the retention), whatever the rule's prefix, or when the rules cannot be read (fail closed). The reason shows on the Storage page and as `openlens_cold_tier_blocked` in `/metrics`. There is no override for a short lifecycle (minimal config).
+
+**Why:** the tier deletes local data. An operator who set S3 up as a second copy, as D-016 promised, must not lose days to a backup bucket's 30-day expiration rule without a warning.
+
+**Consequences:** a **breaking change** for installs that relied on the implicit move since v0.3.0 (announced in the 0.5.0 notes). A bucket with no lifecycle rule is accepted. The check reads `GetBucketLifecycleConfiguration`, so the S3 key needs that permission when the tier is on.
 
