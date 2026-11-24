@@ -159,9 +159,21 @@ function touchSession(now) {
   if (!state.last || now - state.last > SESSION_GAP || dayChanged) state.sid = (cfg == null ? void 0 : cfg.cookieless) ? COOKIELESS : uuid();
   state.last = now;
 }
+function cleanUrl(href) {
+  const [base2, query] = (href.split("#")[0] || "").split("?");
+  if (!query) return base2 || "";
+  const kept = query.split("&").filter((kv) => {
+    const k = (kv.split("=")[0] || "").toLowerCase();
+    return k.startsWith("utm_") || k === "ref" || k === "gclid";
+  });
+  return kept.length ? `${base2}?${kept.join("&")}` : base2 || "";
+}
+function personal(text) {
+  return text.includes("@") || /\d{7,}/.test(text);
+}
 function base() {
   const p = {
-    $current_url: location.href.split("#")[0],
+    $current_url: cleanUrl(location.href),
     $pathname: route(),
     $environment: (cfg == null ? void 0 : cfg.environment) || detectEnvironment(location.hostname),
     $lib: "web",
@@ -352,8 +364,8 @@ function describe(el, path) {
   const isInput = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
   const masked = up.some((x) => x.hasAttribute("data-openlens-mask"));
   if (!isInput && !masked) {
-    const text = (el.textContent || "").replace(/\s+/g, " ").trim();
-    if (text) p.$text = text.slice(0, 60);
+    const text = (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60);
+    if (text && (f || !personal(text))) p.$text = text;
   }
   const href = masked ? null : el.getAttribute("href");
   if (href) p.$href = (_a = href.split("?")[0]) == null ? void 0 : _a.slice(0, 200);
@@ -504,7 +516,8 @@ function init(config) {
   var _a, _b;
   if (cfg || typeof window === "undefined") return;
   if (!config.host || !config.key) return;
-  if (navigator.doNotTrack === "1" || config.consent === "denied") consent = "denied";
+  const gpc = navigator.globalPrivacyControl === true;
+  if (navigator.doNotTrack === "1" || gpc || config.consent === "denied") consent = "denied";
   else consent = (_a = config.consent) != null ? _a : "granted";
   cfg = config;
   origFetch = (_b = window.fetch) == null ? void 0 : _b.bind(window);

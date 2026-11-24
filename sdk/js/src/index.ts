@@ -161,9 +161,26 @@ function touchSession(now: number): void {
   state.last = now;
 }
 
+/** Query parameters kept in a page URL: campaign tags only. Reset tokens,
+ * magic links and e-mail addresses travel in query strings: never sent. */
+function cleanUrl(href: string): string {
+  const [base, query] = (href.split("#")[0] || "").split("?");
+  if (!query) return base || "";
+  const kept = query.split("&").filter((kv) => {
+    const k = (kv.split("=")[0] || "").toLowerCase();
+    return k.startsWith("utm_") || k === "ref" || k === "gclid";
+  });
+  return kept.length ? `${base}?${kept.join("&")}` : base || "";
+}
+
+/** Click text that may name a person: an e-mail address or a long number. */
+function personal(text: string): boolean {
+  return text.includes("@") || /\d{7,}/.test(text);
+}
+
 function base(): Props {
   const p: Props = {
-    $current_url: location.href.split("#")[0],
+    $current_url: cleanUrl(location.href),
     $pathname: route(),
     $environment: cfg?.environment || detectEnvironment(location.hostname),
     $lib: "web",
@@ -398,8 +415,10 @@ function describe(el: Element, path?: EventTarget[]): Props {
   // Text under data-openlens-mask is private (e.g. decrypted user content): never sent.
   const masked = up.some((x) => x.hasAttribute("data-openlens-mask"));
   if (!isInput && !masked) {
-    const text = (el.textContent || "").replace(/\s+/g, " ").trim();
-    if (text) p.$text = text.slice(0, 60);
+    const text = (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60);
+    // Under data-feature the text is the app's own label; elsewhere it may
+    // be data shown to the user, kept only when it names nobody.
+    if (text && (f || !personal(text))) p.$text = text;
   }
   const href = masked ? null : el.getAttribute("href");
   if (href) p.$href = href.split("?")[0]?.slice(0, 200);
@@ -569,7 +588,8 @@ function autocapture(): void {
 export function init(config: Config): void {
   if (cfg || typeof window === "undefined") return;
   if (!config.host || !config.key) return;
-  if (navigator.doNotTrack === "1" || config.consent === "denied") consent = "denied";
+  const gpc = (navigator as Navigator & { globalPrivacyControl?: boolean }).globalPrivacyControl === true;
+  if (navigator.doNotTrack === "1" || gpc || config.consent === "denied") consent = "denied";
   else consent = config.consent ?? "granted";
   cfg = config;
   origFetch = window.fetch?.bind(window);
