@@ -1,0 +1,17 @@
+# Require the owner's review on the paths where a mistake is hardest to
+# see or costliest to ship: authentication and access control, the
+# query guard that hides people from Ask, secrets, the cold tier and
+# backups, CI workflows and deployment (NGOV-01).
+
+/crates/server/src/auth.rs      @Philippe-arnd
+/crates/server/src/access.rs    @Philippe-arnd
+/crates/server/src/scopes.rs    @Philippe-arnd
+/crates/server/src/csrf.rs      @Philippe-arnd
+/crates/server/src/secrets.rs   @Philippe-arnd
+/crates/server/src/tokens.rs    @Philippe-arnd
+/crates/server/src/cold.rs      @Philippe-arnd
+/crates/server/src/backup.rs    @Philippe-arnd
+/crates/storage/                @Philippe-arnd
+/crates/query/src/aggregate.rs  @Philippe-arnd
+/.github/workflows/              @Philippe-arnd
+/deploy/                         @Philippe-arnd
