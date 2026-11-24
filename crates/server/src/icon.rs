@@ -7,9 +7,7 @@
 //! public addresses (checked after DNS, on every redirect), reads at most
 //! [`MAX_BYTES`], and keeps the bytes only if they are an image.
 
-use std::collections::HashSet;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::Mutex;
 use std::time::Duration;
 
 use axum::extract::{Path, State};
@@ -24,8 +22,6 @@ use crate::AppState;
 const MAX_BYTES: u64 = 128 * 1024;
 /// An icon is fetched again after this many days.
 const REFRESH_DAYS: i64 = 7;
-
-static IN_FLIGHT: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
 /// `GET /p/{id}/icon`: the stored favicon, else an SVG with the initial.
 /// Starts a refresh in the background when the icon is missing or old.
@@ -121,11 +117,13 @@ fn refresh_if_due(state: &AppState, id: &str) {
     {
         return;
     }
-    {
-        let Ok(mut g) = IN_FLIGHT.lock() else { return };
-        if !g.get_or_insert_with(HashSet::new).insert(id.to_owned()) {
-            return;
-        }
+    // One fetch per icon at a time.
+    let first = state
+        .caches
+        .icons_in_flight
+        .update(id.to_owned(), |was| (Some(()), was.is_none()));
+    if first != Some(true) {
+        return;
     }
     let state = state.clone();
     let id = id.to_owned();
@@ -151,11 +149,7 @@ fn refresh_if_due(state: &AppState, id: &str) {
             state
                 .meta
                 .set_project_setting(&id, "icon_checked", &chrono::Utc::now().to_rfc3339());
-        if let Ok(mut g) = IN_FLIGHT.lock()
-            && let Some(s) = g.as_mut()
-        {
-            s.remove(&id);
-        }
+        state.caches.icons_in_flight.remove(&id);
     });
 }
 

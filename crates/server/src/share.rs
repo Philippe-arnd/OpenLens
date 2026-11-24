@@ -3,9 +3,7 @@
 //! anyone with the link sees it without logging in. No SQL, people,
 //! replays or settings are reachable from it.
 
-use std::collections::HashMap;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use axum::extract::{Form, Path, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
@@ -14,10 +12,6 @@ use serde::Deserialize;
 
 use crate::AppState;
 use crate::web::html_page;
-
-/// Rendered views, kept a few minutes (token hash → (when, html)).
-static CACHE: Mutex<Option<HashMap<String, (Instant, String)>>> = Mutex::new(None);
-const CACHE_FOR: Duration = Duration::from_secs(300);
 
 #[derive(Deserialize)]
 pub(crate) struct NewLink {
@@ -130,9 +124,7 @@ pub(crate) async fn revoke(
     Path((id, lid)): Path<(String, String)>,
 ) -> Response {
     let _ = state.meta.revoke_share_link(&id, &lid);
-    if let Ok(mut c) = CACHE.lock() {
-        *c = None;
-    }
+    state.caches.share_pages.clear();
     crate::privacy::audit(&state, &headers, Some(&id), "share.revoke", &lid);
     Redirect::to(&format!("/p/{id}/settings#share")).into_response()
 }
@@ -158,12 +150,8 @@ pub(crate) async fn view(
         return not_found();
     };
     let key = crate::short_hash(&token);
-    let cached = CACHE.lock().ok().and_then(|c| {
-        c.as_ref()
-            .and_then(|m| m.get(&key))
-            .filter(|(at, _)| at.elapsed() < CACHE_FOR)
-            .map(|(_, h)| h.clone())
-    });
+    // Rendered views are kept a few minutes (token hash → html).
+    let cached = state.caches.share_pages.get(&key);
     let body = match cached {
         Some(h) => h,
         None => {
@@ -199,11 +187,7 @@ pub(crate) async fn view(
                 openlens_ui::render_shared(|| openlens_ui::board(&info, &b, &f, "", &[], None, &[]))
             };
             let h = markup.into_string();
-            if let Ok(mut c) = CACHE.lock() {
-                let m = c.get_or_insert_with(HashMap::new);
-                m.retain(|_, (at, _)| at.elapsed() < CACHE_FOR);
-                m.insert(key, (Instant::now(), h.clone()));
-            }
+            state.caches.share_pages.insert(key, h.clone());
             h
         }
     };

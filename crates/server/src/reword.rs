@@ -9,16 +9,14 @@
 //! (titles, evidence, next steps: feature and role names, counts), never
 //! events or user data.
 
-use std::collections::HashMap;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::Deserialize;
 use serde_json::json;
 use sha2::Digest;
 
 const API: &str = "https://api.anthropic.com/v1/messages";
-const TTL: Duration = Duration::from_secs(24 * 3600);
+pub(crate) const TTL: Duration = Duration::from_secs(24 * 3600);
 
 /// Plain wording of one card.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -26,9 +24,6 @@ pub(crate) struct Plain {
     pub title: String,
     pub next_step: String,
 }
-
-type Cache = HashMap<String, (Instant, Option<Vec<Plain>>)>;
-static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
 
 fn settings() -> Option<(String, String)> {
     let key = std::env::var("OPENLENS_LLM_API_KEY")
@@ -56,22 +51,21 @@ fn cache_key(cards: &[openlens_engine::Insight]) -> String {
 
 /// The plain wording for these cards if it is ready; otherwise starts
 /// computing it in the background and returns `None` (render the originals).
-pub(crate) fn plain(cards: &[openlens_engine::Insight]) -> Option<Vec<Plain>> {
+pub(crate) fn plain(
+    state: &crate::AppState,
+    cards: &[openlens_engine::Insight],
+) -> Option<Vec<Plain>> {
     let (api_key, model) = settings()?;
     if cards.is_empty() {
         return None;
     }
     let key = cache_key(cards);
-    {
-        let mut g = CACHE.lock().ok()?;
-        let cache = g.get_or_insert_with(HashMap::new);
-        cache.retain(|_, (at, _)| at.elapsed() < TTL);
-        if let Some((_, v)) = cache.get(&key) {
-            return v.clone();
-        }
-        // Mark as in flight (None) so concurrent renders do not ask again.
-        cache.insert(key.clone(), (Instant::now(), None));
+    if let Some(v) = state.caches.reword.get(&key) {
+        return v;
     }
+    // Mark as in flight (None) so concurrent renders do not ask again.
+    state.caches.reword.insert(key.clone(), None);
+    let caches = state.caches.clone();
     let originals: Vec<(String, String, String)> = cards
         .iter()
         .map(|c| (c.title.clone(), c.evidence.clone(), c.next_step.clone()))
@@ -84,11 +78,7 @@ pub(crate) fn plain(cards: &[openlens_engine::Insight]) -> Option<Vec<Plain>> {
                 None
             }
         };
-        if let Ok(mut g) = CACHE.lock()
-            && let Some(cache) = g.as_mut()
-        {
-            cache.insert(key, (Instant::now(), result));
-        }
+        caches.reword.insert(key, result);
     });
     None
 }
@@ -240,7 +230,8 @@ mod tests {
     fn off_without_a_key() {
         // SAFETY of the assumption: tests do not set OPENLENS_LLM_API_KEY.
         if std::env::var("OPENLENS_LLM_API_KEY").is_err() {
-            assert!(plain(&[]).is_none());
+            // `plain` asks nothing without settings.
+            assert!(settings().is_none());
         }
     }
 }

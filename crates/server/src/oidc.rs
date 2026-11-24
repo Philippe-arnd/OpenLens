@@ -12,9 +12,6 @@
 //! invited (`/users`) can sign in, matched on a verified email: SSO proves
 //! who someone is, the team list says what they may see.
 
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
-
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -55,22 +52,16 @@ pub(crate) fn enabled() -> bool {
 }
 
 #[derive(Clone, Deserialize)]
-struct Discovery {
+pub(crate) struct Discovery {
     issuer: String,
     authorization_endpoint: String,
     token_endpoint: String,
 }
 
-static DISCOVERY: Mutex<Option<(Instant, String, Discovery)>> = Mutex::new(None);
-
 /// The provider's endpoints, cached for an hour.
-async fn discovery(cfg: &Config) -> Result<Discovery, String> {
-    if let Ok(g) = DISCOVERY.lock()
-        && let Some((at, issuer, d)) = g.as_ref()
-        && *issuer == cfg.issuer
-        && at.elapsed() < Duration::from_secs(3600)
-    {
-        return Ok(d.clone());
+async fn discovery(state: &AppState, cfg: &Config) -> Result<Discovery, String> {
+    if let Some(d) = state.caches.oidc.get(&cfg.issuer) {
+        return Ok(d);
     }
     let url = format!("{}/.well-known/openid-configuration", cfg.issuer);
     let d: Discovery = tokio::task::spawn_blocking(move || -> Result<Discovery, String> {
@@ -88,9 +79,7 @@ async fn discovery(cfg: &Config) -> Result<Discovery, String> {
     {
         return Err("the provider's endpoints must be https".into());
     }
-    if let Ok(mut g) = DISCOVERY.lock() {
-        *g = Some((Instant::now(), cfg.issuer.clone(), d.clone()));
-    }
+    state.caches.oidc.insert(cfg.issuer.clone(), d.clone());
     Ok(d)
 }
 
@@ -156,7 +145,7 @@ pub(crate) async fn start(State(state): State<AppState>, headers: HeaderMap) -> 
             "Single sign-on is not configured.",
         );
     };
-    let d = match discovery(&cfg).await {
+    let d = match discovery(&state, &cfg).await {
         Ok(d) => d,
         Err(err) => {
             tracing::warn!(%err, "OIDC discovery failed");
@@ -295,7 +284,7 @@ pub(crate) async fn callback(
     if exp.parse::<i64>().unwrap_or(0) < now || !crate::token_matches(st, &got_state) {
         return fail("state mismatch or flow expired");
     }
-    let d = match discovery(&cfg).await {
+    let d = match discovery(&state, &cfg).await {
         Ok(d) => d,
         Err(_) => return fail("discovery failed"),
     };

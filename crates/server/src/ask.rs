@@ -12,8 +12,6 @@
 //!   cache, compact TSV tool results, the last 6 turns as plain text;
 //! - a daily token budget per project and a rate limit per user.
 
-use std::collections::HashMap;
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use axum::extract::{Form, Path, State};
@@ -51,19 +49,12 @@ pub(crate) use openlens_ui::AskTurn as Turn;
 
 /// A proposed write, until confirmed or expired.
 #[derive(Debug, Clone)]
-struct Pending {
+pub(crate) struct Pending {
     project: String,
     user: String,
     action: Value,
     at: Instant,
 }
-
-static PENDING: Mutex<Option<HashMap<String, Pending>>> = Mutex::new(None);
-static RATE: Mutex<Option<HashMap<String, Vec<Instant>>>> = Mutex::new(None);
-/// Per project: (built at, map version, brief).
-type Briefs = HashMap<String, (Instant, i64, String)>;
-static BRIEFS: Mutex<Option<Briefs>> = Mutex::new(None);
-static LAST_SENT: Mutex<Option<HashMap<String, Value>>> = Mutex::new(None);
 
 fn tools() -> Vec<Tool> {
     let obj = |props: Value, req: &[&str]| json!({ "type": "object", "properties": props, "required": req });
@@ -228,12 +219,10 @@ fn filters(p: &openlens_meta::Project) -> openlens_engine::Filters {
 async fn brief(state: &AppState, p: &openlens_meta::Project) -> String {
     let map = crate::load_map(state, &p.id).await;
     let version = map.as_ref().map_or(0, |(_, v)| *v);
-    if let Ok(g) = BRIEFS.lock()
-        && let Some((at, v, b)) = g.as_ref().and_then(|m| m.get(&p.id))
-        && *v == version
-        && at.elapsed() < Duration::from_secs(24 * 3600)
+    if let Some((v, b)) = state.caches.ask_briefs.get(&p.id)
+        && v == version
     {
-        return b.clone();
+        return b;
     }
     let f = filters(p);
     let mut s = format!(
@@ -295,10 +284,10 @@ async fn brief(state: &AppState, p: &openlens_meta::Project) -> String {
             s.push_str(&format!("- objective at risk: {o}\n"));
         }
     }
-    if let Ok(mut g) = BRIEFS.lock() {
-        g.get_or_insert_with(HashMap::new)
-            .insert(p.id.clone(), (Instant::now(), version, s.clone()));
-    }
+    state
+        .caches
+        .ask_briefs
+        .insert(p.id.clone(), (version, s.clone()));
     s
 }
 
@@ -496,19 +485,15 @@ async fn run_tool(
                 action,
                 chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
             ));
-            if let Ok(mut g) = PENDING.lock() {
-                let m = g.get_or_insert_with(HashMap::new);
-                m.retain(|_, x| x.at.elapsed() < Duration::from_secs(1800));
-                m.insert(
-                    token.clone(),
-                    Pending {
-                        project: p.id.clone(),
-                        user: user.to_owned(),
-                        action,
-                        at: Instant::now(),
-                    },
-                );
-            }
+            state.caches.ask_pending.insert(
+                token.clone(),
+                Pending {
+                    project: p.id.clone(),
+                    user: user.to_owned(),
+                    action,
+                    at: Instant::now(),
+                },
+            );
             (
                 format!("proposed, waiting for the person to confirm: {desc}"),
                 Some((format!("pending:{token}"), desc)),
@@ -571,16 +556,20 @@ fn add_usage(state: &AppState, project: &str, tokens: i64) {
     }
 }
 
-fn rate_ok(user: &str) -> bool {
-    let Ok(mut g) = RATE.lock() else { return false };
-    let m = g.get_or_insert_with(HashMap::new);
-    let v = m.entry(user.to_owned()).or_default();
-    v.retain(|t| t.elapsed() < Duration::from_secs(3600));
-    if v.len() >= PER_HOUR {
-        return false;
-    }
-    v.push(Instant::now());
-    true
+fn rate_ok(state: &AppState, user: &str) -> bool {
+    state
+        .caches
+        .ask_rate
+        .update(user.to_owned(), |v| {
+            let mut v = v.unwrap_or_default();
+            v.retain(|t| t.elapsed() < Duration::from_secs(3600));
+            if v.len() >= PER_HOUR {
+                return (Some(v), false);
+            }
+            v.push(Instant::now());
+            (Some(v), true)
+        })
+        .unwrap_or(false)
 }
 
 /// Ask one question: the tool loop, then the turn to keep.
@@ -600,7 +589,7 @@ pub(crate) async fn answer(
             "Today's token budget for this project is used up; it resets at midnight UTC.".into(),
         );
     }
-    if !rate_ok(user) {
+    if !rate_ok(state, user) {
         return Err(format!("At most {PER_HOUR} questions an hour."));
     }
     let brief = brief(state, p).await;
@@ -647,10 +636,10 @@ pub(crate) async fn answer(
     for step in 0..=MAX_STEPS {
         let tool_list: &[Tool] = if step == MAX_STEPS { &[] } else { &tools };
         let body = llm::body(&cfg, &model, RULES, &brief, &msgs, tool_list);
-        if let Ok(mut g) = LAST_SENT.lock() {
-            g.get_or_insert_with(HashMap::new)
-                .insert(p.id.clone(), body.clone());
-        }
+        state
+            .caches
+            .ask_last_sent
+            .insert(p.id.clone(), body.clone());
         let c2 = cfg.clone();
         let reply = tokio::task::spawn_blocking(move || llm::send(&c2, &body))
             .await
@@ -849,10 +838,10 @@ pub(crate) async fn apply(
     user: &str,
     token: &str,
 ) -> Result<String, String> {
-    let pending = PENDING
-        .lock()
-        .ok()
-        .and_then(|mut g| g.as_mut().and_then(|m| m.remove(token)))
+    let pending = state
+        .caches
+        .ask_pending
+        .remove(&token.to_owned())
         .ok_or("This change expired or was already applied.")?;
     if pending.project != project
         || pending.user != user
@@ -967,10 +956,10 @@ pub(crate) async fn sent(
     if !auth::viewer(&state, &headers).is_some_and(|v| v.admin) {
         return StatusCode::FORBIDDEN.into_response();
     }
-    let body = LAST_SENT
-        .lock()
-        .ok()
-        .and_then(|g| g.as_ref().and_then(|m| m.get(&id).cloned()))
+    let body = state
+        .caches
+        .ask_last_sent
+        .get(&id)
         .unwrap_or_else(|| json!({ "note": "nothing sent since the server started" }));
     let mut r = serde_json::to_string_pretty(&body)
         .unwrap_or_default()

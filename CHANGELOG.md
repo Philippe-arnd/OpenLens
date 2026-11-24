@@ -16,6 +16,10 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 - **`xtask bench --with-board PROJECT`** (#344, part 2): measures ingestion while two readers compute a board in a loop (docs/benchmarks.md), and warns when the capture p99 goes above 50 ms.
 
+- **A slow job no longer holds up the flush** (#311): flush, compaction, the S3 copy, backups, alerts and the digest each run on their own interval. Backups, the S3 copy and compaction still take turns. An SMTP server that never answers gives up after 30 s.
+
+- **Every in-memory cache has a size limit** (#309): the 13 global caches and limiters (Ask, rate limits, cookieless sessions, icons, OIDC, reworded cards, share pages, login emails) live in the server state with a capacity and a time to live. `/metrics` reports `openlens_cache_entries{cache="…"}`.
+
 - **Group commit for ingestion** (#333): a capture request writes its events under the writer's lock and waits for the disk outside it, so one `fsync` serves every request that arrived in the meantime (a lone request still syncs at once). A resent batch dropped as a duplicate now waits until its first copy is on disk before its 200. `/metrics` counts `openlens_wal_syncs_total`.
 
 - **Dashboard reads no longer queue behind each other** (#344, part 1): metadata reads (settings, users, projects, tokens, flags and the like) go to 4 read-only SQLite connections next to the one writer.

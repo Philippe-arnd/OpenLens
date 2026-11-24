@@ -101,7 +101,7 @@ pub(crate) async fn public(
     headers: HeaderMap,
     Query(q): Query<HashMap<String, String>>,
 ) -> Response {
-    if crate::capture::ip_limited(&peer, &headers) {
+    if crate::capture::ip_limited(&state, &peer, &headers) {
         return crate::capture::too_many();
     }
     let cors = [

@@ -44,7 +44,7 @@ pub(crate) async fn ingest(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if crate::capture::ip_limited(&peer, &headers) {
+    if crate::capture::ip_limited(&state, &peer, &headers) {
         return crate::capture::too_many();
     }
     if let Some(r) = crate::capture::disk_full(&state) {

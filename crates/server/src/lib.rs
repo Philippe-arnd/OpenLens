@@ -12,6 +12,7 @@ mod auth;
 pub mod backup;
 mod backups;
 pub mod boards;
+pub mod cache;
 mod capture;
 mod comments;
 mod cookieless;
@@ -88,6 +89,8 @@ pub struct AppState {
     /// Session generation (#342): part of every cookie's signature, bumped
     /// by *Sign out everywhere*. Load it with [`tokens::session_generation`].
     pub session_gen: Arc<std::sync::atomic::AtomicU64>,
+    /// In-memory caches and limiters, each with a size limit (#309).
+    pub caches: Arc<cache::Caches>,
 }
 
 /// How the server reads the free space of its data volume.
@@ -297,30 +300,71 @@ async fn update_check() {
 /// compact closed days and apply retention (D-015), and check for a newer release
 /// once a day. Runs until the process exits.
 pub async fn background(state: AppState) {
+    run_jobs(
+        state,
+        |st| Box::pin(async move { digest::maybe_send(&st).await }),
+        Duration::from_secs(600),
+    )
+    .await;
+}
+
+/// A periodic job, as a future factory (tests swap the digest for one
+/// that never finishes, #311).
+type Job = fn(AppState) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
+
+/// One task per periodic job (#311), each on its own interval, so a slow
+/// one (an SMTP server that hangs, a long backup) never holds up the
+/// flush: events still reach Parquet every few seconds. Backups, the S3
+/// copy and compaction take turns on one lock, as they did in one loop.
+async fn run_jobs(state: AppState, digest: Job, digest_first: Duration) {
+    use tokio::time::{MissedTickBehavior, interval_at};
     tokio::spawn(update_check());
-    let mut tick = tokio::time::interval(Duration::from_secs(2));
-    let mut last_digest_check = std::time::Instant::now();
-    let mut last_backup_check = std::time::Instant::now();
-    let mut last_alert_check = std::time::Instant::now();
-    let mut alert_minute: u64 = 0;
-    // First S3 copy a few minutes after start, then hourly.
-    let mut last_s3_sync = std::time::Instant::now()
-        .checked_sub(Duration::from_secs(3300))
-        .unwrap_or_else(std::time::Instant::now);
-    // Run the first compaction and retention pass right away.
-    let mut last_compact = std::time::Instant::now()
-        .checked_sub(Duration::from_secs(600))
-        .unwrap_or_else(std::time::Instant::now);
-    loop {
-        tick.tick().await;
-        let st = state.clone();
-        let res =
-            tokio::task::spawn_blocking(move || flush_and_compact(&st, &mut last_compact)).await;
-        if last_s3_sync.elapsed() >= Duration::from_secs(3600)
-            && let Some((cfg, _)) = s3::configured(&state.meta, &state.data_dir)
-        {
-            last_s3_sync = std::time::Instant::now();
-            let (root, meta) = (state.data_dir.clone(), state.meta.clone());
+    let heavy = Arc::new(tokio::sync::Mutex::new(()));
+    let every = |first: Duration, period: Duration| {
+        let mut t = interval_at(tokio::time::Instant::now() + first, period);
+        t.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        t
+    };
+    // Flush: every 2 s, when the buffer is due.
+    let st = state.clone();
+    let mut t = every(Duration::ZERO, Duration::from_secs(2));
+    let flusher = tokio::spawn(async move {
+        loop {
+            t.tick().await;
+            let s = st.clone();
+            match tokio::task::spawn_blocking(move || flush(&s)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => tracing::error!(%err, "background flush failed"),
+                Err(err) => tracing::error!(%err, "background flush crashed"),
+            }
+        }
+    });
+    // Compaction and retention: at start, then every 10 minutes.
+    let (st, lock) = (state.clone(), heavy.clone());
+    let mut t = every(Duration::ZERO, Duration::from_secs(600));
+    tokio::spawn(async move {
+        loop {
+            t.tick().await;
+            let _turn = lock.lock().await;
+            let s = st.clone();
+            match tokio::task::spawn_blocking(move || compact(&s)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => tracing::error!(%err, "compaction failed"),
+                Err(err) => tracing::error!(%err, "compaction crashed"),
+            }
+        }
+    });
+    // S3 copy: 5 minutes after start, then hourly.
+    let (st, lock) = (state.clone(), heavy.clone());
+    let mut t = every(Duration::from_secs(300), Duration::from_secs(3600));
+    tokio::spawn(async move {
+        loop {
+            t.tick().await;
+            let Some((cfg, _)) = s3::configured(&st.meta, &st.data_dir) else {
+                continue;
+            };
+            let _turn = lock.lock().await;
+            let (root, meta) = (st.data_dir.clone(), st.meta.clone());
             let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
             match tokio::task::spawn_blocking(move || {
                 let r = s3::sync(&cfg, &root, &meta, &today);
@@ -335,33 +379,43 @@ pub async fn background(state: AppState) {
                 Err(err) => tracing::warn!(%err, "S3 copy task crashed"),
             }
         }
-        if last_backup_check.elapsed() >= Duration::from_secs(60) {
-            last_backup_check = std::time::Instant::now();
-            backups::tick(&state).await;
+    });
+    // Backups: checked every minute against the plan.
+    let (st, lock) = (state.clone(), heavy);
+    let mut t = every(Duration::from_secs(60), Duration::from_secs(60));
+    tokio::spawn(async move {
+        loop {
+            t.tick().await;
+            let _turn = lock.lock().await;
+            backups::tick(&st).await;
         }
-        if last_alert_check.elapsed() >= Duration::from_secs(60) {
-            last_alert_check = std::time::Instant::now();
-            alert_minute += 1;
-            let (st, m) = (state.clone(), alert_minute);
-            // Probes can be slow: never hold up the flush loop.
-            tokio::spawn(async move { alerts::tick(&st, m).await });
+    });
+    // Alerts: every minute; probes can be slow, so each round is its own task.
+    let st = state.clone();
+    let mut t = every(Duration::from_secs(60), Duration::from_secs(60));
+    tokio::spawn(async move {
+        let mut minute: u64 = 0;
+        loop {
+            t.tick().await;
+            minute += 1;
+            let s = st.clone();
+            tokio::spawn(async move { alerts::tick(&s, minute).await });
         }
-        if last_digest_check.elapsed() >= Duration::from_secs(600) {
-            last_digest_check = std::time::Instant::now();
-            digest::maybe_send(&state).await;
+    });
+    // Weekly digest: checked every 10 minutes.
+    let st = state;
+    let mut t = every(digest_first, Duration::from_secs(600));
+    tokio::spawn(async move {
+        loop {
+            t.tick().await;
+            digest(st.clone()).await;
         }
-        match res {
-            Ok(Ok(next)) => last_compact = next,
-            Ok(Err(err)) => tracing::error!(%err, "background flush failed"),
-            Err(err) => tracing::error!(%err, "background task crashed"),
-        }
-    }
+    });
+    // The flush task runs for the life of the process.
+    let _ = flusher.await;
 }
 
-fn flush_and_compact(
-    state: &AppState,
-    last_compact: &mut std::time::Instant,
-) -> Result<std::time::Instant, String> {
+fn flush(state: &AppState) -> Result<(), String> {
     {
         // Only the hand-over runs under the writer lock: captures keep
         // appending while the segments are written (#293).
@@ -391,44 +445,46 @@ fn flush_and_compact(
             }
         }
     }
-    if last_compact.elapsed() >= Duration::from_secs(600) {
-        let _guard = privacy::MAINTENANCE
-            .lock()
-            .map_err(|_| "maintenance lock poisoned")?;
-        for p in state.meta.projects().map_err(|e| e.to_string())? {
-            let now = chrono::Utc::now();
-            clean_stored_urls(state, &p.id);
-            // Compaction, erasure and retention below rewrite files.
-            state.boards.bump();
-            if let Err(err) = openlens_storage::compact(&state.data_dir, &p.id, now) {
-                tracing::warn!(project = %p.id, %err, "compaction failed");
-            }
-            // People forgotten lately: rewritten out again, in case a
-            // restore or a late flush brought rows back (#230).
-            let recent = state
-                .meta
-                .forgotten_since(&p.id, now.timestamp() - 2 * 86400)
-                .unwrap_or_default();
-            if !recent.is_empty() {
-                let ids: std::collections::HashSet<String> = recent.into_iter().collect();
-                if let Err(err) = openlens_storage::erase(&state.data_dir, &p.id, &ids) {
-                    tracing::warn!(project = %p.id, %err, "erasure re-apply failed");
-                }
-            }
-            match openlens_storage::prune(&state.data_dir, &p.id, now) {
-                Ok(0) => {}
-                Ok(n) => tracing::info!(project = %p.id, days = n, "expired old event days"),
-                Err(err) => tracing::warn!(project = %p.id, %err, "event retention failed"),
-            }
-            match openlens_replay::prune(&state.data_dir, &p.id, now) {
-                Ok(0) => {}
-                Ok(n) => tracing::info!(project = %p.id, recordings = n, "expired old recordings"),
-                Err(err) => tracing::warn!(project = %p.id, %err, "replay retention failed"),
+    Ok(())
+}
+
+/// Compaction, erasure re-apply and retention for every project.
+fn compact(state: &AppState) -> Result<(), String> {
+    let _guard = privacy::MAINTENANCE
+        .lock()
+        .map_err(|_| "maintenance lock poisoned")?;
+    for p in state.meta.projects().map_err(|e| e.to_string())? {
+        let now = chrono::Utc::now();
+        clean_stored_urls(state, &p.id);
+        // Compaction, erasure and retention below rewrite files.
+        state.boards.bump();
+        if let Err(err) = openlens_storage::compact(&state.data_dir, &p.id, now) {
+            tracing::warn!(project = %p.id, %err, "compaction failed");
+        }
+        // People forgotten lately: rewritten out again, in case a
+        // restore or a late flush brought rows back (#230).
+        let recent = state
+            .meta
+            .forgotten_since(&p.id, now.timestamp() - 2 * 86400)
+            .unwrap_or_default();
+        if !recent.is_empty() {
+            let ids: std::collections::HashSet<String> = recent.into_iter().collect();
+            if let Err(err) = openlens_storage::erase(&state.data_dir, &p.id, &ids) {
+                tracing::warn!(project = %p.id, %err, "erasure re-apply failed");
             }
         }
-        return Ok(std::time::Instant::now());
+        match openlens_storage::prune(&state.data_dir, &p.id, now) {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(project = %p.id, days = n, "expired old event days"),
+            Err(err) => tracing::warn!(project = %p.id, %err, "event retention failed"),
+        }
+        match openlens_replay::prune(&state.data_dir, &p.id, now) {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(project = %p.id, recordings = n, "expired old recordings"),
+            Err(err) => tracing::warn!(project = %p.id, %err, "replay retention failed"),
+        }
     }
-    Ok(*last_compact)
+    Ok(())
 }
 
 /// One-off rewrite of the URLs stored before capture cleaned them (#290),
@@ -567,5 +623,75 @@ mod version_tests {
         assert!(v("v0.10.0") > v("v0.9.9"));
         assert_eq!(v("v0.2.0-261122-755dcee"), None);
         assert_eq!(v("nightly"), None);
+    }
+}
+
+#[cfg(test)]
+mod jobs_tests {
+    #![allow(clippy::unwrap_used)]
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_hung_digest_never_holds_up_the_flush() {
+        let dir = tempfile::tempdir().unwrap();
+        let meta = openlens_meta::Meta::in_memory().unwrap();
+        let policy = openlens_storage::FlushPolicy {
+            max_events: 1,
+            max_age: Duration::from_millis(100),
+        };
+        let (writer, _) = openlens_storage::Writer::open(dir.path(), policy).unwrap();
+        let state = crate::AppState {
+            meta: Arc::new(meta),
+            writer: Arc::new(Mutex::new(writer)),
+            query: openlens_query::QueryEngine::new(dir.path(), openlens_query::Limits::default()),
+            data_dir: dir.path().to_path_buf(),
+            admin_token_hash: "x".into(),
+            session_key: "k".into(),
+            boards: Default::default(),
+            flushing: Default::default(),
+            metrics: Default::default(),
+            disk_space: crate::disk_space,
+            session_gen: Default::default(),
+            caches: Default::default(),
+        };
+        // The digest starts at once and never finishes, like an SMTP
+        // server that accepts the connection and never answers.
+        tokio::spawn(super::run_jobs(
+            state.clone(),
+            |_| Box::pin(std::future::pending()),
+            Duration::ZERO,
+        ));
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let ev = openlens_event::Event {
+            uuid: "0191f0c0-0000-7000-8000-000000000001".into(),
+            project: "p1".into(),
+            event: "$pageview".into(),
+            distinct_id: "u1".into(),
+            session_id: None,
+            timestamp: chrono::Utc::now(),
+            received_at: chrono::Utc::now(),
+            url: None,
+            path: None,
+            feature: None,
+            role: None,
+            account: None,
+            plan: None,
+            environment: "production".into(),
+            release: None,
+            flags: None,
+            properties: "{}".into(),
+        };
+        state.writer.lock().unwrap().append(&[ev]).unwrap();
+        // The flush job ticks every 2 s: within 5 s the event is in Parquet.
+        let mut flushed = false;
+        for _ in 0..50 {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            if state.writer.lock().unwrap().buffered() == 0 {
+                flushed = true;
+                break;
+            }
+        }
+        assert!(flushed, "the flush waited for the digest");
     }
 }
