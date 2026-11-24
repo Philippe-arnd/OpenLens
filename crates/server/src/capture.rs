@@ -111,33 +111,128 @@ const IP_BURST: f64 = 500.0;
 pub(crate) const KEY_RATE: f64 = 20_000.0;
 const KEY_BURST: f64 = 200_000.0;
 
-fn limited(headers: &HeaderMap, key: &str, events: usize) -> bool {
-    use std::sync::{Mutex, OnceLock};
-    static IPS: OnceLock<Mutex<Buckets>> = OnceLock::new();
-    static KEYS: OnceLock<Mutex<Buckets>> = OnceLock::new();
-    // Public traffic comes through the proxy (Coolify, an Ingress), which
-    // says who the client is. Direct connections come from the host or the
-    // cluster (server SDKs, benchmarks, health checks) and are not limited.
-    // The last X-Forwarded-For entry is the one our proxy added; earlier
-    // ones come from the client and could be anything.
-    let Some(ip) = headers
+/// The connection's peer address, when the server knows it (always in
+/// production; tests that call the router directly have none).
+pub(crate) type Peer = Option<axum::Extension<axum::extract::ConnectInfo<std::net::SocketAddr>>>;
+
+/// A proxy we take `X-Forwarded-For` from: the host itself or a private
+/// network (Docker, Compose, a cluster), never the internet.
+fn trusted_proxy(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v) => v.is_loopback() || v.is_private() || v.is_link_local(),
+        std::net::IpAddr::V6(v) => {
+            v.is_loopback() || v.is_unique_local() || v.is_unicast_link_local()
+        }
+    }
+}
+
+/// Who to rate-limit: the connection's address, or, behind a trusted
+/// proxy, the client it names (the last `X-Forwarded-For` entry is the one
+/// our proxy added; earlier ones come from the client). `None` for direct
+/// local traffic (server SDKs on the host, benchmarks, health checks).
+pub(crate) fn client_ip(peer: &Peer, headers: &HeaderMap) -> Option<String> {
+    let peer = peer.as_ref().map(|axum::Extension(c)| c.0.ip());
+    if let Some(ip) = peer
+        && !trusted_proxy(ip)
+    {
+        return Some(ip.to_string());
+    }
+    let forwarded = headers
         .get("x-forwarded-for")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.rsplit(',').next())
         .or_else(|| headers.get("x-real-ip").and_then(|v| v.to_str().ok()))
         .map(|v| v.trim().to_owned())
-    else {
+        .filter(|v| !v.is_empty());
+    match (forwarded, peer) {
+        (Some(f), _) => Some(f),
+        (None, Some(ip)) if !ip.is_loopback() => Some(ip.to_string()),
+        _ => None,
+    }
+}
+
+/// Whether this client sent too many requests (checked before any parsing).
+pub(crate) fn ip_limited(peer: &Peer, headers: &HeaderMap) -> bool {
+    use std::sync::{Mutex, OnceLock};
+    static IPS: OnceLock<Mutex<Buckets>> = OnceLock::new();
+    let Some(ip) = client_ip(peer, headers) else {
         return false;
     };
-    let ip_ok = IPS
+    !IPS.get_or_init(Mutex::default)
+        .lock()
+        .is_ok_and(|mut b| b.take(&ip, 1.0, IP_RATE, IP_BURST))
+}
+
+fn key_limited(key: &str, events: usize) -> bool {
+    use std::sync::{Mutex, OnceLock};
+    static KEYS: OnceLock<Mutex<Buckets>> = OnceLock::new();
+    !KEYS
         .get_or_init(Mutex::default)
         .lock()
-        .is_ok_and(|mut b| b.take(&ip, 1.0, IP_RATE, IP_BURST));
-    let key_ok = KEYS
-        .get_or_init(Mutex::default)
-        .lock()
-        .is_ok_and(|mut b| b.take(key, events as f64, KEY_RATE, KEY_BURST));
-    !(ip_ok && key_ok)
+        .is_ok_and(|mut b| b.take(key, events as f64, KEY_RATE, KEY_BURST))
+}
+
+/// 429 with a hint for the SDK.
+pub(crate) fn too_many() -> Response {
+    let mut r = error(
+        StatusCode::TOO_MANY_REQUESTS,
+        "too many events; retry in a few seconds",
+    );
+    r.headers_mut().insert(
+        axum::http::header::RETRY_AFTER,
+        axum::http::HeaderValue::from_static("5"),
+    );
+    r
+}
+
+/// Writes stop below this share of free space on the data volume, so the
+/// WAL, compaction and backups still have room. Fixed (D-014).
+const MIN_FREE_SHARE: f64 = 0.05;
+
+/// Whether `available` of `total` bytes is too little to accept writes.
+pub(crate) fn space_low(available: u64, total: u64) -> bool {
+    total > 0 && (available as f64) < (total as f64) * MIN_FREE_SHARE
+}
+
+/// Free and total bytes of the volume holding `dir`.
+#[cfg(unix)]
+pub(crate) fn disk_space(dir: &std::path::Path) -> Option<(u64, u64)> {
+    let s = rustix::fs::statvfs(dir).ok()?;
+    Some((
+        s.f_bavail.saturating_mul(s.f_frsize),
+        s.f_blocks.saturating_mul(s.f_frsize),
+    ))
+}
+
+/// Free and total bytes of the volume holding `dir` (unknown here).
+#[cfg(not(unix))]
+pub(crate) fn disk_space(_dir: &std::path::Path) -> Option<(u64, u64)> {
+    None
+}
+
+/// 503 when the data volume is nearly full; logged once a minute at most.
+pub(crate) fn disk_full(state: &AppState) -> Option<Response> {
+    let (available, total) = disk_space(&state.data_dir)?;
+    if !space_low(available, total) {
+        return None;
+    }
+    use std::sync::Mutex;
+    static LAST: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+    if let Ok(mut last) = LAST.lock()
+        && last.is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(60))
+    {
+        *last = Some(std::time::Instant::now());
+        tracing::error!(available, total, "data volume almost full: writes refused");
+    }
+    let mut r = error(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "the server is out of disk space; retry later",
+    );
+    r.headers_mut().insert(
+        axum::http::header::RETRY_AFTER,
+        axum::http::HeaderValue::from_static("60"),
+    );
+    Some(r)
 }
 
 /// Environment given to events sent by robots.
@@ -166,10 +261,17 @@ pub(crate) fn is_bot(ua: &str) -> bool {
 
 pub(crate) async fn capture(
     State(state): State<AppState>,
+    peer: Peer,
     Query(query): Query<HashMap<String, String>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    if ip_limited(&peer, &headers) {
+        return too_many();
+    }
+    if let Some(r) = disk_full(&state) {
+        return r;
+    }
     let raw = match inflate(&headers, &body) {
         Ok(r) => r,
         Err(resp) => return *resp,
@@ -195,17 +297,13 @@ pub(crate) async fn capture(
         Ok(n) => n,
         Err(e) => return error(StatusCode::PAYLOAD_TOO_LARGE, &e.to_string()),
     };
-    if limited(&headers, &project.api_key, normalized.events.len()) {
+    // Direct local traffic (server SDKs on the host, benchmarks) has no
+    // per-key budget either.
+    if client_ip(&peer, &headers).is_some()
+        && key_limited(&project.api_key, normalized.events.len())
+    {
         tracing::warn!(project = %project.id, "capture rate limited");
-        let mut r = error(
-            StatusCode::TOO_MANY_REQUESTS,
-            "too many events; retry in a few seconds",
-        );
-        r.headers_mut().insert(
-            axum::http::header::RETRY_AFTER,
-            axum::http::HeaderValue::from_static("5"),
-        );
-        return r;
+        return too_many();
     }
     // Crawlers and monitors posting directly (the SDK already skips them in
     // browsers): kept, but in their own environment, out of every number.
@@ -277,6 +375,13 @@ pub(crate) async fn capture(
 #[cfg(test)]
 mod tests {
     use super::is_bot;
+
+    #[test]
+    fn writes_stop_when_the_volume_is_nearly_full() {
+        assert!(super::space_low(1, 100));
+        assert!(!super::space_low(50, 100));
+        assert!(!super::space_low(0, 0), "unknown size: keep accepting");
+    }
 
     #[test]
     fn buckets_refill_and_cap() {

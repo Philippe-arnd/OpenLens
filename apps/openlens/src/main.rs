@@ -152,8 +152,9 @@ async fn serve() -> ExitCode {
     };
     tracing::info!(%addr, "openlens listening");
 
-    let serve = axum::serve(listener, openlens_server::router(state.clone()))
-        .with_graceful_shutdown(shutdown_signal());
+    let app = openlens_server::router(state.clone())
+        .into_make_service_with_connect_info::<std::net::SocketAddr>();
+    let serve = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal());
     let served = serve.await;
     match openlens_server::flush_now(&state) {
         Ok(n) => tracing::info!(n, "flushed buffered events on shutdown"),

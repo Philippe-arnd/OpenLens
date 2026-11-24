@@ -2509,6 +2509,7 @@ dependencies = [
  "openlens-ui",
  "rand",
  "ring",
+ "rustix",
  "rustls",
  "serde",
  "serde_json",

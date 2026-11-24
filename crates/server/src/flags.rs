@@ -97,9 +97,13 @@ pub(crate) fn properties(
 
 pub(crate) async fn public(
     State(state): State<AppState>,
+    peer: crate::capture::Peer,
     headers: HeaderMap,
     Query(q): Query<HashMap<String, String>>,
 ) -> Response {
+    if crate::capture::ip_limited(&peer, &headers) {
+        return crate::capture::too_many();
+    }
     let cors = [
         ("access-control-allow-origin", "*"),
         ("cache-control", "no-store"),
