@@ -65,13 +65,28 @@ fn role_changes_are_recorded_with_dates_and_repeats_are_not() {
 }
 
 #[test]
-fn admin_token_is_stable_across_reopen() {
+fn admin_token_is_stable_across_reopen_and_never_stored_in_clear() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("meta.db");
-    let t1 = Meta::open(&path).unwrap().admin_token().unwrap();
-    let t2 = Meta::open(&path).unwrap().admin_token().unwrap();
-    assert_eq!(t1, t2);
-    assert!(t1.len() > 20);
+    let (h1, plain) = Meta::open(&path).unwrap().admin_token_hash().unwrap();
+    let plain = plain.expect("shown once, when generated");
+    let meta = Meta::open(&path).unwrap();
+    let (h2, again) = meta.admin_token_hash().unwrap();
+    assert_eq!(h1, h2);
+    assert!(again.is_none() && plain.len() > 20);
+    let stored = meta.setting("admin_token").unwrap().unwrap();
+    assert!(!stored.contains(&plain));
+    // A token stored in clear by an older release is hashed in place.
+    meta.set_setting("admin_token", "adm_old").unwrap();
+    let (h3, _) = meta.admin_token_hash().unwrap();
+    assert_eq!(h3, openlens_meta::sha256_hex("adm_old"));
+    assert!(
+        !meta
+            .setting("admin_token")
+            .unwrap()
+            .unwrap()
+            .contains("adm_old")
+    );
 }
 
 #[test]

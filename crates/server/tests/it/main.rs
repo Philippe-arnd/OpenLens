@@ -30,7 +30,7 @@ fn harness() -> Harness {
         writer: Arc::new(Mutex::new(writer)),
         query: openlens_query::QueryEngine::new(dir.path(), openlens_query::Limits::default()),
         data_dir: dir.path().to_path_buf(),
-        admin_token: "adm_test".into(),
+        admin_token_hash: openlens_meta::sha256_hex("adm_test").into(),
         session_key: "session-key-for-tests".into(),
         boards: Default::default(),
         flushing: Default::default(),

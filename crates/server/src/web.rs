@@ -318,7 +318,7 @@ async fn login(
     headers: HeaderMap,
     Form(f): Form<LoginForm>,
 ) -> Response {
-    if crate::token_matches(f.token.trim(), &state.admin_token) {
+    if crate::admin_token_matches(&state, f.token.trim()) {
         let c = auth::set_cookie(
             &auth::new_session(&state, auth::OWNER),
             &headers,

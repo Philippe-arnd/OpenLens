@@ -146,7 +146,7 @@ pub(crate) fn has_bearer(state: &AppState, headers: &HeaderMap) -> bool {
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
-        .is_some_and(|t| token_matches(t.trim(), &state.admin_token))
+        .is_some_and(|t| crate::admin_token_matches(state, t.trim()))
 }
 
 /// `Set-Cookie` header value for a session (Secure when served over HTTPS).

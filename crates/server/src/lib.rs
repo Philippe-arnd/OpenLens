@@ -65,7 +65,8 @@ pub struct AppState {
     /// Data root.
     pub data_dir: PathBuf,
     /// Admin token for the dashboard and API.
-    pub admin_token: Arc<str>,
+    /// SHA-256 (hex) of the admin token: the token itself is never kept.
+    pub admin_token_hash: Arc<str>,
     /// Signs session cookies and the OIDC flow ([`secrets::session_key`]).
     pub session_key: Arc<str>,
     /// Query engine over the data root.
@@ -411,6 +412,11 @@ pub fn flush_now(state: &AppState) -> Result<usize, String> {
     let n = w.flush().map_err(|e| e.to_string())?;
     state.boards.bump();
     Ok(n)
+}
+
+/// Whether `given` is the admin token (hashes compared in constant time).
+pub(crate) fn admin_token_matches(state: &AppState, given: &str) -> bool {
+    token_matches(&openlens_meta::sha256_hex(given), &state.admin_token_hash)
 }
 
 /// Constant-time string comparison.

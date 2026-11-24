@@ -393,7 +393,11 @@ fn token(len: usize) -> String {
         .collect()
 }
 
-fn sha256_hex(s: &str) -> String {
+/// Prefix of a hashed secret in `settings`.
+const HASHED: &str = "sha256:";
+
+/// SHA-256 of a token, in hex: how tokens are stored and compared.
+pub fn sha256_hex(s: &str) -> String {
     use sha2::Digest;
     hex::encode(sha2::Sha256::digest(s.as_bytes()))
 }
@@ -494,9 +498,27 @@ impl Meta {
         })
     }
 
-    /// The admin token, generated on first call.
-    pub fn admin_token(&self) -> Result<String> {
-        self.setting_or_init("admin_token", || format!("adm_{}", token(32)))
+    /// The SHA-256 (hex) of the admin token, and the token itself when this
+    /// call generated it (the only time it exists in clear: show it once).
+    /// The store keeps only the hash; a token stored in clear by an older
+    /// release is hashed in place.
+    pub fn admin_token_hash(&self) -> Result<(String, Option<String>)> {
+        const KEY: &str = "admin_token";
+        match self.setting(KEY)? {
+            Some(v) if v.starts_with(HASHED) => Ok((v[HASHED.len()..].to_owned(), None)),
+            // Stored in clear by older releases: hash it in place.
+            Some(plain) => {
+                let h = sha256_hex(&plain);
+                self.set_setting(KEY, &format!("{HASHED}{h}"))?;
+                Ok((h, None))
+            }
+            None => {
+                let plain = format!("adm_{}", token(32));
+                let h = sha256_hex(&plain);
+                self.set_setting(KEY, &format!("{HASHED}{h}"))?;
+                Ok((h, Some(plain)))
+            }
+        }
     }
 
     /// Create a project. A fresh capture key is generated unless `key` is given.

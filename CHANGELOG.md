@@ -91,6 +91,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- **The admin token is stored hashed** (SHA-256): a token stored in clear by an older release is hashed at the first start, so neither `meta.db` nor a backup holds it. A lost generated token cannot be read back; set `OPENLENS_ADMIN_TOKEN` to choose a new one.
 - **Sessions are signed with their own key**, `<data>/.session.key` (made on first start, mode 0600, not in backups), instead of the admin token. Upgrading signs everyone out once.
 - The sidebar's project switch lost its arrow (#214), and gained *Settings*.
 
