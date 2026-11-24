@@ -50,6 +50,7 @@ pub async fn revenue(
     map: Option<&FeatureMap>,
     f: &Filters,
 ) -> Result<Option<Revenue>> {
+    let q = &q.with_params(&f.params()?);
     let Some(m) = map else { return Ok(None) };
     let successes: Vec<(String, String)> = m
         .features

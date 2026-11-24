@@ -302,6 +302,7 @@ pub async fn churn(
     map: Option<&FeatureMap>,
     f: &Filters,
 ) -> Result<ChurnReport> {
+    let q = &q.with_params(&f.params()?);
     let src = source(map);
     let w = f.clause(90)?;
     let ident = identified(any_person(q, project).await?);

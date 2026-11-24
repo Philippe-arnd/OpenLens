@@ -336,6 +336,29 @@ pub fn validate(m: &FeatureMap) -> Vec<Issue> {
         }
     }
     relations(m, &keys, &mut v);
+    // Every value below goes into the board's queries (#310): one rule.
+    // (Routes have their own, stricter one above: no quote at all.)
+    let mut in_sql: Vec<(String, &str)> = Vec::new();
+    for (i, r) in m.roles.iter().enumerate() {
+        in_sql.push((format!("roles[{i}].key"), &r.key));
+        for (j, x) in r.matches.iter().enumerate() {
+            in_sql.push((format!("roles[{i}].matches[{j}]"), x));
+        }
+    }
+    for (i, f) in m.features.iter().enumerate() {
+        in_sql.push((format!("features[{i}].key"), &f.key));
+        for (j, x) in f.renamed_from.iter().enumerate() {
+            in_sql.push((format!("features[{i}].renamed_from[{j}]"), x));
+        }
+        if let Some(x) = &f.success {
+            in_sql.push((format!("features[{i}].success"), x));
+        }
+    }
+    for (path, value) in in_sql {
+        if openlens_sqlgen::checked(value).is_err() {
+            v.push(err(path, "1-200 characters, with no control character"));
+        }
+    }
     v
 }
 
@@ -561,8 +584,12 @@ impl FeatureMap {
     }
 }
 
+/// The value inside a SQL literal: quotes doubled by `openlens_sqlgen`,
+/// the one place that does it (#310). `validate` refuses what `checked`
+/// would.
 fn sql_escape(s: &str) -> String {
-    s.replace('\'', "''")
+    let q = openlens_sqlgen::quote(s);
+    q[1..q.len() - 1].to_owned()
 }
 
 /// Turn a route pattern into an anchored regex: `:param` matches one

@@ -13,6 +13,8 @@
 //!   stored twice (#331).
 //! - `cargo xtask env-docs`: every `OPENLENS_*` variable the server reads is
 //!   in docs/deploy/README.md (#318; part of `ci`).
+//! - `cargo xtask sql-guard`: quotes are escaped by openlens-sqlgen only
+//!   (#310; part of `ci`).
 //! - `cargo xtask file-length`: no Rust file above 1,000 lines (#307; part
 //!   of `ci`).
 
@@ -22,6 +24,7 @@ mod crash;
 mod env_docs;
 mod file_length;
 mod layers;
+mod sql_guard;
 
 use std::process::{Command, ExitCode};
 
@@ -36,8 +39,9 @@ fn main() -> ExitCode {
         "crash" => crash::crash(&std::env::args().skip(2).collect::<Vec<_>>()),
         "env-docs" => env_docs::check(),
         "file-length" => file_length::check(),
+        "sql-guard" => sql_guard::check(),
         _ => Err(
-            "usage: cargo xtask <ci|layers|env-docs|file-length|demo DIR|bench URL KEY|bench-gen DIR|crash [--secs N] [--kills N] [--seed N]>"
+            "usage: cargo xtask <ci|layers|env-docs|file-length|sql-guard|demo DIR|bench URL KEY|bench-gen DIR|crash [--secs N] [--kills N] [--seed N]>"
                 .to_owned(),
         ),
     };
@@ -80,6 +84,7 @@ fn ci() -> Result<(), String> {
     check_layers()?;
     env_docs::check()?;
     file_length::check()?;
+    sql_guard::check()?;
     // cargo-deny is optional locally; CI installs it. Say so instead of
     // silently skipping.
     if Command::new("cargo")

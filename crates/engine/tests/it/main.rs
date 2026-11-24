@@ -132,6 +132,21 @@ async fn hostile_filter_values_cannot_break_out_of_the_literal() {
     };
     let b = board(&q, "p", &f, None).await.unwrap();
     assert_eq!(b.users.mau, 0);
+    // Bound as values (#310): quotes, backslashes and `$` stay data.
+    for v in [
+        r"a\' OR 1=1 --",
+        "$env",
+        "'; DROP TABLE events; --",
+        "rôle ✓",
+    ] {
+        let f = Filters {
+            release: Some(v.into()),
+            environment: v.into(),
+            ..Filters::default()
+        };
+        let b = board(&q, "p", &f, None).await.unwrap();
+        assert_eq!(b.users.mau, 0, "{v}");
+    }
     let bad = Filters {
         role: Some("a\nb".into()),
         ..Filters::default()
@@ -915,4 +930,33 @@ async fn days_follow_the_project_time_zone() {
     assert_eq!(d(&paris), vec![utc_day.to_string()]);
     // A name that is not a time zone is refused, not interpolated.
     assert!(board(&q, "p", &day("x'; DROP"), None).await.is_err());
+}
+
+/// By environment, the breakdown drops the environment filter and shows
+/// every environment side by side (regression: #310 bound it as `$env`).
+#[tokio::test]
+async fn breakdown_by_environment_shows_every_environment() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let e = E {
+        user: "u1",
+        role: "admin",
+        session: "s1",
+        event: "$pageview",
+        mins_ago: 5,
+        feature: None,
+        release: "1.0",
+        props: "{}",
+    };
+    let mut staging = mk(&e, 1);
+    staging.environment = "staging".into();
+    w.append(&[mk(&e, 0), staging]).unwrap();
+    w.flush().unwrap();
+    let q = QueryEngine::new(dir.path(), Limits::default());
+    let rows = openlens_engine::breakdown(&q, "p", None, &Filters::default(), "environment")
+        .await
+        .unwrap();
+    let mut envs: Vec<Option<String>> = rows.into_iter().map(|r| r.value).collect();
+    envs.sort();
+    assert_eq!(envs, [Some("production".into()), Some("staging".into())]);
 }

@@ -35,6 +35,7 @@ pub async fn audience(
     map: Option<&FeatureMap>,
     f: &Filters,
 ) -> Result<Audience> {
+    let q = &q.with_params(&f.params()?);
     let src = source(map);
     let w = f.clause(30)?;
     let prop = |k: &str, re: &str| format!("regexp_match(properties, '\"\\${k}\":\"({re})\"')[1]");

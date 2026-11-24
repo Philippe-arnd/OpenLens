@@ -55,6 +55,7 @@ pub async fn acquisition(
     by: &str,
     touch: Touch,
 ) -> Result<Vec<AcquisitionRow>> {
+    let q = &q.with_params(&f.params()?);
     let src = source(map);
     let w = f.clause(90)?;
     let key = match by {

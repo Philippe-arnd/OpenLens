@@ -8,6 +8,8 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 - **Access by type, the last pages** (#339): storage and backups, API tokens, AI settings, the audit log, SQL, exports and project creation take `Admin` or `ProjectWrite` instead of their own checks. The admin token now opens admin pages too, as it already did for project changes.
 
+- **Bound SQL values** (#310, part 1): the board's filter values are passed to DataFusion as parameters instead of being written into the SQL, every quote goes through the new `openlens-sqlgen` crate, and CI fails on a hand-made escape (D-027). A feature map with a control character or a 200+ byte value in a role, key or event is now refused at upload.
+
 - **Daily rollups** (#322): each closed day is rolled up into `person_q` and `metric_q` (15-minute buckets, so any time zone gets its own days), visible to SQL and Ask's full view. They are kept after their events expire, and erasing someone removes them from every day (D-025, D-026). The board starts reading them in #323.
 
 - **Measured at scale** (#321): `cargo xtask bench-gen` and the `scale` job of `perf.yml` measured 63 M events over 90 days: a 22 s board on first load and 2.6 GB of memory. The sizing docs now say a small server holds about 4 M events in 90 days (D-023).

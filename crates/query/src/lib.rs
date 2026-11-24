@@ -183,6 +183,8 @@ pub struct QueryEngine {
     aliases: AliasCache,
     /// Queries stopped at the time limit, shared by every copy (#346).
     timeouts: Arc<std::sync::atomic::AtomicU64>,
+    /// Values for the `$name` placeholders of this copy's queries (#310).
+    params: Arc<openlens_sqlgen::Params>,
 }
 
 impl QueryEngine {
@@ -196,6 +198,16 @@ impl QueryEngine {
             snapshots: Arc::default(),
             aliases: AliasCache::default(),
             timeouts: Arc::default(),
+            params: Arc::default(),
+        }
+    }
+
+    /// This engine, with `params` filling the `$name` placeholders of its
+    /// queries (#310). Values never become SQL text.
+    pub fn with_params(&self, params: &openlens_sqlgen::Params) -> Self {
+        Self {
+            params: Arc::new(params.clone()),
+            ..self.clone()
         }
     }
 
@@ -249,6 +261,7 @@ impl QueryEngine {
                 .sql_with_options(sql, options)
                 .await
                 .map_err(|e| QueryError::Rejected(e.to_string()))?;
+            let df = bind(df, &self.params)?;
             let schema = Arc::new(df.schema().as_arrow().clone());
             let mut stream = df
                 .execute_stream()
@@ -410,7 +423,11 @@ impl QueryEngine {
             sql,
             Box::pin(async {
                 let ctx = self.context(project).await?;
-                drain(plan(&ctx, sql).await?, self.limits.max_rows).await
+                drain(
+                    bind(plan(&ctx, sql).await?, &self.params)?,
+                    self.limits.max_rows,
+                )
+                .await
             }),
         )
         .await
@@ -451,7 +468,11 @@ impl QueryEngine {
                     ctx.register_table("events", view)
                         .map_err(|e| QueryError::Storage(e.to_string()))?;
                 }
-                drain(plan(&ctx, sql).await?, self.limits.max_rows).await
+                drain(
+                    bind(plan(&ctx, sql).await?, &self.params)?,
+                    self.limits.max_rows,
+                )
+                .await
             }),
         )
         .await
@@ -498,7 +519,7 @@ impl QueryEngine {
                 let ctx = self.session()?;
                 ctx.register_table("events", view)
                     .map_err(|e| QueryError::Storage(e.to_string()))?;
-                let (state, plan) = plan(&ctx, sql).await?.into_parts();
+                let (state, plan) = bind(plan(&ctx, sql).await?, &self.params)?.into_parts();
                 let plan = aggregate::guard(plan).map_err(QueryError::Rejected)?;
                 drain(
                     datafusion::dataframe::DataFrame::new(state, plan),
@@ -577,6 +598,27 @@ async fn offload<T: Send + 'static>(
 }
 
 /// Plan read-only SQL: no DDL, DML or statements.
+/// Fill the `$name` placeholders from `params` (#310).
+fn bind(
+    df: datafusion::dataframe::DataFrame,
+    params: &openlens_sqlgen::Params,
+) -> Result<datafusion::dataframe::DataFrame, QueryError> {
+    if params.is_empty() {
+        return Ok(df);
+    }
+    let values: HashMap<String, datafusion::scalar::ScalarValue> = params
+        .iter()
+        .map(|(k, v)| {
+            (
+                k.to_owned(),
+                datafusion::scalar::ScalarValue::Utf8(Some(v.to_owned())),
+            )
+        })
+        .collect();
+    df.with_param_values(datafusion::common::ParamValues::from(values))
+        .map_err(|e| QueryError::Rejected(e.to_string()))
+}
+
 async fn plan(
     ctx: &SessionContext,
     sql: &str,

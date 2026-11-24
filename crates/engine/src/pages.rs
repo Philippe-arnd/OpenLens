@@ -44,6 +44,7 @@ pub async fn pages(
     src: &str,
     f: &Filters,
 ) -> Result<Vec<PageStats>> {
+    let q = &q.with_params(&f.params()?);
     let w = f.clause(30)?;
     let views_sql = format!(
         "SELECT path, count(*) AS views, count(DISTINCT distinct_id) AS users FROM {src} \
@@ -128,6 +129,7 @@ pub async fn click_map(
     f: &Filters,
     path: &str,
 ) -> Result<ClickMap> {
+    let q = &q.with_params(&f.params()?);
     let w = f.clause(30)?;
     let p = crate::lit(path)?;
     let base = format!(
@@ -169,6 +171,7 @@ pub async fn sessions_on_path(
     f: &Filters,
     path: &str,
 ) -> Result<Vec<String>> {
+    let q = &q.with_params(&f.params()?);
     let w = f.clause(30)?;
     let sql = format!(
         "SELECT session_id, max(timestamp) AS t FROM {src} WHERE {w} AND event = '$pageview' AND path = {} \
@@ -207,6 +210,7 @@ pub async fn survey_results(
     src: &str,
     f: &Filters,
 ) -> Result<Vec<SurveyResults>> {
+    let q = &q.with_params(&f.params()?);
     let w = f.clause(30)?;
     let base = format!(
         "SELECT regexp_match(properties, '\"\\$survey\":\"([a-z0-9_-]+)\"')[1] AS k, \

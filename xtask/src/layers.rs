@@ -6,6 +6,7 @@
 /// dev-dependencies may use.
 pub const LAYERS: &[(&str, Option<u8>)] = &[
     ("openlens-event", Some(0)),
+    ("openlens-sqlgen", Some(0)),
     ("openlens-storage", Some(1)),
     ("openlens-meta", Some(1)),
     ("openlens-query", Some(2)),

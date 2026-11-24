@@ -245,6 +245,7 @@ pub async fn weekly(
     map: Option<&FeatureMap>,
     f: &Filters,
 ) -> Result<Weekly> {
+    let q = &q.with_params(&f.params()?);
     let src = source(map);
     let w = f.clause(112)?;
     let day = f.day()?;

@@ -33,6 +33,7 @@ pub async fn churned_sessions(
     f: &Filters,
     place: &str,
 ) -> Result<Vec<(String, String)>> {
+    let q = &q.with_params(&f.params()?);
     let src = source(map);
     let churn = map.map_or(14, |m| i64::from(m.churn_days()));
     let ident = identified(any_person(q, project).await?);
@@ -80,6 +81,7 @@ pub async fn breakdown(
     f: &Filters,
     by: &str,
 ) -> Result<Vec<BreakdownRow>> {
+    let q = &q.with_params(&f.params()?);
     let col = match by {
         "role" => "role",
         "account" => "account",
@@ -100,11 +102,8 @@ pub async fn breakdown(
     let mut w = f.clause(30)?;
     // By environment: every environment, side by side.
     if col == "environment" {
-        w = w.replacen(
-            &format!(" AND environment = {}", lit(&f.environment)?),
-            "",
-            1,
-        );
+        // The clause binds it as `$env` (#310).
+        w = w.replacen(" AND environment = $env", "", 1);
     }
     let sql = format!(
         "SELECT {col} AS value, count(DISTINCT distinct_id) AS users, count(DISTINCT session_id) AS sessions, \
@@ -157,6 +156,7 @@ pub async fn live(
     map: Option<&FeatureMap>,
     f: &Filters,
 ) -> Result<Live> {
+    let q = &q.with_params(&f.params()?);
     let src = source(map);
     let w = format!(
         "{} AND timestamp >= now() - INTERVAL '30 minutes'",

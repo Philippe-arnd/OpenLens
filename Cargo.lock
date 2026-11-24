@@ -2408,6 +2408,7 @@ dependencies = [
  "openlens-event",
  "openlens-featuremap",
  "openlens-query",
+ "openlens-sqlgen",
  "openlens-storage",
  "openlens-testkit",
  "serde",
@@ -2443,6 +2444,7 @@ dependencies = [
 name = "openlens-featuremap"
 version = "0.3.0"
 dependencies = [
+ "openlens-sqlgen",
  "serde",
  "serde_json",
  "serde_norway",
@@ -2488,6 +2490,7 @@ dependencies = [
  "futures",
  "hmac",
  "openlens-event",
+ "openlens-sqlgen",
  "openlens-storage",
  "serde",
  "serde_json",
@@ -2555,6 +2558,10 @@ dependencies = [
  "ureq",
  "webpki-roots",
 ]
+
+[[package]]
+name = "openlens-sqlgen"
+version = "0.3.0"
 
 [[package]]
 name = "openlens-storage"

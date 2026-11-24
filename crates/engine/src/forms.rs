@@ -197,6 +197,7 @@ pub async fn forms(
     map: Option<&FeatureMap>,
     f: &Filters,
 ) -> Result<Vec<FormStats>> {
+    let q = &q.with_params(&f.params()?);
     let src = source(map);
     let w = f.clause(30)?;
     let form =

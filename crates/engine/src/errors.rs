@@ -47,6 +47,7 @@ pub async fn error_groups(
     src: &str,
     f: &Filters,
 ) -> Result<Vec<ErrorGroup>> {
+    let q = &q.with_params(&f.params()?);
     let w = f.clause(30)?;
     let base = format!(
         "WITH e AS (SELECT distinct_id, session_id, timestamp, role, release, coalesce(feature, path) AS place, \

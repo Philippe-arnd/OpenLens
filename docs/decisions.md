@@ -174,3 +174,11 @@ Append-only. Each entry: id, date, decision, why, consequences.
 
 **Consequences:** rollups cannot be rebuilt once their events are gone, so their schema only gains nullable columns; a new rollup version converts the old tree instead of dropping it. docs/privacy.md says what is kept, and for how long.
 
+## D-027 (2026-11-24, agent for #310) SQL values are bound, or quoted in one place
+
+**Decision:** a value reaches SQL through `openlens-sqlgen` only. Filter values from a request (environment, role, release) are bound as named placeholders (`$env`, `$role`, `$release`) that DataFusion fills in (`QueryEngine::with_params`): they are never part of the query text. Where a placeholder cannot go (inside a view, such as the feature map's projection, or a cast's type), `sqlgen::quote` makes the literal, after `sqlgen::checked` (1-200 bytes, no control character) or the map's validation, which applies the same rule. `cargo xtask sql-guard`, part of `ci`, fails when quotes are doubled anywhere else.
+
+**Why:** two hand-written escapes with different rules, spread over a dozen files, were one forgotten call away from an injection. One crate with no dependency can be used from the feature map and the engine alike.
+
+**Consequences:** a new filter value is bound with `Params::set` or `bind`, never formatted in. The engine's other values (success events, feature keys, paths) are still quoted literals until #310 part 2 binds them too.
+
