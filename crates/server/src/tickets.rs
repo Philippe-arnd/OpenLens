@@ -826,11 +826,7 @@ pub(crate) async fn api_create(
     let d = match draft(&state, &p, &b.kind, &b.subject, &host(&headers)).await {
         Ok(d) => d,
         Err(e) => {
-            return (
-                StatusCode::UNPROCESSABLE_ENTITY,
-                axum::Json(json!({ "error": e })),
-            )
-                .into_response();
+            return crate::apierr::json(StatusCode::UNPROCESSABLE_ENTITY, e);
         }
     };
     if b.to != "github" {
@@ -844,7 +840,7 @@ pub(crate) async fn api_create(
             crate::privacy::audit(&state, &headers, Some(&p.id), "ticket.file", &t.title);
             axum::Json(json!({ "ticket": t })).into_response()
         }
-        Err(e) => (StatusCode::BAD_REQUEST, axum::Json(json!({ "error": e }))).into_response(),
+        Err(e) => crate::apierr::json(StatusCode::BAD_REQUEST, e),
     }
 }
 

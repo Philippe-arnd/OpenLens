@@ -33,7 +33,7 @@ pub(crate) fn routes() -> Router<AppState> {
 }
 
 fn err(status: StatusCode, msg: &str) -> Response {
-    (status, Json(json!({ "error": msg }))).into_response()
+    crate::apierr::json(status, msg)
 }
 
 /// All flags of a project (invalid stored rows are skipped).

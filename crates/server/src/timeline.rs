@@ -217,11 +217,7 @@ pub(crate) async fn api_list(
     Path(id): Path<String>,
 ) -> Response {
     if !auth::has_bearer(&state, &headers) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "admin bearer token required"})),
-        )
-            .into_response();
+        return crate::apierr::json(StatusCode::UNAUTHORIZED, "admin bearer token required");
     }
     let marks = collect(&state, &id, &[], 90);
     Json(json!({ "timeline": marks.iter().map(|m| json!({ "day": m.day, "kind": m.kind, "text": m.text })).collect::<Vec<_>>() })).into_response()
@@ -236,11 +232,7 @@ pub(crate) async fn api_add(
     Json(b): Json<ApiNote>,
 ) -> Response {
     if !auth::has_bearer(&state, &headers) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "admin bearer token required"})),
-        )
-            .into_response();
+        return crate::apierr::json(StatusCode::UNAUTHORIZED, "admin bearer token required");
     }
     let day = b
         .day
@@ -250,10 +242,6 @@ pub(crate) async fn api_add(
         .add_note(&id, &day, "api", "agent (api)", &b.body)
     {
         Ok(n) => (StatusCode::CREATED, Json(json!({ "id": n, "day": day }))).into_response(),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": e.to_string()})),
-        )
-            .into_response(),
+        Err(e) => crate::apierr::json(StatusCode::BAD_REQUEST, e.to_string()),
     }
 }

@@ -62,7 +62,7 @@ fn ok_or(status: u16, v: Value) -> Result<Value, String> {
     if (200..300).contains(&status) {
         Ok(v)
     } else {
-        Err(format!("HTTP {status}: {v}"))
+        Err(crate::api_error(status, &v))
     }
 }
 

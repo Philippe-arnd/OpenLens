@@ -543,18 +543,10 @@ pub(crate) async fn api_status(
     Path(id): Path<String>,
 ) -> Response {
     if !crate::auth::has_bearer(&state, &headers) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            axum::Json(serde_json::json!({"error": "admin bearer token required"})),
-        )
-            .into_response();
+        return crate::apierr::json(StatusCode::UNAUTHORIZED, "admin bearer token required");
     }
     if load(&state, &id).await.is_none() {
-        return (
-            StatusCode::NOT_FOUND,
-            axum::Json(serde_json::json!({"error": "unknown project"})),
-        )
-            .into_response();
+        return crate::apierr::json(StatusCode::NOT_FOUND, "unknown project");
     }
     axum::Json(crate::alerts::status(&state, &id)).into_response()
 }
