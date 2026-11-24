@@ -251,7 +251,7 @@ pub struct RoleUsers {
 }
 
 /// KPIs of one release.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct ReleaseRow {
     /// Release name.
     pub release: String,
@@ -403,7 +403,9 @@ pub(crate) const INTERACTION: &str =
 /// Largest 90-day window the board keeps in memory; beyond it, each query
 /// reads the files. The snapshot holds only the columns the board reads
 /// (properties only for `$vital`), so a row costs about 160 bytes: 4 M rows
-/// stay under ~650 MB (#190).
+/// stay under ~650 MB (#190). The snapshot also reserves its bytes in the
+/// query memory pool (768 MB, shared with every query): when the pool
+/// cannot hold it, the board reads the files instead (#329).
 const BOARD_SNAPSHOT_ROWS: usize = 4_000_000;
 
 /// The columns of the board snapshot. `uuid`, `url`, `received_at`,
@@ -412,6 +414,72 @@ const BOARD_SNAPSHOT_ROWS: usize = 4_000_000;
 const BOARD_COLUMNS: &str = "event, distinct_id, session_id, timestamp, path, feature, role, \
      environment, release, flags, date, \
      CASE WHEN event = '$vital' THEN properties END AS properties";
+
+/// What the filter bar of a page needs, without the board (#329): the
+/// environments, the roles (with the unmatched ones apart, as on the
+/// board) and the latest releases. The Errors, Pages and Events pages call
+/// this instead of computing the whole board.
+pub async fn filter_options(
+    q: &QueryEngine,
+    project: &str,
+    f: &Filters,
+    map: Option<&FeatureMap>,
+) -> Result<Board> {
+    let src = source(map);
+    let roles_sql = format!(
+        "SELECT role, count(DISTINCT distinct_id) AS users FROM {src} WHERE {} \
+         GROUP BY role ORDER BY users DESC LIMIT 12",
+        Filters {
+            role: None,
+            ..f.clone()
+        }
+        .clause(30)?
+    );
+    let releases_sql = format!(
+        "SELECT release, CAST(min(timestamp) AS VARCHAR) AS first_seen, \
+         count(DISTINCT distinct_id) AS users FROM {src} WHERE {} AND release IS NOT NULL \
+         GROUP BY release ORDER BY min(timestamp) DESC LIMIT 5",
+        Filters {
+            release: None,
+            ..f.clone()
+        }
+        .clause(90)?
+    );
+    let env_sql = "SELECT DISTINCT environment FROM raw_events ORDER BY environment";
+    let (roles, releases, envs) = futures::join!(
+        q.sql(project, &roles_sql),
+        q.sql(project, &releases_sql),
+        q.sql(project, env_sql),
+    );
+    let mut b = Board {
+        filters: Some(f.clone()),
+        ..Board::default()
+    };
+    for r in roles?.rows.iter() {
+        let role = text(r, "role");
+        let users = int(r, "users");
+        match role.as_deref().and_then(|v| v.strip_prefix("unmatched:")) {
+            Some(raw) => b.role_gaps.push((raw.to_owned(), users)),
+            None => b.roles.push(RoleUsers { role, users }),
+        }
+    }
+    b.releases = releases?
+        .rows
+        .iter()
+        .map(|r| ReleaseRow {
+            release: text(r, "release").unwrap_or_default(),
+            first_seen: text(r, "first_seen").unwrap_or_default(),
+            users: int(r, "users"),
+            ..ReleaseRow::default()
+        })
+        .collect();
+    b.environments = envs?
+        .rows
+        .iter()
+        .filter_map(|r| text(r, "environment"))
+        .collect();
+    Ok(b)
+}
 
 /// Compute the board for a project, with its feature map when it has one.
 /// Queries run concurrently.

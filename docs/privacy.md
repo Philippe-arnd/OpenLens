@@ -13,10 +13,16 @@ What OpenLens stores, for how long, where, and what it never stores. Everything 
 - **Dashboard users:** email, name, role, time zone, last sign-in. Login links and sessions are signed; secrets (S3) are sealed.
 - **Audit log** of admin actions (who, when, what), kept for the life of the install.
 
+## On the visitor's device
+
+- **By default**, the SDK keeps in the browser's `localStorage` (no cookie): an anonymous id, the session id and its last activity, what `identify` was given (user id, role, account, plan, and the properties flag rules target), the active flags and variants, and which surveys were answered. Some regulators treat `localStorage` like a cookie: ask for consent where that applies, and the SDK respects it.
+- **With `data-cookieless`**, it stores nothing on the device (see *Cookieless mode* below).
+
 ## Never stored
 
 - IP addresses (used for the country and the rate limit, then dropped).
-- Raw user agents, referrer paths and query strings.
+- Raw user agents and referrer paths.
+- Query strings, except the campaign tags `utm_*`, `ref` and `gclid`, kept in the page URL (see *Events* above).
 - Input values in recordings.
 
 ## Retention (fixed, D-015)

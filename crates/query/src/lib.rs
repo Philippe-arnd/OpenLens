@@ -21,7 +21,7 @@ use datafusion::datasource::file_format::parquet::ParquetFormat;
 use datafusion::datasource::listing::{
     ListingOptions, ListingTable, ListingTableConfig, ListingTableUrl,
 };
-use datafusion::execution::memory_pool::FairSpillPool;
+use datafusion::execution::memory_pool::{FairSpillPool, MemoryConsumer, MemoryReservation};
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::prelude::{SQLOptions, SessionConfig, SessionContext};
 use futures::StreamExt;
@@ -145,7 +145,8 @@ impl Default for Limits {
         Self {
             max_rows: 10_000,
             timeout: Duration::from_secs(15),
-            memory: 512 * 1024 * 1024,
+            // Queries and the board snapshot share it (#329).
+            memory: 768 * 1024 * 1024,
         }
     }
 }
@@ -161,6 +162,9 @@ pub struct QueryResult {
     pub truncated: bool,
 }
 
+/// An in-memory table of one project, and its reservation in the pool.
+type Snapshot = (String, String, Arc<MemTable>, Arc<MemoryReservation>);
+
 /// Runs read-only SQL against a data root.
 #[derive(Debug, Clone)]
 pub struct QueryEngine {
@@ -171,7 +175,9 @@ pub struct QueryEngine {
     /// requests (segments are immutable, so cached footers never go stale).
     runtime: Option<Arc<datafusion::execution::runtime_env::RuntimeEnv>>,
     /// In-memory tables added by [`QueryEngine::snapshot`], for one project.
-    snapshots: Arc<Vec<(String, String, Arc<MemTable>)>>,
+    /// Each holds its bytes reserved in the memory pool (#329) until the
+    /// last copy of the engine that uses it is dropped.
+    snapshots: Arc<Vec<Snapshot>>,
     /// Per project: the identity tables and when they were read.
     aliases: AliasCache,
     /// Queries stopped at the time limit, shared by every copy (#346).
@@ -257,22 +263,45 @@ impl QueryEngine {
                 }
                 batches.push(batch);
             }
+            // The snapshot counts against the same memory cap as the
+            // queries (#329): when the pool cannot hold it, read the files.
+            let Some(runtime) = &self.runtime else {
+                return Ok(None);
+            };
+            let bytes: usize = batches
+                .iter()
+                .map(datafusion::arrow::record_batch::RecordBatch::get_array_memory_size)
+                .sum();
+            let reservation =
+                MemoryConsumer::new(format!("snapshot {name}")).register(&runtime.memory_pool);
+            if reservation.try_grow(bytes).is_err() {
+                tracing::debug!(
+                    bytes,
+                    "snapshot does not fit in the memory pool; reading the files"
+                );
+                return Ok(None);
+            }
             let table = MemTable::try_new(schema, vec![batches])
                 .map_err(|e| QueryError::Storage(e.to_string()))?;
-            Ok(Some(table))
+            Ok(Some((table, reservation)))
         };
         let table = match tokio::time::timeout(self.limits.timeout, run).await {
             Ok(r) => r?,
             Err(_) => return Err(self.timed_out(self.limits.timeout)),
         };
-        Ok(table.map(|t| {
+        Ok(table.map(|(t, reservation)| {
             let mut snaps: Vec<_> = self
                 .snapshots
                 .iter()
-                .filter(|(p, n, _)| !(p == project && n == name))
+                .filter(|(p, n, _, _)| !(p == project && n == name))
                 .cloned()
                 .collect();
-            snaps.push((project.to_owned(), name.to_owned(), Arc::new(t)));
+            snaps.push((
+                project.to_owned(),
+                name.to_owned(),
+                Arc::new(t),
+                Arc::new(reservation),
+            ));
             QueryEngine {
                 snapshots: Arc::new(snaps),
                 ..self.clone()
@@ -321,7 +350,7 @@ impl QueryEngine {
                     .map_err(|e| QueryError::Storage(e.to_string()))?;
             }
         }
-        for (p, name, t) in self.snapshots.iter() {
+        for (p, name, t, _) in self.snapshots.iter() {
             if p == project {
                 ctx.register_table(name.as_str(), t.clone())
                     .map_err(|e| QueryError::Storage(e.to_string()))?;

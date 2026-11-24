@@ -16,6 +16,10 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 - **`xtask bench --with-board PROJECT`** (#344, part 2): measures ingestion while two readers compute a board in a loop (docs/benchmarks.md), and warns when the capture p99 goes above 50 ms.
 
+- **Public promises match the code** (#306): the README says the board is computed once and then served from memory, links its numbers to the nightly benchmark and the SDK size to the job that measures it, and says "no setting required" with a link to the optional settings. The privacy page lists what the SDK keeps in `localStorage` by default (and nothing in cookieless mode), and says which query-string tags are kept.
+
+- **Lighter Errors, Pages and Events pages, and the board snapshot inside the memory cap** (#329): those three pages read only the options of their filter bar, not the whole board. The board's in-memory snapshot now reserves its bytes in the query memory pool, raised from 512 MB to 768 MB and shared with every query; when the pool cannot hold it, the board reads the files instead.
+
 - **A slow job no longer holds up the flush** (#311): flush, compaction, the S3 copy, backups, alerts and the digest each run on their own interval. Backups, the S3 copy and compaction still take turns. An SMTP server that never answers gives up after 30 s.
 
 - **Every in-memory cache has a size limit** (#309): the 13 global caches and limiters (Ask, rate limits, cookieless sessions, icons, OIDC, reworded cards, share pages, login emails) live in the server state with a capacity and a time to live. `/metrics` reports `openlens_cache_entries{cache="…"}`.
