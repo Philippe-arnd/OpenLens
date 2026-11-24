@@ -162,6 +162,42 @@ async fn snapshots_are_per_project_bounded_and_read_only() {
 }
 
 #[tokio::test]
+async fn concurrent_shared_snapshots_are_built_once() {
+    let (_d, q) = seeded();
+    let mut role = openlens_sqlgen::Params::new();
+    let unused = role.set("role", "admin").unwrap();
+    assert_eq!(unused, "$role");
+    let mut other = openlens_sqlgen::Params::new();
+    other.set("role", "viewer").unwrap();
+    let sql = "SELECT * FROM events";
+    // Different values the SQL does not read: still one snapshot.
+    let (qa, qb) = (q.with_params(&role), q.with_params(&other));
+    let before = q.snapshots_built();
+    let (a, b, c, d) = tokio::join!(
+        qa.shared_snapshot("a", "snap", sql, 100, 7),
+        qb.shared_snapshot("a", "snap", sql, 100, 7),
+        qa.shared_snapshot("a", "snap", sql, 100, 7),
+        qb.shared_snapshot("a", "snap", sql, 100, 7),
+    );
+    for s in [a, b, c, d] {
+        let s = s.unwrap().unwrap();
+        let n = s.sql("a", "SELECT count(*) AS n FROM snap").await.unwrap();
+        assert!(n.rows[0]["n"].as_i64().unwrap() > 0);
+    }
+    assert_eq!(q.snapshots_built(), before + 1, "one build for four callers");
+    // A new data generation builds a new one.
+    q.shared_snapshot("a", "snap", sql, 100, 8)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(q.snapshots_built(), before + 2);
+    // Too large: remembered, not retried at once.
+    assert!(q.shared_snapshot("a", "big", sql, 1, 7).await.unwrap().is_none());
+    assert!(q.shared_snapshot("a", "big", sql, 1, 7).await.unwrap().is_none());
+    assert_eq!(q.snapshots_built(), before + 2);
+}
+
+#[tokio::test]
 async fn anonymous_events_before_identify_belong_to_the_user() {
     let dir = tempfile::tempdir().unwrap();
     let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();

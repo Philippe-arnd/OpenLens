@@ -13,6 +13,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 - **Kustomize base on the current image** (#400, #407): the plain manifests and the example overlay pinned `v0.1.0`, which has no `/readyz`, so with the new readiness probe the pod never became ready. They now pin `v0.3.0`, and so does the chart's default `appVersion`.
 - **Backups include source maps and cold-tier markers** (#419): `openlens backup` now copies `sourcemaps/` and `cold/`, and writes `cold-manifest.json` listing the days whose only copy is on S3 with their prefixes. A restore no longer loses original-source frames of older releases, nor which days live on S3.
+- **Filtered boards opened together share one 90-day snapshot** (#418, part 1): boards for different roles or releases of the same data build the snapshot once and free it 15 s after the last one finishes, instead of one snapshot each. New metric `openlens_board_snapshots_total`.
 - **A busy project no longer invalidates the other projects' boards** (#420): the board cache keeps one data generation per project, bumped only by that project's flush, compaction, erasure and retention.
 - **Chart readiness probe follows the pinned image** (NOPS-01): `image.tag` set to a release before `v0.3.0` now keeps the old `/healthz` readiness probe instead of the `/readyz` that release cannot answer.
 

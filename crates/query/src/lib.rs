@@ -34,6 +34,8 @@ use serde::Serialize;
 /// How long the anonymous-id table of a project is reused before it is
 /// read again. Events are flushed every ~10 s, so this stays fresh enough.
 const ALIAS_TTL: Duration = Duration::from_secs(30);
+/// How long a shared snapshot outlives its last user (#418).
+const SNAPSHOT_LINGER: Duration = Duration::from_secs(15);
 
 /// `person_aliases(anon, person)`: anonymous ids that were later identified.
 ///
@@ -173,8 +175,37 @@ pub struct QueryResult {
     pub truncated: bool,
 }
 
-/// An in-memory table of one project, and its reservation in the pool.
-type Snapshot = (String, String, Arc<MemTable>, Arc<MemoryReservation>);
+/// An in-memory table and its reservation in the pool, freed together
+/// when the last engine copy that uses it is dropped.
+#[derive(Debug)]
+struct SnapData {
+    table: Arc<MemTable>,
+    _reservation: MemoryReservation,
+}
+
+/// An in-memory table of one project.
+type Snapshot = (String, String, Arc<SnapData>);
+
+/// What a shared snapshot key last produced (#418).
+#[derive(Debug, Default)]
+enum Last {
+    #[default]
+    Nothing,
+    /// Too large for memory, at this time: do not try again for a minute.
+    TooBig(std::time::Instant),
+    /// Built, alive while some engine copy uses it.
+    Built(std::sync::Weak<SnapData>),
+}
+
+/// (project, name, sql, the params the sql reads, caller's share key).
+type SnapKey = (String, String, String, Vec<(String, String)>, u64);
+
+/// Snapshots shared between concurrent callers with the same key (#418).
+#[derive(Debug, Default)]
+struct SharedSnaps {
+    slots: std::sync::Mutex<HashMap<SnapKey, Arc<tokio::sync::Mutex<Last>>>>,
+    built: std::sync::atomic::AtomicU64,
+}
 
 /// Runs read-only SQL against a data root.
 #[derive(Debug, Clone)]
@@ -189,6 +220,8 @@ pub struct QueryEngine {
     /// Each holds its bytes reserved in the memory pool (#329) until the
     /// last copy of the engine that uses it is dropped.
     snapshots: Arc<Vec<Snapshot>>,
+    /// Snapshots shared by [`QueryEngine::shared_snapshot`] (#418).
+    shared: Arc<SharedSnaps>,
     /// Per project: the identity tables and when they were read.
     aliases: AliasCache,
     /// Queries stopped at the time limit, shared by every copy (#346).
@@ -209,6 +242,7 @@ impl QueryEngine {
             limits,
             runtime,
             snapshots: Arc::default(),
+            shared: Arc::default(),
             aliases: AliasCache::default(),
             timeouts: Arc::default(),
             params: Arc::default(),
@@ -262,16 +296,104 @@ impl QueryEngine {
     ) -> Result<Option<QueryEngine>, QueryError> {
         let this = self.clone();
         let (project, name, sql) = (project.to_owned(), name.to_owned(), sql.to_owned());
-        offload(async move { this.snapshot_here(&project, &name, &sql, max_rows).await }).await
+        offload(async move {
+            let data = this.build_snapshot(&project, &name, &sql, max_rows).await?;
+            Ok(data.map(|d| this.with_snapshot(&project, &name, d)))
+        })
+        .await
     }
 
-    async fn snapshot_here(
+    /// [`QueryEngine::snapshot`], shared (#418): callers with the same
+    /// project, name, SQL, bound values the SQL reads and `share` key wait
+    /// for one build and use the same table. It lives as long as one of
+    /// them still uses it, plus [`SNAPSHOT_LINGER`], then is freed; a result too large for memory is
+    /// remembered for a minute. `share` is the caller's data generation, so
+    /// a snapshot never outlives new data.
+    pub async fn shared_snapshot(
         &self,
         project: &str,
         name: &str,
         sql: &str,
         max_rows: usize,
+        share: u64,
     ) -> Result<Option<QueryEngine>, QueryError> {
+        let used: Vec<(String, String)> = self
+            .params
+            .iter()
+            .filter(|(k, _)| sql.contains(&format!("${k}")))
+            .map(|(k, v)| (k.to_owned(), v.to_owned()))
+            .collect();
+        let key: SnapKey = (project.to_owned(), name.to_owned(), sql.to_owned(), used, share);
+        let slot = {
+            let mut slots = self
+                .shared
+                .slots
+                .lock()
+                .map_err(|_| QueryError::Storage("snapshot slots poisoned".into()))?;
+            if slots.len() > 64 {
+                slots.retain(|_, l| Arc::strong_count(l) > 1);
+            }
+            slots.entry(key).or_default().clone()
+        };
+        let this = self.clone();
+        let (project, name, sql) = (project.to_owned(), name.to_owned(), sql.to_owned());
+        offload(async move {
+            let mut last = slot.lock().await;
+            match &*last {
+                Last::Built(w) => {
+                    if let Some(d) = w.upgrade() {
+                        return Ok(Some(this.with_snapshot(&project, &name, d)));
+                    }
+                }
+                Last::TooBig(at) if at.elapsed() < Duration::from_secs(60) => return Ok(None),
+                _ => {}
+            }
+            let data = this.build_snapshot(&project, &name, &sql, max_rows).await?;
+            *last = match &data {
+                Some(d) => {
+                    // Boards waiting for a compute permit start after the
+                    // first ones finish: keep the table a few seconds more.
+                    let linger = d.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(SNAPSHOT_LINGER).await;
+                        drop(linger);
+                    });
+                    Last::Built(Arc::downgrade(d))
+                }
+                None => Last::TooBig(std::time::Instant::now()),
+            };
+            Ok(data.map(|d| this.with_snapshot(&project, &name, d)))
+        })
+        .await
+    }
+
+    /// How many snapshots [`QueryEngine::shared_snapshot`] built since the
+    /// start (`openlens_board_snapshots_total`).
+    pub fn snapshots_built(&self) -> u64 {
+        self.shared.built.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn with_snapshot(&self, project: &str, name: &str, data: Arc<SnapData>) -> QueryEngine {
+        let mut snaps: Vec<_> = self
+            .snapshots
+            .iter()
+            .filter(|(p, n, _)| !(p == project && n == name))
+            .cloned()
+            .collect();
+        snaps.push((project.to_owned(), name.to_owned(), data));
+        QueryEngine {
+            snapshots: Arc::new(snaps),
+            ..self.clone()
+        }
+    }
+
+    async fn build_snapshot(
+        &self,
+        project: &str,
+        name: &str,
+        sql: &str,
+        max_rows: usize,
+    ) -> Result<Option<Arc<SnapData>>, QueryError> {
         if name.is_empty() || !name.bytes().all(|b| b.is_ascii_lowercase() || b == b'_') {
             return Err(QueryError::Rejected("invalid snapshot name".into()));
         }
@@ -327,23 +449,16 @@ impl QueryEngine {
             Ok(r) => r?,
             Err(_) => return Err(self.timed_out(self.limits.timeout)),
         };
+        if table.is_some() {
+            self.shared
+                .built
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
         Ok(table.map(|(t, reservation)| {
-            let mut snaps: Vec<_> = self
-                .snapshots
-                .iter()
-                .filter(|(p, n, _, _)| !(p == project && n == name))
-                .cloned()
-                .collect();
-            snaps.push((
-                project.to_owned(),
-                name.to_owned(),
-                Arc::new(t),
-                Arc::new(reservation),
-            ));
-            QueryEngine {
-                snapshots: Arc::new(snaps),
-                ..self.clone()
-            }
+            Arc::new(SnapData {
+                table: Arc::new(t),
+                _reservation: reservation,
+            })
         }))
     }
 
@@ -405,9 +520,9 @@ impl QueryEngine {
             ctx.register_table(name, Arc::new(t))
                 .map_err(|e| QueryError::Storage(e.to_string()))?;
         }
-        for (p, name, t, _) in self.snapshots.iter() {
+        for (p, name, t) in self.snapshots.iter() {
             if p == project {
-                ctx.register_table(name.as_str(), t.clone())
+                ctx.register_table(name.as_str(), t.table.clone())
                     .map_err(|e| QueryError::Storage(e.to_string()))?;
             }
         }

@@ -515,6 +515,29 @@ pub async fn board(
     f: &Filters,
     map: Option<(&FeatureMap, i64)>,
 ) -> Result<Board> {
+    board_with(q, project, f, map, None).await
+}
+
+/// [`board`], sharing its 90-day snapshot with the boards computed at the
+/// same time for other roles or releases of the same data `generation`
+/// (#418): four filtered boards build one snapshot, not four.
+pub async fn board_shared(
+    q: &QueryEngine,
+    project: &str,
+    f: &Filters,
+    map: Option<(&FeatureMap, i64)>,
+    generation: u64,
+) -> Result<Board> {
+    board_with(q, project, f, map, Some(generation)).await
+}
+
+async fn board_with(
+    q: &QueryEngine,
+    project: &str,
+    f: &Filters,
+    map: Option<(&FeatureMap, i64)>,
+    share: Option<u64>,
+) -> Result<Board> {
     let q = &q.with_params(&f.params()?);
     // Every board query reads the same projection (roles and features
     // resolved from the map) over at most 90 days: compute it once, in
@@ -526,14 +549,17 @@ pub async fn board(
     }
     .clause(90)?;
     let projected = source(map.map(|(m, _)| m));
-    let snap = q
-        .snapshot(
-            project,
-            "board_events",
-            &format!("SELECT {BOARD_COLUMNS} FROM {projected} WHERE {window}"),
-            BOARD_SNAPSHOT_ROWS,
-        )
-        .await?;
+    let snap_sql = format!("SELECT {BOARD_COLUMNS} FROM {projected} WHERE {window}");
+    let snap = match share {
+        Some(g) => {
+            q.shared_snapshot(project, "board_events", &snap_sql, BOARD_SNAPSHOT_ROWS, g)
+                .await?
+        }
+        None => {
+            q.snapshot(project, "board_events", &snap_sql, BOARD_SNAPSHOT_ROWS)
+                .await?
+        }
+    };
     let (q, src) = match &snap {
         Some(s) => (s, "board_events".to_owned()),
         None => (q, projected),

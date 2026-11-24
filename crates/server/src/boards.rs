@@ -219,7 +219,16 @@ async fn compute(
 ) -> openlens_engine::Result<Arc<Board>> {
     let cache = &state.boards;
     let _permit = cache.inner.permits.acquire().await.ok();
-    let board = Arc::new(Box::pin(openlens_engine::board(&state.query, project, f, map)).await?);
+    let board = Arc::new(
+        Box::pin(openlens_engine::board_shared(
+            &state.query,
+            project,
+            f,
+            map,
+            generation,
+        ))
+        .await?,
+    );
     cache.inner.computed.fetch_add(1, Ordering::Relaxed);
     cache.put(
         key,
