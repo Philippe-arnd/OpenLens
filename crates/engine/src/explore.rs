@@ -102,11 +102,8 @@ pub async fn breakdown(
     let mut w = f.clause(30)?;
     // By environment: every environment, side by side.
     if col == "environment" {
-        w = w.replacen(
-            &format!(" AND environment = {}", lit(&f.environment)?),
-            "",
-            1,
-        );
+        // The clause binds it as `$env` (#310).
+        w = w.replacen(" AND environment = $env", "", 1);
     }
     let sql = format!(
         "SELECT {col} AS value, count(DISTINCT distinct_id) AS users, count(DISTINCT session_id) AS sessions, \
