@@ -64,7 +64,7 @@ The healthcheck lives in `docker-compose.yml`, not in the Dockerfile, so Coolify
 
 Agents: the [`release` skill](../.claude/skills/release/SKILL.md) is the checklist (release now, hold, notes, hotfix, done, roll back).
 
-OpenLens follows [SemVer](https://semver.org) and keeps a [CHANGELOG](../CHANGELOG.md) in the Keep a Changelog format. Every merged change adds its line under `Unreleased`.
+OpenLens follows [SemVer](https://semver.org) and keeps a [CHANGELOG](../CHANGELOG.md) in the Keep a Changelog format. Every merged change adds its line under `Unreleased`. A change that asks the operator or an app to act starts with **Breaking:** and links [the stability policy](stability.md).
 
 **The release train** (`.github/workflows/release-train.yml`, #197) cuts stable releases by itself every Tuesday at 06:17 UTC. It releases the version in `Cargo.toml` when:
 - `[Unreleased]` has entries;
