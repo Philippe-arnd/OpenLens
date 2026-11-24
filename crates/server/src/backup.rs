@@ -18,7 +18,8 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const TREES: [&str; 3] = ["wal", "events", "replay"];
+// `rollups` too: they outlive the events and cannot be rebuilt (D-026).
+const TREES: [&str; 4] = ["wal", "events", "replay", "rollups"];
 
 fn files(root: &Path) -> BTreeSet<PathBuf> {
     let mut out = BTreeSet::new();
@@ -158,12 +159,22 @@ mod tests {
         fs::write(data.join("wal/00002.tmp"), b"").unwrap();
         fs::create_dir_all(data.join("replay/project=p/s")).unwrap();
         fs::write(data.join("replay/project=p/s/00000.zst"), b"z").unwrap();
+        fs::create_dir_all(data.join("rollups/v1/project=p/date=2025-01-01")).unwrap();
+        fs::write(
+            data.join("rollups/v1/project=p/date=2025-01-01/person_q.parquet"),
+            b"r",
+        )
+        .unwrap();
         let meta = openlens_meta::Meta::open(&data.join("meta.db")).unwrap();
         meta.ensure_default_project(None).unwrap();
         drop(meta);
 
         let out = d.path().join("backup");
-        assert_eq!(run(&data, &out).unwrap(), 4);
+        assert_eq!(run(&data, &out).unwrap(), 5);
+        assert!(
+            out.join("rollups/v1/project=p/date=2025-01-01/person_q.parquet")
+                .exists()
+        );
         assert!(
             out.join("events/project=p/date=2026-01-01/a.parquet")
                 .exists()
