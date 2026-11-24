@@ -31,6 +31,35 @@
   "prConcurrentLimit": 6,
   "packageRules": [
     {
+      "description": "Non-major Cargo updates together: one PR, one CI run (#195).",
+      "matchManagers": [
+        "cargo"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "groupName": "cargo non-major"
+    },
+    {
+      "description": "Non-major npm updates of the SDKs together (#195).",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "groupName": "npm non-major"
+    },
+    {
+      "description": "GitHub Actions digests and versions together (#195).",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "groupName": "github actions"
+    },
+    {
       "description": "DataFusion, Arrow and Parquet move together: one PR, one CI run.",
       "groupName": "datafusion and arrow",
       "matchPackageNames": [
@@ -54,7 +83,7 @@
       "platformAutomerge": true
     },
     {
-      "description": "Before 1.0, a 0.x minor of a crate is a major: review it like one.",
+      "description": "Before 1.0, a 0.x minor of a crate is a major: review it like one. Kept out of the auto-merging Cargo group, so that group still merges itself.",
       "matchManagers": [
         "cargo"
       ],
@@ -65,7 +94,8 @@
       "automerge": false,
       "addLabels": [
         "major-update"
-      ]
+      ],
+      "groupName": "cargo 0.x minors"
     },
     {
       "matchUpdateTypes": [
