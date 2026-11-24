@@ -141,3 +141,11 @@ Append-only. Each entry: id, date, decision, why, consequences.
 **Why:** the project key is public, and a limit that only applied to proxied traffic left a directly exposed server (`docker run -p`, a systemd binary) with none, while a client could pick a new address for every request by forging the header.
 
 **Consequences:** a proxy on a public address in front of OpenLens makes every client look like the proxy; put it on a private network, as every supported deployment does.
+
+## D-023 (2026-11-24, agent for #321) The board's snapshot cap stays at 4 M rows; larger apps wait for daily rollups
+
+**Decision:** `BOARD_SNAPSHOT_ROWS` stays at 4 M rows and the default window stays at 90 days. The supported size for one small server is **up to about 4 M events in 90 days** (about 45,000 a day), where the board comes from memory. Above it the board still works, but reads the files: at 63 M events it took 22 s on first load and 12 s after that, with 2.6 GB of server memory, on 4 vCPU. The way past it is the daily rollups of #223 (#325, #326), not a bigger snapshot.
+
+**Why:** a snapshot of 63 M rows would need about 10 GB at 160 bytes a row, far above the 1 GB target (D-001). Rollups make the board's cost depend on the number of days, not the number of events.
+
+**Consequences:** the sizing docs give the 4 M limit and the memory needed above it. Above that size, people should expect a slow board until the rollups ship. The `scale` job of `perf.yml` measures the same thing again after each change.
