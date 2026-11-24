@@ -48,18 +48,42 @@ pub struct ProjectInfo<'a> {
     pub key: &'a str,
 }
 
-static UPDATE: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None);
+/// A newer release (#198), and whether it fixes security advisories (#416).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Update {
+    /// Its tag, e.g. `v0.5.0`.
+    pub tag: String,
+    /// Its notes carry a *Security* section.
+    pub security: bool,
+}
+
+static UPDATE: std::sync::RwLock<Option<Update>> = std::sync::RwLock::new(None);
 
 /// Record the newest release when it is newer than this one (the server
 /// checks once a day), so every page's footer can say so.
-pub fn set_update_available(tag: Option<String>) {
+pub fn set_update_available(update: Option<Update>) {
     if let Ok(mut u) = UPDATE.write() {
-        *u = tag;
+        *u = update;
     }
 }
 
-fn update_available() -> Option<String> {
+fn update_available() -> Option<Update> {
     UPDATE.read().ok().and_then(|u| u.clone())
+}
+
+/// The footer's update notice: louder for a security release.
+fn update_notice(u: &Update) -> Markup {
+    let href = format!(
+        "https://github.com/Philippe-arnd/OpenLens/releases/tag/{}",
+        u.tag
+    );
+    html! {
+        @if u.security {
+            " · " a.update-security href=(href) { "Security update available: " (u.tag) " — fixes published advisories, upgrade soon" }
+        } @else {
+            " · " a href=(href) { "Update available: " (u.tag) }
+        }
+    }
 }
 
 /// Format a count compactly: 1,284 / 12.9K / 4.2M.
@@ -287,8 +311,8 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
                         main { (body) }
                         footer {
                             "OpenLens " (env!("CARGO_PKG_VERSION")) " · map → measure → focus → act → compare"
-                            @if let Some(v) = update_available() {
-                                " · " a href={ "https://github.com/Philippe-arnd/OpenLens/releases/tag/" (v) } { "Update available: " (v) }
+                            @if let Some(u) = update_available() {
+                                (update_notice(&u))
                             }
                         }
                     }
@@ -394,6 +418,25 @@ pub fn render(m: Markup) -> String {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    #[test]
+    fn a_security_release_gets_a_louder_notice() {
+        let plain = update_notice(&Update {
+            tag: "v0.5.0".into(),
+            security: false,
+        })
+        .into_string();
+        let sec = update_notice(&Update {
+            tag: "v0.5.0".into(),
+            security: true,
+        })
+        .into_string();
+        assert!(plain.contains("Update available: v0.5.0"));
+        assert!(!plain.contains("update-security"));
+        assert!(sec.contains("class=\"update-security\""));
+        assert!(sec.contains("Security update available: v0.5.0"));
+        assert!(sec.contains("releases/tag/v0.5.0"));
+    }
 
     #[test]
     fn plain_wording_replaces_the_card_text_and_keeps_the_original() {

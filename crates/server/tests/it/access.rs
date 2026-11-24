@@ -682,6 +682,31 @@ async fn sign_out_everywhere_refuses_every_earlier_cookie() {
 }
 
 #[tokio::test]
+async fn new_data_in_another_project_keeps_this_board_cached() {
+    let h = harness();
+    let (status, _) = post(&h, "/capture", batch(&h.key), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let uri = "/api/projects/default/board";
+    assert_eq!(get(&h, uri, None, true).await.status(), StatusCode::OK);
+    let computed = h.state.boards.computed();
+    // Another project's flush, compaction or erasure (#420).
+    h.state.boards.bump("other");
+    assert_eq!(get(&h, uri, None, true).await.status(), StatusCode::OK);
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert_eq!(h.state.boards.computed(), computed, "no recomputation");
+    h.state.boards.bump("default");
+    assert_eq!(get(&h, uri, None, true).await.status(), StatusCode::OK);
+    for _ in 0..100 {
+        if h.state.boards.computed() > computed {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(h.state.boards.computed(), computed + 1, "its own data does");
+}
+
+#[tokio::test]
 async fn errors_pages_and_events_pages_do_not_compute_the_board() {
     let h = harness();
     let (status, _) = post(&h, "/capture", batch(&h.key), false).await;

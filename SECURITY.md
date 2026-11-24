@@ -17,6 +17,10 @@ Please include the version (the image tag or the release you installed), what an
 
 You are credited in the advisory unless you ask not to be.
 
+## Knowing you are affected
+
+Fixed vulnerabilities are published as advisories on the repository's **Security** tab (affected and patched versions). The release that fixes one carries a **Security** section in its notes and in `CHANGELOG.md`, and a running OpenLens that sees such a release shows *Security update available* in every page's footer instead of the plain update notice (turn the daily check off with `OPENLENS_UPDATE_CHECK=off`).
+
 ## Supported versions
 
 Only the **latest minor release** gets security fixes, as a patch release (for example, when 0.3 is current, 0.3.x gets the fix and 0.2 does not). Stable releases ship every week (see the [release train](docs/development.md#releasing)), and an upgrade within the same major keeps your data, so staying current is the supported path.

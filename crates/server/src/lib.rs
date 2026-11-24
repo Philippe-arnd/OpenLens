@@ -280,9 +280,7 @@ fn stable_version(tag: &str) -> Option<(u64, u64, u64)> {
 }
 
 /// The newest stable release, when it is newer than `current` (#198).
-/// Sends nothing about the install: one anonymous GET to GitHub's public
-/// API. `OPENLENS_UPDATE_CHECK=off` turns it off.
-fn newer_release(current: &str) -> Option<String> {
+fn newer_release(current: &str) -> Option<openlens_ui::Update> {
     let body: serde_json::Value =
         ureq::get("https://api.github.com/repos/Philippe-arnd/OpenLens/releases/latest")
             .header("user-agent", "openlens-update-check")
@@ -295,8 +293,30 @@ fn newer_release(current: &str) -> Option<String> {
             .body_mut()
             .read_json()
             .ok()?;
+    release_update(&body, current)
+}
+
+/// Read a `/releases/latest` answer: the tag when newer than `current`,
+/// and whether its notes carry a `Security` heading (#416: the release
+/// fixes a published advisory, so the footer says so louder).
+fn release_update(body: &serde_json::Value, current: &str) -> Option<openlens_ui::Update> {
     let tag = body.get("tag_name")?.as_str()?.to_owned();
-    (stable_version(&tag)? > stable_version(current)?).then_some(tag)
+    if stable_version(&tag)? <= stable_version(current)? {
+        return None;
+    }
+    let security = body
+        .get("body")
+        .and_then(|b| b.as_str())
+        .is_some_and(|notes| {
+            notes.lines().any(|l| {
+                let l = l.trim();
+                l.starts_with('#')
+                    && l.trim_start_matches('#')
+                        .trim()
+                        .eq_ignore_ascii_case("security")
+            })
+        });
+    Some(openlens_ui::Update { tag, security })
 }
 
 /// Check for a newer release once a day (first check a minute after start).
@@ -310,8 +330,12 @@ async fn update_check() {
             .await
             .ok()
             .flatten();
-        if let Some(t) = &found {
-            tracing::info!(release = %t, "a newer OpenLens release is available");
+        if let Some(u) = &found {
+            if u.security {
+                tracing::warn!(release = %u.tag, "a newer OpenLens release fixes security advisories");
+            } else {
+                tracing::info!(release = %u.tag, "a newer OpenLens release is available");
+            }
         }
         openlens_ui::set_update_available(found);
         tokio::time::sleep(Duration::from_secs(24 * 3600)).await;
@@ -460,7 +484,9 @@ fn flush(state: &AppState) -> Result<(), String> {
                 Ok(n) => {
                     state.metrics.flushed(n, started.elapsed().as_millis());
                     tracing::debug!(n, "flushed events to parquet");
-                    state.boards.bump();
+                    for project in pending.projects() {
+                        state.boards.bump(&project);
+                    }
                 }
                 Err(e) => {
                     if let Ok(mut w) = state.writer.lock() {
@@ -483,7 +509,7 @@ fn compact(state: &AppState) -> Result<(), String> {
         let now = chrono::Utc::now();
         clean_stored_urls(state, &p.id);
         // Compaction, erasure and retention below rewrite files.
-        state.boards.bump();
+        state.boards.bump(&p.id);
         if let Err(err) = openlens_storage::compact(&state.data_dir, &p.id, now) {
             tracing::warn!(project = %p.id, %err, "compaction failed");
         }
@@ -645,8 +671,11 @@ fn clean_stored_urls(state: &AppState, project: &str) {
 pub fn flush_now(state: &AppState) -> Result<usize, String> {
     let _flushing = state.flushing.lock().map_err(|_| "flush lock poisoned")?;
     let mut w = state.writer.lock().map_err(|_| "writer lock poisoned")?;
+    let projects = w.buffered_projects();
     let n = w.flush().map_err(|e| e.to_string())?;
-    state.boards.bump();
+    for project in projects {
+        state.boards.bump(&project);
+    }
     Ok(n)
 }
 
@@ -806,6 +835,29 @@ mod version_tests {
         assert!(v("v0.10.0") > v("v0.9.9"));
         assert_eq!(v("v0.2.0-261122-755dcee"), None);
         assert_eq!(v("nightly"), None);
+    }
+
+    #[test]
+    fn a_security_heading_makes_a_security_update() {
+        use super::release_update as r;
+        let plain = serde_json::json!({"tag_name": "v0.5.0", "body": "## Added\n- things"});
+        let sec =
+            serde_json::json!({"tag_name": "v0.5.0", "body": "## Added\n\n### Security\n- GHSA-x"});
+        assert!(!r(&plain, "0.4.0").unwrap().security);
+        assert!(r(&sec, "0.4.0").unwrap().security);
+        assert_eq!(r(&sec, "0.4.0").unwrap().tag, "v0.5.0");
+        assert!(r(&sec, "0.5.0").is_none(), "same version");
+        assert!(
+            r(&serde_json::json!({"body": "x"}), "0.4.0").is_none(),
+            "no tag"
+        );
+        let no_body = serde_json::json!({"tag_name": "v0.5.0"});
+        assert!(!r(&no_body, "0.4.0").unwrap().security);
+        let mention = serde_json::json!({"tag_name": "v0.5.0", "body": "Security is great"});
+        assert!(
+            !r(&mention, "0.4.0").unwrap().security,
+            "only a heading counts"
+        );
     }
 }
 

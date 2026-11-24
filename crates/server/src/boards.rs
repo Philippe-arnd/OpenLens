@@ -5,8 +5,9 @@
 //! that shows part of it used to compute it again. Here:
 //!
 //! - a result is kept per (project, filters, map version) and reused until
-//!   new data lands (the generation, bumped by flush, compaction, erasure
-//!   and retention) and for at most [`MAX_AGE`] in any case;
+//!   new data lands in that project (its generation, bumped by that
+//!   project's flush, compaction, erasure and retention, #420) and for at
+//!   most [`MAX_AGE`] in any case;
 //! - after new data, the previous result is still served for [`STALE`] while
 //!   one recomputation runs in the background, so a captured event shows on
 //!   the board within about 20 s (10 s flush + [`STALE`]);
@@ -48,7 +49,8 @@ pub struct BoardCache {
 }
 
 struct Inner {
-    generation: AtomicU64,
+    /// Data generation per project (#420); unknown projects are at 0.
+    generations: Mutex<HashMap<String, u64>>,
     computed: AtomicU64,
     entries: Mutex<HashMap<Key, Entry>>,
     /// One lock per key being computed: the others wait on it.
@@ -62,7 +64,7 @@ impl Default for BoardCache {
     fn default() -> Self {
         Self {
             inner: Arc::new(Inner {
-                generation: AtomicU64::new(0),
+                generations: Mutex::new(HashMap::new()),
                 computed: AtomicU64::new(0),
                 entries: Mutex::new(HashMap::new()),
                 flights: Mutex::new(HashMap::new()),
@@ -76,21 +78,30 @@ impl Default for BoardCache {
 impl std::fmt::Debug for BoardCache {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BoardCache")
-            .field("generation", &self.generation())
+            .field(
+                "projects",
+                &self.inner.generations.lock().map_or(0, |m| m.len()),
+            )
             .field("computed", &self.computed())
             .finish_non_exhaustive()
     }
 }
 
 impl BoardCache {
-    /// New data landed (flush, compaction, erasure, retention, rewrite).
-    pub fn bump(&self) {
-        self.inner.generation.fetch_add(1, Ordering::Relaxed);
+    /// New data landed in `project` (flush, compaction, erasure,
+    /// retention, rewrite): only its cached boards go stale.
+    pub fn bump(&self, project: &str) {
+        if let Ok(mut m) = self.inner.generations.lock() {
+            *m.entry(project.to_owned()).or_default() += 1;
+        }
     }
 
-    /// The current data generation.
-    pub fn generation(&self) -> u64 {
-        self.inner.generation.load(Ordering::Relaxed)
+    /// The current data generation of `project`.
+    pub fn generation(&self, project: &str) -> u64 {
+        self.inner
+            .generations
+            .lock()
+            .map_or(0, |m| m.get(project).copied().unwrap_or(0))
     }
 
     /// Results kept now.
@@ -159,7 +170,7 @@ pub(crate) fn warm(
         format!("{f:?}"),
         map.map_or(0, |(_, v)| v),
     );
-    let generation = state.boards.generation();
+    let generation = state.boards.generation(project);
     state
         .boards
         .get(&key)
@@ -179,7 +190,7 @@ pub(crate) async fn board(
         format!("{f:?}"),
         map.map_or(0, |(_, v)| v),
     );
-    let generation = cache.generation();
+    let generation = cache.generation(project);
     if let Some(e) = cache.get(&key)
         && servable(&e, generation)
     {
@@ -191,7 +202,7 @@ pub(crate) async fn board(
     let lock = cache.flight(&key);
     let _computing = lock.lock().await;
     // Someone else may have computed it while we waited.
-    let generation = cache.generation();
+    let generation = cache.generation(project);
     if let Some(e) = cache.get(&key)
         && servable(&e, generation)
     {
@@ -211,7 +222,16 @@ async fn compute(
 ) -> openlens_engine::Result<Arc<Board>> {
     let cache = &state.boards;
     let _permit = cache.inner.permits.acquire().await.ok();
-    let board = Arc::new(Box::pin(openlens_engine::board(&state.query, project, f, map)).await?);
+    let board = Arc::new(
+        Box::pin(openlens_engine::board_shared(
+            &state.query,
+            project,
+            f,
+            map,
+            generation,
+        ))
+        .await?,
+    );
     cache.inner.computed.fetch_add(1, Ordering::Relaxed);
     cache.put(
         key,
@@ -237,8 +257,8 @@ fn refresh_later(state: &AppState, key: Key, f: Filters, map: Option<(FeatureMap
     tokio::spawn(async move {
         let lock = state.boards.flight(&key);
         let _computing = lock.lock().await;
-        let generation = state.boards.generation();
         let project = key.0.clone();
+        let generation = state.boards.generation(&project);
         let done = match state.boards.get(&key) {
             Some(e) if fresh(&e, generation) => Ok(()),
             _ => compute(
@@ -259,4 +279,19 @@ fn refresh_later(state: &AppState, key: Key, f: Filters, map: Option<(FeatureMap
             busy.remove(&key);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BoardCache;
+
+    #[test]
+    fn a_bump_only_ages_its_own_project() {
+        let c = BoardCache::default();
+        assert_eq!(c.generation("a"), 0);
+        c.bump("a");
+        c.bump("a");
+        assert_eq!(c.generation("a"), 2);
+        assert_eq!(c.generation("b"), 0, "project b is untouched");
+    }
 }
