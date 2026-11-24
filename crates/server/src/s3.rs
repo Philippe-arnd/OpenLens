@@ -8,7 +8,8 @@
 //!
 //! What goes up, from the background loop: every closed day of events
 //! (`events/project=…/date=…/*.parquet`, once compacted; again if its files
-//! change) and a daily snapshot of `meta.db`. Requests are signed with AWS
+//! change), the rollups of closed days (D-026) and a daily snapshot of
+//! `meta.db`. Requests are signed with AWS
 //! Signature Version 4, implemented here (no SDK).
 
 use std::fs;
@@ -363,17 +364,18 @@ pub(crate) fn test(cfg: &Config) -> Result<(), String> {
 
 const MARK: &str = ".s3-uploaded";
 
-/// Upload closed days whose files changed since the last upload, and the
-/// day's metadata snapshot. Returns the number of objects uploaded.
-pub(crate) fn sync(
+/// Upload the closed days of one tree (`<tree>/project=…/date=…/*.parquet`)
+/// whose files changed since the last upload. With `stamp`, a file
+/// rewritten under the same name counts as changed.
+fn sync_tree(
     cfg: &Config,
     root: &Path,
-    meta: &openlens_meta::Meta,
+    tree: &Path,
     today: &str,
+    stamp: bool,
 ) -> Result<usize, String> {
     let mut sent = 0;
-    let events = root.join("events");
-    let Ok(projects) = fs::read_dir(&events) else {
+    let Ok(projects) = fs::read_dir(tree) else {
         return Ok(0);
     };
     for p in projects.flatten() {
@@ -396,8 +398,18 @@ pub(crate) fn sync(
             let listing: String = files
                 .iter()
                 .filter_map(|f| {
-                    f.file_name()
-                        .map(|n| n.to_string_lossy().into_owned() + "\n")
+                    let n = f.file_name()?.to_string_lossy().into_owned();
+                    if !stamp {
+                        return Some(n + "\n");
+                    }
+                    let m = fs::metadata(f).ok()?;
+                    let t = m
+                        .modified()
+                        .ok()?
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .ok()?
+                        .as_nanos();
+                    Some(format!("{n} {} {t}\n", m.len()))
                 })
                 .collect();
             if fs::read_to_string(dir.join(MARK)).ok().as_deref() == Some(listing.as_str()) {
@@ -415,6 +427,25 @@ pub(crate) fn sync(
             fs::write(dir.join(MARK), listing).map_err(|e| e.to_string())?;
         }
     }
+    Ok(sent)
+}
+
+/// Upload closed days whose files changed since the last upload, and the
+/// day's metadata snapshot. Returns the number of objects uploaded.
+pub(crate) fn sync(
+    cfg: &Config,
+    root: &Path,
+    meta: &openlens_meta::Meta,
+    today: &str,
+) -> Result<usize, String> {
+    let mut sent = sync_tree(cfg, root, &root.join("events"), today, false)?;
+    // The rollups outlive the events (D-026): copy them too. They are
+    // rewritten in place when someone is erased, so their mark records
+    // sizes and times, not only names.
+    let rollups = root
+        .join("rollups")
+        .join(format!("v{}", openlens_storage::rollup::ROLLUP_VERSION));
+    sent += sync_tree(cfg, root, &rollups, today, true)?;
     let snap_mark = root.join(".s3-meta-day");
     if fs::read_to_string(&snap_mark).ok().as_deref() != Some(today) {
         let tmp = root.join(format!(".meta-snapshot-{today}.db"));
@@ -525,6 +556,22 @@ mod tests {
             2,
             "a compacted day goes up again"
         );
+        // Rollups go up too, and again when rewritten under the same name
+        // (someone erased, D-026).
+        let r = d.path().join("rollups/v1/project=p/date=2025-01-01");
+        fs::create_dir_all(&r).unwrap();
+        fs::write(r.join("person_q.parquet"), b"r1").unwrap();
+        assert_eq!(sync(&cfg, d.path(), &meta, "2026-11-22").unwrap(), 1);
+        assert!(
+            got.lock()
+                .unwrap()
+                .iter()
+                .any(|p| p.0
+                    == "/lens/prod/rollups/v1/project%3Dp/date%3D2025-01-01/person_q.parquet")
+        );
+        assert_eq!(sync(&cfg, d.path(), &meta, "2026-11-22").unwrap(), 0);
+        fs::write(r.join("person_q.parquet"), b"r2-trimmed").unwrap();
+        assert_eq!(sync(&cfg, d.path(), &meta, "2026-11-22").unwrap(), 1);
     }
 
     /// The worked "PUT Object" example of the AWS SigV4 documentation.
