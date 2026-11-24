@@ -24,7 +24,7 @@ jobs:
     name: Auto Merge
     # One CI workflow: run on failure too, or a failing PR never gets its issue.
     if: github.event.workflow_run.event == 'pull_request' && (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure')
-    uses: Philippe-arnd/reusable-workflow-vibecoded/.github/workflows/reusable-auto-merge.yml@main
+    uses: Philippe-arnd/reusable-workflow-vibecoded/.github/workflows/reusable-auto-merge.yml@9085e222057537f2718519134ef6c1b92d6e3f21 # main
     with:
       required-checks: |
         cargo xtask ci
