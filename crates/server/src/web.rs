@@ -599,12 +599,62 @@ async fn board(
         );
     };
     let f = q.filters(&auth::tz_for(&state, &headers, &p.timezone));
+    let map = crate::load_map(&state, &p.id).await;
+    let host = crate::base_url(&headers);
+    if crate::boards::warm(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))) {
+        return board_page(state, p, f, map, host).await;
+    }
+    // A cold cache means seconds of computing: send the page shell at once
+    // (head, sidebar, a loading line), then the board when it is ready
+    // (#301). The loading line hides itself, in CSS, once the board follows
+    // it. Errors after the first byte show in the page (status 200).
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
         name: &p.name,
         key: &p.api_key,
     };
-    let map = crate::load_map(&state, &p.id).await;
+    let shell = openlens_ui::board_shell(&info).into_string();
+    let Some(cut) = shell.rfind("</main>") else {
+        return board_page(state, p, f, map, host).await;
+    };
+    let (open, close) = (shell[..cut].to_owned(), shell[cut..].to_owned());
+    let rest = async move {
+        let page = board_page(state, p, f, map, host).await;
+        let bytes = axum::body::to_bytes(page.into_body(), 64 * 1024 * 1024)
+            .await
+            .unwrap_or_default();
+        let full = String::from_utf8_lossy(&bytes);
+        let inner = match (full.find("<main>"), full.rfind("</main>")) {
+            (Some(a), Some(b)) if a + 6 <= b => full[a + 6..b].to_owned(),
+            _ => "<p class=\"alert\" role=\"alert\">Couldn't finish this page. Reload it.</p>"
+                .to_owned(),
+        };
+        Ok::<_, std::convert::Infallible>(axum::body::Bytes::from(inner + &close))
+    };
+    use futures::StreamExt;
+    let stream = futures::stream::iter([Ok::<_, std::convert::Infallible>(
+        axum::body::Bytes::from(open),
+    )])
+    .chain(futures::stream::once(rest));
+    let mut r = html(StatusCode::OK, maud::PreEscaped(String::new()));
+    r.headers_mut().remove(header::CONTENT_LENGTH);
+    *r.body_mut() = axum::body::Body::from_stream(stream);
+    r
+}
+
+/// The whole board page, computed now (or read from the cache).
+async fn board_page(
+    state: AppState,
+    p: openlens_meta::Project,
+    f: openlens_engine::Filters,
+    map: Option<(openlens_featuremap::FeatureMap, i64)>,
+    host: String,
+) -> Response {
+    let info = openlens_ui::ProjectInfo {
+        id: &p.id,
+        name: &p.name,
+        key: &p.api_key,
+    };
     let (board, revenue) = tokio::join!(
         crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
         openlens_engine::revenue(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f)
@@ -646,7 +696,7 @@ async fn board(
                 &info,
                 &b,
                 &f,
-                &crate::base_url(&headers),
+                &host,
                 &crate::reword::plain(&state, &b.insights)
                     .unwrap_or_default()
                     .into_iter()

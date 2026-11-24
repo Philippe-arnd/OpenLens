@@ -649,6 +649,17 @@ fn empty(p: &ProjectInfo<'_>, host: &str) -> Markup {
     }
 }
 
+/// The board page before its content (#301): the layout and a loading
+/// line, sent while a cold board is computed. The content follows it in
+/// the same `<main>`, and the line hides itself then (`app.css`).
+pub fn board_shell(p: &ProjectInfo<'_>) -> Markup {
+    layout(
+        "Focus board",
+        Some(p),
+        html! { p.page-loading role="status" { span.spinner aria-hidden="true" {} "Computing the board…" } },
+    )
+}
+
 /// The Focus board (M1: KPI strip, activity, features, roles, releases).
 /// `plain`: optional plain-language `(title, next step)` per insight card
 /// (same order), shown instead of the original, which stays as the tooltip.

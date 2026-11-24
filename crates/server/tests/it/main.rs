@@ -4793,13 +4793,31 @@ async fn errors_pages_and_events_pages_do_not_compute_the_board() {
     }
     // Only their filter bar's options were read (#329).
     assert_eq!(h.state.boards.computed(), 0);
-    assert_eq!(
-        get(&h, "/p/default", Some(&owner), false).await.status(),
-        StatusCode::OK
-    );
+    // The board page streams (#301): read it to the end first.
+    let board = get(&h, "/p/default", Some(&owner), false).await;
+    assert_eq!(board.status(), StatusCode::OK);
+    body_text(board).await;
     assert_eq!(
         h.state.boards.computed(),
         1,
         "the board page still computes it"
     );
+}
+
+#[tokio::test]
+async fn a_cold_board_streams_its_shell_first_and_a_warm_one_does_not() {
+    let h = harness();
+    let (status, _) = post(&h, "/capture", batch(&h.key), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let owner = login_cookie(&h).await;
+    // Cold: the shell with its loading line, then the board in the same page.
+    let cold = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
+    let loading = cold.find("page-loading").unwrap();
+    let kpis = cold.find("Daily active users").unwrap();
+    assert!(loading < kpis, "the loading line comes before the board");
+    assert!(cold.trim_end().ends_with("</html>"));
+    // Warm: the cached board, with no loading line.
+    let warm = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
+    assert!(warm.contains("Daily active users") && !warm.contains("page-loading"));
 }

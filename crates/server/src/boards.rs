@@ -146,6 +146,26 @@ fn servable(e: &Entry, generation: u64) -> bool {
     fresh(e, generation) || (e.at.elapsed() < STALE && e.at.elapsed() < MAX_AGE)
 }
 
+/// Whether the board for these filters can be served from the cache now,
+/// without computing (#301: a cold one streams the page shell first).
+pub(crate) fn warm(
+    state: &AppState,
+    project: &str,
+    f: &Filters,
+    map: Option<(&FeatureMap, i64)>,
+) -> bool {
+    let key: Key = (
+        project.to_owned(),
+        format!("{f:?}"),
+        map.map_or(0, |(_, v)| v),
+    );
+    let generation = state.boards.generation();
+    state
+        .boards
+        .get(&key)
+        .is_some_and(|e| servable(&e, generation))
+}
+
 /// The board of `project` for these filters, from the cache when possible.
 pub(crate) async fn board(
     state: &AppState,
