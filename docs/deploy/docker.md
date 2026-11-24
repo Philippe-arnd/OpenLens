@@ -9,7 +9,7 @@ docker run -d --name openlens --restart unless-stopped \
   -p 127.0.0.1:8686:8686 -v openlens-data:/data \
   -e OPENLENS_PUBLIC_URL=https://analytics.example.com \
   ghcr.io/philippe-arnd/openlens:0.2
-docker logs openlens   # the admin token is printed on first start
+docker logs openlens   # first start: a single-use owner link, valid 1 hour
 ```
 
 Or with Compose (`compose.yaml`):

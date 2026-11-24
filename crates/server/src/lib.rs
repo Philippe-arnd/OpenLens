@@ -1,7 +1,7 @@
 //! HTTP server: capture and flag endpoints, query API, health checks and the
 //! dashboard.
 //!
-//! Layer: L4 (see `docs/architecture.md`).
+//! Layer: L5 (see `docs/architecture.md`).
 
 mod alerts;
 mod api;
@@ -39,6 +39,7 @@ mod surveys;
 mod tickets;
 mod timeline;
 mod tls;
+pub mod tokens;
 mod users;
 mod web;
 
@@ -83,6 +84,9 @@ pub struct AppState {
     /// Free and total bytes of the volume holding a directory: [`disk_space`]
     /// in production; tests put a fake here to fill the disk (#346).
     pub disk_space: DiskSpace,
+    /// Session generation (#342): part of every cookie's signature, bumped
+    /// by *Sign out everywhere*. Load it with [`tokens::session_generation`].
+    pub session_gen: Arc<std::sync::atomic::AtomicU64>,
 }
 
 /// How the server reads the free space of its data volume.

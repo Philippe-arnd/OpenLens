@@ -1829,6 +1829,106 @@ pub fn ask(v: &AskView<'_>) -> Markup {
     )
 }
 
+/// One scoped API token in Settings → API tokens (#342), never its value.
+pub struct TokenRow {
+    /// Id, to revoke it.
+    pub id: String,
+    /// What it is for.
+    pub label: String,
+    /// `read`, `write` or `admin`.
+    pub scope: String,
+    /// The projects it reaches (`None`: all).
+    pub projects: Option<Vec<String>>,
+    /// RFC 3339.
+    pub created_at: String,
+    /// RFC 3339.
+    pub last_used: Option<String>,
+}
+
+/// Everything Settings → API tokens shows (#342).
+pub struct TokensView {
+    /// The tokens.
+    pub tokens: Vec<TokenRow>,
+    /// Every project, `(id, name)`, to limit a new token.
+    pub projects: Vec<(String, String)>,
+    /// A token just created: shown once, here.
+    pub created: Option<String>,
+    /// What just happened.
+    pub notice: Option<String>,
+    /// What went wrong.
+    pub error: Option<String>,
+}
+
+/// Settings → API tokens and sessions (#342).
+pub fn tokens(v: &TokensView) -> Markup {
+    let when = |t: &str| t.get(..16).unwrap_or(t).replace('T', " ");
+    layout(
+        "API tokens",
+        None,
+        html! {
+            div.heading { div {
+                h1 { "API tokens" }
+                p.muted { "Tokens for the CLI, MCP and scripts. " code { "read" } " reads (enough for " code { "openlens-cli mcp" } "), " code { "write" } " also changes projects, " code { "admin" } " does everything the admin token does. A token never opens dashboard pages." }
+            } }
+            @if let Some(n) = &v.notice { p.notice role="status" { (n) } }
+            @if let Some(e) = &v.error { p.alert role="alert" { (e) } }
+            @if let Some(t) = &v.created {
+                section.card.wide {
+                    h2.mint { (icon("task")) "Your new token" }
+                    p { "Copy it now: it is stored hashed and will not be shown again." }
+                    pre.snippet { code { (t) } }
+                }
+            }
+            section.card.wide {
+                h2.violet { (icon("code")) "Create a token" }
+                form.settings method="post" action="/settings/tokens" {
+                    label { "Label " input type="text" name="label" maxlength="100" placeholder="what it is for" required; }
+                    label { "Scope "
+                        select name="scope" {
+                            option value="read" { "read" }
+                            option value="write" { "write" }
+                            option value="admin" { "admin" }
+                        }
+                    }
+                    @if !v.projects.is_empty() {
+                        fieldset {
+                            legend { "Projects (none ticked: all)" }
+                            @for (id, name) in &v.projects {
+                                label.check { input type="checkbox" name="project" value=(id); " " (name) }
+                            }
+                        }
+                    }
+                    button type="submit" { "Create the token" }
+                }
+            }
+            section.card.wide {
+                h2.sky { (icon("shield")) "Tokens" }
+                @if v.tokens.is_empty() { p.muted { "No token yet." } }
+                @else {
+                    div.table-scroll { table.plain {
+                        thead { tr { th { "Label" } th { "Scope" } th { "Projects" } th { "Created" } th { "Last used" } th { span.sr-only { "Actions" } } } }
+                        tbody { @for t in &v.tokens {
+                            tr {
+                                td { (t.label) br; span.small.muted { (t.id) } }
+                                td { span.chip { (t.scope) } }
+                                td.small { @match &t.projects { Some(p) => (p.join(", ")), None => span.muted { "all" } } }
+                                td.small.muted { (when(&t.created_at)) }
+                                td.small.muted { (t.last_used.as_deref().map(when).unwrap_or_else(|| "never".into())) }
+                                td { form method="post" action={ "/settings/tokens/" (t.id) "/revoke" } { button.ghost type="submit" { "Revoke" } } }
+                            }
+                        } }
+                    } }
+                }
+            }
+            section.card.wide {
+                h2.coral { (icon("users")) "Sessions" }
+                p { "Signs out every browser that is logged in, yours excepted: people log in again with a login link, SSO or the admin token. API tokens and the admin token keep working." }
+                form method="post" action="/settings/sessions/revoke" { button type="submit" { "Sign out everywhere" } }
+            }
+        },
+    )
+}
+
 /// Settings → AI (#244).
 pub struct AiView<'a> {
     /// Env vars set it (the form is read-only then).
@@ -3684,7 +3784,7 @@ pub fn projects(list: &[ProjectSummary], admin: bool) -> Markup {
         html! {
             div.heading {
                 div { h1 { "Projects" } p.muted { "One per app. Pick one to open its Focus board." } }
-                @if admin { a.button href="/users" { (icon("users")) "Team" } " " a.button href="/settings/storage" { (icon("layers")) "Storage and backups" } " " a.button href="/settings/ai" { (icon("spark")) "AI" } " " a.button href="/audit" { (icon("shield")) "Audit log" } }
+                @if admin { a.button href="/users" { (icon("users")) "Team" } " " a.button href="/settings/storage" { (icon("layers")) "Storage and backups" } " " a.button href="/settings/tokens" { (icon("code")) "API tokens" } " " a.button href="/settings/ai" { (icon("spark")) "AI" } " " a.button href="/audit" { (icon("shield")) "Audit log" } }
             }
             @if admin {
                 details.card.wide.new-project {

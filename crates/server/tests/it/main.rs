@@ -36,6 +36,7 @@ fn harness() -> Harness {
         flushing: Default::default(),
         metrics: Default::default(),
         disk_space: openlens_server::disk_space,
+        session_gen: Default::default(),
     };
     Harness {
         _dir: dir,
@@ -4325,6 +4326,10 @@ const ROUTES: &[(&str, &str, Access)] = &[
     ("POST", "/p/{project}/tickets", Write),
     ("GET", "/p/{project}/tickets/new", Read),
     ("POST", "/p/{project}/tickets/target", Write),
+    ("GET", "/settings/tokens", Admin),
+    ("POST", "/settings/tokens", Admin),
+    ("POST", "/settings/tokens/{id}/revoke", Admin),
+    ("POST", "/settings/sessions/revoke", Admin),
     ("GET", "/settings/storage", Admin),
     ("POST", "/settings/storage/s3", Admin),
     ("POST", "/settings/storage/backups", Admin),
@@ -4656,4 +4661,81 @@ async fn the_server_closes_connections_that_never_finish_their_headers() {
 
     stop.send(()).unwrap();
     server.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn api_tokens_are_made_in_settings_and_shown_once() {
+    let h = harness();
+    let owner = login_cookie(&h).await;
+    let (s, page) = post_form_body(
+        &h,
+        "/settings/tokens",
+        &owner,
+        "label=ci&scope=read&project=default",
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let plain = page
+        .split("<code>olt_")
+        .nth(1)
+        .and_then(|r| r.split("</code>").next())
+        .map(|t| format!("olt_{t}"))
+        .unwrap();
+    assert!(plain.starts_with("olt_"), "{plain}");
+    // The value works on the API, and the list never shows it again.
+    let api = router(h.state.clone())
+        .oneshot(
+            Request::get("/api/projects")
+                .header("authorization", format!("Bearer {plain}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(api.status(), StatusCode::OK);
+    let list = body_text(get(&h, "/settings/tokens", Some(&owner), false).await).await;
+    assert!(list.contains("ci") && !list.contains(&plain));
+    let id = h.state.meta.api_tokens().unwrap()[0].id.clone();
+    post_form(&h, &format!("/settings/tokens/{id}/revoke"), &owner, "").await;
+    assert!(h.state.meta.api_tokens().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn sign_out_everywhere_refuses_every_earlier_cookie() {
+    let h = harness();
+    let mine = login_cookie(&h).await;
+    let other = login_cookie(&h).await;
+    let r = router(h.state.clone())
+        .oneshot(
+            Request::post("/settings/sessions/revoke")
+                .header("cookie", &mine)
+                .header("sec-fetch-site", "same-origin")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let renewed = r.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    for old in [&mine, &other] {
+        let page = get(&h, "/projects", Some(old), false).await;
+        assert!(page.status().is_redirection(), "an old cookie still works");
+    }
+    assert_eq!(
+        get(&h, "/projects", Some(&renewed), false).await.status(),
+        StatusCode::OK
+    );
+    // The generation is stored, so a restart keeps the old cookies out.
+    assert_eq!(
+        openlens_server::tokens::session_generation(&h.state.meta),
+        1
+    );
+    // The admin token still works.
+    assert!(login_cookie(&h).await.starts_with("ol_session="));
 }

@@ -326,6 +326,9 @@ form.invite input, form.invite select { font: inherit; padding: 6px 8px; border:
 form.settings { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
 form.settings label, form.inline label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--muted); }
 form.inline label.check { flex-direction: row; align-items: center; gap: 6px; }
+form.settings fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--muted); }
+form.settings legend { padding: 0 0 4px; }
+form.settings label.check { flex-direction: row; align-items: center; gap: 6px; color: var(--ink); }
 form.settings input, form.inline input[type=text], form.inline input[type=date], .new-project input { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--surface); color: var(--ink); }
 form.settings input[name=app_url] { min-width: 260px; }
 form.inline { flex-wrap: wrap; align-items: end; }

@@ -50,6 +50,10 @@ None of these is needed. Each feature stays off until its variables are set.
 
 | Feature | Variables |
 | --- | --- |
+| Where the server listens (default `0.0.0.0:8686`) and keeps its data (default `./data`; `/data` in the image) | `OPENLENS_ADDR`, `OPENLENS_DATA_DIR` |
+| Choose the admin token yourself, instead of a generated one and a one-hour owner link in the first log (#342) | `OPENLENS_ADMIN_TOKEN` |
+| A project `default` with this capture key, created at start when there is no project yet (CI, demos, templates) | `OPENLENS_PROJECT_KEY` |
+| *Create ticket* posts the drafted issue to GitHub (else it is stored encrypted from the ticket page, or you copy the Markdown) | `OPENLENS_GITHUB_TOKEN` |
 | Single sign-on (OpenID Connect). Register `<public url>/oidc/callback` as the redirect URI. Only invited emails (Team) can sign in. | `OPENLENS_OIDC_ISSUER`, `OPENLENS_OIDC_CLIENT_ID`, `OPENLENS_OIDC_CLIENT_SECRET` |
 | **Ask**, the AI chat (docs/ai.md): the model sees aggregates and definitions, never event properties or user ids unless an admin allows it per project. | `OPENLENS_LLM_PROVIDER` (`anthropic` or `openai-compatible`), `OPENLENS_LLM_BASE_URL`, `OPENLENS_LLM_API_KEY`, `OPENLENS_LLM_MODEL`, optional `OPENLENS_LLM_FAST_MODEL`, `OPENLENS_LLM_DAILY_TOKENS`; or Settings → AI |
 | Insight cards reworded in plain language by Claude (cached a day; originals kept as tooltips; a rewording that changes a number is discarded). Only the cards' text is sent. | `OPENLENS_LLM_API_KEY` (Anthropic API key), optional `OPENLENS_LLM_MODEL` (default `claude-opus-5-5`) |
