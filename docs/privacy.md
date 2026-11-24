@@ -34,7 +34,7 @@ What OpenLens stores, for how long, where, and what it never stores. Everything 
 ## Rights of the people you measure
 
 - **Access:** a person's profile → *Export their data (JSON)* (admins), or `GET /p/{project}/people/{id}/export.json` with the admin token. Each export is in the audit log.
-- **Erasure:** a person's profile → *Forget this person* (admins), or `DELETE /api/projects/{project}/people/{id}/forget`. Their events (and those of the anonymous ids linked to them by `identify`) are rewritten out of the files at once, their recordings and profile are deleted, and anything they send later is dropped. They are removed from the daily rollups too, including the days older than 400 days; only counts with no one in them remain. The list of forgotten ids stays in the metadata, so a restore from an older backup is cleaned again at the next compaction (within 10 minutes). The S3 copy and backups age out under your own retention.
+- **Erasure:** a person's profile → *Forget this person* (admins), or `DELETE /api/projects/{project}/people/{id}/forget`. Their events (and those of the anonymous ids linked to them by `identify`) are rewritten out of the files at once, their recordings and profile are deleted, and anything they send later is dropped. They are removed from the daily rollups too, including the days older than 400 days; only counts with no one in them remain. The list of forgotten ids stays in the metadata, so a restore from an older backup is cleaned again at the next compaction (within 10 minutes). With S3 set, event days older than 120 days live on S3 only: forgetting someone rewrites those days too (within the hour), and their export reads them back. Other S3 copies and backups age out under your own retention.
 
 ## Three profiles
 

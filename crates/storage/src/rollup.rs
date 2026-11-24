@@ -149,6 +149,14 @@ pub fn tables() -> [(&'static str, SchemaRef); 5] {
     ]
 }
 
+/// Every rollup table, empty (a day with nothing to roll up, and tests).
+pub fn empty() -> Vec<(&'static str, RecordBatch)> {
+    tables()
+        .into_iter()
+        .map(|(n, s)| (n, RecordBatch::new_empty(s)))
+        .collect()
+}
+
 fn tree(root: &Path) -> PathBuf {
     root.join("rollups").join(format!("v{ROLLUP_VERSION}"))
 }

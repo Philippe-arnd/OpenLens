@@ -6,6 +6,8 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Added
 
+- **Cold tier on S3** (#326, part B): with S3 set, event days older than 120 days leave the disk once S3 holds every file, verified. Forgetting someone and a person's export still cover them, and they are deleted from S3 after 400 days (D-031).
+
 - **The CLI checked against the API contract** (#312, part 3): a test fails when the CLI or its MCP tools call a path that `/api/openapi.json` does not list.
 
 - **Versioned API** (#312, part 2): every API route also answers under `/api/v1/...`, and `/api/openapi.json` describes them all (method, scope, parameters, the error codes). A test keeps the document equal to the routes in the code. `/api/...` stays as an alias.

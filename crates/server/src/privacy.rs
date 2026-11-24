@@ -216,6 +216,25 @@ pub(crate) async fn export(
     if openlens_sqlgen::checked(&who).is_err() {
         return StatusCode::BAD_REQUEST.into_response();
     }
+    // Days in the cold tier come back first: the export covers everything
+    // kept about the person (#326). They return to S3 at the next pass.
+    if let Some((cfg, _)) = crate::s3::configured(&state.meta, &state.data_dir) {
+        let root = state.data_dir.clone();
+        let p = project.clone();
+        let back = tokio::task::spawn_blocking(move || {
+            let _guard = MAINTENANCE
+                .lock()
+                .map_err(|_| "maintenance lock poisoned".to_owned())?;
+            crate::cold::restore_project(&cfg, &root, &p)
+        })
+        .await;
+        if !matches!(back, Ok(Ok(_))) {
+            return crate::apierr::json(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "older days are on S3 and could not be read back; try again",
+            );
+        }
+    }
     let mut ids = linked_ids(&state, &project, &who).await;
     ids.push(who.clone());
     let mut params = openlens_sqlgen::Params::new();
