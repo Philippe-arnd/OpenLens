@@ -280,6 +280,16 @@ async fn aggregate_sql_hides_people_and_small_groups() {
         "SELECT user_key FROM events",
         "SELECT count(*), (SELECT min(user_key) FROM events) FROM events",
         "SELECT count(*) FROM events UNION ALL SELECT count(*) FROM events",
+        // NSEC-01: a column renamed to `user_key` under FROM must not be
+        // trusted as the real pseudonym.
+        "SELECT array_agg(path) FROM (SELECT path, CAST(timestamp AS VARCHAR) AS user_key \
+         FROM events WHERE feature = 'rare') t",
+        "SELECT array_agg(path) FROM (SELECT path, session_key AS user_key FROM events \
+         WHERE feature = 'rare') t",
+        // NSEC-01: the real pseudonym must not be listed out either.
+        "SELECT role, array_agg(DISTINCT user_key) FROM events GROUP BY 1",
+        "SELECT role, string_agg(user_key, ',') FROM events GROUP BY 1",
+        "SELECT min(user_key) FROM events",
     ] {
         assert!(
             q.sql_aggregate("c", "events", key, leak).await.is_err(),

@@ -594,7 +594,7 @@ async fn project(state: &AppState, id: &str) -> Option<openlens_meta::Project> {
 }
 
 fn host(headers: &HeaderMap) -> String {
-    crate::base_url(headers)
+    crate::public_url(headers)
 }
 
 #[derive(Deserialize)]

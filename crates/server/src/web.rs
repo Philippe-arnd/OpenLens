@@ -341,7 +341,7 @@ async fn board(
     };
     let f = q.filters(&auth::tz_for(&state, &headers, &p.timezone));
     let map = crate::load_map(&state, &p.id).await;
-    let host = crate::base_url(&headers);
+    let host = crate::public_url(&headers);
     if crate::boards::warm(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))) {
         return board_page(state, p, f, map, host).await;
     }
@@ -555,7 +555,7 @@ async fn events(
 /// The page the user came from, as a same-origin path, else `/`. A path
 /// that a browser could read as another host (`//x`, `/\x`) is refused.
 fn back_to(headers: &HeaderMap) -> String {
-    let base = crate::base_url(headers);
+    let base = crate::public_url(headers);
     headers
         .get(header::REFERER)
         .and_then(|v| v.to_str().ok())
@@ -761,7 +761,7 @@ async fn digest_page(
     };
     let mailed = std::env::var("OPENLENS_SMTP_URL").is_ok_and(|s| !s.is_empty())
         && std::env::var("OPENLENS_DIGEST_TO").is_ok_and(|s| s.contains('@'));
-    match crate::digest::compute(&state, &p, &crate::base_url(&headers)).await {
+    match crate::digest::compute(&state, &p, &crate::public_url(&headers)).await {
         Ok((d, _)) => {
             let info = openlens_ui::ProjectInfo {
                 id: &p.id,

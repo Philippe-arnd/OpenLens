@@ -142,6 +142,7 @@ pub fn router(state: AppState) -> Router {
         .merge(replay::routes())
         .merge(web::routes())
         .layer(axum::middleware::from_fn(csrf::layer))
+        .layer(axum::middleware::from_fn(trusted_headers_layer))
         // Pages, the API and Ask (a few model rounds) get two minutes.
         .layer(tower_http::timeout::TimeoutLayer::with_status_code(
             axum::http::StatusCode::REQUEST_TIMEOUT,
@@ -660,8 +661,21 @@ pub(crate) fn token_matches(given: &str, expected: &str) -> bool {
     given.len() == expected.len() && bool::from(given.as_bytes().ct_eq(expected.as_bytes()))
 }
 
-/// Public base URL of this server as the client sees it.
-pub(crate) fn base_url(headers: &axum::http::HeaderMap) -> String {
+/// Public base URL of this server as the client sees it: the fixed
+/// `OPENLENS_PUBLIC_URL` (or `SERVICE_URL_OPENLENS`) when one is set,
+/// otherwise the request's `Host`, with `X-Forwarded-Host` and
+/// `X-Forwarded-Proto` honoured only because [`trusted_headers_layer`] has
+/// already stripped both from any connection that is not a trusted proxy
+/// (SEC-06).
+pub(crate) fn public_url(headers: &axum::http::HeaderMap) -> String {
+    if let Ok(fixed) =
+        std::env::var("OPENLENS_PUBLIC_URL").or_else(|_| std::env::var("SERVICE_URL_OPENLENS"))
+    {
+        let fixed = fixed.trim().trim_end_matches('/');
+        if !fixed.is_empty() {
+            return fixed.to_owned();
+        }
+    }
     let host = headers
         .get("x-forwarded-host")
         .or_else(|| headers.get("host"))
@@ -680,6 +694,50 @@ pub(crate) fn base_url(headers: &axum::http::HeaderMap) -> String {
         _ => "http",
     };
     format!("{proto}://{host}")
+}
+
+/// SEC-06: strip `X-Forwarded-Host` and `X-Forwarded-Proto` from any
+/// connection that is not [`capture::trusted_proxy`], before anything else
+/// in the app (the CSRF same-origin check, [`public_url`], the session
+/// cookie, the OIDC redirect) can read them. A request with no
+/// `ConnectInfo` (a direct local call, as in most tests) is treated as
+/// trusted, the same as everywhere else this server decides who to trust.
+///
+/// Also sets the response headers that follow from the same public URL:
+/// HSTS when it is HTTPS, and, on `/api`, `nosniff` and `no-store` since
+/// those responses carry session-authenticated JSON.
+pub(crate) async fn trusted_headers_layer(
+    mut req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::http::{HeaderValue, header};
+
+    let trusted = req
+        .extensions()
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .is_none_or(|c| capture::trusted_proxy(c.0.ip()));
+    if !trusted {
+        req.headers_mut().remove("x-forwarded-host");
+        req.headers_mut().remove("x-forwarded-proto");
+    }
+    let https = public_url(req.headers()).starts_with("https://");
+    let api = req.uri().path().starts_with("/api");
+    let mut res = next.run(req).await;
+    let h = res.headers_mut();
+    if https {
+        h.insert(
+            header::STRICT_TRANSPORT_SECURITY,
+            HeaderValue::from_static("max-age=31536000"),
+        );
+    }
+    if api {
+        h.insert(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        );
+        h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    }
+    res
 }
 
 /// The original source position of each error group's latest stack, using

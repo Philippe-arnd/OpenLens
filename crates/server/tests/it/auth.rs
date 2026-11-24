@@ -84,3 +84,94 @@ async fn login_links_open_the_board_exactly_once() {
     let second = use_link(&h, path).await;
     assert_eq!(second.status(), StatusCode::UNAUTHORIZED);
 }
+
+/// SEC-06: a public URL derived from request headers trusted a header any
+/// client could send. `X-Forwarded-Host`/`-Proto` must only count from a
+/// trusted proxy, and the public scheme must drive HSTS; `/api` responses
+/// carry `nosniff` and `no-store`, since they are session-authenticated
+/// JSON.
+#[tokio::test]
+async fn login_links_ignore_an_untrusted_forwarded_host() {
+    let h = harness();
+
+    async fn login_link(
+        peer: &str,
+        forwarded_host: &str,
+        forwarded_proto: &str,
+    ) -> (String, bool, bool, bool) {
+        let h = harness();
+        let mut req = Request::post("/api/login-links")
+            .header("authorization", "Bearer adm_test")
+            .header("host", "legit.example")
+            .header("x-forwarded-host", forwarded_host)
+            .header("x-forwarded-proto", forwarded_proto)
+            .body(Body::empty())
+            .unwrap();
+        req.extensions_mut()
+            .insert(axum::extract::ConnectInfo::<std::net::SocketAddr>(
+                peer.parse().unwrap(),
+            ));
+        let resp = router(h.state.clone()).oneshot(req).await.unwrap();
+        let hsts = resp.headers().get("strict-transport-security").is_some();
+        let nosniff = resp
+            .headers()
+            .get("x-content-type-options")
+            .is_some_and(|v| v == "nosniff");
+        let no_store = resp
+            .headers()
+            .get("cache-control")
+            .is_some_and(|v| v == "no-store");
+        let body: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(resp.into_body(), 1 << 20)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        (
+            body["url"].as_str().unwrap().to_owned(),
+            hsts,
+            nosniff,
+            no_store,
+        )
+    }
+
+    // A direct, public client cannot pick the host its own links use, and
+    // its (forged) claim of HTTPS does not turn on HSTS.
+    let (url, hsts, nosniff, no_store) =
+        login_link("203.0.113.5:1234", "evil.example", "https").await;
+    assert!(
+        url.contains("legit.example") && !url.contains("evil.example"),
+        "{url}"
+    );
+    assert!(!hsts, "an untrusted claim of HTTPS must not set HSTS");
+    assert!(nosniff && no_store, "{url}");
+
+    // Behind a trusted proxy (loopback/private, as the rest of the server
+    // already treats X-Forwarded-For), the headers it sets are honoured.
+    let (url, hsts, ..) = login_link("127.0.0.1:1234", "proxy.example", "https").await;
+    assert!(url.contains("proxy.example"), "{url}");
+    assert!(hsts, "a trusted proxy's https must set HSTS");
+
+    // The session cookie itself follows the same public scheme (SEC-06):
+    // `__Host-` over HTTPS, plain otherwise.
+    let secure = router(h.state.clone())
+        .oneshot({
+            let mut req = Request::post("/login")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .header("x-forwarded-proto", "https")
+                .body(Body::from("token=adm_test"))
+                .unwrap();
+            req.extensions_mut()
+                .insert(axum::extract::ConnectInfo::<std::net::SocketAddr>(
+                    "127.0.0.1:1234".parse().unwrap(),
+                ));
+            req
+        })
+        .await
+        .unwrap();
+    let cookie = secure.headers()["set-cookie"].to_str().unwrap();
+    assert!(
+        cookie.starts_with("__Host-ol_session=") && cookie.contains("; Secure"),
+        "{cookie}"
+    );
+}

@@ -134,7 +134,7 @@ pub(crate) type Peer = Option<axum::Extension<axum::extract::ConnectInfo<std::ne
 
 /// A proxy we take `X-Forwarded-For` from: the host itself or a private
 /// network (Docker, Compose, a cluster), never the internet.
-fn trusted_proxy(ip: std::net::IpAddr) -> bool {
+pub(crate) fn trusted_proxy(ip: std::net::IpAddr) -> bool {
     match ip {
         std::net::IpAddr::V4(v) => v.is_loopback() || v.is_private() || v.is_link_local(),
         std::net::IpAddr::V6(v) => {

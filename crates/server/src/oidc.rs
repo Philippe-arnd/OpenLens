@@ -160,7 +160,7 @@ pub(crate) async fn start(State(state): State<AppState>, headers: HeaderMap) -> 
     let exp = chrono::Utc::now().timestamp() + FLOW_SECS;
     let payload = format!("{st}.{nonce}.{verifier}.{exp}");
     let sig = auth::sign(&state.session_key, &format!("oidc:{payload}"));
-    let redirect_uri = format!("{}/oidc/callback", crate::base_url(&headers));
+    let redirect_uri = format!("{}/oidc/callback", crate::public_url(&headers));
     let url = format!(
         "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={st}&nonce={nonce}&code_challenge={}&code_challenge_method=S256",
         d.authorization_endpoint,
@@ -169,7 +169,7 @@ pub(crate) async fn start(State(state): State<AppState>, headers: HeaderMap) -> 
         openlens_ui::url_enc("openid email"),
         challenge(&verifier),
     );
-    let secure = crate::base_url(&headers).starts_with("https://");
+    let secure = crate::public_url(&headers).starts_with("https://");
     let cookie = format!(
         "{COOKIE}={payload}.{sig}; Path=/oidc; HttpOnly; SameSite=Lax; Max-Age={FLOW_SECS}{}",
         if secure { "; Secure" } else { "" }
@@ -198,18 +198,20 @@ struct Claims {
     aud: serde_json::Value,
     exp: i64,
     nonce: Option<String>,
+    sub: String,
     email: Option<String>,
     email_verified: Option<bool>,
 }
 
-/// Check an ID token's claims; returns the verified email.
+/// Check an ID token's claims; returns the verified email and the
+/// (issuer, subject) pair SEC-07 binds a user to on their first sign-in.
 fn verified_email(
     id_token: &str,
     issuer: &str,
     client_id: &str,
     nonce: &str,
     now: i64,
-) -> Result<String, &'static str> {
+) -> Result<(String, String, String), &'static str> {
     let payload = id_token.split('.').nth(1).ok_or("malformed ID token")?;
     let claims: Claims =
         serde_json::from_slice(&b64url_decode(payload).ok_or("malformed ID token")?)
@@ -231,13 +233,17 @@ fn verified_email(
     if claims.nonce.as_deref() != Some(nonce) {
         return Err("wrong nonce");
     }
-    if claims.email_verified == Some(false) {
+    // SEC-07: a provider that lets a user pick an unverified or absent
+    // e-mail must not be trusted to vouch for it; require `true`, not
+    // merely "not `false`".
+    if claims.email_verified != Some(true) {
         return Err("email not verified");
     }
-    claims
+    let email = claims
         .email
         .filter(|e| e.contains('@'))
-        .ok_or("no email in the ID token")
+        .ok_or("no email in the ID token")?;
+    Ok((email, claims.iss, claims.sub))
 }
 
 /// `GET /oidc/callback`: back from the provider.
@@ -288,7 +294,7 @@ pub(crate) async fn callback(
         Ok(d) => d,
         Err(_) => return fail("discovery failed"),
     };
-    let redirect_uri = format!("{}/oidc/callback", crate::base_url(&headers));
+    let redirect_uri = format!("{}/oidc/callback", crate::public_url(&headers));
     let form = [
         ("grant_type".to_owned(), "authorization_code".to_owned()),
         ("code".to_owned(), code),
@@ -310,10 +316,11 @@ pub(crate) async fn callback(
     let Ok(Ok(token)) = token else {
         return fail("token exchange failed");
     };
-    let email = match verified_email(&token.id_token, &d.issuer, &cfg.client_id, nonce, now) {
-        Ok(e) => e,
-        Err(why) => return fail(why),
-    };
+    let (email, iss, sub) =
+        match verified_email(&token.id_token, &d.issuer, &cfg.client_id, nonce, now) {
+            Ok(e) => e,
+            Err(why) => return fail(why),
+        };
     let meta = state.meta.clone();
     let user = tokio::task::spawn_blocking(move || meta.user_by_email(&email)).await;
     let Ok(Ok(Some(user))) = user else {
@@ -329,6 +336,18 @@ pub(crate) async fn callback(
             "Sign-in disabled",
             "An admin disabled sign-in for this account. Ask them to enable it again.",
         );
+    }
+    // SEC-07: the e-mail alone does not prove this is the same account at
+    // the provider; (iss, sub) must match what this user first bound.
+    let meta = state.meta.clone();
+    let uid = user.id.clone();
+    let bound = tokio::task::spawn_blocking(move || meta.bind_oidc_subject(&uid, &iss, &sub))
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or(false);
+    if !bound {
+        return fail("account does not match this user's provider identity");
     }
     let _ = state.meta.touch_sign_in(&user.id);
     let session = auth::set_cookie(
@@ -372,18 +391,23 @@ mod tests {
 
     #[test]
     fn id_token_claims_are_all_checked() {
-        let ok = serde_json::json!({"iss":"https://id.example.com","aud":"cid","exp":2_000_000_000,"nonce":"n1","email":"ana@example.com","email_verified":true});
+        let ok = serde_json::json!({"iss":"https://id.example.com","aud":"cid","exp":2_000_000_000,"nonce":"n1","sub":"sub-1","email":"ana@example.com","email_verified":true});
         let now = 1_900_000_000;
+        let (email, iss, sub) = verified_email(
+            &token(ok.clone()),
+            "https://id.example.com/",
+            "cid",
+            "n1",
+            now,
+        )
+        .unwrap();
         assert_eq!(
-            verified_email(
-                &token(ok.clone()),
-                "https://id.example.com/",
-                "cid",
-                "n1",
-                now
+            (email, iss, sub),
+            (
+                "ana@example.com".to_owned(),
+                "https://id.example.com".to_owned(),
+                "sub-1".to_owned(),
             )
-            .unwrap(),
-            "ana@example.com"
         );
         let bad = |k: &str, v: serde_json::Value| {
             let mut c = ok.clone();
@@ -403,6 +427,15 @@ mod tests {
         assert_eq!(bad("nonce", "n2".into()).unwrap_err(), "wrong nonce");
         assert_eq!(
             bad("email_verified", false.into()).unwrap_err(),
+            "email not verified"
+        );
+        // SEC-07: a provider that simply omits the claim is refused too,
+        // not just one that sends `false`.
+        let mut missing = ok.clone();
+        missing.as_object_mut().unwrap().remove("email_verified");
+        assert_eq!(
+            verified_email(&token(missing), "https://id.example.com", "cid", "n1", now)
+                .unwrap_err(),
             "email not verified"
         );
         assert!(verified_email("garbage", "x", "cid", "n1", now).is_err());

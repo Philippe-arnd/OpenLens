@@ -100,6 +100,107 @@ fn has_subquery(e: &Expr) -> bool {
     .unwrap_or(true)
 }
 
+fn is_pseudonym_column(e: &Expr) -> bool {
+    matches!(e, Expr::Column(c) if c.name == "user_key" || c.name == "session_key")
+}
+
+/// Is `e` exactly `openlens_pseudonym(<source>)` aliased `alias`, the shape
+/// [`view_sql`] gives `user_key` and `session_key`?
+fn is_real_pseudonym(e: &Expr, alias: &str, source: &str) -> bool {
+    let Expr::Alias(a) = e else { return false };
+    if a.name != alias {
+        return false;
+    }
+    matches!(
+        a.expr.as_ref(),
+        Expr::ScalarFunction(f)
+            if f.func.name() == PSEUDONYM_FN
+                && matches!(f.args.as_slice(), [Expr::Column(c)] if c.name == source)
+    )
+}
+
+/// NSEC-01: a column named `user_key` or `session_key` can only reach the
+/// aggregate by being the real pseudonym the view computed, never a value
+/// an attacker renamed in a sub-query under `FROM`. Below the aggregate we
+/// therefore accept any number of filters and sub-query aliases (the
+/// `events` view is itself one or more nested views), but the first
+/// projection we meet going down must be the view's own: it must define
+/// `user_key` as `openlens_pseudonym(distinct_id)` and `session_key` as
+/// `openlens_pseudonym(session_id)`, nothing else. Whatever sits below that
+/// projection is trusted, since an attacker's SQL text never reaches below
+/// the point where the aggregate view was built.
+fn check_input_shape(mut node: &LogicalPlan) -> Result<(), String> {
+    loop {
+        match node {
+            LogicalPlan::Filter(f) => {
+                if has_subquery(&f.predicate) {
+                    return Err("subqueries are only allowed below the aggregate".into());
+                }
+                node = &f.input;
+            }
+            LogicalPlan::SubqueryAlias(s) => node = &s.input,
+            LogicalPlan::Projection(p) => {
+                let user_key = p
+                    .expr
+                    .iter()
+                    .any(|e| is_real_pseudonym(e, "user_key", "distinct_id"));
+                let session_key = p
+                    .expr
+                    .iter()
+                    .any(|e| is_real_pseudonym(e, "session_key", "session_id"));
+                return if user_key && session_key {
+                    Ok(())
+                } else {
+                    Err(
+                        "aggregate directly over `events`: no sub-query is allowed under FROM"
+                            .into(),
+                    )
+                };
+            }
+            _ => {
+                return Err(
+                    "aggregate directly over `events`: no sub-query is allowed under FROM".into(),
+                );
+            }
+        }
+    }
+}
+
+/// NSEC-01: `array_agg`, `string_agg`, `min`, `max`, `first_value` and
+/// `last_value` on `user_key` or `session_key` would hand back the raw
+/// pseudonym of people in groups that are too small to show, or let a
+/// caller list pseudonyms to target one at a time in a later query. Only
+/// `count(DISTINCT …)`, which is how the threshold itself counts people,
+/// is allowed on these columns.
+fn check_pseudonym_functions(exprs: &[Expr]) -> Result<(), String> {
+    for e in exprs {
+        let mut offender = None;
+        e.apply(|x| {
+            if let Expr::AggregateFunction(af) = x {
+                let touches_pseudonym = af
+                    .params
+                    .args
+                    .iter()
+                    .any(|a| a.exists(|x| Ok(is_pseudonym_column(x))).unwrap_or(true));
+                if touches_pseudonym
+                    && !(af.func.name().eq_ignore_ascii_case("count") && af.params.distinct)
+                {
+                    offender = Some(af.func.name().to_owned());
+                    return Ok(TreeNodeRecursion::Stop);
+                }
+            }
+            Ok(TreeNodeRecursion::Continue)
+        })
+        .map_err(|e| e.to_string())?;
+        if let Some(name) = offender {
+            return Err(format!(
+                "only count(DISTINCT …) is allowed on `user_key` or `session_key`, not {name}(…)"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Check that `plan` only returns aggregates, then add the group-size
 /// threshold. The error is a message for the caller.
 pub(crate) fn guard(plan: LogicalPlan) -> Result<LogicalPlan, String> {
@@ -118,7 +219,11 @@ pub(crate) fn guard(plan: LogicalPlan) -> Result<LogicalPlan, String> {
     let mut node = &plan;
     loop {
         match node {
-            LogicalPlan::Aggregate(_) => break,
+            LogicalPlan::Aggregate(a) => {
+                check_input_shape(&a.input)?;
+                check_pseudonym_functions(&a.aggr_expr)?;
+                break;
+            }
             LogicalPlan::Projection(_)
             | LogicalPlan::Filter(_)
             | LogicalPlan::Sort(_)

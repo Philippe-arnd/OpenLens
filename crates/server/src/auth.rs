@@ -15,8 +15,12 @@ use sha2::Sha256;
 
 use crate::{AppState, token_matches};
 
-/// Cookie name.
+/// Cookie name over plain HTTP (local or behind an untrusted proxy).
 pub(crate) const COOKIE: &str = "ol_session";
+/// Cookie name over HTTPS (SEC-06): the `__Host-` prefix makes the browser
+/// refuse the cookie without `Secure`, `Path=/` and no `Domain`, which is
+/// exactly what [`set_cookie`] already sends.
+pub(crate) const HOST_COOKIE: &str = "__Host-ol_session";
 /// Session lifetime: 30 days.
 pub(crate) const SESSION_SECS: i64 = 30 * 24 * 3600;
 
@@ -92,14 +96,20 @@ fn session_user(state: &AppState, value: &str) -> Option<String> {
     ok.then(|| user.to_owned())
 }
 
+/// The session cookie's value, under either name (SEC-06): `__Host-…` when
+/// the browser got it over HTTPS, the plain name otherwise.
+fn session_cookie(headers: &HeaderMap) -> Option<String> {
+    cookie(headers, HOST_COOKIE).or_else(|| cookie(headers, COOKIE))
+}
+
 /// Who the session cookie belongs to (`OWNER` or a user id), if valid.
 pub(crate) fn session_id(state: &AppState, headers: &HeaderMap) -> Option<String> {
-    session_user(state, &cookie(headers, COOKIE)?)
+    session_user(state, &session_cookie(headers)?)
 }
 
 /// The logged-in dashboard viewer, if any.
 pub(crate) fn viewer(state: &AppState, headers: &HeaderMap) -> Option<Viewer> {
-    let id = session_user(state, &cookie(headers, COOKIE)?)?;
+    let id = session_user(state, &session_cookie(headers)?)?;
     if id == OWNER {
         return Some(Viewer {
             admin: true,
@@ -160,11 +170,23 @@ pub(crate) fn has_bearer(state: &AppState, headers: &HeaderMap) -> bool {
             .is_some_and(|v| token_matches(v, &crate::scopes::mark(state)))
 }
 
-/// `Set-Cookie` header value for a session (Secure when served over HTTPS).
+/// `Set-Cookie` header value for a session: `__Host-ol_session` (SEC-06)
+/// when served over HTTPS, else the plain `ol_session`, never both.
 pub(crate) fn set_cookie(value: &str, headers: &HeaderMap, max_age: i64) -> String {
-    let secure = crate::base_url(headers).starts_with("https://");
+    let secure = crate::public_url(headers).starts_with("https://");
+    let name = if secure { HOST_COOKIE } else { COOKIE };
     format!(
-        "{COOKIE}={value}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{}",
+        "{name}={value}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{}",
         if secure { "; Secure" } else { "" }
     )
+}
+
+/// Both possible session cookies, expired: used on sign-out so a cookie
+/// set under one name (for instance before a scheme change) does not
+/// outlive it.
+pub(crate) fn clear_cookies() -> [String; 2] {
+    [
+        format!("{COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"),
+        format!("{HOST_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Secure"),
+    ]
 }
