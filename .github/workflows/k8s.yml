@@ -100,7 +100,12 @@ jobs:
         run: |
           kubectl create namespace kz
           kubectl kustomize deploy/k8s/example > /dev/null
-          kubectl -n kz apply -k deploy/k8s/base
+          # The base pins the last release; test it on the image under test,
+          # so a probe added on main is checked against code that has it.
+          kubectl kustomize deploy/k8s/base \
+            | sed -E "s#(ghcr.io/philippe-arnd/openlens):v[0-9][^\"]*#\\1:$TAG#" \
+            | kubectl -n kz apply -f -
+          kubectl -n kz get statefulset openlens -o jsonpath='{.spec.template.spec.containers[0].image}' | grep -q ":$TAG$"
           kubectl -n kz rollout status statefulset/openlens --timeout 5m
           kubectl -n kz port-forward svc/openlens 8688:8686 > /dev/null 2>&1 &
           sleep 3
