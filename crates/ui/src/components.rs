@@ -50,9 +50,23 @@ pub(crate) fn filter_fields(envs: &[String], b: &Board, f: &Filters) -> Markup {
 pub(crate) fn tile(accent: &str, glyph: &str, label: &str, value: &str, hint: &str) -> Markup {
     html! {
         div class={ "tile " (accent) } {
-            div.label { span.chip-icon { (icon(glyph)) } (label) }
+            div.label { span.chip-icon { (icon(glyph)) } (label) (crate::glossary::info(label)) }
             div.value { (value) }
             div.hint { (hint) }
+        }
+    }
+}
+
+/// A row of tabs (#402, reused by the feature pages #411): plain links,
+/// the current one with `aria-current="page"`, so they work with the
+/// keyboard and without script, and wrap on narrow screens.
+/// `items` are (href, label, current).
+pub(crate) fn tabs(aria_label: &str, items: &[(String, &str, bool)]) -> Markup {
+    html! {
+        nav.section-tabs aria-label=(aria_label) {
+            @for (href, label, current) in items {
+                a href=(href) aria-current=[current.then_some("page")] { (label) }
+            }
         }
     }
 }

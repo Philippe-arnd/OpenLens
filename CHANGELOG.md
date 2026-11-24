@@ -19,6 +19,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- **KPI definitions on hover** (#405): every tile has an ⓘ next to its label that shows what it counts and over which window, on hover, keyboard focus or tap, with no script. The glossary is one table in the UI crate, and a test fails when a tile has no entry.
 - **Shorter sidebar** (#402): eight entries (Focus board, Ask, Live, Behaviour, Quality, People, Product, Settings), each with its own icon. A section's pages are tabs at the top of the page, every old URL keeps working, and the bottom block (theme, profile, collapse) stays on screen.
 
 - **Kubernetes readiness follows `/readyz`** (#353): the chart and the Kustomize base take a pod out of the Service when its metadata store or data volume fails, instead of only when the process is down.

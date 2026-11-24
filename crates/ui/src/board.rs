@@ -104,7 +104,7 @@ pub fn board(
                     }
                     sub
                 }))
-                (tile("mint", "spark", "Stickiness", &pct(b.users.stickiness), "DAU ÷ MAU"))
+                (tile("mint", "spark", "Stickiness", &pct(b.users.stickiness), "last 30 days"))
                 (tile("sky", "clock", "Avg session", &duration(b.sessions.avg_secs), &format!("{} sessions · {} bounce", compact(b.sessions.count), pct(b.sessions.bounce_rate))))
                 (tile("sun", "task", "Tasks per user per day", &format!("{:.1}", b.sessions.tasks_per_user_day), "feature uses, last 7 days"))
                 (tile("coral", "alert", "Sessions with errors", &pct(b.sessions.error_rate), "last 7 days"))

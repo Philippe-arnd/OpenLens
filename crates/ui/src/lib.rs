@@ -14,6 +14,7 @@ mod board;
 mod components;
 mod explore;
 mod features;
+mod glossary;
 mod goals;
 mod icons;
 mod manage;
@@ -164,13 +165,12 @@ fn section_tabs(title: &str, p: &ProjectInfo<'_>) -> Markup {
     let Some(g) = group_of(title, p.name).filter(|g| g.tabs.len() > 1) else {
         return html! {};
     };
-    html! {
-        nav.section-tabs aria-label=(g.label) {
-            @for (href, label, titles) in g.tabs {
-                a href={ "/p/" (p.id) (href) } aria-current=[titles.contains(&title).then_some("page")] { (label) }
-            }
-        }
-    }
+    let items: Vec<(String, &str, bool)> = g
+        .tabs
+        .iter()
+        .map(|(href, label, titles)| (format!("/p/{}{href}", p.id), *label, titles.contains(&title)))
+        .collect();
+    components::tabs(g.label, &items)
 }
 
 /// Format a count compactly: 1,284 / 12.9K / 4.2M.
