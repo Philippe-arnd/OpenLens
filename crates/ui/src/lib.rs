@@ -686,6 +686,40 @@ mod tests {
         assert!(sec.contains("releases/tag/v0.5.0"));
     }
 
+    /// Every card and tile of the board opens its detail (#409): a new one
+    /// must use `tile_to` / `to(...)`, or say `no_detail` on purpose.
+    #[test]
+    fn every_board_card_and_tile_leads_somewhere() {
+        let src = include_str!("board.rs");
+        let body = &src[src.find("pub fn board(").unwrap()..];
+        assert!(
+            !body.contains("(tile(\""),
+            "a board tile without a detail: use tile_to"
+        );
+        for line in body.lines().filter(|l| l.trim_start().starts_with("h2.")) {
+            assert!(
+                line.contains("(to(") || line.contains("no_detail"),
+                "card without a detail: {line}"
+            );
+        }
+        let f = Filters {
+            environment: "production".into(),
+            role: Some("admin".into()),
+            internal: true,
+            ..Filters::default()
+        };
+        assert_eq!(
+            detail_url("d", "/errors", &f),
+            "/p/d/errors?env=production&role=admin&internal=1"
+        );
+        assert_eq!(
+            detail_url("d", "/breakdown?by=role", &f),
+            "/p/d/breakdown?by=role&env=production&role=admin&internal=1"
+        );
+        let shared = render_shared(|| to("/x", "Releases")).into_string();
+        assert_eq!(shared, "Releases", "no link on a share link");
+    }
+
     #[test]
     fn breadcrumbs_follow_the_section_and_the_instance_pages() {
         let p = ProjectInfo {

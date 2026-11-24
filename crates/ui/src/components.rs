@@ -57,6 +57,52 @@ pub(crate) fn tile(accent: &str, glyph: &str, label: &str, value: &str, hint: &s
     }
 }
 
+/// Where a board card or tile leads (#409): the page, with the board's
+/// filters (environment, role, release, the team toggle) carried along.
+pub(crate) fn detail_url(project: &str, path: &str, f: &Filters) -> String {
+    let mut q = vec![format!("env={}", url_enc(&f.environment))];
+    if let Some(r) = &f.role {
+        q.push(format!("role={}", url_enc(r)));
+    }
+    if let Some(r) = &f.release {
+        q.push(format!("release={}", url_enc(r)));
+    }
+    if f.internal {
+        q.push("internal=1".to_owned());
+    }
+    let sep = if path.contains('?') { '&' } else { '?' };
+    format!("/p/{project}{path}{sep}{}", q.join("&"))
+}
+
+/// A card title that opens its detail (#409): the link stretches over the
+/// whole card (CSS `.stretch::after`), one tab stop per card. Plain text
+/// on a share link, whose detail pages need a login.
+pub(crate) fn to(href: &str, label: &str) -> Markup {
+    html! {
+        @if crate::shared() { (label) } @else {
+            a.stretch href=(href) { (label) span.details aria-hidden="true" { "Details →" } }
+        }
+    }
+}
+
+/// [`tile`] that opens its detail page (#409).
+pub(crate) fn tile_to(
+    href: &str,
+    accent: &str,
+    glyph: &str,
+    label: &str,
+    value: &str,
+    hint: &str,
+) -> Markup {
+    html! {
+        div class={ "tile " (accent) } {
+            div.label { span.chip-icon { (icon(glyph)) } (to(href, label)) (crate::glossary::info(label)) }
+            div.value { (value) }
+            div.hint { (hint) }
+        }
+    }
+}
+
 /// A row of tabs (#402, reused by the feature pages #411): plain links,
 /// the current one with `aria-current="page"`, so they work with the
 /// keyboard and without script, and wrap on narrow screens.

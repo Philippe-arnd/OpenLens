@@ -535,3 +535,14 @@ select:focus-visible, input:focus-visible, button:focus-visible { outline: 2px s
   .section-tabs { flex-wrap: nowrap; overflow-x: auto; }
 }
 .prev-next { display: flex; justify-content: space-between; gap: 12px; margin-top: 18px; }
+/* Cards and tiles open their detail (#409): one stretched link per card. */
+.card, .tile { position: relative; }
+a.stretch { color: inherit; text-decoration: none; }
+a.stretch::after { content: ""; position: absolute; inset: 0; border-radius: inherit; z-index: 0; }
+.card a:not(.stretch), .card button, .card select, .card input, .card summary, .card .kpi-info, .tile .kpi-info { position: relative; z-index: 1; }
+a.stretch .details { margin-left: 8px; font-size: 12px; font-weight: 500; color: var(--violet); opacity: 0; transition: opacity .15s; }
+.card:hover a.stretch .details, .tile:hover a.stretch .details, a.stretch:focus-visible .details { opacity: 1; }
+@media (pointer: coarse) { a.stretch .details { opacity: 1; } }
+.card:has(a.stretch):hover, .tile:has(a.stretch):hover { border-color: color-mix(in srgb, var(--violet) 35%, var(--line)); }
+a.stretch:focus-visible { outline: none; }
+.card:has(a.stretch:focus-visible), .tile:has(a.stretch:focus-visible) { outline: 2px solid var(--violet); outline-offset: 2px; }
