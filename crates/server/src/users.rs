@@ -328,13 +328,10 @@ pub(crate) struct MeQuery {
 
 /// `GET /me`.
 pub(crate) async fn me_page(
+    crate::access::Signed(v): crate::access::Signed,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Query(q): Query<MeQuery>,
 ) -> Response {
-    let Some(v) = auth::viewer(&state, &headers) else {
-        return Redirect::to("/login").into_response();
-    };
     let user = if v.id == auth::OWNER {
         None
     } else {
@@ -362,13 +359,10 @@ pub(crate) struct MeForm {
 
 /// `POST /me`: my time zone (and name).
 pub(crate) async fn me_save(
+    crate::access::Signed(v): crate::access::Signed,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Form(f): Form<MeForm>,
 ) -> Response {
-    let Some(v) = auth::viewer(&state, &headers) else {
-        return Redirect::to("/login").into_response();
-    };
     let tz = f.timezone.trim().to_owned();
     if !tz.is_empty() && crate::api::check_timezone(&tz).is_err() {
         return oops("The time zone must be an IANA name like Europe/Paris.");

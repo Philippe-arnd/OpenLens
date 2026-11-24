@@ -128,6 +128,29 @@ thread_local! {
     static SHARED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
+/// The reader's display choices (#300): the theme and the sidebar. The
+/// server says where to read them ([`set_prefs_source`]); `layout()`
+/// writes them on `<html>`, so nothing rewrites the page afterwards.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Prefs {
+    /// `light` or `dark`; `None` follows the system.
+    pub theme: Option<&'static str>,
+    /// The sidebar is folded.
+    pub nav_collapsed: bool,
+}
+
+static PREFS: std::sync::OnceLock<fn() -> Prefs> = std::sync::OnceLock::new();
+
+/// Where pages read the current request's [`Prefs`] (the server keeps them
+/// per request). Set once; later calls are ignored.
+pub fn set_prefs_source(source: fn() -> Prefs) {
+    let _ = PREFS.set(source);
+}
+
+fn prefs() -> Prefs {
+    PREFS.get().map_or_else(Prefs::default, |f| f())
+}
+
 /// Is the page being rendered for a share link (#229)?
 fn shared() -> bool {
     SHARED.with(std::cell::Cell::get)
@@ -143,9 +166,10 @@ pub fn render_shared(f: impl FnOnce() -> Markup) -> Markup {
 }
 
 fn shared_layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Markup {
+    let p = prefs();
     html! {
         (DOCTYPE)
-        html lang="en" {
+        html lang="en" data-theme=[p.theme] data-nav=[p.nav_collapsed.then_some("collapsed")] {
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
@@ -170,9 +194,10 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
     if shared() {
         return shared_layout(title, project, body);
     }
+    let p = prefs();
     html! {
         (DOCTYPE)
-        html lang="en" {
+        html lang="en" data-theme=[p.theme] data-nav=[p.nav_collapsed.then_some("collapsed")] {
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";

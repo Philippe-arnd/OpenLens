@@ -103,14 +103,11 @@ pub(crate) struct PageQuery {
 
 /// `GET /p/{id}/features[?v=N]`: the map (or version N) and its status.
 pub(crate) async fn page(
+    crate::access::Signed(v): crate::access::Signed,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path(id): Path<String>,
     Query(q): Query<PageQuery>,
 ) -> Response {
-    let Some(v) = auth::viewer(&state, &headers) else {
-        return Redirect::to("/login").into_response();
-    };
     let Some(p) = project(&state, &id).await else {
         return html_page(
             StatusCode::NOT_FOUND,

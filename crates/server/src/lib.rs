@@ -101,6 +101,7 @@ pub use serve::{HEADER_READ_TIMEOUT, serve};
 
 /// Build the application router.
 pub fn router(state: AppState) -> Router {
+    openlens_ui::set_prefs_source(web::current_prefs);
     let capture = Router::new()
         .route("/capture", post(capture::capture))
         .route("/e", post(capture::capture))

@@ -394,14 +394,12 @@ pub(crate) async fn revenue(
 
 /// `GET /p/{id}/churn` (#247).
 pub(crate) async fn churn(
+    crate::access::Signed(viewer): crate::access::Signed,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
     axum::extract::RawQuery(raw): axum::extract::RawQuery,
 ) -> Response {
-    let Some(viewer) = auth::viewer(&state, &headers) else {
-        return Redirect::to("/login").into_response();
-    };
     let Some(p) = project(&state, &id).await else {
         return not_found("No such project.");
     };

@@ -613,14 +613,12 @@ fn info(p: &openlens_meta::Project) -> openlens_ui::ProjectInfo<'_> {
 
 /// `GET /p/{id}/tickets/new?kind=&subject=`: the drafted ticket.
 pub(crate) async fn new(
+    crate::access::Signed(v): crate::access::Signed,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
     Query(q): Query<Finding>,
 ) -> Response {
-    let Some(v) = auth::viewer(&state, &headers) else {
-        return Redirect::to("/login").into_response();
-    };
     let Some(p) = project(&state, &id).await else {
         return html_page(
             StatusCode::NOT_FOUND,
@@ -686,13 +684,10 @@ pub(crate) async fn create(
 
 /// `GET /p/{id}/tickets`: tickets and the learning log.
 pub(crate) async fn list(
+    crate::access::Signed(v): crate::access::Signed,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Response {
-    let Some(v) = auth::viewer(&state, &headers) else {
-        return Redirect::to("/login").into_response();
-    };
     let Some(p) = project(&state, &id).await else {
         return html_page(
             StatusCode::NOT_FOUND,

@@ -4,6 +4,8 @@
 //! - [`ProjectWrite`]: an admin who may see the `{project}` of the route, or
 //!   the bearer token. Every handler that changes a project takes it.
 //! - [`Admin`]: an admin (Team pages).
+//! - [`Signed`]: anyone signed in, as their [`Viewer`] (for a handler
+//!   that reads who it is); a page sends the others to the login.
 //! - [`Session`]: anyone signed in to the dashboard (a page sends the
 //!   others to the login); [`SessionData`], the same for a data file
 //!   (JSON, timelines), which answers 401 instead.
@@ -117,5 +119,18 @@ impl FromRequestParts<AppState> for SessionData {
         } else {
             Err(StatusCode::UNAUTHORIZED.into_response())
         }
+    }
+}
+
+/// The signed-in viewer; others go to the login page.
+pub(crate) struct Signed(pub Viewer);
+
+impl FromRequestParts<AppState> for Signed {
+    type Rejection = Response;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Response> {
+        auth::viewer(state, &parts.headers)
+            .map(Self)
+            .ok_or_else(crate::web::to_login)
     }
 }
