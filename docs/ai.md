@@ -6,6 +6,8 @@
 
 Use **Settings → AI** (admins), or set environment variables. Environment variables win over the page.
 
+**On the page, pick a provider and paste its key** (#406): Anthropic, OpenAI, Google (Gemini), Mistral, OpenRouter or Ollama. *Save and check* lists the provider's models with your key (a bad key, an empty account or a wrong address is reported right away), then picks the most capable current model as the main one and the cheapest as the fast one. Override either one under *Models*. A provider that does not list its models gets a built-in default you can replace. Ollama also shows its base URL (default `http://ollama:11434/v1`). **Custom** shows every field: the protocol, base URL, models and key, for LiteLLM, vLLM, Azure OpenAI or any OpenAI-compatible gateway.
+
 | Setting | Environment variable | Notes |
 |---|---|---|
 | Provider | `OPENLENS_LLM_PROVIDER` | `anthropic` or `openai-compatible`. If only `OPENLENS_LLM_API_KEY` is set, the provider is Anthropic, as before. |

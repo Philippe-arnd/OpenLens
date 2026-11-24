@@ -463,6 +463,12 @@ pub fn tokens(v: &TokensView) -> Markup {
 pub struct AiView<'a> {
     /// Env vars set it (the form is read-only then).
     pub from_env: bool,
+    /// The preset the stored settings match (`custom`, or empty when off).
+    pub preset: String,
+    /// The presets offered (#406).
+    pub presets: Vec<AiPreset>,
+    /// The models the provider listed at the last save.
+    pub models: Vec<String>,
     /// What runs now.
     pub active: Option<String>,
     /// Stored values.
@@ -483,6 +489,18 @@ pub struct AiView<'a> {
     pub error: Option<&'a str>,
 }
 
+/// One provider preset in the picker (#406).
+pub struct AiPreset {
+    /// Form value.
+    pub id: &'static str,
+    /// Shown name.
+    pub label: &'static str,
+    /// What a key looks like.
+    pub key_hint: &'static str,
+    /// Where to get a key.
+    pub key_url: &'static str,
+}
+
 /// The AI settings page.
 pub fn ai_settings(v: &AiView<'_>) -> Markup {
     layout(
@@ -501,20 +519,41 @@ pub fn ai_settings(v: &AiView<'_>) -> Markup {
                 @if v.from_env {
                     p.muted { "Set by the " code { "OPENLENS_LLM_*" } " environment variables, which win over this page." }
                 } @else {
-                    form.settings method="post" action="/settings/ai" {
+                    form.settings.ai-form method="post" action="/settings/ai" {
                         label { "Provider "
-                            select name="provider" {
-                                option value="off" selected[v.provider.is_empty()] { "off" }
-                                option value="anthropic" selected[v.provider == "anthropic"] { "Anthropic" }
-                                option value="openai-compatible" selected[v.provider == "openai-compatible"] { "OpenAI-compatible" }
+                            select name="preset" {
+                                option value="off" selected[v.preset.is_empty()] { "off" }
+                                @for p in &v.presets {
+                                    option value=(p.id) selected[v.preset == p.id] { (p.label) }
+                                }
+                                option value="custom" selected[v.preset == "custom"] { "Custom (any OpenAI-compatible server, Azure, LiteLLM, vLLM…)" }
                             }
                         }
-                        label { "Base URL " input type="url" name="base_url" value=(v.base_url) placeholder="http://litellm:4000/v1 or http://ollama:11434/v1" maxlength="300"; }
-                        label { "Model " input type="text" name="model" value=(v.model) placeholder="claude-opus-5-5" maxlength="120"; }
-                        label { "Fast model (optional) " input type="text" name="fast_model" value=(v.fast_model) placeholder="for short lookups" maxlength="120"; }
-                        label { "API key " input type="password" name="key" autocomplete="off" placeholder=(if v.key_set { "stored (leave empty to keep it)" } else { "none" }); }
+                        label { "API key " input type="password" name="key" autocomplete="off" placeholder=(if v.key_set { "stored (leave empty to keep it)".to_owned() } else { "paste it here".to_owned() }); }
+                        p.small.muted.key-help {
+                            @for p in &v.presets {
+                                span class={ "for-" (p.id) } { (p.label) " keys look like " code { (p.key_hint) } " · " a href=(p.key_url) rel="noopener" target="_blank" { "get one" } }
+                            }
+                        }
+                        div.custom-only {
+                            label { "Protocol "
+                                select name="provider" {
+                                    option value="openai-compatible" selected[v.provider != "anthropic"] { "OpenAI Chat Completions" }
+                                    option value="anthropic" selected[v.provider == "anthropic"] { "Anthropic Messages" }
+                                }
+                            }
+                        }
+                        div.url-field {
+                            label { "Base URL " input type="url" name="base_url" value=(v.base_url) placeholder="empty: the preset's address · http://ollama:11434/v1 · http://litellm:4000/v1" maxlength="300"; }
+                        }
+                        details.models open[v.preset == "custom"] {
+                            summary { "Models" @if !v.model.is_empty() { " · " (v.model) " / " (if v.fast_model.is_empty() { v.model.as_str() } else { v.fast_model.as_str() }) } }
+                            datalist id="ai-models" { @for m in &v.models { option value=(m) {} } }
+                            label { "Model " input type="text" name="model" list="ai-models" value=(v.model) placeholder="picked from the provider's list" maxlength="120"; }
+                            label { "Fast model " input type="text" name="fast_model" list="ai-models" value=(v.fast_model) placeholder="for short lookups" maxlength="120"; }
+                        }
                         div.actions {
-                            button type="submit" name="action" value="save" { "Save" }
+                            button type="submit" name="action" value="save" { "Save and check" }
                             button.soft type="submit" name="action" value="test" { "Test" }
                             @if v.key_set { button.ghost type="submit" name="action" value="forget" { "Remove the key" } }
                         }

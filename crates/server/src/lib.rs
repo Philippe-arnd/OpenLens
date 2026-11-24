@@ -26,6 +26,7 @@ mod flags;
 mod goals;
 mod icon;
 mod llm;
+mod llm_presets;
 mod manage;
 pub mod metrics;
 mod oidc;

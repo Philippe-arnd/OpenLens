@@ -472,3 +472,15 @@ input.narrow { width: 9em; }
 .page-loading .spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--ink-2, currentColor); animation: ol-spin 0.8s linear infinite; }
 @keyframes ol-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .page-loading .spinner { animation: none; } }
+
+/* AI settings (#406): presets need only the key; Custom shows every field. No script. */
+.ai-form .custom-only, .ai-form .url-field, .ai-form .key-help > span { display: none; }
+.ai-form:has(select[name="preset"] option[value="custom"]:checked) .custom-only,
+.ai-form:has(select[name="preset"] option[value="custom"]:checked) .url-field,
+.ai-form:has(select[name="preset"] option[value="ollama"]:checked) .url-field { display: block; }
+.ai-form:has(select[name="preset"] option[value="anthropic"]:checked) .key-help .for-anthropic { display: inline; }
+.ai-form:has(select[name="preset"] option[value="openai"]:checked) .key-help .for-openai { display: inline; }
+.ai-form:has(select[name="preset"] option[value="google"]:checked) .key-help .for-google { display: inline; }
+.ai-form:has(select[name="preset"] option[value="mistral"]:checked) .key-help .for-mistral { display: inline; }
+.ai-form:has(select[name="preset"] option[value="openrouter"]:checked) .key-help .for-openrouter { display: inline; }
+.ai-form:has(select[name="preset"] option[value="ollama"]:checked) .key-help .for-ollama { display: inline; }
