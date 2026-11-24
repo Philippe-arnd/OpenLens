@@ -337,16 +337,134 @@ pub(crate) async fn me_page(
     } else {
         load(&state, &v.id).await
     };
-    let notice = q.done.is_some().then_some("Saved.");
+    let notice = match q.done.as_deref() {
+        Some("password") => Some("Password saved. Your other sessions are signed out."),
+        Some("account") => Some(
+            "Your admin account is ready: log in with your email and password from now on. The admin token still works, as the way back in.",
+        ),
+        Some(_) => Some("Saved."),
+        None => None,
+    };
+    me_view(&state, &v, user.as_ref(), notice, None)
+}
+
+fn me_view(
+    state: &AppState,
+    v: &auth::Viewer,
+    user: Option<&openlens_meta::User>,
+    notice: Option<&str>,
+    error: Option<&str>,
+) -> Response {
+    let has_password = user.is_some_and(|u| state.meta.password_of(&u.id).ok().flatten().is_some());
     html_page(
-        StatusCode::OK,
+        if error.is_some() {
+            StatusCode::BAD_REQUEST
+        } else {
+            StatusCode::OK
+        },
         openlens_ui::me(
-            user.as_ref().and_then(|u| u.name.as_deref()),
-            user.as_ref().map(|u| u.email.as_str()),
+            user.and_then(|u| u.name.as_deref()),
+            user.map(|u| u.email.as_str()),
             v.tz.as_deref(),
-            notice,
+            notice.or(error),
+            &openlens_ui::MePassword {
+                enabled: crate::password::enabled(),
+                owner: v.id == auth::OWNER,
+                has_password,
+                error: error.is_some(),
+            },
         ),
     )
+}
+
+#[derive(Deserialize)]
+pub(crate) struct PasswordForm {
+    #[serde(default)]
+    email: String,
+    #[serde(default)]
+    current: String,
+    #[serde(default)]
+    password: String,
+    #[serde(default)]
+    again: String,
+}
+
+/// `POST /me/password` (#428): set or change my password; signed in with
+/// the admin token, create my admin account (email + password) instead.
+pub(crate) async fn me_password(
+    crate::access::Signed(v): crate::access::Signed,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(f): Form<PasswordForm>,
+) -> Response {
+    let user = if v.id == auth::OWNER {
+        None
+    } else {
+        load(&state, &v.id).await
+    };
+    let err = |m: &str| me_view(&state, &v, user.as_ref(), None, Some(m));
+    if !crate::password::enabled() {
+        return err("Password sign-in is turned off (OPENLENS_PASSWORD_LOGIN=off).");
+    }
+    if let Err(m) = crate::password::check_new(&f.password, &f.again) {
+        return err(m);
+    }
+    let meta = state.meta.clone();
+    let owner = v.id == auth::OWNER;
+    let (id, email, current, pw) = (
+        v.id.clone(),
+        f.email.clone(),
+        f.current.clone(),
+        f.password.clone(),
+    );
+    let res = tokio::task::spawn_blocking(move || -> Result<String, String> {
+        let target = if owner {
+            // The token holder becomes a real admin account.
+            meta.upsert_user(&email, "admin", None)
+                .map_err(|e| e.to_string())?
+                .id
+        } else {
+            if let Some((hash, _)) = meta.password_of(&id).map_err(|e| e.to_string())?
+                && !crate::password::verify(&hash, &current)
+            {
+                return Err("The current password is not right.".into());
+            }
+            id
+        };
+        let h = crate::password::hash(&pw)?;
+        meta.set_password_hash(&target, &h, chrono::Utc::now().timestamp())
+            .map_err(|e| e.to_string())?;
+        Ok(target)
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()));
+    match res {
+        Ok(target) => {
+            crate::privacy::audit_as(
+                &state,
+                &target,
+                None,
+                "auth.password_set",
+                if owner { "account created" } else { "" },
+            );
+            let c = auth::set_cookie(
+                &auth::new_session(&state, &target),
+                &headers,
+                auth::SESSION_SECS,
+            );
+            let to = if owner {
+                "/me?done=account"
+            } else {
+                "/me?done=password"
+            };
+            let mut r = Redirect::to(to).into_response();
+            if let Ok(h) = axum::http::HeaderValue::from_str(&c) {
+                r.headers_mut().append(axum::http::header::SET_COOKIE, h);
+            }
+            r
+        }
+        Err(m) => err(&m),
+    }
 }
 
 #[derive(Deserialize)]

@@ -13,6 +13,7 @@ mod audience;
 mod board;
 mod components;
 mod explore;
+mod feature_page;
 mod features;
 mod glossary;
 mod goals;
@@ -25,6 +26,7 @@ pub use audience::*;
 pub use board::*;
 pub use components::*;
 pub use explore::*;
+pub use feature_page::*;
 pub use features::*;
 pub use goals::*;
 pub use icons::icon;
@@ -540,19 +542,39 @@ fn layout_with(
 }
 
 /// Login page.
-pub fn login(failed: bool, sso: bool, email: bool) -> Markup {
+pub fn login(failed: bool, sso: bool, email: bool, password: bool) -> Markup {
+    let token_form = html! {
+        form method="post" action="/login" {
+            label for="token" { "Admin token" }
+            input #token name="token" type="password" autocomplete="off" required autofocus[!password];
+            button type="submit" { "Open my board" }
+        }
+    };
     layout(
         "Log in",
         None,
         html! {
             section.login {
                 h1 { "Hello again " span.wave aria-hidden="true" { "👋" } }
-                p.muted { "Paste the admin token, or open the login link your agent sent you." }
-                @if failed { p.alert role="alert" { "That token didn't work. Try again?" } }
-                form method="post" action="/login" {
-                    label for="token" { "Admin token" }
-                    input #token name="token" type="password" autocomplete="current-password" required autofocus;
-                    button type="submit" { "Open my board" }
+                @if password {
+                    p.muted { "Sign in with your email and password." }
+                    @if failed { p.alert role="alert" { "That didn't work. Check and try again; after a few failed tries, wait 15 minutes." } }
+                    form method="post" action="/login/password" {
+                        label for="pw-email" { "Email" }
+                        input #pw-email name="email" type="email" autocomplete="username" required autofocus;
+                        label for="pw" { "Password" }
+                        input #pw name="password" type="password" autocomplete="current-password" required;
+                        button type="submit" { "Log in" }
+                    }
+                    // The way back in, always (#428): a lost password, a locked account.
+                    details.token-login {
+                        summary { "Use the admin token" }
+                        (token_form)
+                    }
+                } @else {
+                    p.muted { "Paste the admin token, or open the login link your agent sent you." }
+                    @if failed { p.alert role="alert" { "That token didn't work. Try again?" } }
+                    (token_form)
                 }
                 @if sso {
                     p.muted.small { "or" }
@@ -625,6 +647,15 @@ pub fn message(title: &str, text: &str) -> Markup {
     )
 }
 
+/// [`message`] with markup (a link back, for instance).
+pub fn message_html(title: &str, body: Markup) -> Markup {
+    layout(
+        title,
+        None,
+        html! { section.login { h1 { (title) } p { (body) } } },
+    )
+}
+
 /// Raw HTML escape hatch for tests.
 pub fn render(m: Markup) -> String {
     let PreEscaped(s) = m;
@@ -653,6 +684,40 @@ mod tests {
         assert!(sec.contains("class=\"update-security\""));
         assert!(sec.contains("Security update available: v0.5.0"));
         assert!(sec.contains("releases/tag/v0.5.0"));
+    }
+
+    /// Every card and tile of the board opens its detail (#409): a new one
+    /// must use `tile_to` / `to(...)`, or say `no_detail` on purpose.
+    #[test]
+    fn every_board_card_and_tile_leads_somewhere() {
+        let src = include_str!("board.rs");
+        let body = &src[src.find("pub fn board(").unwrap()..];
+        assert!(
+            !body.contains("(tile(\""),
+            "a board tile without a detail: use tile_to"
+        );
+        for line in body.lines().filter(|l| l.trim_start().starts_with("h2.")) {
+            assert!(
+                line.contains("(to(") || line.contains("no_detail"),
+                "card without a detail: {line}"
+            );
+        }
+        let f = Filters {
+            environment: "production".into(),
+            role: Some("admin".into()),
+            internal: true,
+            ..Filters::default()
+        };
+        assert_eq!(
+            detail_url("d", "/errors", &f),
+            "/p/d/errors?env=production&role=admin&internal=1"
+        );
+        assert_eq!(
+            detail_url("d", "/breakdown?by=role", &f),
+            "/p/d/breakdown?by=role&env=production&role=admin&internal=1"
+        );
+        let shared = render_shared(|| to("/x", "Releases")).into_string();
+        assert_eq!(shared, "Releases", "no link on a share link");
     }
 
     #[test]

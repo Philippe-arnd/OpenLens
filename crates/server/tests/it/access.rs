@@ -163,6 +163,7 @@ const ROUTES: &[(&str, &str, Access)] = &[
     ("GET", "/login", Public),
     ("POST", "/login", Public),
     ("POST", "/login/email", Public),
+    ("POST", "/login/password", Public),
     ("GET", "/projects", Signed),
     ("POST", "/projects", Admin),
     ("GET", "/welcome", Signed),
@@ -174,6 +175,7 @@ const ROUTES: &[(&str, &str, Access)] = &[
     ("POST", "/users/{id}/{action}", Admin),
     ("GET", "/me", Signed),
     ("POST", "/me", Signed),
+    ("POST", "/me/password", Signed),
     ("POST", "/logout", Signed),
     ("GET", "/l/{token}", Public),
     ("POST", "/l/{token}", Public),
@@ -722,6 +724,20 @@ async fn instance_pages_keep_the_project_menu_and_a_breadcrumb() {
     let settings = body_text(get(&h, "/p/default/settings", Some(&owner), false).await).await;
     assert!(settings.contains("list=\"tz-all\"") && settings.contains("Europe/Paris"));
     assert!(settings.contains("name=\"quiet_start\""));
+    // The setup progress (#403): required steps as a bar, the rest optional.
+    assert!(settings.contains("aria-label=\"Setup\""), "{settings}");
+    assert!(settings.contains("An alert channel") && settings.contains("· optional"));
+}
+
+#[tokio::test]
+async fn the_board_tells_admins_what_setup_is_left() {
+    let h = harness();
+    let (status, _) = post(&h, "/capture", batch(&h.key), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let owner = login_cookie(&h).await;
+    let board = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
+    assert!(board.contains("Finish in Settings"), "no alert channel yet");
 }
 
 #[tokio::test]

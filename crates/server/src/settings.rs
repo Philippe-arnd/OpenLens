@@ -123,6 +123,13 @@ pub(crate) async fn page(
                 notice,
                 yesterday: &yesterday,
                 shares: state.meta.share_links(&p.id).unwrap_or_default(),
+                setup: setup_steps(
+                    &state,
+                    &p.id,
+                    n("events") > 0,
+                    n("releases") > 0,
+                    detected.is_some(),
+                ),
                 alerts: {
                     let a = crate::alerts::Settings::load(&state.meta, &p.id);
                     openlens_ui::AlertsView {
@@ -143,6 +150,103 @@ pub(crate) async fn page(
             },
         ),
     )
+}
+
+/// The setup steps of a project (#403). Required: events arrive, the app
+/// address is known (set, or seen in pageviews), one alert channel. The
+/// rest is shown as optional: releases, source maps, S3, SMTP, the AI key.
+pub(crate) fn setup_steps(
+    state: &AppState,
+    project: &str,
+    events: bool,
+    releases: bool,
+    detected_url: bool,
+) -> Vec<openlens_ui::SetupStep> {
+    let base = format!("/p/{project}/settings");
+    let set = |k: &str| {
+        state
+            .meta
+            .project_setting(project, k)
+            .ok()
+            .flatten()
+            .is_some_and(|v| !v.is_empty())
+    };
+    let a = crate::alerts::Settings::load(&state.meta, project);
+    let smtp = crate::digest::login_mail().is_some();
+    let has_events = events
+        || std::fs::read_dir(
+            state
+                .data_dir
+                .join("events")
+                .join(format!("project={project}")),
+        )
+        .is_ok_and(|mut d| d.next().is_some());
+    let maps = std::fs::read_dir(
+        state
+            .data_dir
+            .join("sourcemaps")
+            .join(format!("project={project}")),
+    )
+    .is_ok_and(|mut d| d.next().is_some());
+    let step = |label, done, required, href: String| openlens_ui::SetupStep {
+        label,
+        done,
+        required,
+        href,
+    };
+    vec![
+        step(
+            "First event received",
+            has_events,
+            true,
+            format!("{base}#install"),
+        ),
+        step(
+            "App address known (for uptime)",
+            set("app_url") || detected_url,
+            true,
+            base.clone(),
+        ),
+        step(
+            "An alert channel (email, webhook or ntfy)",
+            (a.email && smtp) || !a.webhook.is_empty() || !a.ntfy.is_empty(),
+            true,
+            format!("{base}#alerts"),
+        ),
+        step(
+            "Releases detected",
+            releases,
+            false,
+            format!("{base}#install"),
+        ),
+        step(
+            "Source maps uploaded",
+            maps,
+            false,
+            "/settings/tokens".into(),
+        ),
+        step(
+            "S3 copy configured",
+            crate::s3::configured(&state.meta, &state.data_dir).is_some(),
+            false,
+            "/settings/storage".into(),
+        ),
+        step("SMTP for emails", smtp, false, "/settings/storage".into()),
+        step(
+            "AI key for Ask",
+            crate::llm::config(state).is_some(),
+            false,
+            "/settings/ai".into(),
+        ),
+    ]
+}
+
+/// Required setup steps (done, total), when some are left (#403).
+pub(crate) fn setup_left(state: &AppState, project: &str) -> Option<(usize, usize)> {
+    let steps = setup_steps(state, project, false, false, false);
+    let req: Vec<_> = steps.iter().filter(|s| s.required).collect();
+    let done = req.iter().filter(|s| s.done).count();
+    (done < req.len()).then_some((done, req.len()))
 }
 
 #[derive(Deserialize)]

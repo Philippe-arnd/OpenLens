@@ -4,6 +4,13 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **Setup progress** (#403, part 2): project settings show the required steps as a bar (first event, app address, one alert channel), with the optional ones listed (releases, source maps, S3, SMTP, AI key). Each step links to where it is fixed. While a required step is left, admins see a one-line *Finish in Settings* strip on the Focus board.
+- **Every board card and tile opens its detail** (#409, part 1): the whole card is one link (one tab stop, a *Details →* hint on hover and focus), to Audience, Events, Errors, Pages, Feature map, Flows, Flags, Timeline, Churn or Revenue, with the board's environment, role, release and team filters carried along. On a share link they stay plain. A test fails when a new card forgets it.
+- **A page per feature** (#411, part 1): `/p/<id>/features/<key>`, reached from the feature map. It has a breadcrumb (Projects › project › Feature map › area › feature) and tabs: Overview (use and success vs the 30 days before, routes, roles, pages, related features, findings), Flow and History. Previous and next links move between the features of an area. A former key redirects, and an unknown one returns a 404 with a link back. `map.yaml` and `map.json` keep their URLs.
+- **Sign in with a password** (#428): after the first sign-in with the admin token, *My profile* creates your admin account (email + password), and from then on the login page leads with email + password. Invited users can set a password there too. Passwords are Argon2id hashes, and 5 failed tries lock an email for 15 minutes. Changing a password signs out your other sessions. The admin token always works on the login page (*Use the admin token*), as the way back in. `OPENLENS_PASSWORD_LOGIN=off` turns password sign-in off.
+
 ### Security
 
 - **Fixed in this release** (#415): the Ask `k=5` anonymity bypass (NSEC-01), the untrusted public URL (SEC-06), the OIDC email trust gap (SEC-07) and the cold-tier markers lost on restart (NSEC-02).
@@ -19,6 +26,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- **Memory goes back to the OS after a big board** (#418, part 2): the server now uses jemalloc with a 1-second decay. At 4 M events with four filtered boards at once, the resident memory 30 s later dropped from 1,202 MB to 135 MB, and the peak from 1,306 MB to 1,066 MB, with the same board times (perf runs 45493539121 and 45496284808).
 - **Breaking: the cold tier is now opt-in** (#417, D-032). Since 0.3.0, configuring S3 also moved event days older than 120 days off the disk, which made S3 their only copy. From this release nothing leaves the disk until an admin turns the cold tier on in *Storage and backups* (or sets `OPENLENS_S3_COLD=on`). Days already on S3 stay readable. With the tier on, OpenLens first reads the bucket's lifecycle rules and moves nothing when one expires objects in under 400 days or when they cannot be read. The reason shows on the Storage page and as `openlens_cold_tier_blocked`. A banner says how many days live on S3 only.
 - **A visual pass on every page**: a clearer type scale (28 px page titles, 15 px card titles), more space between cards and tiles, tabular numbers, quieter table headers with row hover, visible focus rings, and settings forms on one aligned grid.
 - **Settings keep their place** (#403, part 1): the instance pages (API tokens, AI, Storage, Team, My profile) keep the menu of the last project you opened (or your only project) and share an *Instance* tab group. Every page has a breadcrumb (`Projects › project › section › page`). Time zones offer every IANA zone, quiet hours are hour pickers, and the health path and embed address suggest values.

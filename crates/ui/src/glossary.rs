@@ -75,6 +75,15 @@ pub(crate) const KPI: &[(&str, &str)] = &[
         "Revenue",
         "Sum of the purchase events' amounts in the period, in the project's currency; payers are distinct users who paid.",
     ),
+    (
+        "Users",
+        "Distinct people who used this feature in the last 30 days.",
+    ),
+    ("Uses", "Times the feature was used in the last 30 days."),
+    (
+        "Succeeded",
+        "Distinct people who reached its declared success event in the last 30 days.",
+    ),
 ];
 
 /// The definition of a tile label, if there is one.
@@ -124,9 +133,27 @@ mod tests {
             include_str!("team.rs"),
             include_str!("features.rs"),
             include_str!("explore.rs"),
+            include_str!("feature_page.rs"),
         ];
         let mut seen = 0;
         for src in sources {
+            // tile_to(&detail_url(.., "/path", f), "accent", "glyph", "Label", …)
+            for call in src.split("tile_to(").skip(1) {
+                let lits: Vec<&str> = call
+                    .split('"')
+                    .skip(1)
+                    .step_by(2)
+                    .filter(|l| !l.starts_with('/'))
+                    .take(3)
+                    .collect();
+                if let Some(label) = lits.get(2) {
+                    seen += 1;
+                    assert!(
+                        super::definition(label).is_some(),
+                        "tile {label:?} has no glossary entry"
+                    );
+                }
+            }
             for call in src.split("tile(").skip(1) {
                 // tile("accent", "glyph", "Label" | &format!("Label (…)", …)
                 let args: Vec<&str> = call.splitn(4, ',').collect();

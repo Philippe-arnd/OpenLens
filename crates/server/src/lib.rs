@@ -31,6 +31,7 @@ mod manage;
 pub mod metrics;
 mod oidc;
 mod openapi;
+mod password;
 mod privacy;
 mod replay;
 mod reword;

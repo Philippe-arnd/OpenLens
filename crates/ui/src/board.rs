@@ -81,10 +81,13 @@ pub fn board(
             @if !b.objectives_at_risk.is_empty() && !shared() {
                 p.notice role="status" { (icon("star")) " Objectives at risk: " (b.objectives_at_risk.join(" · ")) " — " a href={ "/p/" (p.id) "/goals" } { "Goals" } }
             }
+            @if let Some((done, total)) = b.setup.filter(|_| !shared()) {
+                p.notice role="status" { (icon("task")) " Setup: " (done) " of " (total) " required steps done — " a href={ "/p/" (p.id) "/settings" } { "Finish in Settings" } }
+            }
             (filter_bar(p.id, b, f, ""))
             (insight_cards(p.id, b, plain))
             section.tiles aria-label="Key numbers" {
-                (tile("violet", "users", "Daily active users", &{
+                (tile_to(&detail_url(p.id, "/audience", f), "violet", "users", "Daily active users", &{
                     if b.users.known > 0 {
                         format!("{} · {}", compact(b.users.dau), pct(b.users.dau_share()))
                     } else {
@@ -104,19 +107,19 @@ pub fn board(
                     }
                     sub
                 }))
-                (tile("mint", "spark", "Stickiness", &pct(b.users.stickiness), "last 30 days"))
-                (tile("sky", "clock", "Avg session", &duration(b.sessions.avg_secs), &format!("{} sessions · {} bounce", compact(b.sessions.count), pct(b.sessions.bounce_rate))))
-                (tile("sun", "task", "Tasks per user per day", &format!("{:.1}", b.sessions.tasks_per_user_day), "feature uses, last 7 days"))
-                (tile("coral", "alert", "Sessions with errors", &pct(b.sessions.error_rate), "last 7 days"))
+                (tile_to(&detail_url(p.id, "/audience", f), "mint", "spark", "Stickiness", &pct(b.users.stickiness), "last 30 days"))
+                (tile_to(&detail_url(p.id, "/events", f), "sky", "clock", "Avg session", &duration(b.sessions.avg_secs), &format!("{} sessions · {} bounce", compact(b.sessions.count), pct(b.sessions.bounce_rate))))
+                (tile_to(&detail_url(p.id, "/features", f), "sun", "task", "Tasks per user per day", &format!("{:.1}", b.sessions.tasks_per_user_day), "feature uses, last 7 days"))
+                (tile_to(&detail_url(p.id, "/errors", f), "coral", "alert", "Sessions with errors", &pct(b.sessions.error_rate), "last 7 days"))
             }
             div.grid {
                 section.card {
-                    h2.violet { (icon("pulse")) "Active users" }
+                    h2.violet { (icon("pulse")) (to(&detail_url(p.id, "/audience", f), "Active users")) }
                     (sparkline_marked(&b.dau_series, marks))
                     p.muted.small { "Last 14 days. Hover a bar for the day" @if !marks.is_empty() && !shared() { ", a dot for what changed (" a href={ "/p/" (p.id) "/timeline" } { "timeline" } ")" } "." }
                 }
                 section.card {
-                    h2.sky { (icon("bolt")) "Web Vitals (p75)" }
+                    h2.sky { (icon("bolt")) (to(&detail_url(p.id, "/pages", f), "Web Vitals (p75)")) }
                     @if b.vitals.is_empty() { p.muted { "No measurements yet. They arrive when visitors leave a page." } }
                     @else {
                         table.plain {
@@ -133,39 +136,39 @@ pub fn board(
                 }
                 @if let Some(r) = revenue {
                     section.card {
-                        h2.mint { (icon("star")) "Revenue, last 30 days" }
+                        h2.mint { (icon("star")) (to(&detail_url(p.id, "/revenue", f), "Revenue, last 30 days")) }
                         table.plain { tbody { @for m in &r.totals {
                             tr { th scope="row" { (money(m.total, &m.currency)) } td.small.muted { (compact(m.payers)) " payers · " (money(m.per_active_user, &m.currency)) " per active user" } }
                         } } }
                         p.small { a href={ "/p/" (p.id) "/revenue" } { "By feature, role and release →" } }
                     }
                 }
-                (feature_pulse(b, feats.is_empty()))
+                (feature_pulse(p.id, f, b, feats.is_empty()))
                 @if !unused.is_empty() {
                     section.card {
-                        h2.coral { (icon("ban")) "Never used (last 30 days)" }
+                        h2.coral { (icon("ban")) (to(&detail_url(p.id, "/features", f), "Never used (last 30 days)")) }
                         ul.tags { @for x in &unused { li { (x.name.as_deref().unwrap_or(&x.key)) } } }
                         p.muted.small { "Declared in the feature map, but nobody reached them. Hidden, broken, or not needed?" }
                     }
                 }
                 @if !b.role_gaps.is_empty() {
                     section.card {
-                        h2.sun { (icon("gap")) "Role gaps" }
+                        h2.sun { (icon("gap")) (to(&detail_url(p.id, "/breakdown?by=role", f), "Role gaps")) }
                         p.small { "These raw role values match no role in the feature map, so they are counted apart:" }
                         ul.tags { @for (raw, n) in &b.role_gaps { li { code { (raw) } " · " (compact(*n)) " users" } } }
                         p.muted.small { "Ask your agent to map them under " code { "roles:" } " in openlens.features.yaml." }
                     }
                 }
                 section.card {
-                    h2.mint { (icon("shield")) "Who uses the app" }
+                    h2.mint { (icon("shield")) (to(&detail_url(p.id, "/audience", f), "Who uses the app")) }
                     (bars(&roles))
                     p.muted.small { "Distinct users per role, last 30 days." }
                 }
-                (role_matrix(b))
-                (retention_grid(b))
+                (role_matrix(p.id, f, b))
+                (retention_grid(p.id, f, b))
                 @if !b.funnels.is_empty() {
                     section.card.wide {
-                        h2.sky { (icon("funnel")) "Funnels" }
+                        h2.sky { (icon("funnel")) (to(&detail_url(p.id, "/flows", f), "Funnels")) }
                         @for fun in &b.funnels {
                             h3.small { (fun.feature) }
                             table.bars {
@@ -184,7 +187,7 @@ pub fn board(
                 }
                 @if !b.flag_cohorts.is_empty() {
                     section.card.wide {
-                        h2.violet { (icon("flag")) "Flags: with vs without" }
+                        h2.violet { (icon("flag")) (to(&detail_url(p.id, "/flags", f), "Flags: with vs without")) }
                         table.plain {
                             thead { tr { th { "Flag" } th.num { "Users with / without" } th.num { "Avg session" } th.num { "Tasks / session" } th.num { "Sessions with errors" } th { "Confidence" } } }
                             tbody { @for c in &b.flag_cohorts {
@@ -203,7 +206,7 @@ pub fn board(
                 }
                 @if !b.journeys.is_empty() {
                     section.card.wide {
-                        h2.mint { (icon("route")) "Paths to value" }
+                        h2.mint { (icon("route")) (to(&detail_url(p.id, "/flows", f), "Paths to value")) }
                         p.muted.small { "What users did just before reaching each success for the first time (last 30 days)." }
                         ul.journeys {
                             @for j in &b.journeys {
@@ -217,7 +220,7 @@ pub fn board(
                     }
                 }
                 section.card.wide {
-                    h2.coral { (icon("release")) "Releases" }
+                    h2.coral { (icon("release")) (to(&detail_url(p.id, "/timeline", f), "Releases")) }
                     @if b.releases.is_empty() { p.muted { "No release tagged yet. Pass " code { "release" } " to the SDK to compare releases." } }
                     @else {
                         (release_compare(&b.releases))
@@ -354,12 +357,12 @@ pub(crate) fn family_label(fam: &str) -> &'static str {
 /// Feature pulse: for each used feature, how many of the active users
 /// adopt it, how often and on how many days they come back to it, and how
 /// many reach its success event.
-pub(crate) fn feature_pulse(b: &Board, empty: bool) -> Markup {
+pub(crate) fn feature_pulse(pid: &str, f: &Filters, b: &Board, empty: bool) -> Markup {
     let mau = b.users.mau.max(1) as f64;
     let ratio = |a: i64, n: i64| a as f64 / n.max(1) as f64;
     html! {
         section.card.wide {
-            h2.sun { (icon("layers")) "Feature pulse" }
+            h2.sun { (icon("layers")) (to(&detail_url(pid, "/features", f), "Feature pulse")) }
             @if empty {
                 p.muted { "No feature has been used yet. Features come from " code { "data-feature" } " attributes and the feature map." }
             } @else {
@@ -416,7 +419,7 @@ pub(crate) fn confidence(p: Option<f64>) -> Markup {
 
 /// Weekly retention cohorts: users first seen each week (rows) and the
 /// share of them active again N weeks later (columns).
-pub(crate) fn retention_grid(b: &Board) -> Markup {
+pub(crate) fn retention_grid(pid: &str, f: &Filters, b: &Board) -> Markup {
     let rows: Vec<_> = b.retention.iter().filter(|r| r.users > 0).collect();
     let cols = rows.iter().map(|r| r.weeks.len()).max().unwrap_or(0);
     if rows.len() < 2 || cols == 0 {
@@ -424,7 +427,7 @@ pub(crate) fn retention_grid(b: &Board) -> Markup {
     }
     html! {
         section.card.wide {
-            h2.mint { (icon("clock")) "Do they come back?" }
+            h2.mint { (icon("clock")) (to(&detail_url(pid, "/churn", f), "Do they come back?")) }
             table.plain.matrix {
                 thead { tr {
                     th { "First seen (week of)" }
@@ -454,7 +457,7 @@ pub(crate) fn retention_grid(b: &Board) -> Markup {
 /// Roles × features: the share of each role's users who used each
 /// feature in the last 30 days. One hue, darker = more adoption; the number
 /// is always printed, so colour is never the only cue.
-pub(crate) fn role_matrix(b: &Board) -> Markup {
+pub(crate) fn role_matrix(pid: &str, f: &Filters, b: &Board) -> Markup {
     let roles: Vec<(&str, i64)> = b
         .roles
         .iter()
@@ -475,7 +478,7 @@ pub(crate) fn role_matrix(b: &Board) -> Markup {
     };
     html! {
         section.card.wide {
-            h2.violet { (icon("users")) "Who uses what" }
+            h2.violet { (icon("users")) (to(&detail_url(pid, "/features", f), "Who uses what")) }
             table.plain.matrix {
                 thead { tr { th { "Feature" } @for (r, n) in &roles { th.num scope="col" { (r) br; span.muted.small { (compact(*n)) " users" } } } } }
                 tbody { @for f in &feats {

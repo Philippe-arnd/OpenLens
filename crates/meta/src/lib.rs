@@ -277,6 +277,16 @@ fn migrate(c: &Connection) -> rusqlite::Result<()> {
         // on their first sign-in; required to match on every one after.
         ("oidc_iss", "ALTER TABLE users ADD COLUMN oidc_iss TEXT"),
         ("oidc_sub", "ALTER TABLE users ADD COLUMN oidc_sub TEXT"),
+        // #428: an Argon2id hash (PHC string) and when it was set (unix
+        // seconds): sessions issued before then stop working.
+        (
+            "password_hash",
+            "ALTER TABLE users ADD COLUMN password_hash TEXT",
+        ),
+        (
+            "password_at",
+            "ALTER TABLE users ADD COLUMN password_at INTEGER",
+        ),
     ] {
         let has: bool = c
             .prepare("SELECT 1 FROM pragma_table_info('users') WHERE name = ?1")?

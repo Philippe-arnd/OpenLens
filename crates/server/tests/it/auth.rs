@@ -175,3 +175,132 @@ async fn login_links_ignore_an_untrusted_forwarded_host() {
         "{cookie}"
     );
 }
+
+/// A form POST that also returns the session cookie it sets, if any.
+async fn post_cookie(
+    h: &Harness,
+    uri: &str,
+    cookie: &str,
+    body: &str,
+) -> (StatusCode, Option<String>) {
+    let r = router(h.state.clone())
+        .oneshot(
+            Request::post(uri)
+                .header("cookie", cookie)
+                .header("origin", "http://localhost:8686")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(body.to_owned()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let set = r
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .find(|v| v.starts_with("ol_session="))
+        .map(|v| v.split(';').next().unwrap().to_owned());
+    (r.status(), set)
+}
+
+#[tokio::test]
+async fn the_token_holder_creates_an_account_then_signs_in_with_a_password() {
+    let h = harness();
+    let token = login_cookie(&h).await;
+    // Weak or mistyped: refused.
+    let (s, page) = post_form_body(
+        &h,
+        "/me/password",
+        &token,
+        "email=ann%40example.com&password=short&again=short",
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert!(page.contains("at least 12"), "{page}");
+    // The owner becomes a real admin account.
+    let (s, first) = post_cookie(
+        &h,
+        "/me/password",
+        &token,
+        "email=ann%40example.com&password=violet+tram+seven&again=violet+tram+seven",
+    )
+    .await;
+    assert_eq!(s, StatusCode::SEE_OTHER);
+    let first = first.expect("signed in as the account");
+    assert!(first.contains(".ann-at-example-com."), "{first}");
+    // The login page now leads with the password, the token folded below.
+    let page = body_text(get(&h, "/login", None, false).await).await;
+    assert!(page.contains("action=\"/login/password\"") && page.contains("Use the admin token"));
+    // Wrong password and unknown email: the same answer.
+    let (s1, _) = post_cookie(
+        &h,
+        "/login/password",
+        "",
+        "email=ann%40example.com&password=nope+nope+nope",
+    )
+    .await;
+    let (s2, _) = post_cookie(
+        &h,
+        "/login/password",
+        "",
+        "email=bob%40example.com&password=nope+nope+nope",
+    )
+    .await;
+    assert_eq!(
+        (s1, s2),
+        (StatusCode::UNAUTHORIZED, StatusCode::UNAUTHORIZED)
+    );
+    // The right one.
+    let (s, session) = post_cookie(
+        &h,
+        "/login/password",
+        "",
+        "email=ann%40example.com&password=violet+tram+seven",
+    )
+    .await;
+    assert_eq!(s, StatusCode::SEE_OTHER);
+    let session = session.unwrap();
+    assert_eq!(
+        get(&h, "/me", Some(&session), false).await.status(),
+        StatusCode::OK
+    );
+    // Changing it needs the current one, and signs out the older sessions.
+    let (s, _) = post_form_body(
+        &h,
+        "/me/password",
+        &session,
+        "current=wrong&password=amber+kite+river&again=amber+kite+river",
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    let (s, fresh) = post_cookie(
+        &h,
+        "/me/password",
+        &session,
+        "current=violet+tram+seven&password=amber+kite+river&again=amber+kite+river",
+    )
+    .await;
+    assert_eq!(s, StatusCode::SEE_OTHER);
+    let fresh = fresh.unwrap();
+    assert_ne!(
+        get(&h, "/me", Some(&first), false).await.status(),
+        StatusCode::OK,
+        "older session out"
+    );
+    assert_eq!(
+        get(&h, "/me", Some(&fresh), false).await.status(),
+        StatusCode::OK
+    );
+    let (s, _) = post_cookie(
+        &h,
+        "/login/password",
+        "",
+        "email=ann%40example.com&password=violet+tram+seven",
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "old password");
+    // The token always works: the way back in.
+    assert!(login_cookie(&h).await.starts_with("ol_session="));
+}

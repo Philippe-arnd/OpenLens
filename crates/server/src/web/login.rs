@@ -2,11 +2,81 @@
 
 use super::*;
 
-pub(super) async fn login_page() -> Response {
+/// Password sign-in shows first once an account has a password (#428).
+fn with_password(state: &AppState) -> bool {
+    crate::password::enabled() && state.meta.any_password().unwrap_or(false)
+}
+
+pub(super) async fn login_page(State(state): State<AppState>) -> Response {
     html(
         StatusCode::OK,
-        openlens_ui::login(false, crate::oidc::enabled(), email_login().is_some()),
+        openlens_ui::login(
+            false,
+            crate::oidc::enabled(),
+            email_login().is_some(),
+            with_password(&state),
+        ),
     )
+}
+
+#[derive(Deserialize)]
+pub(super) struct PasswordForm {
+    #[serde(default)]
+    email: String,
+    #[serde(default)]
+    password: String,
+}
+
+/// `POST /login/password` (#428): one answer for every failure, after the
+/// same delay; a locked email is refused even with the right password.
+pub(super) async fn login_password(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(f): Form<PasswordForm>,
+) -> Response {
+    let email = f.email.trim().to_lowercase();
+    let fail = |state: &AppState| {
+        html(
+            StatusCode::UNAUTHORIZED,
+            openlens_ui::login(
+                true,
+                crate::oidc::enabled(),
+                email_login().is_some(),
+                with_password(state),
+            ),
+        )
+    };
+    if !crate::password::enabled() || email.len() > 200 || f.password.len() > 200 {
+        return fail(&state);
+    }
+    let meta = state.meta.clone();
+    let (e2, pw) = (email.clone(), f.password.clone());
+    let user = tokio::task::spawn_blocking(move || {
+        if crate::password::locked(&e2) {
+            return None;
+        }
+        let u = meta.user_by_email(&e2).ok()??;
+        let (hash, _) = meta.password_of(&u.id).ok()??;
+        (!u.disabled && crate::password::verify(&hash, &pw)).then_some(u)
+    })
+    .await
+    .ok()
+    .flatten();
+    let Some(u) = user else {
+        crate::password::failed(&email);
+        crate::privacy::audit_as(&state, "anonymous", None, "auth.password_failed", &email);
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        return fail(&state);
+    };
+    crate::password::succeeded(&email);
+    let _ = state.meta.touch_sign_in(&u.id);
+    crate::privacy::audit_as(&state, &u.id, None, "auth.password_ok", "");
+    let c = auth::set_cookie(
+        &auth::new_session(&state, &u.id),
+        &headers,
+        auth::SESSION_SECS,
+    );
+    with_cookie(Redirect::to("/").into_response(), &c)
 }
 
 #[derive(Deserialize)]
@@ -32,7 +102,12 @@ pub(super) async fn login(
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     html(
         StatusCode::UNAUTHORIZED,
-        openlens_ui::login(true, crate::oidc::enabled(), email_login().is_some()),
+        openlens_ui::login(
+            true,
+            crate::oidc::enabled(),
+            email_login().is_some(),
+            with_password(&state),
+        ),
     )
 }
 

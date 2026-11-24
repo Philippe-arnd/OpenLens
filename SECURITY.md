@@ -17,6 +17,10 @@ Please include the version (the image tag or the release you installed), what an
 
 You are credited in the advisory unless you ask not to be.
 
+## Passwords
+
+Dashboard passwords (#428) are stored only as Argon2id hashes (a random salt each) in `meta.db`, and never logged. After 5 failed tries in 15 minutes an email is refused for the rest of that window, and every failure gets the same answer, whether the account exists or not. Changing a password signs out that user's other sessions. The admin token stays the recovery path.
+
 ## Knowing you are affected
 
 Fixed vulnerabilities are published as advisories on the repository's **Security** tab (affected and patched versions). The release that fixes one carries a **Security** section in its notes and in `CHANGELOG.md`, and a running OpenLens that sees such a release shows *Security update available* in every page's footer instead of the plain update notice (turn the daily check off with `OPENLENS_UPDATE_CHECK=off`).

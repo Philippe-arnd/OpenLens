@@ -277,6 +277,122 @@ pub(crate) struct DownloadQuery {
     v: Option<i64>,
 }
 
+#[derive(Deserialize, Default)]
+pub(crate) struct FeatureQuery {
+    /// A string: inside a flattened struct, urlencoded numbers do not parse.
+    #[serde(default)]
+    v: Option<String>,
+    #[serde(default)]
+    tab: Option<String>,
+    #[serde(flatten)]
+    filters: crate::api::FilterQuery,
+}
+
+/// `GET /p/{id}/features/{key}`: one feature's page (#411), or the map
+/// download for `map.yaml` / `map.json` (kept at their URLs).
+pub(crate) async fn feature_or_download(
+    _: crate::access::Session,
+    State(state): State<AppState>,
+    Path((id, key)): Path<(String, String)>,
+    Query(q): Query<FeatureQuery>,
+) -> Response {
+    if key == "map.yaml" || key == "map.json" {
+        return download(
+            crate::access::Session,
+            State(state),
+            Path((id, key)),
+            Query(DownloadQuery {
+                v: q.v.as_deref().and_then(|v| v.parse().ok()),
+            }),
+        )
+        .await;
+    }
+    let Some(p) = project(&state, &id).await else {
+        return html_page(
+            StatusCode::NOT_FOUND,
+            openlens_ui::message("Not found", "No such project."),
+        );
+    };
+    let gone = || {
+        html_page(
+            StatusCode::NOT_FOUND,
+            openlens_ui::message_html(
+                "No such feature",
+                maud::html! { "This key is not in the feature map. " a href={ "/p/" (id) "/features" } { "Back to the feature map" } },
+            ),
+        )
+    };
+    let Some(m) = state
+        .meta
+        .feature_map(&p.id)
+        .ok()
+        .flatten()
+        .and_then(|(_, y)| openlens_featuremap::parse(&y).map)
+    else {
+        return gone();
+    };
+    let Some(current) = m.current_key(&key).map(str::to_owned) else {
+        return gone();
+    };
+    if current != key {
+        return axum::response::Redirect::to(&format!("/p/{}/features/{current}", p.id))
+            .into_response();
+    }
+    let Some(feature) = m.features.iter().find(|f| f.key == current) else {
+        return gone();
+    };
+    let f = q.filters.filters(&p.timezone);
+    let ctx = match openlens_engine::feature_context(&state.query, &p.id, &m, &f, &current).await {
+        Ok(Some(c)) => c,
+        Ok(None) => return gone(),
+        Err(e) => {
+            return html_page(
+                StatusCode::BAD_REQUEST,
+                openlens_ui::message("Can't show that", &e.to_string()),
+            );
+        }
+    };
+    let peers: Vec<&openlens_featuremap::Feature> = m
+        .features
+        .iter()
+        .filter(|x| x.area == feature.area)
+        .collect();
+    let at = peers.iter().position(|x| x.key == current).unwrap_or(0);
+    let near = |i: Option<usize>| {
+        i.and_then(|i| peers.get(i))
+            .map(|x| (x.key.as_str(), x.name.as_str()))
+    };
+    let versions: Vec<(i64, String, Option<String>)> = state
+        .meta
+        .feature_map_versions(&p.id)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|v| (v.version, v.created_at, v.author))
+        .collect();
+    let info = openlens_ui::ProjectInfo {
+        id: &p.id,
+        name: &p.name,
+        key: &p.api_key,
+    };
+    let tab = if q.tab.as_deref() == Some("history") {
+        "history"
+    } else {
+        "overview"
+    };
+    html_page(
+        StatusCode::OK,
+        openlens_ui::feature_page(&openlens_ui::FeaturePage {
+            p: &info,
+            feature,
+            ctx: &ctx,
+            tab,
+            versions: &versions,
+            prev: near(at.checked_sub(1)),
+            next: near(Some(at + 1)),
+        }),
+    )
+}
+
 /// `GET /p/{id}/features/map.yaml` and `/features/map.json` (`?v=N` for a version).
 pub(crate) async fn download(
     _: crate::access::Session,

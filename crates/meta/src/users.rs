@@ -40,6 +40,40 @@ impl Meta {
         })
     }
 
+    /// Store a user's password hash (#428; the hash is made by the caller,
+    /// never the password itself), and when it was set.
+    pub fn set_password_hash(&self, id: &str, hash: &str, at: i64) -> Result<bool> {
+        self.with(|c| {
+            Ok(c.execute(
+                "UPDATE users SET password_hash = ?2, password_at = ?3 WHERE id = ?1",
+                params![id, hash, at],
+            )? == 1)
+        })
+    }
+
+    /// A user's password hash and when it was set, if they have one.
+    pub fn password_of(&self, id: &str) -> Result<Option<(String, i64)>> {
+        self.with(|c| {
+            Ok(c
+                .query_row(
+                    "SELECT password_hash, password_at FROM users WHERE id = ?1 AND password_hash IS NOT NULL",
+                    [id],
+                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<i64>>(1)?.unwrap_or(0))),
+                )
+                .optional()?)
+        })
+    }
+
+    /// Does any account have a password (the login page then leads with it)?
+    pub fn any_password(&self) -> Result<bool> {
+        self.with(|c| {
+            Ok(c.prepare(
+                "SELECT 1 FROM users WHERE password_hash IS NOT NULL AND disabled = 0 LIMIT 1",
+            )?
+            .exists([])?)
+        })
+    }
+
     /// One user by id.
     pub fn user(&self, id: &str) -> Result<Option<User>> {
         self.read(|c| {
