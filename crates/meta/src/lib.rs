@@ -89,6 +89,15 @@ CREATE TABLE IF NOT EXISTS role_history (
 );
 CREATE INDEX IF NOT EXISTS role_history_person ON role_history (project, distinct_id, since);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS api_tokens (
+  id TEXT PRIMARY KEY,
+  hash TEXT NOT NULL UNIQUE,
+  scope TEXT NOT NULL,
+  projects TEXT,
+  label TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_used TEXT
+);
 CREATE TABLE IF NOT EXISTS feature_maps (
   project TEXT NOT NULL,
   version INTEGER NOT NULL,
@@ -391,6 +400,35 @@ fn token(len: usize) -> String {
     (0..len)
         .map(|_| CHARS[rng.random_range(0..CHARS.len())] as char)
         .collect()
+}
+
+/// An API token with a scope , as listed: never its value.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ApiToken {
+    /// Stable id, used to revoke it.
+    pub id: String,
+    /// `read`, `write` or `admin`.
+    pub scope: String,
+    /// The projects it may reach; `None`: every project.
+    pub projects: Option<Vec<String>>,
+    /// What it is for.
+    pub label: String,
+    /// RFC 3339.
+    pub created_at: String,
+    /// RFC 3339, when it was last used.
+    pub last_used: Option<String>,
+}
+
+fn api_token_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ApiToken> {
+    let projects: Option<String> = r.get(2)?;
+    Ok(ApiToken {
+        id: r.get(0)?,
+        scope: r.get(1)?,
+        projects: projects.map(|p| p.split(',').map(str::to_owned).collect()),
+        label: r.get(3)?,
+        created_at: r.get(4)?,
+        last_used: r.get(5)?,
+    })
 }
 
 /// Prefix of a hashed secret in `settings`.
@@ -773,6 +811,88 @@ impl Meta {
     /// SHA-256 is stored, so a leaked database does not leak live links.
     pub fn create_login_link(&self, ttl_secs: i64) -> Result<String> {
         self.create_login_link_for(None, ttl_secs)
+    }
+
+    /// Create an API token : `scope` is `read`, `write` or `admin`;
+    /// `projects` limits it (`None`: every project). Only its hash is
+    /// stored; the token is returned once.
+    pub fn create_api_token(
+        &self,
+        scope: &str,
+        projects: Option<&[String]>,
+        label: &str,
+    ) -> Result<(ApiToken, String)> {
+        if !matches!(scope, "read" | "write" | "admin") {
+            return Err(MetaError::Invalid("scope must be read, write or admin"));
+        }
+        let plain = format!("olt_{}", token(40));
+        let t = ApiToken {
+            id: format!("tok_{}", token(12)),
+            scope: scope.to_owned(),
+            projects: projects.map(<[String]>::to_vec),
+            label: label.chars().take(100).collect(),
+            created_at: Utc::now().to_rfc3339(),
+            last_used: None,
+        };
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO api_tokens (id, hash, scope, projects, label, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    t.id,
+                    sha256_hex(&plain),
+                    t.scope,
+                    t.projects.as_ref().map(|p| p.join(",")),
+                    t.label,
+                    t.created_at
+                ],
+            )?;
+            Ok(())
+        })?;
+        Ok((t, plain))
+    }
+
+    /// The API token with this value, if it exists (its use is recorded).
+    pub fn api_token(&self, plain: &str) -> Result<Option<ApiToken>> {
+        if plain.len() > 100 || !plain.starts_with("olt_") {
+            return Ok(None);
+        }
+        let hash = sha256_hex(plain);
+        let found = self.with(|c| {
+            c.query_row(
+                "SELECT id, scope, projects, label, created_at, last_used FROM api_tokens WHERE hash = ?1",
+                [&hash],
+                api_token_row,
+            )
+            .optional()
+            .map_err(Into::into)
+        })?;
+        if found.is_some() {
+            let now = Utc::now().to_rfc3339();
+            self.with(|c| {
+                c.execute(
+                    "UPDATE api_tokens SET last_used = ?2 WHERE hash = ?1",
+                    params![hash, now],
+                )?;
+                Ok(())
+            })?;
+        }
+        Ok(found)
+    }
+
+    /// Every API token (never their values).
+    pub fn api_tokens(&self) -> Result<Vec<ApiToken>> {
+        self.with(|c| {
+            let mut st = c.prepare(
+                "SELECT id, scope, projects, label, created_at, last_used FROM api_tokens ORDER BY created_at",
+            )?;
+            let rows = st.query_map([], api_token_row)?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+    }
+
+    /// Revoke an API token; false if there was none with this id.
+    pub fn revoke_api_token(&self, id: &str) -> Result<bool> {
+        self.with(|c| Ok(c.execute("DELETE FROM api_tokens WHERE id = ?1", [id])? > 0))
     }
 
     /// A one-time login link for a user (`None`: the owner, i.e. admin of
