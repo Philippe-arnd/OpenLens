@@ -169,7 +169,7 @@ Measured on 2026-11-22, on one core of a 4-vCPU VPS ([docs/benchmarks.md](docs/b
 
 ## 🚧 Known limits
 
-- **One node.** The WAL and SQLite have one writer, so Kubernetes runs one replica. The S3 option is a backup copy, not shared storage.
+- **One node.** The WAL and SQLite have one writer, so Kubernetes runs one replica. S3 holds a copy of closed days, not shared storage; with the opt-in cold tier, it becomes the only copy of days older than 120 days (D-032).
 - **Web first.** There is no native mobile SDK yet.
 - **Sessions are cut at UTC midnight** by the SDK; KPI days follow the project's time zone.
 - **Small samples:** insight cards wait for at least 8 users per compared group.

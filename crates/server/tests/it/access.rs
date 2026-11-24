@@ -222,6 +222,7 @@ const ROUTES: &[(&str, &str, Access)] = &[
     ("POST", "/settings/sessions/revoke", Admin),
     ("GET", "/settings/storage", Admin),
     ("POST", "/settings/storage/s3", Admin),
+    ("POST", "/settings/storage/cold", Admin),
     ("POST", "/settings/storage/backups", Admin),
     ("POST", "/settings/storage/backups/run", Admin),
     ("GET", "/settings/storage/backups/latest.tar.gz", Admin),

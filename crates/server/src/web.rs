@@ -119,6 +119,7 @@ pub(crate) fn routes() -> Router<AppState> {
         )
         .route("/settings/storage", get(crate::storage::page))
         .route("/settings/storage/s3", post(crate::storage::s3))
+        .route("/settings/storage/cold", post(crate::storage::cold))
         .route("/settings/storage/backups", post(crate::storage::plan))
         .route(
             "/settings/storage/backups/run",
