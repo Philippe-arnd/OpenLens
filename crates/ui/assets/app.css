@@ -208,6 +208,7 @@ form.inline input[type=number] { width: 70px; }
 pre.copy { white-space: pre-wrap; word-break: break-all; background: var(--raised); border: 1px dashed var(--line); padding: 12px; border-radius: var(--radius-s); user-select: all; }
 
 footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px; border-top: 1px solid var(--line-2); }
+footer a.update-security { color: var(--bad); font-weight: 600; }
 /* Phones (#170): nothing wider than the screen. Wide tables scroll inside
    their card, the navigation scrolls sideways, and controls are big enough
    to tap. */

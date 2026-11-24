@@ -4,6 +4,11 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Security
+
+- **Fixed in this release** (#415): the Ask `k=5` anonymity bypass (NSEC-01), the untrusted public URL (SEC-06), the OIDC email trust gap (SEC-07) and the cold-tier markers lost on restart (NSEC-02).
+- **Security releases say so** (#416): when the newer release's notes carry a *Security* section, every page's footer reads "Security update available" (highlighted) instead of the plain notice, and the server logs a warning.
+
 ### Fixed
 
 - **Kustomize base on the current image** (#400, #407): the plain manifests and the example overlay pinned `v0.1.0`, which has no `/readyz`, so with the new readiness probe the pod never became ready. They now pin `v0.3.0`, and so does the chart's default `appVersion`.
