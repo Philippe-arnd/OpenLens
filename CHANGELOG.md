@@ -22,6 +22,8 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 - **Theme without rewriting pages** (#300): the theme and sidebar cookies are read once per request, and the page template writes them on `<html>`; no middleware reads a response back any more.
 
+- **`xtask bench-gen`** (#321): a deterministic synthetic app of any size (63 M events over 90 days by default), written straight into a data dir for scale benchmarks.
+
 - **Three privacy profiles** (#316): docs/privacy.md describes Exempt (cookieless, no replay; designed to meet the CNIL exemption conditions, which it lists for you to check), Standard and Full, what Ask sends to the model, and links a record-of-processing and a data-processing-clause template. The nightly browser check verifies the first two on a real page (no cookie, `localStorage` or not, no replay, no device id when exempt).
 
 - **The board page shows at once** (#301): when its board is not cached yet, the page head, the sidebar and a *Computing the board…* line are sent at once, and the board follows in the same page when it is ready (no script: the line hides itself in CSS). A cached board is sent whole, as before.
