@@ -41,6 +41,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: stable
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5
       - name: decide
         id: d
         env:
@@ -84,6 +85,10 @@ jobs:
           gh workflow run publish.yml -f tag="$TAG"
           gh workflow run release.yml --ref "$TAG"
           gh workflow run k8s.yml --ref "$TAG"
+          # The site and its screenshots follow `release: published`, which a
+          # release made with this token does not send either.
+          gh workflow run pages.yml --ref main || true
+          gh workflow run screenshots.yml --ref main || true
           # 2b. An hour later, check that every part landed (#258).
           gh workflow run release-summary.yml -f tag="$TAG" -f wait_minutes=60 || true
           # 3. A PR names the release in the CHANGELOG and moves main to the
@@ -93,17 +98,30 @@ jobs:
           sed -i "s/^## \[Unreleased\]$/## [Unreleased]\n\n## [$V] - $today/" CHANGELOG.md
           sed -i "s#^\[Unreleased\]: .*#[Unreleased]: https://github.com/$GITHUB_REPOSITORY/compare/$TAG...HEAD\n[$V]: https://github.com/$GITHUB_REPOSITORY/compare/$prev...$TAG#" CHANGELOG.md
           sed -i "0,/^version = \"$V\"/s//version = \"$next\"/" Cargo.toml
-          cargo update -w --offline -q || cargo update -w -q
+          cargo update -w --offline -q 2>/dev/null || cargo update -w -q
+          # Plain-manifest and chart defaults name the release just cut.
+          sed -i "s/^appVersion: .*/appVersion: \"$TAG\"/; s/^version: .*/version: $V/" deploy/helm/openlens/Chart.yaml
+          sed -i -E "s/^(\s*newTag:) .*/\\1 $TAG/" deploy/k8s/example/kustomization.yaml
+          scripts/render-k8s.sh
           branch="release/develop-$next"
           git checkout -q -b "$branch"
           git commit -qam "Release $TAG, develop $next"
           git push -q origin "$branch"
           body="Names $TAG in the CHANGELOG and moves main to $next. Opened by the release train."
-          if url=$(gh pr create --base main --head "$branch" --title "Release $TAG, develop $next" --body "$body") \
-             && gh pr merge "$url" --merge --delete-branch; then
+          # A PR opened with this token starts no CI: start it on the branch
+          # (its checks land on the same commit), wait, then merge.
+          merged() {
+            url=$(gh pr create --base main --head "$branch" --title "Release $TAG, develop $next" --body "$body") || return 1
+            gh workflow run ci.yml --ref "$branch" || return 1
+            sleep 20
+            run=$(gh run list --workflow ci.yml --branch "$branch" --event workflow_dispatch --limit 1 --json databaseId -q '.[0].databaseId')
+            [ -n "$run" ] && gh run watch "$run" --exit-status --interval 60 > /dev/null || return 1
+            gh pr merge "$url" --merge --delete-branch
+          }
+          if merged; then
             echo "::notice::released $TAG; main is now $next ($url)"
           else
             gh issue create --title "Release train: merge $branch" --label release-hold \
-              --body "$TAG is published, but the follow-up PR could not be opened or merged by the workflow token. Open and merge \`$branch\` (or allow GitHub Actions to create pull requests in Settings → Actions). The \`release-hold\` label stops the next train until then." || true
+              --body "$TAG is published, but the follow-up PR could not be opened or merged by the workflow token. Open and merge \`$branch\`. If the log says *GitHub Actions is not permitted to create or approve pull requests*, tick *Allow GitHub Actions to create and approve pull requests* in Settings → Actions → General. The \`release-hold\` label stops the next train until then." || true
             echo "::warning::released $TAG; open and merge $branch by hand"
           fi

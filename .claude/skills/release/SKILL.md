@@ -41,6 +41,7 @@ Open (or label) an issue with `release-hold` and say why. Remove the label to le
 - the GitHub release `vX.Y.Z` exists, not a pre-release, with binaries, SDK bundles, chart and `SHA256SUMS`;
 - `ghcr.io/philippe-arnd/openlens:vX.Y.Z` and `:X.Y` exist, and the `Image` run (with the upgrade and rollback check) is green;
 - the chart `oci://ghcr.io/philippe-arnd/charts/openlens --version X.Y.Z` is published (`k8s.yml` green);
+- the "Release vX.Y.Z, develop …" PR merged: it also moves the chart's `appVersion` and the Kustomize pins to `vX.Y.Z` (plain-manifest users install that tag). By hand (hotfix): edit `Chart.yaml` and `deploy/k8s/example`, then `scripts/render-k8s.sh`;
 - the Pages site shows `vX.Y.Z`;
 - the screenshots PR merged (or says the images did not change);
 - `main` is on the next minor (`Cargo.toml`) and the CHANGELOG names the version.
