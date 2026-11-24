@@ -745,6 +745,47 @@ fn main() -> ExitCode {
 mod http_tests {
     use super::{api_error, plain_http_ok};
 
+    /// `/api/projects/{project}/flows?{}` as `/api/projects/{}/flows`.
+    fn template(path: &str) -> String {
+        path.split('/')
+            .map(|seg| {
+                if seg.starts_with('{') {
+                    "{}".to_owned()
+                } else {
+                    seg.split(['?', '{']).next().unwrap_or("").to_owned()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("/")
+    }
+
+    /// Every API path the CLI and its MCP tools call is in the server's
+    /// OpenAPI document (#312), so a renamed route fails here, not in use.
+    #[test]
+    fn every_path_the_cli_calls_is_in_the_contract() {
+        let doc = openlens_server::openapi_document();
+        let known: std::collections::BTreeSet<String> = doc["paths"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|p| template(&format!("/api{p}")))
+            .collect();
+        let mut checked = 0;
+        for src in [include_str!("main.rs"), include_str!("mcp.rs")] {
+            for lit in src
+                .split('"')
+                .filter(|l| l.starts_with("/api/") && !l.ends_with('/'))
+            {
+                assert!(
+                    known.contains(&template(lit)),
+                    "{lit} is not in /api/openapi.json"
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 40, "found only {checked} paths");
+    }
+
     #[test]
     fn errors_are_read_from_their_code_not_their_text() {
         let v =

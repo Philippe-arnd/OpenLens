@@ -2392,6 +2392,7 @@ dependencies = [
  "openlens-featuremap",
  "openlens-flags",
  "openlens-mcp",
+ "openlens-server",
  "serde",
  "serde_json",
  "tempfile",

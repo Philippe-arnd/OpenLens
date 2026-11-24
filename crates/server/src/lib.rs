@@ -101,6 +101,12 @@ pub type DiskSpace = fn(&std::path::Path) -> Option<(u64, u64)>;
 pub use capture::disk_space;
 pub use serve::{HEADER_READ_TIMEOUT, serve};
 
+/// The OpenAPI document of the API (#312), for clients to check
+/// themselves against.
+pub fn openapi_document() -> serde_json::Value {
+    openapi::document()
+}
+
 /// Build the application router.
 pub fn router(state: AppState) -> Router {
     openlens_ui::set_prefs_source(web::current_prefs);

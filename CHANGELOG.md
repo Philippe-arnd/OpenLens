@@ -6,6 +6,8 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Added
 
+- **The CLI checked against the API contract** (#312, part 3): a test fails when the CLI or its MCP tools call a path that `/api/openapi.json` does not list.
+
 - **Versioned API** (#312, part 2): every API route also answers under `/api/v1/...`, and `/api/openapi.json` describes them all (method, scope, parameters, the error codes). A test keeps the document equal to the routes in the code. `/api/...` stays as an alias.
 
 - **Query guard rails** (#326, part A): Ask, the SQL page and the SQL API run one long query at a time (a second one is told to retry, 503 on the API) so the board never waits. Running out of memory gives a plain message. Compacted days are sorted by event and time in smaller row groups, so queries skip what they do not need (D-029).
