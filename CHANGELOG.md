@@ -6,6 +6,8 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Added
 
+- **Daily rollups** (#322): each closed day is rolled up into `person_q` and `metric_q` (15-minute buckets, so any time zone gets its own days), visible to SQL and Ask's full view. Erasing someone and retention drop them too (D-025). The board starts reading them in #323.
+
 - **Measured at scale** (#321): `cargo xtask bench-gen` and the `scale` job of `perf.yml` measured 63 M events over 90 days: a 22 s board on first load and 2.6 GB of memory. The sizing docs now say a small server holds about 4 M events in 90 days (D-023).
 
 - **Stability policy** (#317): docs/stability.md says what a beta release may change, what stays compatible (stored events, feature map, SDKs, `/api/v1` once it exists) and the upgrade order (D-024). The README shows the beta status.

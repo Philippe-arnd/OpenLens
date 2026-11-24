@@ -48,6 +48,8 @@ pub enum StorageError {
     InvalidProject,
 }
 
+pub mod rollup;
+
 /// Result alias.
 pub type Result<T> = std::result::Result<T, StorageError>;
 
@@ -506,12 +508,17 @@ pub fn sync_dir(dir: &Path) -> Result<()> {
 /// durable on return: the file, its directory entry, and a directory just
 /// created in its parent.
 fn write_parquet(dir: &Path, batch: &RecordBatch) -> Result<PathBuf> {
+    write_parquet_as(dir, &uuid::Uuid::now_v7().to_string(), batch)
+}
+
+/// Write a batch to `dir/<name>.parquet` atomically, replacing any file of
+/// that name, with the same durability as [`write_parquet`].
+pub(crate) fn write_parquet_as(dir: &Path, name: &str, batch: &RecordBatch) -> Result<PathBuf> {
     let created = !dir.is_dir();
     fs::create_dir_all(dir)?;
     if created && let Some(parent) = dir.parent() {
         sync_dir(parent)?;
     }
-    let name = uuid::Uuid::now_v7().to_string();
     let tmp = dir.join(format!(".{name}.tmp"));
     let dst = dir.join(format!("{name}.parquet"));
     let props = WriterProperties::builder()
@@ -644,7 +651,7 @@ pub fn erase(root: &Path, project: &str, ids: &HashSet<String>) -> Result<usize>
     if ids.is_empty() {
         return Ok(0);
     }
-    rewrite_files(root, project, |b| {
+    let removed = rewrite_files(root, project, |b| {
         let Some(col) = b
             .column_by_name("distinct_id")
             .and_then(|c| c.as_any().downcast_ref::<arrow::array::StringArray>())
@@ -656,7 +663,13 @@ pub fn erase(root: &Path, project: &str, ids: &HashSet<String>) -> Result<usize>
             .collect();
         let gone = b.num_rows() - keep.true_count();
         Ok((arrow::compute::filter_record_batch(b, &keep)?, gone))
-    })
+    })?;
+    // The rollups held these people too: rebuild them from what is left.
+    if removed > 0 {
+        rollup::bump();
+        rollup::drop_project(root, project)?;
+    }
+    Ok(removed)
 }
 
 /// Clean the page URL of every stored event with
@@ -767,13 +780,15 @@ pub const EVENT_RETENTION_DAYS: i64 = 400;
 /// Returns the number of days removed.
 pub fn prune(root: &Path, project: &str, now: DateTime<Utc>) -> Result<usize> {
     let pdir = project_dir(root, project)?;
-    if !pdir.is_dir() {
-        return Ok(0);
-    }
     let cutoff = format!(
         "date={}",
         (now - chrono::Duration::days(EVENT_RETENTION_DAYS)).format("%Y-%m-%d")
     );
+    // Rollups go with their day: they never outlive the events (#322).
+    rollup::prune(root, project, &cutoff)?;
+    if !pdir.is_dir() {
+        return Ok(0);
+    }
     let mut removed = 0;
     for entry in fs::read_dir(&pdir)? {
         let path = entry?.path();
