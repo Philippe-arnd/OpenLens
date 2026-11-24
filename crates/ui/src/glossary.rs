@@ -137,6 +137,23 @@ mod tests {
         ];
         let mut seen = 0;
         for src in sources {
+            // tile_to(&detail_url(.., "/path", f), "accent", "glyph", "Label", …)
+            for call in src.split("tile_to(").skip(1) {
+                let lits: Vec<&str> = call
+                    .split('"')
+                    .skip(1)
+                    .step_by(2)
+                    .filter(|l| !l.starts_with('/'))
+                    .take(3)
+                    .collect();
+                if let Some(label) = lits.get(2) {
+                    seen += 1;
+                    assert!(
+                        super::definition(label).is_some(),
+                        "tile {label:?} has no glossary entry"
+                    );
+                }
+            }
             for call in src.split("tile(").skip(1) {
                 // tile("accent", "glyph", "Label" | &format!("Label (…)", …)
                 let args: Vec<&str> = call.splitn(4, ',').collect();
