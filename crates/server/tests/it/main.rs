@@ -31,6 +31,7 @@ fn harness() -> Harness {
         query: openlens_query::QueryEngine::new(dir.path(), openlens_query::Limits::default()),
         data_dir: dir.path().to_path_buf(),
         admin_token: "adm_test".into(),
+        session_key: "session-key-for-tests".into(),
         boards: Default::default(),
         flushing: Default::default(),
     };
@@ -4359,5 +4360,29 @@ async fn direct_clients_are_rate_limited_whatever_headers_they_send() {
     assert_eq!(
         burst_from(&h, "/capture", ev, "10.0.0.2:4000", true).await,
         0
+    );
+}
+
+#[tokio::test]
+async fn the_admin_token_cannot_forge_a_session() {
+    use hmac::{Hmac, Mac};
+    let h = harness();
+    let exp = chrono::Utc::now().timestamp() + 3600;
+    let mut mac = Hmac::<sha2::Sha256>::new_from_slice(b"adm_test").unwrap();
+    mac.update(format!("session:{exp}:owner").as_bytes());
+    let forged = format!(
+        "ol_session={exp}.owner.{}",
+        hex::encode(mac.finalize().into_bytes())
+    );
+    let r = get(&h, "/p/default", Some(&forged), false).await;
+    assert!(
+        r.status().is_redirection(),
+        "a token copied from the store signs nothing"
+    );
+    // A real sign-in still works.
+    let owner = login_cookie(&h).await;
+    assert_eq!(
+        get(&h, "/p/default", Some(&owner), false).await.status(),
+        StatusCode::OK
     );
 }

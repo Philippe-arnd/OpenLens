@@ -10,6 +10,7 @@ use ring::aead::{CHACHA20_POLY1305, LessSafeKey, NONCE_LEN, Nonce, UnboundKey};
 use ring::rand::{SecureRandom, SystemRandom};
 
 const FILE: &str = ".secret.key";
+const SESSION_FILE: &str = ".session.key";
 
 fn key(data_dir: &Path) -> Result<LessSafeKey, String> {
     let bytes = match std::env::var("OPENLENS_SECRET_KEY")
@@ -51,6 +52,26 @@ fn write_private(path: &Path, b: &[u8]) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())
+}
+
+/// The key that signs session cookies and the OIDC flow:
+/// `<data>/.session.key`, made on first use (mode 0600). It is not the
+/// admin token, so a copy of the store or a log line with the token cannot
+/// forge a session, and backups (which copy only `meta.db` and the data
+/// trees) do not carry it. A new key signs everyone out.
+pub fn session_key(data_dir: &Path) -> Result<String, String> {
+    let path = data_dir.join(SESSION_FILE);
+    if let Ok(b) = std::fs::read(&path)
+        && b.len() == 32
+    {
+        return Ok(hex::encode(b));
+    }
+    let mut b = vec![0u8; 32];
+    SystemRandom::new()
+        .fill(&mut b)
+        .map_err(|_| "no randomness")?;
+    write_private(&path, &b)?;
+    Ok(hex::encode(b))
 }
 
 /// Seal `plain`: `hex(nonce || ciphertext || tag)`.
