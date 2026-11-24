@@ -676,6 +676,37 @@ pub fn erase(root: &Path, project: &str, ids: &HashSet<String>) -> Result<usize>
     Ok(removed)
 }
 
+/// [`erase`] for one day only (a day brought back from the cold tier,
+/// #326). Returns the events removed.
+pub fn erase_day(
+    root: &Path,
+    project: &str,
+    day: chrono::NaiveDate,
+    ids: &HashSet<String>,
+) -> Result<usize> {
+    let dir = project_dir(root, project)?.join(format!("date={}", day.format("%Y-%m-%d")));
+    if ids.is_empty() || !dir.is_dir() {
+        return Ok(0);
+    }
+    let removed = rewrite_day(&dir, &mut |b: &RecordBatch| {
+        let Some(col) = b
+            .column_by_name("distinct_id")
+            .and_then(|c| c.as_any().downcast_ref::<arrow::array::StringArray>())
+        else {
+            return Ok((b.clone(), 0));
+        };
+        let keep: arrow::array::BooleanArray = (0..col.len())
+            .map(|i| Some(col.is_null(i) || !ids.contains(col.value(i))))
+            .collect();
+        let gone = b.num_rows() - keep.true_count();
+        Ok((arrow::compute::filter_record_batch(b, &keep)?, gone))
+    })?;
+    if removed > 0 {
+        rollup::bump();
+    }
+    Ok(removed)
+}
+
 /// Clean the page URL of every stored event with
 /// [`openlens_event::clean_url`] (#290): files written before URLs were
 /// cleaned at capture still hold query strings. Returns the number of

@@ -350,6 +350,44 @@ pub(crate) fn list(cfg: &Config, prefix: &str) -> Result<Vec<String>, String> {
         .collect())
 }
 
+/// `(key, size)` of the objects under `prefix` (below the configured
+/// prefix), at most 1000 (#326).
+pub(crate) fn list_sized(cfg: &Config, prefix: &str) -> Result<Vec<(String, u64)>, String> {
+    let full = format!("{}{prefix}", cfg.prefix);
+    let body = ok(
+        request(
+            cfg,
+            "GET",
+            "",
+            &[("list-type", "2"), ("prefix", &full)],
+            &[],
+        )?,
+        "list",
+    )?;
+    let text = String::from_utf8_lossy(&body);
+    let tag = |t: &str, name: &str| -> Option<String> {
+        Some(
+            t.split(&format!("<{name}>"))
+                .nth(1)?
+                .split(&format!("</{name}>"))
+                .next()?
+                .to_owned(),
+        )
+    };
+    Ok(text
+        .split("<Contents>")
+        .skip(1)
+        .filter_map(|c| {
+            let key = tag(c, "Key")?.replace("&amp;", "&");
+            let size = tag(c, "Size")?.parse().ok()?;
+            Some((
+                key.strip_prefix(&cfg.prefix).unwrap_or(&key).to_owned(),
+                size,
+            ))
+        })
+        .collect())
+}
+
 /// Put, read back and delete a probe object: are the settings right?
 pub(crate) fn test(cfg: &Config) -> Result<(), String> {
     let key = format!(".openlens-probe-{}", chrono::Utc::now().timestamp());

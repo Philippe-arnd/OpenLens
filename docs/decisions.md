@@ -206,3 +206,11 @@ Append-only. Each entry: id, date, decision, why, consequences.
 
 **Consequences:** a new API route needs a line in the table, and CI says so. Removing a route or a field from `/api/v1` follows D-024: one minor release of deprecation first.
 
+## D-031 (2026-11-24, agent for #326, owner's go) With S3 set, old event days live on S3 only
+
+**Decision:** when S3 is configured, an event day older than **120 days** moves to S3. It moves only once its rollups exist, its upload is current, and S3 lists every one of its files at the same size. A marker `cold/project=<p>/date=<d>` records it. 120 rather than 90 days, because goals read 112 days of raw events: every dashboard view keeps working. Forgetting someone also reaches cold days: each one is brought back, rewritten without them, sent up again (new objects first, old ones deleted), and moved off the disk again, by the hourly S3 job. A person's export brings the project's cold days back first. Cold days older than 400 days are deleted from S3 (D-015). Without S3 nothing changes. This amends D-016 for those days: S3 is then their only copy.
+
+**Why:** a long-lived install keeps its disk to the last four months of raw events, while rollups (D-026) and S3 keep the rest.
+
+**Consequences:** local backups (`openlens backup`) hold only the days on disk; S3 holds the rest. Restoring a backup without the S3 bucket loses the cold days. Queries on raw events never read cold days; investigations further back (#325) will bring them back on demand.
+
