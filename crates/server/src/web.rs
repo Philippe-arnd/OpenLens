@@ -658,7 +658,7 @@ pub(crate) async fn nav_layer(
         "/settings/tokens",
         "/settings/ai",
         "/settings/storage",
-        "/team",
+        "/users",
         "/me",
     ]
     .iter()
