@@ -152,10 +152,12 @@ async fn serve() -> ExitCode {
     };
     tracing::info!(%addr, "openlens listening");
 
-    let app = openlens_server::router(state.clone())
-        .into_make_service_with_connect_info::<std::net::SocketAddr>();
-    let serve = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal());
-    let served = serve.await;
+    let served = openlens_server::serve(
+        listener,
+        openlens_server::router(state.clone()),
+        shutdown_signal(),
+    )
+    .await;
     match openlens_server::flush_now(&state) {
         Ok(n) => tracing::info!(n, "flushed buffered events on shutdown"),
         Err(err) => tracing::error!(%err, "final flush failed; events stay in the WAL"),
@@ -255,5 +257,6 @@ fn build_state() -> Result<openlens_server::AppState, String> {
         boards: Default::default(),
         flushing: Default::default(),
         metrics: Default::default(),
+        disk_space: openlens_server::disk_space,
     })
 }

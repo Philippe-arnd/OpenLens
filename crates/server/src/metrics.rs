@@ -70,7 +70,7 @@ pub(crate) async fn metrics(State(state): State<AppState>, headers: HeaderMap) -
     let m = &state.metrics;
     let get = |c: &AtomicU64| c.load(Ordering::Relaxed);
     let buffered = state.writer.lock().map_or(0, |w| w.buffered() as u64);
-    let (free, total) = crate::capture::disk_space(&state.data_dir).unwrap_or((0, 0));
+    let (free, total) = (state.disk_space)(&state.data_dir).unwrap_or((0, 0));
     let last = get(&m.last_flush_unix);
     let now = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or(0);
     let mut out = String::new();
@@ -98,6 +98,12 @@ pub(crate) async fn metrics(State(state): State<AppState>, headers: HeaderMap) -
             "counter",
             "Requests answered 429.",
             get(&m.rate_limited),
+        ),
+        (
+            "query_timeouts_total",
+            "counter",
+            "SQL queries stopped at their time limit.",
+            state.query.timeouts(),
         ),
         (
             "disk_refused_total",
@@ -185,7 +191,7 @@ fn not_ready(state: &AppState) -> Option<&'static str> {
         return Some("data volume not writable");
     }
     let _ = std::fs::remove_file(&probe);
-    if let Some((free, total)) = crate::capture::disk_space(&state.data_dir)
+    if let Some((free, total)) = (state.disk_space)(&state.data_dir)
         && crate::capture::space_low(free, total)
     {
         return Some("data volume almost full");

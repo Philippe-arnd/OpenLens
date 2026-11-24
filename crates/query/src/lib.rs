@@ -174,6 +174,8 @@ pub struct QueryEngine {
     snapshots: Arc<Vec<(String, String, Arc<MemTable>)>>,
     /// Per project: the identity tables and when they were read.
     aliases: AliasCache,
+    /// Queries stopped at the time limit, shared by every copy (#346).
+    timeouts: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl QueryEngine {
@@ -186,7 +188,19 @@ impl QueryEngine {
             runtime,
             snapshots: Arc::default(),
             aliases: AliasCache::default(),
+            timeouts: Arc::default(),
         }
+    }
+
+    /// How many queries stopped at the time limit since the start.
+    pub fn timeouts(&self) -> u64 {
+        self.timeouts.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn timed_out(&self, limit: Duration) -> QueryError {
+        self.timeouts
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        QueryError::Timeout(limit)
     }
 
     /// A copy of this engine where `name` is also a table for `project`:
@@ -249,7 +263,7 @@ impl QueryEngine {
         };
         let table = match tokio::time::timeout(self.limits.timeout, run).await {
             Ok(r) => r?,
-            Err(_) => return Err(QueryError::Timeout(self.limits.timeout)),
+            Err(_) => return Err(self.timed_out(self.limits.timeout)),
         };
         Ok(table.map(|t| {
             let mut snaps: Vec<_> = self
@@ -476,7 +490,7 @@ impl QueryEngine {
         let started = Instant::now();
         let out = match tokio::time::timeout(limit, run).await {
             Ok(r) => r,
-            Err(_) => Err(QueryError::Timeout(limit)),
+            Err(_) => Err(self.timed_out(limit)),
         };
         // `RUST_LOG=openlens_query=debug` shows what each query costs.
         tracing::debug!(ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX), sql = %sql.chars().take(160).collect::<String>(), "query");

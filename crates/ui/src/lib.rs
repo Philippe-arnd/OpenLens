@@ -287,6 +287,25 @@ pub fn login(failed: bool, sso: bool, email: bool) -> Markup {
     )
 }
 
+/// The page a login link opens: a button that uses the link. A GET never
+/// uses it, so a link preview (Slack, Teams, Outlook Safe Links) leaves it
+/// valid for the person it was sent to (#315).
+pub fn login_continue(action: &str) -> Markup {
+    layout(
+        "Log in",
+        None,
+        html! {
+            section.login {
+                h1 { "Hello " span.wave aria-hidden="true" { "👋" } }
+                p.muted { "This link opens your board once. Continue to log in." }
+                form method="post" action=(action) {
+                    button type="submit" autofocus { "Continue to my board" }
+                }
+            }
+        },
+    )
+}
+
 /// First login with the admin token or the agent's link: create your own
 /// admin account (named in the team list, and the one SSO signs in to).
 pub fn welcome(sso: bool, error: Option<&str>) -> Markup {

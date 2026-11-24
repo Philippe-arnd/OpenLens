@@ -31,6 +31,7 @@ mod reword;
 mod s3;
 mod scopes;
 pub mod secrets;
+mod serve;
 mod settings;
 mod share;
 mod storage;
@@ -79,7 +80,16 @@ pub struct AppState {
     pub flushing: Arc<Mutex<()>>,
     /// Counters for `/metrics` (#296).
     pub metrics: Arc<metrics::Metrics>,
+    /// Free and total bytes of the volume holding a directory: [`disk_space`]
+    /// in production; tests put a fake here to fill the disk (#346).
+    pub disk_space: DiskSpace,
 }
+
+/// How the server reads the free space of its data volume.
+pub type DiskSpace = fn(&std::path::Path) -> Option<(u64, u64)>;
+
+pub use capture::disk_space;
+pub use serve::{HEADER_READ_TIMEOUT, serve};
 
 /// Build the application router.
 pub fn router(state: AppState) -> Router {

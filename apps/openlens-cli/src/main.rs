@@ -250,7 +250,7 @@ enum Command {
     /// Print the rule to add to the app's AGENTS.md / CLAUDE.md so its agents
     /// keep the feature map current.
     Rules,
-    /// Create a one-time login link for the PM (valid 7 days).
+    /// Create a one-time login link for the PM (valid 24 hours; invites: 7 days).
     LoginLink {
         /// Invite this person (else: an owner link, full access).
         #[arg(long)]

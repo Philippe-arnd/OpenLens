@@ -233,7 +233,7 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "login_link",
-                description: "A one-time login link (7 days). Without email: an owner link for the PM. With email (+ role viewer|admin, optional projects): invites that person with that access.",
+                description: "A one-time login link. Without email: an owner link for the PM (valid 24 hours). With email (+ role viewer|admin, optional projects): invites that person with that access (valid 7 days).",
                 input_schema: json!({"type":"object","properties":{"email":{"type":"string"},"role":{"type":"string","enum":["viewer","admin"]},"projects":{"type":"array","items":{"type":"string"}}}}),
             },
         ]

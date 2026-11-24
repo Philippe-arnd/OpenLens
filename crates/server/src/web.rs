@@ -33,7 +33,7 @@ pub(crate) fn routes() -> Router<AppState> {
             get(crate::users::me_page).post(crate::users::me_save),
         )
         .route("/logout", post(logout))
-        .route("/l/{token}", get(login_link))
+        .route("/l/{token}", get(login_link_page).post(login_link))
         .route("/p/{project}", get(board))
         .route("/p/{project}/events", get(events))
         .route("/p/{project}/errors", get(errors_page))
@@ -424,6 +424,45 @@ async fn logout(headers: HeaderMap) -> Response {
     )
 }
 
+/// GET of a login link: a "Continue" page that leaves the link valid
+/// (#315). It does not look the token up: an expired link shows "Link
+/// expired" after the POST, and the GET tells nothing about a token.
+async fn login_link_page(Path(token): Path<String>) -> Response {
+    if token.len() > 100
+        || !token
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    {
+        return link_expired().await;
+    }
+    let mut r = html(
+        StatusCode::OK,
+        openlens_ui::login_continue(&format!("/l/{token}")),
+    );
+    let h = r.headers_mut();
+    h.insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    h.insert(
+        axum::http::header::REFERRER_POLICY,
+        axum::http::HeaderValue::from_static("no-referrer"),
+    );
+    r
+}
+
+async fn link_expired() -> Response {
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    html(
+        StatusCode::UNAUTHORIZED,
+        openlens_ui::message(
+            "Link expired",
+            "This login link was already used or has expired. Ask your agent for a new one.",
+        ),
+    )
+}
+
+/// POST of a login link (the "Continue" button): uses it, once.
 async fn login_link(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -435,14 +474,7 @@ async fn login_link(
         _ => None,
     };
     let Some(who) = who else {
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        return html(
-            StatusCode::UNAUTHORIZED,
-            openlens_ui::message(
-                "Link expired",
-                "This login link was already used or has expired. Ask your agent for a new one.",
-            ),
-        );
+        return link_expired().await;
     };
     if who != auth::OWNER {
         let _ = state.meta.touch_sign_in(&who);

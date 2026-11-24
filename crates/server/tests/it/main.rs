@@ -35,6 +35,7 @@ fn harness() -> Harness {
         boards: Default::default(),
         flushing: Default::default(),
         metrics: Default::default(),
+        disk_space: openlens_server::disk_space,
     };
     Harness {
         _dir: dir,
@@ -278,11 +279,30 @@ async fn login_links_open_the_board_exactly_once() {
     .unwrap();
     let url = body["url"].as_str().unwrap();
     let path = &url[url.find("/l/").unwrap()..];
-    let first = get(&h, path, None, false).await;
+    // Link previews GET the link: that must not use it (#315).
+    for _ in 0..2 {
+        let page = get(&h, path, None, false).await;
+        assert_eq!(page.status(), StatusCode::OK);
+        assert!(page.headers().get("set-cookie").is_none());
+    }
+    let first = use_link(&h, path).await;
     assert!(first.status().is_redirection());
     assert!(first.headers().get("set-cookie").is_some());
-    let second = get(&h, path, None, false).await;
+    let second = use_link(&h, path).await;
     assert_eq!(second.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// The "Continue" button of a login link page.
+async fn use_link(h: &Harness, path: &str) -> axum::response::Response {
+    router(h.state.clone())
+        .oneshot(
+            Request::post(path)
+                .header("sec-fetch-site", "same-origin")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
@@ -1113,7 +1133,7 @@ async fn invite(h: &Harness, body: serde_json::Value) -> String {
     )
     .unwrap();
     let url = v["url"].as_str().unwrap();
-    let r = get(h, &url[url.find("/l/").unwrap()..], None, false).await;
+    let r = use_link(h, &url[url.find("/l/").unwrap()..]).await;
     r.headers()["set-cookie"]
         .to_str()
         .unwrap()
@@ -4265,6 +4285,7 @@ const ROUTES: &[(&str, &str, Access)] = &[
     ("POST", "/me", Signed),
     ("POST", "/logout", Signed),
     ("GET", "/l/{token}", Public),
+    ("POST", "/l/{token}", Public),
     ("GET", "/p/{project}", Read),
     ("GET", "/p/{project}/events", Read),
     ("GET", "/p/{project}/errors", Read),
@@ -4557,4 +4578,82 @@ async fn the_admin_token_cannot_forge_a_session() {
         get(&h, "/p/default", Some(&owner), false).await.status(),
         StatusCode::OK
     );
+}
+
+#[tokio::test]
+async fn a_nearly_full_disk_stops_writes_and_readiness() {
+    let mut h = harness();
+    let ready = |h: &Harness| {
+        let state = h.state.clone();
+        async move {
+            router(state)
+                .oneshot(Request::get("/readyz").body(Body::empty()).unwrap())
+                .await
+                .unwrap()
+                .status()
+        }
+    };
+    assert_eq!(ready(&h).await, StatusCode::OK);
+    assert_eq!(
+        post(&h, "/capture", batch(&h.key), false).await.0,
+        StatusCode::OK
+    );
+
+    // 1 byte free out of 100: under the fixed 5 % floor.
+    h.state.disk_space = |_| Some((1, 100));
+    assert_eq!(ready(&h).await, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        post(&h, "/capture", batch(&h.key), false).await.0,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    let chunk = format!(
+        r#"{{"key":"{}","session_id":"s-1","distinct_id":"u1","seq":0,"events":[{{"t":1}}]}}"#,
+        h.key
+    );
+    assert_eq!(
+        post(&h, "/r", chunk.into_bytes(), false).await.0,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+}
+
+#[tokio::test]
+async fn the_server_closes_connections_that_never_finish_their_headers() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let h = harness();
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let server = tokio::spawn(openlens_server::serve(l, router(h.state.clone()), async {
+        let _ = stopped.await;
+    }));
+
+    // A normal request is served, and handlers still see the client address.
+    let mut ok = tokio::net::TcpStream::connect(addr).await.unwrap();
+    ok.write_all(b"GET /healthz HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let mut reply = String::new();
+    ok.read_to_string(&mut reply).await.unwrap();
+    assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+
+    // Half the headers, then nothing: cut off after the header timeout.
+    let mut slow = tokio::net::TcpStream::connect(addr).await.unwrap();
+    slow.write_all(b"GET /healthz HTTP/1.1\r\nhost: x\r\n")
+        .await
+        .unwrap();
+    let started = std::time::Instant::now();
+    let mut buf = Vec::new();
+    let read = tokio::time::timeout(
+        openlens_server::HEADER_READ_TIMEOUT + std::time::Duration::from_secs(5),
+        slow.read_to_end(&mut buf),
+    )
+    .await;
+    assert!(read.is_ok(), "the connection was still open");
+    assert!(
+        started.elapsed()
+            >= openlens_server::HEADER_READ_TIMEOUT - std::time::Duration::from_secs(1)
+    );
+
+    stop.send(()).unwrap();
+    server.await.unwrap().unwrap();
 }
