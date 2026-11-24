@@ -368,11 +368,16 @@ pub(crate) async fn capture(
                 )
                 .map_err(|e| e.to_string())?;
         }
-        let mut w = st
-            .writer
-            .lock()
-            .map_err(|_| "writer lock poisoned".to_owned())?;
-        w.append(&events).map_err(|e| e.to_string())
+        // Write under the lock, wait for the disk outside it, so one fsync
+        // serves every request that arrives meanwhile (#333).
+        let (ticket, durable) = {
+            let mut w = st
+                .writer
+                .lock()
+                .map_err(|_| "writer lock poisoned".to_owned())?;
+            (w.write(&events).map_err(|e| e.to_string())?, w.durable())
+        };
+        durable.wait(ticket).map_err(|e| e.to_string())
     })
     .await;
     match stored {

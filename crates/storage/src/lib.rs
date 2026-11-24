@@ -19,7 +19,7 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Instant;
 
 use arrow::array::{Array, ArrayRef, RecordBatch, StringBuilder, TimestampMicrosecondBuilder};
@@ -145,8 +145,88 @@ impl Recent {
     }
 }
 
+/// Group commit for the WAL (#333). Appends write under the writer's lock
+/// and return a ticket; [`Durable::wait`] then makes the ticket durable
+/// *outside* the lock. One `fsync` covers every write made before it
+/// started: the first waiter syncs, the ones arriving meanwhile wait for
+/// the next sync, which covers them all. A lone request syncs at once.
+pub struct Durable {
+    state: Mutex<SyncState>,
+    done: Condvar,
+}
+
+struct SyncState {
+    /// The WAL being appended to (a second handle on the same file).
+    file: Arc<File>,
+    /// Writes made so far (ticket numbers).
+    written: u64,
+    /// Every ticket up to this one is on disk.
+    synced: u64,
+    /// A sync is running.
+    syncing: bool,
+    /// `fsync` calls made, for `/metrics`.
+    syncs: u64,
+}
+
+impl Durable {
+    fn new(file: &File) -> Result<Self> {
+        Ok(Self {
+            state: Mutex::new(SyncState {
+                file: Arc::new(file.try_clone()?),
+                written: 0,
+                synced: 0,
+                syncing: false,
+                syncs: 0,
+            }),
+            done: Condvar::new(),
+        })
+    }
+
+    fn lock(&self) -> Result<MutexGuard<'_, SyncState>> {
+        self.state
+            .lock()
+            .map_err(|_| StorageError::Io(std::io::Error::other("WAL sync state poisoned")))
+    }
+
+    /// Return once every write up to `ticket` is on disk.
+    pub fn wait(&self, ticket: u64) -> Result<()> {
+        let mut s = self.lock()?;
+        loop {
+            if s.synced >= ticket {
+                return Ok(());
+            }
+            if !s.syncing {
+                break;
+            }
+            s = self
+                .done
+                .wait(s)
+                .map_err(|_| StorageError::Io(std::io::Error::other("WAL sync state poisoned")))?;
+        }
+        s.syncing = true;
+        s.syncs += 1;
+        let (file, target) = (s.file.clone(), s.written);
+        drop(s);
+        let synced = file.sync_data();
+        let mut s = self.lock()?;
+        s.syncing = false;
+        if synced.is_ok() {
+            s.synced = s.synced.max(target);
+        }
+        drop(s);
+        self.done.notify_all();
+        Ok(synced?)
+    }
+
+    /// How many `fsync` calls the WAL took since the start.
+    pub fn syncs(&self) -> u64 {
+        self.lock().map_or(0, |s| s.syncs)
+    }
+}
+
 /// Appends events durably and turns them into Parquet segments.
 pub struct Writer {
+    durable: Arc<Durable>,
     recent: Recent,
     root: PathBuf,
     policy: FlushPolicy,
@@ -194,8 +274,10 @@ impl Writer {
         let wal_seq = max_seq + 1;
         let (wal, wal_path) = open_wal(&wal_dir, wal_seq)?;
         sync_dir(&wal_dir)?;
+        let durable = Arc::new(Durable::new(wal.get_ref())?);
         Ok((
             Self {
+                durable,
                 recent: {
                     let mut r = Recent::default();
                     for ev in &recovered {
@@ -219,23 +301,45 @@ impl Writer {
     /// Append events. They are on disk (fsynced) when this returns `Ok`.
     /// Events whose uuid was stored recently (a resent batch) are dropped.
     pub fn append(&mut self, events: &[Event]) -> Result<()> {
-        let events: Vec<Event> = events
+        let ticket = self.write(events)?;
+        self.durable.wait(ticket)
+    }
+
+    /// The first half of [`Writer::append`], to call under the writer's
+    /// lock: write the events to the WAL (not yet fsynced) and return a
+    /// ticket for [`Durable::wait`], to call after releasing the lock.
+    ///
+    /// A resent batch whose events are all dropped as duplicates still
+    /// gets a ticket covering every write so far, so its 200 waits until
+    /// the first copy is on disk.
+    pub fn write(&mut self, events: &[Event]) -> Result<u64> {
+        let mut batch = HashSet::new();
+        let fresh: Vec<Event> = events
             .iter()
-            .filter(|ev| self.recent.insert(&ev.uuid))
+            .filter(|ev| !self.recent.set.contains(&ev.uuid) && batch.insert(ev.uuid.as_str()))
             .cloned()
             .collect();
-        if events.is_empty() {
-            return Ok(());
+        if !fresh.is_empty() {
+            for ev in &fresh {
+                serde_json::to_writer(&mut self.wal, ev).map_err(std::io::Error::other)?;
+                self.wal.write_all(b"\n")?;
+            }
+            self.wal.flush()?;
+            // Only once written: a failed write leaves the uuids unknown,
+            // so the client's retry is stored rather than dropped.
+            for ev in &fresh {
+                self.recent.insert(&ev.uuid);
+            }
+            self.buffer.extend(fresh);
+            self.oldest.get_or_insert_with(Instant::now);
+            self.durable.lock()?.written += 1;
         }
-        for ev in &events {
-            serde_json::to_writer(&mut self.wal, ev).map_err(std::io::Error::other)?;
-            self.wal.write_all(b"\n")?;
-        }
-        self.wal.flush()?;
-        self.wal.get_ref().sync_data()?;
-        self.buffer.extend(events);
-        self.oldest.get_or_insert_with(Instant::now);
-        Ok(())
+        Ok(self.durable.lock()?.written)
+    }
+
+    /// The WAL's group commit, to wait on outside the writer's lock.
+    pub fn durable(&self) -> Arc<Durable> {
+        self.durable.clone()
     }
 
     /// Whether the flush policy says it is time to flush.
@@ -283,6 +387,17 @@ impl Writer {
         }
         let wal_dir = self.root.join("wal");
         let (wal, path) = open_wal(&wal_dir, self.wal_seq + 1)?;
+        // Every write so far goes to disk with the old WAL, so the tickets
+        // that point to it are covered before syncs move to the new one.
+        self.wal.flush()?;
+        self.wal.get_ref().sync_data()?;
+        {
+            let mut s = self.durable.lock()?;
+            s.file = Arc::new(wal.get_ref().try_clone()?);
+            s.synced = s.written;
+            s.syncs += 1;
+        }
+        self.durable.done.notify_all();
         self.wal_seq += 1;
         let mut old_wals = std::mem::take(&mut self.stale_wals);
         old_wals.push(std::mem::replace(&mut self.wal_path, path));
