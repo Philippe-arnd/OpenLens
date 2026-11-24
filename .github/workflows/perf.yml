@@ -106,7 +106,7 @@ jobs:
           gen_start=$(date +%s)
           ./target/perf/xtask bench-gen "$D" --events "$EVENTS" > gen.json
           gen_secs=$(( $(date +%s) - gen_start ))
-          OPENLENS_DATA_DIR="$D" OPENLENS_ADDR=127.0.0.1:18741 OPENLENS_ADMIN_TOKEN=perf ./target/perf/openlens > server.log 2>&1 &
+          MALLOC_ARENA_MAX=2 MALLOC_TRIM_THRESHOLD_=131072 OPENLENS_DATA_DIR="$D" OPENLENS_ADDR=127.0.0.1:18741 OPENLENS_ADMIN_TOKEN=perf ./target/perf/openlens > server.log 2>&1 &
           PID=$!
           for _ in $(seq 120); do curl -sf 127.0.0.1:18741/healthz > /dev/null && break; sleep 1; done
           C=$(curl -si -XPOST 127.0.0.1:18741/login -d token=perf | tr -d '\r' | sed -n 's/^[Ss]et-[Cc]ookie: \(ol_session=[^;]*\).*/\1/p')
