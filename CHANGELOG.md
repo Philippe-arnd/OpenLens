@@ -6,6 +6,8 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Added
 
+- **Measured at scale** (#321): `cargo xtask bench-gen` and the `scale` job of `perf.yml` measured 63 M events over 90 days: a 22 s board on first load and 2.6 GB of memory. The sizing docs now say a small server holds about 4 M events in 90 days (D-023).
+
 - **Operations** (#296): `GET /metrics` (Prometheus, `read` token), `GET /readyz` (the chart's readiness probe), an `x-request-id` on every response and in the request's log span, and request time limits (10 s for ingestion, 2 min otherwise). See docs/deploy/README.md, *Watching it run*.
 
 - **Scoped API tokens:** `read`, `write` or `admin`, optionally limited to projects, stored hashed, made with `openlens-cli tokens create --scope read --project <id>` (or `POST /api/tokens`), listed and revoked with `tokens list|revoke`. A `read` token gets 403 on every write and is enough for `openlens-cli mcp`; scoped tokens never open dashboard pages.

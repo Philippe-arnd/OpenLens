@@ -142,7 +142,7 @@ Keep the same admin token Secret.
 
 - **Disk:** about **11 bytes per event** after compression, and events are kept 400 days. So 1 M events a day needs about 4.5 GB a year. Replays (kept 30 days) often weigh more than events: watch the PVC usage during the first week and size from it.
 - **CPU:** about **80k events/s per vCPU** at ingestion. The default request (`100m`) is enough for most apps.
-- **Memory:** the board keeps up to 4 M events of the 90-day window in memory, at about 160 bytes each (up to about 650 MB). The default limit of 1 GiB covers about 2 M events in 90 days. Raise it to 2 GiB above that.
+- **Memory:** the board keeps up to 4 M events of the 90-day window in memory, at about 160 bytes each (up to about 650 MB). The default limit of 1 GiB covers about 2 M events in 90 days. Raise it to 2 GiB above that. Past 4 M events in 90 days, the board reads the files instead (measured at 63 M events: 22 s for the first load, 2.6 GB peak memory; see [benchmarks](../benchmarks.md) and D-023). Give it 4 GiB there, and expect a slow board until daily rollups ship (#223).
 
 ## Security
 

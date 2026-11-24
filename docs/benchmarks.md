@@ -41,7 +41,20 @@ taskset -c 1-3 ./target/perf/xtask bench http://127.0.0.1:18740 "$KEY" 10 4 50  
 
 `xtask bench` prints JSON (events/s and latency percentiles), and exits non-zero if any request failed.
 
-**At scale** (#321): `cargo xtask bench-gen <data-dir> [--events N] [--users N]` writes a large synthetic app straight into a data dir: 63 M events over 90 days and 200,000 people by default, in 4 roles, on 20 features, with a release every 15 days. It is deterministic, and it compacts each day at the end. Start the server on the dir and time the board. A debug build writes about 20,000 events/s, so use the perf build for the full size. The measurements at 63 M, and the decision on the snapshot cliff (`BOARD_SNAPSHOT_ROWS`), come from the `scale` run of `perf.yml` and will be recorded here.
+**At scale** (#321): `cargo xtask bench-gen <data-dir> [--events N] [--users N]` writes a large synthetic app straight into a data dir: 63 M events over 90 days and 200,000 people by default, in 4 roles, on 20 features, with a release every 15 days. It is deterministic, and it compacts each day at the end. Start the server on the dir and time the board. A debug build writes about 20,000 events/s, so use the perf build for the full size. The `scale` job of `perf.yml` (run by hand, input `scale_events`) does this on a GitHub runner.
+
+Measured on 2026-11-24 (perf build, `ubuntu-latest`, 4 vCPU and not pinned, so one vCPU is slower; run 45362175892):
+
+| 63 M events, 200,000 people, 90 days | |
+|---|---|
+| generation and compaction | 377 s |
+| data dir | 2,955 MB (about 47 bytes per event: the synthetic properties compress worse than real traffic) |
+| board, first load | 22.0 s |
+| board, second load | 12.1 s |
+| board with a role filter, first load | 15.2 s |
+| server peak memory | 2,590 MB |
+
+At this size the 90-day window is 16 times the snapshot cap (`BOARD_SNAPSHOT_ROWS`, 4 M rows), so every board query reads the Parquet files: this is the slow path, not the snapshot. What to do about it is D-023.
 
 **Every night** (#314): `perf.yml` runs the perf build on demo data, one minute of ingestion and one minute with `--with-board`, keeps the JSON as an artifact, and compares it with the average of the last 7 runs (`scripts/perf/compare.py`). A metric more than 20 % worse opens or comments on one issue. The figures on this page are still measured by hand.
 
