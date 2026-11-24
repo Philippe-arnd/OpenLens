@@ -29,6 +29,7 @@ webpki-roots.workspace = true
 maxminddb.workspace = true
 subtle.workspace = true
 axum.workspace = true
+futures = "0.3"
 hyper.workspace = true
 hyper-util.workspace = true
 tower.workspace = true

@@ -452,3 +452,11 @@ svg.sankey .slabel { font-size: 12px; fill: var(--ink); paint-order: stroke; str
 input.narrow { width: 9em; }
 .objective { padding: 6px 0; border-bottom: 1px solid var(--line, rgba(127,127,127,.2)); }
 .objective:last-of-type { border-bottom: 0; }
+
+/* Streamed pages (#301): the loading line shows until the content arrives
+   after it, then hides itself; no script. */
+.page-loading { display: flex; align-items: center; gap: 10px; color: var(--muted); margin: 24px 0; }
+.page-loading:not(:last-child) { display: none; }
+.page-loading .spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--ink-2, currentColor); animation: ol-spin 0.8s linear infinite; }
+@keyframes ol-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .page-loading .spinner { animation: none; } }
