@@ -19,6 +19,7 @@ chrono.workspace = true
 ureq.workspace = true
 
 [dev-dependencies]
+openlens-server = { path = "../../crates/server" }
 tempfile.workspace = true
 
 [lints]
