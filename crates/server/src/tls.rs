@@ -72,12 +72,21 @@ pub(crate) fn expiry(origin: &str) -> Result<i64, String> {
     let rest = origin
         .strip_prefix("https://")
         .ok_or("not an https address")?;
-    let (host, port) = match rest.rsplit_once(':') {
-        Some((h, p)) if !h.contains(']') || h.ends_with(']') => (
-            h.trim_matches(['[', ']']).to_owned(),
-            p.parse::<u16>().map_err(|_| "bad port")?,
-        ),
-        _ => (rest.to_owned(), 443),
+    // `[v6]:port`, `[v6]`, `host:port` or `host` (review of v0.3.0: a bare
+    // `[2001:db8::1]` was cut at its last colon).
+    let (host, port) = if let Some(v6) = rest.strip_prefix('[') {
+        let (h, after) = v6.split_once(']').ok_or("bad address")?;
+        let port = match after.strip_prefix(':') {
+            Some(p) => p.parse::<u16>().map_err(|_| "bad port")?,
+            None if after.is_empty() => 443,
+            None => return Err("bad address".into()),
+        };
+        (h.to_owned(), port)
+    } else {
+        match rest.rsplit_once(':') {
+            Some((h, p)) => (h.to_owned(), p.parse::<u16>().map_err(|_| "bad port")?),
+            None => (rest.to_owned(), 443),
+        }
     };
     let addr = (host.as_str(), port)
         .to_socket_addrs()

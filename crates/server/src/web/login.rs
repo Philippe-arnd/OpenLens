@@ -100,15 +100,18 @@ pub(super) async fn login_email(
         return done;
     };
     let email = f.email.trim().to_lowercase();
-    if email.len() > 200 || !email.contains('@') || !email_allowed(&state, &email) {
+    if email.len() > 200 || !email.contains('@') {
         return done;
     }
     tokio::spawn(async move {
         let meta = state.meta.clone();
         let e = email.clone();
+        let st = state.clone();
+        // Only a real, active account counts against the sending budget, so
+        // made-up addresses cannot use it up (review of v0.3.0).
         let link = tokio::task::spawn_blocking(move || {
             let u = meta.user_by_email(&e).ok()??;
-            if u.disabled {
+            if u.disabled || !email_allowed(&st, &e) {
                 return None;
             }
             meta.create_login_link_for(Some(&u.id), 15 * 60).ok()

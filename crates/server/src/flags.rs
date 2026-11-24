@@ -66,6 +66,7 @@ pub(crate) async fn save(state: &AppState, project: &str, f: &Flag) -> Result<()
 /// evaluate and never stored.
 pub(crate) fn properties(
     q: &HashMap<String, String>,
+    peer: &crate::capture::Peer,
     headers: &HeaderMap,
 ) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = q
@@ -88,7 +89,8 @@ pub(crate) fn properties(
     out.dedup_by(|a, b| a.0 == b.0);
     out.truncate(openlens_flags::MAX_PROPERTIES);
     if !out.iter().any(|(k, _)| k == "country")
-        && let Some(c) = crate::audience::client_ip(headers).and_then(crate::audience::country)
+        && let Some(c) =
+            crate::audience::client_ip(peer, headers).and_then(crate::audience::country)
     {
         out.push(("country".into(), c));
     }
@@ -145,7 +147,7 @@ pub(crate) async fn public(
         (_, None) => None,
     };
     let flags = load(&state, &project.id).await;
-    let props = properties(&q, &headers);
+    let props = properties(&q, &peer, &headers);
     let subject = Subject {
         distinct_id: id,
         role,

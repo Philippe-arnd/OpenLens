@@ -238,7 +238,11 @@ fn build_state() -> Result<openlens_server::AppState, String> {
                 // single-use owner link does.
                 match meta.create_login_link_for(None, 3600) {
                     Ok(link) => {
-                        let base = std::env::var("OPENLENS_PUBLIC_URL").unwrap_or_default();
+                        // Same fallback as email sign-in: Coolify sets
+                        // SERVICE_URL_OPENLENS (review of v0.3.0).
+                        let base = std::env::var("OPENLENS_PUBLIC_URL")
+                            .or_else(|_| std::env::var("SERVICE_URL_OPENLENS"))
+                            .unwrap_or_default();
                         let owner_link = format!("{}/l/{link}", base.trim_end_matches('/'));
                         tracing::info!(%owner_link, "generated admin token, stored hashed and never shown. Open this single-use owner link within 1 hour, then create API tokens in Settings → API tokens (or set OPENLENS_ADMIN_TOKEN to choose your own token)");
                     }

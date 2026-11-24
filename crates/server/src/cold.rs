@@ -187,6 +187,20 @@ pub(crate) fn restore(
     Ok(names.len())
 }
 
+/// The bytes the cold days of `project` hold on S3.
+pub(crate) fn project_bytes(cfg: &Config, root: &Path, project: &str) -> Result<u64, String> {
+    let mut n = 0;
+    for (p, day) in cold_days(root) {
+        if p == project {
+            n += s3::list_sized(cfg, &format!("{}/", rel(&p, day)))?
+                .iter()
+                .map(|(_, s)| s)
+                .sum::<u64>();
+        }
+    }
+    Ok(n)
+}
+
 /// Every cold day of `project` back on disk (a person's export reads
 /// them). They go back to S3 at the next hourly pass.
 pub(crate) fn restore_project(cfg: &Config, root: &Path, project: &str) -> Result<usize, String> {
@@ -340,6 +354,10 @@ mod tests {
                     "DELETE" => {
                         store.remove(&key);
                         ("204 No Content", Vec::new())
+                    }
+                    // A real bucket lists only at its root (`/bucket`).
+                    "GET" if query.contains("list-type=2") && !key.is_empty() => {
+                        ("404 Not Found", b"<Code>NoSuchKey</Code>".to_vec())
                     }
                     "GET" if query.contains("list-type=2") => {
                         let prefix = query

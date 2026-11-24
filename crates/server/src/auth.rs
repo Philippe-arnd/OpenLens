@@ -66,7 +66,8 @@ pub(crate) fn new_session(state: &AppState, user: &str) -> String {
 }
 
 /// What a session cookie signs. Generation 0 (no sign-out yet) keeps the
-/// format of earlier releases, so an upgrade logs nobody out.
+/// message format of earlier releases; the key is `.session.key`, so the
+/// upgrade from v0.2 (signed with the admin token) signs everyone out once.
 fn session_msg(state: &AppState, exp: i64, user: &str) -> String {
     match state.session_gen.load(std::sync::atomic::Ordering::Relaxed) {
         0 => format!("session:{exp}:{user}"),

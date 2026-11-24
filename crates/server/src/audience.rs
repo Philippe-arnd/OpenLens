@@ -73,13 +73,10 @@ pub(crate) fn country(ip: IpAddr) -> Option<String> {
 
 /// The client address: the last `X-Forwarded-For` entry (the one our
 /// proxy added), else `X-Real-IP`. Direct connections have none.
-pub(crate) fn client_ip(headers: &HeaderMap) -> Option<IpAddr> {
-    headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.rsplit(',').next())
-        .or_else(|| headers.get("x-real-ip").and_then(|v| v.to_str().ok()))
-        .and_then(|s| s.trim().parse().ok())
+pub(crate) fn client_ip(peer: &crate::capture::Peer, headers: &HeaderMap) -> Option<IpAddr> {
+    // The same rule as the rate limits (D-022): forwarded headers count only
+    // from a proxy, and the peer is used without one (review of v0.3.0).
+    crate::capture::client_ip(peer, headers).and_then(|s| s.parse().ok())
 }
 
 /// Device class, browser and OS from a user agent (a few rules, in order;
@@ -265,7 +262,11 @@ pub(crate) fn channel(
 /// Add `$country`, `$device`, `$browser` and `$os` to the page views of a
 /// batch (server values replace whatever the client sent under those
 /// names). Other events are left as they are.
-pub(crate) fn enrich(events: &mut [openlens_event::Event], headers: &HeaderMap) {
+pub(crate) fn enrich(
+    events: &mut [openlens_event::Event],
+    peer: &crate::capture::Peer,
+    headers: &HeaderMap,
+) {
     if !events.iter().any(|e| e.event == "$pageview") {
         return;
     }
@@ -274,7 +275,7 @@ pub(crate) fn enrich(events: &mut [openlens_event::Event], headers: &HeaderMap) 
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
     let (device, browser, os) = parse_ua(ua);
-    let country = client_ip(headers).and_then(country);
+    let country = client_ip(peer, headers).and_then(country);
     for e in events.iter_mut().filter(|e| e.event == "$pageview") {
         let Ok(serde_json::Value::Object(mut props)) =
             serde_json::from_str::<serde_json::Value>(&e.properties)

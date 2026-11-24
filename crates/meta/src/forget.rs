@@ -22,6 +22,8 @@ impl Meta {
             Ok(())
         })?;
         if let Ok(mut cache) = self.forgotten.lock() {
+            self.forgotten_gen
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             cache.remove(project);
         }
         Ok(())
@@ -34,13 +36,18 @@ impl Meta {
         {
             return Ok(set.contains(id));
         }
+        let generation = self.forgotten_gen.load(std::sync::atomic::Ordering::SeqCst);
         let set: HashSet<String> = self.read(|c| {
             let mut st = c.prepare("SELECT distinct_id FROM forgotten WHERE project = ?1")?;
             let rows = st.query_map([project], |r| r.get::<_, String>(0))?;
             Ok(rows.collect::<rusqlite::Result<HashSet<_>>>()?)
         })?;
         let found = set.contains(id);
-        if let Ok(mut cache) = self.forgotten.lock() {
+        // Cached only if no forget happened since the read: the bump and the
+        // check both run under the cache lock.
+        if let Ok(mut cache) = self.forgotten.lock()
+            && self.forgotten_gen.load(std::sync::atomic::Ordering::SeqCst) == generation
+        {
             cache.insert(project.to_owned(), Arc::new(set));
         }
         Ok(found)

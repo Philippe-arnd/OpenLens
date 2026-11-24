@@ -168,6 +168,21 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- **Review before v0.3.0:**
+  - **Admins and tokens limited to some projects stay in them.** Before this fix, a token could list other projects' keys and make install-wide calls, and an admin of one project could open install-wide pages (team, tokens, storage, AI) and widen their own reach.
+  - **Forgotten people's recordings are dropped**, like their events. A rare race could also let a forgotten person's events back in until the next forget.
+  - **The S3 listing works with a prefix set.** Before this fix, S3 backups were recorded as failed and the cold tier never moved a day.
+  - **Backups:** the S3 backup is streamed from disk instead of read into memory, and a failed scheduled backup is tried again at the next tick instead of waiting a full period.
+  - **Email sign-in:** made-up addresses no longer use up the hourly sending budget.
+  - **Country and cookieless visitors** follow the same proxy rule as the rate limits (D-022).
+  - **A person's export** refuses to be partial (more than 200,000 events), and checks the disk before reading cold days back.
+  - **Smaller fixes:**
+    - share embed origins must be exactly `localhost` or `127.0.0.1` over plain http;
+    - the public-address check sees IPv4 inside IPv6 (NAT64, 6to4);
+    - the TLS check reads `https://[v6]`;
+    - the first-start owner link has the Coolify host;
+    - long non-ASCII paths no longer crash a backup.
+
 - **Board queries no longer slow ingestion down** (#295): DataFusion runs on its own threads, apart from the ones serving HTTP; `/capture` gunzips and parses batches off the async threads; the forgotten people of a project are kept in memory instead of one lookup per event.
 - **Project pages need a session** (#294): the flag and survey edit pages were readable without signing in. Every `/p/…` page now refuses anonymous visitors in one place (login redirect, or 401 for JSON and CSV), and a test walks every route of the router as an anonymous visitor, a viewer of another project and a viewer.
 - **Ingestion limits follow the connection** (D-022): `/capture`, `/r` and `/flags` count clients by their connection address and trust `X-Forwarded-For` only from a private proxy; the check runs before the body is read. Writes get 503 when less than 5 % of the data volume is free.
