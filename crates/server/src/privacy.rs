@@ -103,15 +103,17 @@ pub(crate) fn forget_blocking(
 
 /// The anonymous ids that were linked to a person by `$identify`.
 async fn linked_ids(state: &AppState, project: &str, who: &str) -> Vec<String> {
-    let Ok(lit) = openlens_engine::sql_literal(who) else {
+    let mut params = openlens_sqlgen::Params::new();
+    let Ok(person) = params.bind(who) else {
         return Vec::new();
     };
     let sql = format!(
         "SELECT DISTINCT regexp_match(properties, '\"\\$anon_distinct_id\":\"([^\"]+)\"')[1] AS anon \
-         FROM raw_events WHERE event = '$identify' AND distinct_id = {lit}"
+         FROM raw_events WHERE event = '$identify' AND distinct_id = {person}"
     );
     state
         .query
+        .with_params(&params)
         .sql(project, &sql)
         .await
         .map(|r| {
@@ -217,14 +219,15 @@ pub(crate) async fn export(
     headers: HeaderMap,
     Path((project, who)): Path<(String, String)>,
 ) -> Response {
-    if openlens_engine::sql_literal(&who).is_err() {
+    if openlens_sqlgen::checked(&who).is_err() {
         return StatusCode::BAD_REQUEST.into_response();
     }
     let mut ids = linked_ids(&state, &project, &who).await;
     ids.push(who.clone());
+    let mut params = openlens_sqlgen::Params::new();
     let list = ids
         .iter()
-        .filter_map(|i| openlens_engine::sql_literal(i).ok())
+        .filter_map(|i| params.bind(i).ok())
         .collect::<Vec<_>>()
         .join(", ");
     let sql = format!(
@@ -239,7 +242,7 @@ pub(crate) async fn export(
             ..openlens_query::Limits::default()
         },
     );
-    let events = match engine.sql(&project, &sql).await {
+    let events = match engine.with_params(&params).sql(&project, &sql).await {
         Ok(r) => r.rows,
         Err(e) => {
             return (

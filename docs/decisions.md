@@ -180,5 +180,5 @@ Append-only. Each entry: id, date, decision, why, consequences.
 
 **Why:** two hand-written escapes with different rules, spread over a dozen files, were one forgotten call away from an injection. One crate with no dependency can be used from the feature map and the engine alike.
 
-**Consequences:** a new filter value is bound with `Params::set` or `bind`, never formatted in. The engine's other values (success events, feature keys, paths) are still quoted literals until #310 part 2 binds them too.
+**Consequences:** a new filter value is bound with `Params::set` or `bind`, never formatted in. Every value taken from a request is bound (part 2: events, people, pages, replays, data exports). Values from the feature map or a stored definition (success events, steps, variants) stay quoted literals, checked at upload.
 

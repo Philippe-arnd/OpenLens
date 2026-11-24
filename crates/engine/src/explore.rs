@@ -33,7 +33,9 @@ pub async fn churned_sessions(
     f: &Filters,
     place: &str,
 ) -> Result<Vec<(String, String)>> {
-    let q = &q.with_params(&f.params()?);
+    let mut params = f.params()?;
+    let place = crate::bind(&mut params, place)?;
+    let q = &q.with_params(&params);
     let src = source(map);
     let churn = map.map_or(14, |m| i64::from(m.churn_days()));
     let ident = identified(any_person(q, project).await?);
@@ -44,7 +46,7 @@ pub async fn churned_sessions(
          JOIN churned ch ON e.distinct_id = ch.distinct_id AND e.timestamp = ch.last_seen \
          WHERE coalesce(e.feature, e.path) = {} AND e.session_id IS NOT NULL \
          ORDER BY e.timestamp DESC LIMIT 200",
-        lit(place)?
+        place
     );
     Ok(q.sql(project, &sql)
         .await?

@@ -92,6 +92,11 @@ impl Default for Filters {
 
 /// Quote a user-supplied value as a SQL string literal. Values are bounded
 /// and restricted to printable characters, then single quotes are doubled.
+/// Bind a value from a request to a placeholder of `p` (#310).
+pub(crate) fn bind(p: &mut openlens_sqlgen::Params, v: &str) -> Result<String> {
+    p.bind(v).map_err(|_| EngineError::InvalidFilter("value"))
+}
+
 fn lit(v: &str) -> Result<String> {
     openlens_sqlgen::lit(v).map_err(|_| EngineError::InvalidFilter("value"))
 }

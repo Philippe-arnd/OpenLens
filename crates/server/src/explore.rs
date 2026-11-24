@@ -455,12 +455,11 @@ async fn audiences(state: &AppState, project: &str) -> Vec<openlens_ui::Audience
         .filter(|f| !f.users.is_empty())
         .take(5)
     {
-        let ids: Vec<String> = f
-            .users
-            .iter()
-            .filter(|u| !u.contains('\'') && !u.contains('\\'))
-            .map(|u| format!("'{u}'"))
-            .collect();
+        let mut params = openlens_sqlgen::Params::new();
+        let ids: Vec<String> = f.users.iter().filter_map(|u| params.bind(u).ok()).collect();
+        if ids.is_empty() {
+            continue;
+        }
         let since = (chrono::Utc::now() - chrono::Duration::days(7)).format("%Y-%m-%d");
         let sql = format!(
             "SELECT DISTINCT distinct_id FROM events WHERE date >= '{since}' AND distinct_id IN ({})",
@@ -468,6 +467,7 @@ async fn audiences(state: &AppState, project: &str) -> Vec<openlens_ui::Audience
         );
         let active: std::collections::HashSet<String> = state
             .query
+            .with_params(&params)
             .sql(project, &sql)
             .await
             .map(|r| {
