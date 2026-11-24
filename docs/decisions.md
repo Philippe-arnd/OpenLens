@@ -149,3 +149,12 @@ Append-only. Each entry: id, date, decision, why, consequences.
 **Why:** a snapshot of 63 M rows would need about 10 GB at 160 bytes a row, far above the 1 GB target (D-001). Rollups make the board's cost depend on the number of days, not the number of events.
 
 **Consequences:** the sizing docs give the 4 M limit and the memory needed above it. Above that size, people should expect a slow board until the rollups ship. The `scale` job of `perf.yml` measures the same thing again after each change.
+
+## D-024 (2026-11-24, agent for #317) What a beta release promises
+
+**Decision:** until the end of M6, OpenLens is beta (0.x). A minor release may change behaviour, and a change that asks for action is marked **Breaking:**. Stored events stay readable by newer servers with no migration (columns are only added). Feature-map fields are only added and are optional, and the server is upgraded before a map that uses a new one. The SDKs keep working against newer servers. Once `/api/v1` exists (#312), a field or endpoint is removed only after one minor release of deprecation. The policy lives in docs/stability.md.
+
+**Why:** someone choosing OpenLens needs to know what an upgrade can break. The promises are the ones the code already keeps: a fixed table schema that reads older files, a strict map parser, additive SDK fields.
+
+**Consequences:** a change to the event schema adds a column and never renames one. A change that would break one of these promises waits for a major version, or is announced as **Breaking:** with the steps to follow.
+

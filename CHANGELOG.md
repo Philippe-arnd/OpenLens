@@ -1,12 +1,14 @@
 # Changelog
 
-All notable changes to OpenLens are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and OpenLens uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Before 1.0.0, a minor version (0.x.0) may change behaviour; each such change is listed under **Changed**.
+All notable changes to OpenLens are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and OpenLens uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Before 1.0.0, a minor version (0.x.0) may change behaviour; each such change is listed under **Changed**. A change that asks for action starts with **Breaking:** and follows the [stability policy](docs/stability.md).
 
 ## [Unreleased]
 
 ### Added
 
 - **Measured at scale** (#321): `cargo xtask bench-gen` and the `scale` job of `perf.yml` measured 63 M events over 90 days: a 22 s board on first load and 2.6 GB of memory. The sizing docs now say a small server holds about 4 M events in 90 days (D-023).
+
+- **Stability policy** (#317): docs/stability.md says what a beta release may change, what stays compatible (stored events, feature map, SDKs, `/api/v1` once it exists) and the upgrade order (D-024). The README shows the beta status.
 
 - **Operations** (#296): `GET /metrics` (Prometheus, `read` token), `GET /readyz` (the chart's readiness probe), an `x-request-id` on every response and in the request's log span, and request time limits (10 s for ingestion, 2 min otherwise). See docs/deploy/README.md, *Watching it run*.
 
