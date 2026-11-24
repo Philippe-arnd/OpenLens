@@ -6,6 +6,8 @@
 //!   users, planted patterns) into the `default` project of a data dir, to
 //!   look at the board: `OPENLENS_DATA_DIR=<data-dir> cargo run -p openlens`.
 //! - `cargo xtask bench <url> <key>`: ingestion load test (docs/benchmarks.md).
+//! - `cargo xtask bench-gen <data-dir> [--events N] [--users N]`: a large
+//!   synthetic app (63 M events over 90 days by default) for scale runs (#321).
 //! - `cargo xtask crash [--secs N] [--kills N] [--seed N]`: SIGKILL the real
 //!   server while it ingests, and check no acknowledged event is lost or
 //!   stored twice (#331).
@@ -13,6 +15,7 @@
 //!   in docs/deploy/README.md (#318; part of `ci`).
 
 mod bench;
+mod bench_gen;
 mod crash;
 mod env_docs;
 mod layers;
@@ -26,10 +29,11 @@ fn main() -> ExitCode {
         "layers" => check_layers(),
         "demo" => demo(std::env::args().nth(2)),
         "bench" => bench::bench(&std::env::args().skip(2).collect::<Vec<_>>()),
+        "bench-gen" => bench_gen::bench_gen(&std::env::args().skip(2).collect::<Vec<_>>()),
         "crash" => crash::crash(&std::env::args().skip(2).collect::<Vec<_>>()),
         "env-docs" => env_docs::check(),
         _ => Err(
-            "usage: cargo xtask <ci|layers|env-docs|demo DIR|bench URL KEY|crash [--secs N] [--kills N] [--seed N]>"
+            "usage: cargo xtask <ci|layers|env-docs|demo DIR|bench URL KEY|bench-gen DIR|crash [--secs N] [--kills N] [--seed N]>"
                 .to_owned(),
         ),
     };

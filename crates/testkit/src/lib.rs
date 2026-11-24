@@ -105,6 +105,84 @@ fn event(
     }
 }
 
+/// Events `start..start + len` of a large synthetic app for scale
+/// benchmarks (#321): `total` events spread evenly over the 90 days before
+/// `now`, from `users` people in 4 roles, on 20 features, with a release
+/// every 15 days, sessions of about 15 events, a page view in four and
+/// one `$identify` per person per day. Deterministic: event `i` is the
+/// same whatever the chunking, so a run can be written in pieces.
+pub fn scale_chunk(
+    project: &str,
+    total: u64,
+    users: u64,
+    start: u64,
+    len: u64,
+    now: DateTime<Utc>,
+) -> Vec<Event> {
+    const ROLES: [&str; 4] = ["member", "admin", "viewer", "billing"];
+    const DAY_MS: i64 = 86_400_000;
+    let span = 90 * DAY_MS;
+    let first = now - Duration::days(90);
+    let mix = |i: u64| {
+        // splitmix64: a well-spread hash of the index.
+        let mut z = i.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^ (z >> 31)
+    };
+    let mut out = Vec::with_capacity(usize::try_from(len).unwrap_or(0));
+    for i in start..(start + len).min(total) {
+        let h = mix(i);
+        // Even spread over the window, in order.
+        let at_ms = i128::from(span) * i128::from(i) / i128::from(total.max(1));
+        let at = first + Duration::milliseconds(i64::try_from(at_ms).unwrap_or(0));
+        let day = i64::try_from(at_ms).unwrap_or(0) / DAY_MS;
+        let user = h % users.max(1);
+        let role = ROLES[(user % 4) as usize];
+        let session = format!("u{user}-d{day}-s{}", (h >> 20) % 3);
+        let release = format!("v{}", 1 + day / 15);
+        let feature = format!("f{}", (h >> 8) % 20);
+        let (name, feature, path) = match (h >> 4) % 16 {
+            0 => ("$identify", None, "/".to_owned()),
+            1..=4 => ("$pageview", None, format!("/{feature}")),
+            5 => ("$error", None, format!("/{feature}")),
+            6 => ("$vital", None, format!("/{feature}")),
+            7..=10 => ("$click", Some(feature.as_str()), format!("/{feature}")),
+            11 => ("$submit", Some(feature.as_str()), format!("/{feature}")),
+            _ => ("$feature", Some(feature.as_str()), format!("/{feature}")),
+        };
+        let props = match name {
+            "$vital" => r#"{"$name":"LCP","$value":2380.5}"#,
+            "$error" => r#"{"$message":"boom","$source":"https://app.example.com/a.js:1:2"}"#,
+            _ => "{}",
+        };
+        out.push(Event {
+            uuid: format!(
+                "{:08x}-0000-7000-8000-{:012x}",
+                (h >> 32) as u32,
+                i & 0xffff_ffff_ffff
+            ),
+            project: project.into(),
+            event: name.into(),
+            distinct_id: format!("u{user}"),
+            session_id: Some(session),
+            timestamp: at,
+            received_at: at,
+            url: None,
+            path: Some(path),
+            feature: feature.map(Into::into),
+            role: Some(role.into()),
+            account: None,
+            plan: None,
+            environment: "production".into(),
+            release: Some(release),
+            flags: None,
+            properties: props.into(),
+        });
+    }
+    out
+}
+
 /// A synthetic app with planted patterns (see [`planted`]): 300 users, two
 /// roles, two releases, ~90 days of history ending now.
 pub fn planted_dataset(project: &str) -> Vec<Event> {
@@ -217,4 +295,26 @@ pub fn planted_dataset(project: &str) -> Vec<Event> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod scale_tests {
+    #[test]
+    fn scale_events_do_not_depend_on_the_chunking() {
+        let now = chrono::Utc::now();
+        let whole = super::scale_chunk("p", 1_000, 50, 0, 1_000, now);
+        let mut parts = super::scale_chunk("p", 1_000, 50, 0, 300, now);
+        parts.extend(super::scale_chunk("p", 1_000, 50, 300, 700, now));
+        assert_eq!(whole.len(), 1_000);
+        assert!(
+            whole
+                .iter()
+                .zip(&parts)
+                .all(|(a, b)| a.uuid == b.uuid && a.timestamp == b.timestamp)
+        );
+        assert!(
+            whole.windows(2).all(|w| w[0].timestamp <= w[1].timestamp),
+            "in time order"
+        );
+    }
 }
