@@ -112,6 +112,7 @@ pub fn openapi_document() -> serde_json::Value {
 /// Build the application router.
 pub fn router(state: AppState) -> Router {
     openlens_ui::set_prefs_source(web::current_prefs);
+    openlens_ui::set_nav_project_source(web::current_nav_project);
     let capture = Router::new()
         .route("/capture", post(capture::capture))
         .route("/e", post(capture::capture))
@@ -156,6 +157,10 @@ pub fn router(state: AppState) -> Router {
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             web::access_layer,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            web::nav_layer,
         ))
         .layer(axum::middleware::from_fn(web::theme_layer))
         // One span per request, tagged with its id; the id is returned in

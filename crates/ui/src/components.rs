@@ -71,6 +71,28 @@ pub(crate) fn tabs(aria_label: &str, items: &[(String, &str, bool)]) -> Markup {
     }
 }
 
+/// Every IANA time zone, as `<datalist id="tz-all">` (#403): the zone
+/// fields suggest them instead of taking free text blindly.
+pub(crate) fn zone_list() -> Markup {
+    html! {
+        datalist id="tz-all" {
+            @for z in chrono_tz::TZ_VARIANTS.iter() { option value=(z.name()) {} }
+        }
+    }
+}
+
+/// An hour picker (`""` = not set), for quiet hours (#403).
+pub(crate) fn hour_select(name: &str, value: Option<u8>) -> Markup {
+    html! {
+        select name=(name) {
+            option value="" selected[value.is_none()] { "—" }
+            @for h in 0u8..24 {
+                option value=(h) selected[value == Some(h)] { (format!("{h:02}:00")) }
+            }
+        }
+    }
+}
+
 /// One entry of the timeline of changes (#267).
 #[derive(Debug, Clone)]
 pub struct Mark {

@@ -630,6 +630,78 @@ pub(crate) async fn theme_layer(
     PREFS.scope(prefs, next.run(req)).await
 }
 
+tokio::task_local! {
+    /// The project whose menu an instance page keeps (#403).
+    static NAV_PROJECT: Option<openlens_ui::NavProject>;
+}
+
+/// For `openlens_ui`: the current request's [`NAV_PROJECT`].
+pub(crate) fn current_nav_project() -> Option<openlens_ui::NavProject> {
+    NAV_PROJECT.try_with(Clone::clone).ok().flatten()
+}
+
+/// Instance pages keep a project menu (#403): remember the last project
+/// page visited (`ol_last` cookie), and on the instance pages show that
+/// project when the viewer still sees it, else their only project.
+pub(crate) async fn nav_layer(
+    State(state): State<AppState>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let path = req.uri().path().to_owned();
+    let visited = path
+        .strip_prefix("/p/")
+        .map(|rest| rest.split('/').next().unwrap_or(""))
+        .filter(|id| openlens_replay::valid_id(id))
+        .map(str::to_owned);
+    let instance = [
+        "/settings/tokens",
+        "/settings/ai",
+        "/settings/storage",
+        "/users",
+        "/me",
+    ]
+    .iter()
+    .any(|p| path == *p || path.starts_with(&format!("{p}/")));
+    let nav = if instance {
+        auth::viewer(&state, req.headers()).and_then(|viewer| {
+            let projects = state.meta.projects().ok()?;
+            let seen: Vec<_> = projects
+                .into_iter()
+                .filter(|p| viewer.can_see(&p.id))
+                .collect();
+            let last = auth::cookie(req.headers(), "ol_last");
+            let pick = seen
+                .iter()
+                .find(|p| last.as_deref() == Some(p.id.as_str()))
+                .or_else(|| seen.first().filter(|_| seen.len() == 1))?;
+            Some(openlens_ui::NavProject {
+                id: pick.id.clone(),
+                name: pick.name.clone(),
+                key: pick.api_key.clone(),
+            })
+        })
+    } else {
+        None
+    };
+    let r = NAV_PROJECT.scope(nav, next.run(req)).await;
+    match visited {
+        Some(id)
+            if r.status().is_success()
+                && r.headers()
+                    .get(header::CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+                    .is_some_and(|v| v.starts_with("text/html")) =>
+        {
+            with_cookie(
+                r,
+                &format!("ol_last={id}; Path=/; SameSite=Lax; HttpOnly; Max-Age=31536000"),
+            )
+        }
+        _ => r,
+    }
+}
+
 async fn errors_page(
     _: crate::access::Session,
     State(state): State<AppState>,

@@ -332,14 +332,18 @@ pub fn replays(
             } @else {
                 section.card.wide {
                     table.plain {
-                        thead { tr { th { "Started (" (tz_label(tz)) ")" } th { "User" } th.num { "Length" } th.num { "Size" } th.num { "Comments" } th { span.sr-only { "Play" } } } }
+                        thead { tr { th { "Started (" (tz_label(tz)) ")" } th { "User" } th.num { "Active time" } th.num { "Size" } th.num { "Comments" } th { span.sr-only { "Play" } } } }
                         tbody { @for r in list {
                             @let started = tz.parse::<chrono_tz::Tz>().map_or_else(|_| r.started.format("%Y-%m-%d %H:%M").to_string(), |z| r.started.with_timezone(&z).format("%Y-%m-%d %H:%M").to_string());
                             @let secs = (r.updated - r.started).num_seconds().max(0) as f64;
                             tr {
                                 td.mono { (started) }
                                 td.mono { a href={ "/p/" (p.id) "/replays?u=" (r.distinct_id) } { (r.distinct_id) } }
-                                td.num { (duration(secs)) }
+                                td.num { @match r.active_secs {
+                                    Some(a) if (a as f64) + 60.0 < secs => { (duration(a as f64)) " active" br; span.muted.small { "open " (duration(secs)) } }
+                                    Some(a) => { (duration(a.max(1) as f64)) }
+                                    None => { (duration(secs)) }
+                                } }
                                 td.num.muted { (compact((r.bytes / 1024) as i64)) " kB" }
                                 td.num { @match comments.iter().find(|(s, _)| *s == r.session_id) { Some((_, n)) => { "💬 " (n) }, None => span.muted { "—" } } }
                                 td { a.button href={ "/p/" (p.id) "/replays/" (r.session_id) } { (icon("play")) "Play" } }

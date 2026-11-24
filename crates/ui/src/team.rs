@@ -33,7 +33,8 @@ pub fn projects(list: &[ProjectSummary], admin: bool) -> Markup {
                     summary { (icon("plus")) "New project" }
                     form.invite method="post" action="/projects" {
                         label { "Name " input type="text" name="name" required maxlength="80" placeholder="My app"; }
-                        label { "Time zone " input type="text" name="timezone" placeholder="Europe/Paris" maxlength="64"; }
+                        label { "Time zone " input type="text" name="timezone" placeholder="Europe/Paris" maxlength="64" list="tz-all"; }
+                        (zone_list())
                         button type="submit" { "Create" }
                     }
                     p.muted.small { "Agents do the same with " code { "openlens-cli init --name <app>" } ". Empty time zone: UTC." }
@@ -337,8 +338,8 @@ pub fn me(
                     @if email.is_some() {
                         label { "Name " input type="text" name="name" value=[name] maxlength="80"; }
                     }
-                    label { "Time zone " input type="text" name="timezone" value=[tz] placeholder="the project's" maxlength="64" list="zones"; }
-                    datalist #zones { @for z in ["Europe/Paris", "Europe/London", "Europe/Berlin", "Europe/Rome", "America/New_York", "America/Los_Angeles", "Asia/Tokyo", "UTC"] { option value=(z) {} } }
+                    label { "Time zone " input type="text" name="timezone" value=[tz] placeholder="the project's" maxlength="64" list="tz-all"; }
+                    (zone_list())
                     button type="submit" { "Save" }
                 }
                 p.muted.small { "Every time and every day on the boards follows this zone (an IANA name like Europe/Paris). Empty: each project's own zone." }
@@ -432,7 +433,8 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
                         label { "App address "
                             input type="url" name="app_url" value=[v.app_url] placeholder=(v.detected_url.unwrap_or("https://app.example.com")) maxlength="200";
                         }
-                        label { "Time zone " input type="text" name="timezone" value=(v.timezone) required maxlength="64"; }
+                        label { "Time zone " input type="text" name="timezone" value=(v.timezone) required maxlength="64" list="tz-all"; }
+                        (zone_list())
                         button type="submit" { "Save" }
                     }
                 } @else {
@@ -490,13 +492,14 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
                     form.settings method="post" action={ (base) "/alerts" } {
                         label.check { input type="checkbox" name="down" checked[v.alerts.down]; " App down (needs the app address)" }
                         label { "Announce after (min) " input type="number" name="down_wait" min="1" max="60" value=(v.alerts.down_wait); }
-                        label { "Health path " input type="text" name="health_path" value=(v.alerts.health_path) maxlength="200"; }
+                        label { "Health path " input type="text" name="health_path" value=(v.alerts.health_path) maxlength="200" list="health-paths"; }
+                        datalist id="health-paths" { option value="/" {} option value="/healthz" {} option value="/readyz" {} option value="/health" {} }
                         label.check { input type="checkbox" name="traffic" checked[v.alerts.traffic]; " Traffic stopped" }
                         label.check { input type="checkbox" name="regressions" checked[v.alerts.regressions]; " Regressions and new errors" }
                         label.check { input type="checkbox" name="failing" checked[v.alerts.failing]; " Failing requests spike" }
                         label.check { input type="checkbox" name="cert" checked[v.alerts.cert]; " Certificate expiring (14 days)" }
-                        label { "Quiet from (h) " input type="number" name="quiet_start" min="0" max="23" value=[v.alerts.quiet.map(|q| q.0)] placeholder="22"; }
-                        label { "to (h) " input type="number" name="quiet_end" min="0" max="23" value=[v.alerts.quiet.map(|q| q.1)] placeholder="7"; }
+                        label { "Quiet from " (hour_select("quiet_start", v.alerts.quiet.map(|q| q.0))) }
+                        label { "to " (hour_select("quiet_end", v.alerts.quiet.map(|q| q.1))) }
                         label.check { input type="checkbox" name="email" checked[v.alerts.email]; " Email" @if !v.alerts.smtp { span.muted { " (SMTP not set)" } } }
                         label { "Webhook (Slack, Discord…) " input type="url" name="webhook" value=(v.alerts.webhook) placeholder="https://hooks.slack.com/…" maxlength="500"; }
                         label { "ntfy topic " input type="text" name="ntfy" value=(v.alerts.ntfy) placeholder="my-app-alerts" maxlength="300"; }
@@ -514,7 +517,8 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
                         label { "What " select name="scope" { option value="board" { "Focus board" } option value="digest" { "Weekly digest" } } }
                         label { "Release " input type="text" name="release" placeholder="all" maxlength="100"; }
                         label { "Expires after (days, 0 = never) " input type="number" name="days" min="0" max="366" value="30"; }
-                        label { "May be embedded on " input type="text" name="embed" placeholder="https://intranet.example.com" maxlength="500"; }
+                        label { "May be embedded on " input type="text" name="embed" placeholder="https://intranet.example.com" maxlength="500" list="embed-on"; }
+                        datalist id="embed-on" { @if let Some(u) = v.app_url.or(v.detected_url) { option value=(u) {} } }
                         button type="submit" { "Make a link" }
                     }
                     @if !v.shares.is_empty() {
