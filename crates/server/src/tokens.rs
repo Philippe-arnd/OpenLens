@@ -6,22 +6,11 @@ use std::sync::atomic::Ordering;
 
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::response::Response;
 
 use crate::AppState;
 use crate::auth;
 use crate::web::html_page;
-
-fn guard(state: &AppState, headers: &HeaderMap) -> Result<auth::Viewer, Box<Response>> {
-    match auth::viewer(state, headers) {
-        None => Err(Box::new(Redirect::to("/login").into_response())),
-        Some(v) if !v.admin => Err(Box::new(html_page(
-            StatusCode::FORBIDDEN,
-            openlens_ui::message("Admins only", "API tokens and sessions are for admins."),
-        ))),
-        Some(v) => Ok(v),
-    }
-}
 
 async fn render(
     state: &AppState,
@@ -67,22 +56,17 @@ async fn render(
 }
 
 /// `GET /settings/tokens`.
-pub(crate) async fn page(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(r) = guard(&state, &headers) {
-        return *r;
-    }
+pub(crate) async fn page(_: crate::access::Admin, State(state): State<AppState>) -> Response {
     render(&state, None, None, None).await
 }
 
 /// `POST /settings/tokens`: create one; its value is shown once.
 pub(crate) async fn create(
+    _: crate::access::Admin,
     State(state): State<AppState>,
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Response {
-    if let Err(r) = guard(&state, &headers) {
-        return *r;
-    }
     // One `project` field per ticked project (none: every project), which
     // a struct cannot take from a form: read the pairs.
     let pairs: Vec<(String, String)> = serde_urlencoded::from_bytes(&body).unwrap_or_default();
@@ -128,13 +112,11 @@ pub(crate) async fn create(
 
 /// `POST /settings/tokens/{id}/revoke`.
 pub(crate) async fn revoke(
+    _: crate::access::Admin,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Response {
-    if let Err(r) = guard(&state, &headers) {
-        return *r;
-    }
     let meta = state.meta.clone();
     let key = id.clone();
     match tokio::task::spawn_blocking(move || meta.revoke_api_token(&key)).await {
@@ -150,13 +132,11 @@ pub(crate) async fn revoke(
 /// stops working; the admin's own session is issued again so they stay in.
 /// API tokens and the admin token keep working.
 pub(crate) async fn sign_out_everywhere(
+    _: crate::access::Admin,
+    crate::access::Signed(v): crate::access::Signed,
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Response {
-    let v = match guard(&state, &headers) {
-        Ok(v) => v,
-        Err(r) => return *r,
-    };
     let next = state.session_gen.load(Ordering::Relaxed).saturating_add(1);
     let meta = state.meta.clone();
     let saved = tokio::task::spawn_blocking(move || {

@@ -875,13 +875,10 @@ pub(crate) async fn clear(
 /// `GET /p/{id}/ask/sent` (admins): the exact body of the last request
 /// sent to the provider for this project (no key: it travels in a header).
 pub(crate) async fn sent(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Response {
-    if !auth::viewer(&state, &headers).is_some_and(|v| v.admin) {
-        return StatusCode::FORBIDDEN.into_response();
-    }
     let body = state
         .caches
         .ask_last_sent
@@ -899,13 +896,10 @@ pub(crate) async fn sent(
 
 /// `GET /p/{id}/ask/export.md`: my conversation as Markdown.
 pub(crate) async fn export(
+    crate::access::Signed(v): crate::access::Signed,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Response {
-    let Some(v) = auth::viewer(&state, &headers) else {
-        return StatusCode::FORBIDDEN.into_response();
-    };
     let mut md = String::from("# Ask OpenLens\n");
     for t in history(&state, &id, &v.id) {
         md.push_str(&format!(

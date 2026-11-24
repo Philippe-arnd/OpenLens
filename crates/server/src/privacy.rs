@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use axum::Json;
 use axum::extract::{Form, Path, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -124,18 +124,6 @@ async fn linked_ids(state: &AppState, project: &str, who: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn admin(state: &AppState, headers: &HeaderMap) -> Option<Response> {
-    match auth::viewer(state, headers) {
-        None if auth::has_bearer(state, headers) => None,
-        None => Some(Redirect::to("/login").into_response()),
-        Some(v) if !v.admin => Some(html_page(
-            StatusCode::FORBIDDEN,
-            openlens_ui::message("Admins only", "Ask an admin."),
-        )),
-        _ => None,
-    }
-}
-
 #[derive(Deserialize, Default)]
 pub(crate) struct ConfirmForm {
     #[serde(default)]
@@ -150,9 +138,6 @@ pub(crate) async fn forget(
     Path((project, who)): Path<(String, String)>,
     Form(f): Form<ConfirmForm>,
 ) -> Response {
-    if let Some(r) = admin(&state, &headers) {
-        return r;
-    }
     if f.confirm.trim() != who {
         return html_page(
             StatusCode::BAD_REQUEST,
@@ -227,13 +212,11 @@ pub(crate) async fn api_forget(
 /// `GET /p/{id}/people/{who}/export.json` (admins; also with the bearer):
 /// everything stored about a person (right of access).
 pub(crate) async fn export(
+    _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((project, who)): Path<(String, String)>,
 ) -> Response {
-    if let Some(r) = admin(&state, &headers) {
-        return r;
-    }
     if openlens_engine::sql_literal(&who).is_err() {
         return StatusCode::BAD_REQUEST.into_response();
     }
@@ -304,10 +287,7 @@ pub(crate) async fn export(
 }
 
 /// `GET /audit` (admins).
-pub(crate) async fn audit_page(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Some(r) = admin(&state, &headers) {
-        return r;
-    }
+pub(crate) async fn audit_page(_: crate::access::Admin, State(state): State<AppState>) -> Response {
     let rows: Vec<(String, String, Option<String>, String, String)> = state
         .meta
         .audit_log(500)

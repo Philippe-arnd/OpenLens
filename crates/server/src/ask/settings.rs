@@ -2,17 +2,6 @@
 
 use super::*;
 
-pub(super) fn admin_guard(state: &AppState, headers: &HeaderMap) -> Option<Response> {
-    match auth::viewer(state, headers) {
-        None => Some(Redirect::to("/login").into_response()),
-        Some(v) if !v.admin => Some(html_page(
-            StatusCode::FORBIDDEN,
-            openlens_ui::message("Admins only", "AI settings are for admins."),
-        )),
-        _ => None,
-    }
-}
-
 pub(super) fn ai_view(state: &AppState, notice: Option<String>, error: Option<String>) -> Response {
     let s = |k: &str| state.meta.setting(k).ok().flatten().unwrap_or_default();
     let cfg = llm::config(state);
@@ -45,10 +34,7 @@ pub(super) fn ai_view(state: &AppState, notice: Option<String>, error: Option<St
 }
 
 /// `GET /settings/ai` (admins).
-pub(crate) async fn ai_page(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Some(r) = admin_guard(&state, &headers) {
-        return r;
-    }
+pub(crate) async fn ai_page(_: crate::access::Admin, State(state): State<AppState>) -> Response {
     ai_view(&state, None, None)
 }
 
@@ -71,13 +57,11 @@ pub(crate) struct AiForm {
 
 /// `POST /settings/ai` (admins): save, test, or forget the key.
 pub(crate) async fn ai_save(
+    _: crate::access::Admin,
     State(state): State<AppState>,
     headers: HeaderMap,
     Form(f): Form<AiForm>,
 ) -> Response {
-    if let Some(r) = admin_guard(&state, &headers) {
-        return r;
-    }
     match f.action.as_str() {
         "test" => {
             let Some(cfg) = llm::config(&state) else {
@@ -173,9 +157,6 @@ pub(crate) async fn privacy(
     Path(id): Path<String>,
     Form(f): Form<PrivacyForm>,
 ) -> Response {
-    if let Some(r) = admin_guard(&state, &headers) {
-        return r;
-    }
     let on = f.person_level.is_some();
     let _ = state
         .meta
