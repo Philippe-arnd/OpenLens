@@ -357,14 +357,14 @@ impl Writer {
         self.buffer.len()
     }
 
-    /// Write buffered events to Parquet and start a fresh WAL. Returns the
-    /// number of events flushed.
     /// The distinct projects of the events buffered now (#420: a flush
     /// invalidates only these projects' cached boards).
     pub fn buffered_projects(&self) -> std::collections::BTreeSet<String> {
         projects_of(&self.buffer)
     }
 
+    /// Write buffered events to Parquet and start a fresh WAL. Returns the
+    /// number of events flushed.
     pub fn flush(&mut self) -> Result<usize> {
         let Some(pending) = self.take()? else {
             return Ok(0);
