@@ -25,6 +25,18 @@ cargo xtask bench http://127.0.0.1:PORT KEY   # ingestion load test, see docs/be
 - The screenshots are in the `dashboard-screens` artifact: `gh run download <run-id> -n dashboard-screens`.
 - **Image** (`release.yml`): Docker build, compose, smoke test, then publish to GHCR. It runs nightly, on tags, on demand, or when packaging changes.
 
+## Fuzzing
+
+`fuzz/` holds coverage-guided targets for what strangers send (#299): `capture_batch` (a `/capture` body after decompression), `feature_map` (a pushed map), `error_stack` (a browser stack) and `page_url` (URL cleaning). It is not a workspace member; it needs a nightly toolchain and `cargo-fuzz`:
+
+```sh
+cd fuzz
+cargo run --bin seed                                   # corpus from crates/testkit's hostile inputs
+cargo +nightly fuzz run capture_batch -- -max_total_time=600
+```
+
+A crash leaves its input in `fuzz/artifacts/<target>/`. Fix it, and add that input to `crates/testkit` (rule 27).
+
 ## Docker
 ```sh
 docker compose up --build    # http://localhost:8686/healthz
