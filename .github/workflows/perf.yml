@@ -9,6 +9,10 @@ on:
   schedule:
     - cron: "47 2 * * *"
   workflow_dispatch:
+    inputs:
+      scale_events:
+        description: "Also run the scale measurement (#321) with this many events (0: skip)"
+        default: "0"
 
 permissions:
   contents: read
@@ -75,3 +79,58 @@ jobs:
           open=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "$title in:title" --json number -q '.[0].number')
           if [ -n "$open" ]; then gh issue comment "$open" -R "$GITHUB_REPOSITORY" --body-file body.md; else gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body-file body.md; fi
           exit 1
+
+  # Board latency and memory at scale (#321), by hand only: a synthetic app
+  # written by `xtask bench-gen`, then the board computed cold and warm,
+  # with the server's peak memory. The JSON is kept as an artifact.
+  scale:
+    name: board at scale
+    if: github.event_name == 'workflow_dispatch' && inputs.scale_events != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: perf
+      - run: cargo build --profile perf -p openlens -p xtask
+      - name: generate and measure
+        env:
+          EVENTS: ${{ inputs.scale_events }}
+        run: |
+          set -euo pipefail
+          D="$RUNNER_TEMP/scale"
+          gen_start=$(date +%s)
+          ./target/perf/xtask bench-gen "$D" --events "$EVENTS" > gen.json
+          gen_secs=$(( $(date +%s) - gen_start ))
+          OPENLENS_DATA_DIR="$D" OPENLENS_ADDR=127.0.0.1:18741 OPENLENS_ADMIN_TOKEN=perf ./target/perf/openlens > server.log 2>&1 &
+          PID=$!
+          for _ in $(seq 120); do curl -sf 127.0.0.1:18741/healthz > /dev/null && break; sleep 1; done
+          C=$(curl -si -XPOST 127.0.0.1:18741/login -d token=perf | tr -d '\r' | sed -n 's/^[Ss]et-[Cc]ookie: \(ol_session=[^;]*\).*/\1/p')
+          cold=$(curl -s -o /dev/null -w '%{time_total}' -H "cookie: $C" 127.0.0.1:18741/p/default)
+          warm=$(curl -s -o /dev/null -w '%{time_total}' -H "cookie: $C" 127.0.0.1:18741/p/default)
+          role=$(curl -s -o /dev/null -w '%{time_total}' -H "cookie: $C" "127.0.0.1:18741/p/default?role=admin")
+          peak=$(awk '/VmHWM/ {print $2}' /proc/$PID/status)
+          disk=$(du -sm "$D" | cut -f1)
+          python3 - "$gen_secs" "$cold" "$warm" "$role" "$peak" "$disk" <<'PY' > scale.json
+          import json, sys
+          gen, cold, warm, role, peak, disk = sys.argv[1:]
+          print(json.dumps({
+              "generator": json.load(open("gen.json")),
+              "generate_seconds": int(gen),
+              "board_cold_s": float(cold), "board_warm_s": float(warm), "board_role_filter_cold_s": float(role),
+              "server_peak_rss_mb": int(peak) // 1024, "data_dir_mb": int(disk),
+          }, indent=2))
+          PY
+          cat scale.json
+          { echo '## Board at scale'; echo; echo '```json'; cat scale.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: scale
+          path: |
+            scale.json
+            server.log
