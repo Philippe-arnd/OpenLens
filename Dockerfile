@@ -9,6 +9,8 @@ COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS build
+# jemalloc (#418) builds its C sources with make.
+RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends make > /dev/null && rm -rf /var/lib/apt/lists/*
 COPY --from=plan /src/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
