@@ -21,7 +21,7 @@
   <a href="https://github.com/Philippe-arnd/OpenLens/actions/workflows/k8s.yml"><img alt="Kubernetes" src="https://github.com/Philippe-arnd/OpenLens/actions/workflows/k8s.yml/badge.svg?branch=main"></a>
   <a href="https://github.com/Philippe-arnd/OpenLens/releases"><img alt="Release" src="https://img.shields.io/github/v/release/Philippe-arnd/OpenLens?color=6d5efc"></a>
   <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-6d5efc"></a>
-  <img alt="SDK 5.5 kB gz" src="https://img.shields.io/badge/SDK-5.5%20kB%20gz-0e9f6e">
+  <img alt="SDK size, gzipped" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fphilippe-arnd.github.io%2FOpenLens%2Fbadges%2Fsdk-size.json">
   <img alt="No configuration" src="https://img.shields.io/badge/config-none%20required-d99400">
 </p>
 

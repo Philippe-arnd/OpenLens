@@ -1,6 +1,6 @@
 # @openlens/web
 
-The browser SDK of [OpenLens](https://github.com/Philippe-arnd/OpenLens): self-hosted product analytics by role, feature and release. **About 4.4 kB gzipped**, no runtime dependencies, no cookies.
+The browser SDK of [OpenLens](https://github.com/Philippe-arnd/OpenLens): self-hosted product analytics by role, feature and release. **About 5.5 kB gzipped**, no runtime dependencies, no cookies.
 
 It is the one non-Rust part of OpenLens (`docs/decisions.md`, D-003). It has to run inside your own pages.
 
