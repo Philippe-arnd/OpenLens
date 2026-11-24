@@ -4386,9 +4386,21 @@ const ROUTES: &[(&str, &str, Access)] = &[
 /// `(method, path)` of every `.route(…)` in the server's source.
 fn routes_in_source() -> std::collections::BTreeSet<(String, String)> {
     let mut out = std::collections::BTreeSet::new();
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    for entry in std::fs::read_dir(dir).unwrap() {
-        let src = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+    // Every source file, modules in subdirectories included (#307).
+    let mut dirs = vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src")];
+    let mut files = Vec::new();
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else {
+                files.push(path);
+            }
+        }
+    }
+    for file in files {
+        let src = std::fs::read_to_string(file).unwrap();
         let mut rest = src.as_str();
         while let Some(i) = rest.find(".route(") {
             rest = &rest[i + ".route(".len()..];
