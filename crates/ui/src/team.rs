@@ -318,11 +318,24 @@ pub fn user_edit(u: &openlens_meta::User, status: &str, projects: &[String]) -> 
 }
 
 /// My profile: the time zone I read times in, and my name (#215, #216).
+/// The password card of *My profile* (#428).
+pub struct MePassword {
+    /// Password sign-in is on.
+    pub enabled: bool,
+    /// Signed in with the admin token (no account yet).
+    pub owner: bool,
+    /// This account has a password.
+    pub has_password: bool,
+    /// The notice is an error.
+    pub error: bool,
+}
+
 pub fn me(
     name: Option<&str>,
     email: Option<&str>,
     tz: Option<&str>,
     notice: Option<&str>,
+    pw: &MePassword,
 ) -> Markup {
     layout(
         "My profile",
@@ -332,7 +345,35 @@ pub fn me(
                 h1 { "My profile" }
                 p.muted { @if let Some(e) = email { (e) } @else { "Owner (admin token)" } }
             } }
-            @if let Some(n) = notice { p.notice role="status" { (n) } }
+            @if let Some(n) = notice {
+                @if pw.error { p.alert role="alert" { (n) } } @else { p.notice role="status" { (n) } }
+            }
+            @if pw.enabled {
+                section.card.wide #password {
+                    @if pw.owner {
+                        h2.violet { (icon("shield")) "Create your admin account" }
+                        p.small { "You signed in with the admin token. Create an account with your email and a password to sign in without it. The token keeps working as the way back in (a lost password, a locked account)." }
+                        form.settings method="post" action="/me/password" {
+                            label { "Email " input type="email" name="email" autocomplete="username" required maxlength="200"; }
+                            label { "Password " input type="password" name="password" autocomplete="new-password" required minlength="12" maxlength="200"; }
+                            label { "Again " input type="password" name="again" autocomplete="new-password" required minlength="12" maxlength="200"; }
+                            button type="submit" { "Create my account" }
+                        }
+                    } @else {
+                        h2.violet { (icon("shield")) (if pw.has_password { "Change password" } else { "Set a password" }) }
+                        form.settings method="post" action="/me/password" {
+                            input type="email" name="email" value=[email] autocomplete="username" hidden;
+                            @if pw.has_password {
+                                label { "Current password " input type="password" name="current" autocomplete="current-password" required maxlength="200"; }
+                            }
+                            label { "New password " input type="password" name="password" autocomplete="new-password" required minlength="12" maxlength="200"; }
+                            label { "Again " input type="password" name="again" autocomplete="new-password" required minlength="12" maxlength="200"; }
+                            button type="submit" { "Save the password" }
+                        }
+                        p.muted.small { "At least 12 characters; a few words work well. Saving it signs out your other sessions." }
+                    }
+                }
+            }
             section.card.wide {
                 form.settings method="post" action="/me" {
                     @if email.is_some() {

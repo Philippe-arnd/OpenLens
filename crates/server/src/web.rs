@@ -24,6 +24,8 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/", get(home))
         .route("/login", get(login_page).post(login))
         .route("/login/email", post(login_email))
+        .route("/login/password", post(login_password))
+        .route("/me/password", post(crate::users::me_password))
         .route(
             "/projects",
             get(projects_page).post(crate::settings::create),

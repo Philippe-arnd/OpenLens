@@ -540,19 +540,39 @@ fn layout_with(
 }
 
 /// Login page.
-pub fn login(failed: bool, sso: bool, email: bool) -> Markup {
+pub fn login(failed: bool, sso: bool, email: bool, password: bool) -> Markup {
+    let token_form = html! {
+        form method="post" action="/login" {
+            label for="token" { "Admin token" }
+            input #token name="token" type="password" autocomplete="off" required autofocus[!password];
+            button type="submit" { "Open my board" }
+        }
+    };
     layout(
         "Log in",
         None,
         html! {
             section.login {
                 h1 { "Hello again " span.wave aria-hidden="true" { "👋" } }
-                p.muted { "Paste the admin token, or open the login link your agent sent you." }
-                @if failed { p.alert role="alert" { "That token didn't work. Try again?" } }
-                form method="post" action="/login" {
-                    label for="token" { "Admin token" }
-                    input #token name="token" type="password" autocomplete="current-password" required autofocus;
-                    button type="submit" { "Open my board" }
+                @if password {
+                    p.muted { "Sign in with your email and password." }
+                    @if failed { p.alert role="alert" { "That didn't work. Check and try again; after a few failed tries, wait 15 minutes." } }
+                    form method="post" action="/login/password" {
+                        label for="pw-email" { "Email" }
+                        input #pw-email name="email" type="email" autocomplete="username" required autofocus;
+                        label for="pw" { "Password" }
+                        input #pw name="password" type="password" autocomplete="current-password" required;
+                        button type="submit" { "Log in" }
+                    }
+                    // The way back in, always (#428): a lost password, a locked account.
+                    details.token-login {
+                        summary { "Use the admin token" }
+                        (token_form)
+                    }
+                } @else {
+                    p.muted { "Paste the admin token, or open the login link your agent sent you." }
+                    @if failed { p.alert role="alert" { "That token didn't work. Try again?" } }
+                    (token_form)
                 }
                 @if sso {
                     p.muted.small { "or" }

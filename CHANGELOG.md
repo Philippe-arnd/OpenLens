@@ -4,6 +4,10 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **Sign in with a password** (#428): after the first sign-in with the admin token, *My profile* creates your admin account (email + password), and from then on the login page leads with email + password. Invited users can set a password there too. Passwords are Argon2id hashes, and 5 failed tries lock an email for 15 minutes. Changing a password signs out your other sessions. The admin token always works on the login page (*Use the admin token*), as the way back in. `OPENLENS_PASSWORD_LOGIN=off` turns password sign-in off.
+
 ### Security
 
 - **Fixed in this release** (#415): the Ask `k=5` anonymity bypass (NSEC-01), the untrusted public URL (SEC-06), the OIDC email trust gap (SEC-07) and the cold-tier markers lost on restart (NSEC-02).
