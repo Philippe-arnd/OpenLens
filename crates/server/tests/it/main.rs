@@ -4320,8 +4320,9 @@ async fn no_route_serves_someone_it_should_not() {
     assert!(leaks.is_empty(), "{leaks:#?}");
 
 async fn burst_from(h: &Harness, uri: &str, body: &str, peer: &str, forged: bool) -> usize {
+    let app = router(h.state.clone());
     let mut limited = 0;
-    for i in 0..700 {
+    for i in 0..1000 {
         let mut req = Request::post(uri)
             .header("content-type", "application/json")
             .header("x-openlens-key", h.key.as_str());
@@ -4333,7 +4334,7 @@ async fn burst_from(h: &Harness, uri: &str, body: &str, peer: &str, forged: bool
             .insert(axum::extract::ConnectInfo::<std::net::SocketAddr>(
                 peer.parse().unwrap(),
             ));
-        let r = router(h.state.clone()).oneshot(req).await.unwrap();
+        let r = app.clone().oneshot(req).await.unwrap();
         if r.status() == StatusCode::TOO_MANY_REQUESTS {
             limited += 1;
         }
