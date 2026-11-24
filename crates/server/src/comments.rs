@@ -34,14 +34,11 @@ fn author(state: &AppState, v: &auth::Viewer) -> String {
 
 /// `POST /p/{p}/replays/{s}/comments` (form): back to that moment.
 pub(crate) async fn add(
+    crate::access::Signed(v): crate::access::Signed,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path((project, session)): Path<(String, String)>,
     Form(f): Form<NewComment>,
 ) -> Response {
-    let Some(v) = auth::viewer(&state, &headers) else {
-        return Redirect::to("/login").into_response();
-    };
     if !openlens_replay::valid_id(&session) {
         return StatusCode::NOT_FOUND.into_response();
     }
@@ -69,13 +66,10 @@ pub(crate) async fn add(
 
 /// `POST /p/{p}/replays/{s}/comments/{id}/delete`: author or admin.
 pub(crate) async fn delete(
+    crate::access::Signed(v): crate::access::Signed,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path((project, session, id)): Path<(String, String, i64)>,
 ) -> Response {
-    let Some(v) = auth::viewer(&state, &headers) else {
-        return Redirect::to("/login").into_response();
-    };
     let meta = state.meta.clone();
     let p = project.clone();
     let ok =

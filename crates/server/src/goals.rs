@@ -403,13 +403,11 @@ fn fmt(v: f64, share: bool) -> String {
 
 /// `GET /p/{id}/goals`.
 pub(crate) async fn page(
+    crate::access::Signed(v): crate::access::Signed,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Response {
-    let Some(v) = auth::viewer(&state, &headers) else {
-        return Redirect::to("/login").into_response();
-    };
     let Some(p) = project(&state, &id).await else {
         return html_page(
             StatusCode::NOT_FOUND,

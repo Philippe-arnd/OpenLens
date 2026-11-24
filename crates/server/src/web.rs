@@ -807,55 +807,36 @@ async fn set_nav(headers: HeaderMap, Path(mode): Path<String>) -> Response {
     with_cookie(Redirect::to(&back).into_response(), &cookie)
 }
 
-/// Apply the theme cookie to HTML pages (`<html data-theme="…">`), so the
-/// page renders in the right theme with no script and no flash.
+tokio::task_local! {
+    /// The theme and sidebar choice of the request being served (#300).
+    static PREFS: openlens_ui::Prefs;
+}
+
+/// The current request's display choices, for `openlens_ui` (a page
+/// rendered outside a request gets the defaults).
+pub(crate) fn current_prefs() -> openlens_ui::Prefs {
+    PREFS.try_with(|p| *p).unwrap_or_default()
+}
+
+/// Read the theme and sidebar cookies once and keep them for the request,
+/// so the template writes them on `<html>` (#300): no response is read
+/// back or rewritten. Only known values are kept.
 pub(crate) async fn theme_layer(
     req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> Response {
-    let attrs = {
-        let cookie = |name: &str| {
-            req.headers()
-                .get_all(header::COOKIE)
-                .iter()
-                .filter_map(|v| v.to_str().ok())
-                .flat_map(|v| v.split(';'))
-                .filter_map(|kv| kv.trim().split_once('='))
-                .find(|(k, _)| *k == name)
-                .map(|(_, v)| v.to_owned())
-        };
-        let mut attrs = String::new();
-        if let Some(t) = cookie("ol_theme").filter(|v| v == "light" || v == "dark") {
-            attrs.push_str(&format!(" data-theme=\"{t}\""));
+    let prefs = {
+        let cookie = |name: &str| auth::cookie(req.headers(), name);
+        openlens_ui::Prefs {
+            theme: match cookie("ol_theme").as_deref() {
+                Some("light") => Some("light"),
+                Some("dark") => Some("dark"),
+                _ => None,
+            },
+            nav_collapsed: cookie("ol_nav").as_deref() == Some("collapsed"),
         }
-        if cookie("ol_nav").as_deref() == Some("collapsed") {
-            attrs.push_str(" data-nav=\"collapsed\"");
-        }
-        attrs
     };
-    let resp = next.run(req).await;
-    if attrs.is_empty() {
-        return resp;
-    }
-    let is_html = resp
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.starts_with("text/html"));
-    if !is_html {
-        return resp;
-    }
-    let (mut parts, body) = resp.into_parts();
-    let Ok(bytes) = axum::body::to_bytes(body, 8 * 1024 * 1024).await else {
-        return (StatusCode::INTERNAL_SERVER_ERROR, "page too large").into_response();
-    };
-    let html = String::from_utf8_lossy(&bytes).replacen(
-        "<html lang=\"en\">",
-        &format!("<html lang=\"en\"{attrs}>"),
-        1,
-    );
-    parts.headers.remove(header::CONTENT_LENGTH);
-    Response::from_parts(parts, axum::body::Body::from(html))
+    PREFS.scope(prefs, next.run(req)).await
 }
 
 async fn errors_page(
@@ -1205,10 +1186,10 @@ async fn watch_churned(
     }
 }
 
-async fn projects_page(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let Some(viewer) = auth::viewer(&state, &headers) else {
-        return to_login();
-    };
+async fn projects_page(
+    crate::access::Signed(viewer): crate::access::Signed,
+    State(state): State<AppState>,
+) -> Response {
     let meta = state.meta.clone();
     let Ok(Ok(ps)) = tokio::task::spawn_blocking(move || meta.projects()).await else {
         return html(

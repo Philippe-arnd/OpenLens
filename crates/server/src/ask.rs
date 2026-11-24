@@ -755,13 +755,11 @@ fn view(
 
 /// `GET /p/{id}/ask`.
 pub(crate) async fn page(
+    crate::access::Signed(v): crate::access::Signed,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Response {
-    let Some(v) = auth::viewer(&state, &headers) else {
-        return Redirect::to("/login").into_response();
-    };
     let Some(p) = project(&state, &id).await else {
         return html_page(
             StatusCode::NOT_FOUND,
@@ -784,14 +782,11 @@ pub(crate) struct AskForm {
 
 /// `POST /p/{id}/ask`: ask, then show the conversation.
 pub(crate) async fn ask(
+    crate::access::Signed(v): crate::access::Signed,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path(id): Path<String>,
     Form(f): Form<AskForm>,
 ) -> Response {
-    let Some(v) = auth::viewer(&state, &headers) else {
-        return Redirect::to("/login").into_response();
-    };
     let Some(p) = project(&state, &id).await else {
         return html_page(
             StatusCode::NOT_FOUND,
@@ -889,15 +884,13 @@ fn project_blocking(state: &AppState, id: &str) -> Option<openlens_meta::Project
 
 /// `POST /p/{id}/ask/confirm` (admins).
 pub(crate) async fn confirm(
+    crate::access::Signed(v): crate::access::Signed,
     _: crate::access::ProjectWrite,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
     Form(f): Form<ConfirmForm>,
 ) -> Response {
-    let Some(v) = auth::viewer(&state, &headers) else {
-        return Redirect::to("/login").into_response();
-    };
     if !v.admin {
         return html_page(
             StatusCode::FORBIDDEN,
@@ -935,13 +928,10 @@ pub(crate) async fn confirm(
 
 /// `POST /p/{id}/ask/clear`: forget my conversation.
 pub(crate) async fn clear(
+    crate::access::Signed(v): crate::access::Signed,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Response {
-    let Some(v) = auth::viewer(&state, &headers) else {
-        return Redirect::to("/login").into_response();
-    };
     save_history(&state, &id, &v.id, &[]);
     Redirect::to(&format!("/p/{id}/ask")).into_response()
 }

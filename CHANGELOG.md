@@ -18,6 +18,8 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 - **`xtask bench --with-board PROJECT`** (#344, part 2): measures ingestion while two readers compute a board in a loop (docs/benchmarks.md), and warns when the capture p99 goes above 50 ms.
 
+- **Theme without rewriting pages** (#300): the theme and sidebar cookies are read once per request, and the page template writes them on `<html>`; no middleware reads a response back any more.
+
 - **Public promises match the code** (#306): the README says the board is computed once and then served from memory, links its numbers to the nightly benchmark and the SDK size to the job that measures it, and says "no setting required" with a link to the optional settings. The privacy page lists what the SDK keeps in `localStorage` by default (and nothing in cookieless mode), and says which query-string tags are kept.
 
 - **Lighter Errors, Pages and Events pages, and the board snapshot inside the memory cap** (#329): those three pages read only the options of their filter bar, not the whole board. The board's in-memory snapshot now reserves its bytes in the query memory pool, raised from 512 MB to 768 MB and shared with every query; when the pool cannot hold it, the board reads the files instead.

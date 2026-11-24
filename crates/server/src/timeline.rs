@@ -109,13 +109,10 @@ pub(crate) fn collect(
 
 /// `GET /p/{id}/timeline`.
 pub(crate) async fn page(
+    crate::access::Signed(v): crate::access::Signed,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Response {
-    let Some(v) = auth::viewer(&state, &headers) else {
-        return Redirect::to("/login").into_response();
-    };
     let Ok(Some(p)) = state.meta.project(&id) else {
         return html_page(
             StatusCode::NOT_FOUND,
@@ -170,14 +167,11 @@ fn author(state: &AppState, v: &auth::Viewer) -> String {
 
 /// `POST /p/{id}/timeline` (anyone signed in): add a note.
 pub(crate) async fn add(
+    crate::access::Signed(v): crate::access::Signed,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path(id): Path<String>,
     Form(f): Form<NoteForm>,
 ) -> Response {
-    let Some(v) = auth::viewer(&state, &headers) else {
-        return Redirect::to("/login").into_response();
-    };
     match state
         .meta
         .add_note(&id, f.day.trim(), &v.id, &author(&state, &v), &f.body)
@@ -192,13 +186,10 @@ pub(crate) async fn add(
 
 /// `POST /p/{id}/timeline/{nid}/delete`: its author or an admin.
 pub(crate) async fn delete(
+    crate::access::Signed(v): crate::access::Signed,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path((id, nid)): Path<(String, i64)>,
 ) -> Response {
-    let Some(v) = auth::viewer(&state, &headers) else {
-        return Redirect::to("/login").into_response();
-    };
     match state.meta.delete_note(&id, nid, &v.id, v.admin) {
         Ok(true) => Redirect::to(&format!("/p/{id}/timeline")).into_response(),
         _ => html_page(
