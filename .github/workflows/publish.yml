@@ -1,4 +1,7 @@
 name: Release
+# The tag in the run's title, so scripts/release/summary.sh finds a run
+# started on main with `-f tag=…` (the release train does that).
+run-name: Release ${{ inputs.tag || github.ref_name }}
 
 # Builds the release assets and the GitHub release:
 # - on every push to main (code changes): a build release vX.Y.Z-YYMMDD-sha,

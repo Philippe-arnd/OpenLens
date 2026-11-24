@@ -127,6 +127,6 @@ jobs:
             echo "::notice::released $TAG; main is now $next ($url)"
           else
             gh issue create --title "Release train: merge $branch" --label release-hold \
-              --body "$TAG is published, but the follow-up PR could not be opened or merged by the workflow token. Open and merge \`$branch\`. If the log says *GitHub Actions is not permitted to create or approve pull requests*, tick *Allow GitHub Actions to create and approve pull requests* in Settings → Actions → General, or add a \`RELEASE_TOKEN\` repository secret (fine-grained, contents and pull requests: write). The \`release-hold\` label stops the next train until then." || true
+              --body "$TAG is published, but the follow-up PR could not be opened or merged by the workflow token. Open and merge \`$branch\`. If the log says *GitHub Actions is not permitted to create or approve pull requests*, tick *Allow GitHub Actions to create and approve pull requests* in Settings → Actions → General, or add a \`RELEASE_TOKEN\` repository secret (fine-grained, contents and pull requests: write). The PR touches \`deploy/\` and \`Cargo.toml\`, which need the code owner's review: with the workflow token as author, the owner approves it (or \`RELEASE_TOKEN\` belongs to the owner). The \`release-hold\` label stops the next train until then." || true
             echo "::warning::released $TAG; open and merge $branch by hand"
           fi
