@@ -79,7 +79,9 @@ pub(crate) fn check_new(password: &str, again: &str) -> Result<(), &'static str>
         return Err("Use at most 200 characters.");
     }
     let lower = password.to_lowercase();
-    if COMMON.contains(&lower.as_str()) || lower.chars().all(|c| Some(c) == lower.chars().next()) {
+    let mut chars = lower.chars();
+    let one_char = chars.next().is_some_and(|first| chars.all(|c| c == first));
+    if COMMON.contains(&lower.as_str()) || one_char {
         return Err("That password is too common; pick another one.");
     }
     Ok(())
