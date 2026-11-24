@@ -14,5 +14,8 @@ openlens-testkit = { path = "../crates/testkit" }
 openlens-storage = { path = "../crates/storage" }
 openlens-meta = { path = "../crates/meta" }
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true
