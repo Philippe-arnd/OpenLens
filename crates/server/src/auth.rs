@@ -2,11 +2,11 @@
 //!
 //! - API: `Authorization: Bearer <admin token>`.
 //! - Dashboard: a session cookie `<expiry>.<user>.<hmac>` signed with the
-//!   admin token (HMAC-SHA256). `user` is `owner` (admin token, owner links)
+//!   session key (HMAC-SHA256). `user` is `owner` (admin token, owner links)
 //!   or a user id (D-016); a removed user's sessions stop working at once.
-//!   Stateless otherwise, survives restarts, and rotating the admin token
-//!   logs everyone out. Cookies from before users existed (`<expiry>.<hmac>`)
-//!   still count as the owner.
+//!   The signature covers the session generation: *Sign out everywhere*
+//!   (#342) bumps it, and every cookie issued before stops working.
+//!   Stateless otherwise, and survives restarts.
 //! - One-time login links (`/l/<token>`) for handing the board to a PM.
 
 use axum::http::HeaderMap;
@@ -61,8 +61,17 @@ pub(crate) fn new_session(state: &AppState, user: &str) -> String {
     let exp = chrono::Utc::now().timestamp() + SESSION_SECS;
     format!(
         "{exp}.{user}.{}",
-        sign(&state.session_key, &format!("session:{exp}:{user}"))
+        sign(&state.session_key, &session_msg(state, exp, user))
     )
+}
+
+/// What a session cookie signs. Generation 0 (no sign-out yet) keeps the
+/// format of earlier releases, so an upgrade logs nobody out.
+fn session_msg(state: &AppState, exp: i64, user: &str) -> String {
+    match state.session_gen.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => format!("session:{exp}:{user}"),
+        g => format!("session:{g}:{exp}:{user}"),
+    }
 }
 
 /// The user a session cookie belongs to, if it is valid.
@@ -72,19 +81,14 @@ fn session_user(state: &AppState, value: &str) -> Option<String> {
     if exp_n <= chrono::Utc::now().timestamp() {
         return None;
     }
-    match rest.split_once('.') {
-        Some((user, sig)) => {
-            let ok = user.len() <= 120
-                && token_matches(
-                    sig,
-                    &sign(&state.session_key, &format!("session:{exp}:{user}")),
-                );
-            ok.then(|| user.to_owned())
-        }
-        // Legacy owner cookie.
-        None => token_matches(rest, &sign(&state.session_key, &format!("session:{exp}")))
-            .then(|| OWNER.to_owned()),
-    }
+    // `<expiry>.<hmac>` cookies from before users existed are refused.
+    let (user, sig) = rest.split_once('.')?;
+    let ok = user.len() <= 120
+        && token_matches(
+            sig,
+            &sign(&state.session_key, &session_msg(state, exp_n, user)),
+        );
+    ok.then(|| user.to_owned())
 }
 
 /// Who the session cookie belongs to (`OWNER` or a user id), if valid.

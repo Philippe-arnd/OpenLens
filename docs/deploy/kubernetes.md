@@ -51,7 +51,7 @@ No value is required. The common ones:
   kubectl -n openlens create secret generic openlens-admin --from-literal=admin-token="adm_$(openssl rand -hex 24)"
   ```
 
-  If you don't, OpenLens generates a token, stores only its hash in its volume and prints it once in its log (`generated admin token`). A lost token cannot be read back: set `OPENLENS_ADMIN_TOKEN` to choose a new one.
+  If you don't, OpenLens generates a token and stores only its hash in its volume. The token itself is never shown: the log prints a single-use owner link valid 1 hour (`generated admin token … owner_link=`). Open it, then create API tokens for the CLI and agents in *Settings → API tokens*. Missed the hour, or lost access: set `OPENLENS_ADMIN_TOKEN` to choose a token, and restart.
 
 **Never** put the token in values files, manifests or the app's repository. It belongs in a Secret, and in the agent's own secret store.
 

@@ -128,7 +128,7 @@ Or with Docker, which doesn't need a Rust toolchain:
 
 ```sh
 docker run -p 8686:8686 -v openlens-data:/data ghcr.io/philippe-arnd/openlens:latest
-# the admin token is printed in the log on first start
+# the log prints a one-hour owner link on first start (or pass -e OPENLENS_ADMIN_TOKEN=…)
 ```
 
 ## 🚀 Deploy

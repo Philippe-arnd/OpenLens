@@ -233,8 +233,17 @@ fn build_state() -> Result<openlens_server::AppState, String> {
         Some(t) => openlens_meta::sha256_hex(&t),
         None => {
             let (hash, generated) = meta.admin_token_hash().map_err(|e| e.to_string())?;
-            if let Some(admin_token) = generated {
-                tracing::info!(%admin_token, "generated admin token, shown only now (store it; set OPENLENS_ADMIN_TOKEN to choose your own)");
+            if generated.is_some() {
+                // The token itself never reaches the log (#342): a one-hour,
+                // single-use owner link does.
+                match meta.create_login_link_for(None, 3600) {
+                    Ok(link) => {
+                        let base = std::env::var("OPENLENS_PUBLIC_URL").unwrap_or_default();
+                        let owner_link = format!("{}/l/{link}", base.trim_end_matches('/'));
+                        tracing::info!(%owner_link, "generated admin token, stored hashed and never shown. Open this single-use owner link within 1 hour, then create API tokens in Settings → API tokens (or set OPENLENS_ADMIN_TOKEN to choose your own token)");
+                    }
+                    Err(err) => tracing::error!(%err, "generated admin token, but no owner link could be made: set OPENLENS_ADMIN_TOKEN and restart"),
+                }
             }
             hash
         }
@@ -247,6 +256,7 @@ fn build_state() -> Result<openlens_server::AppState, String> {
         tracing::info!(recovered, "recovered events from the write-ahead log");
     }
     let session_key = openlens_server::secrets::session_key(&data_dir)?;
+    let session_gen = openlens_server::tokens::session_generation(&meta);
     Ok(openlens_server::AppState {
         meta: Arc::new(meta),
         writer: Arc::new(Mutex::new(writer)),
@@ -258,5 +268,6 @@ fn build_state() -> Result<openlens_server::AppState, String> {
         flushing: Default::default(),
         metrics: Default::default(),
         disk_space: openlens_server::disk_space,
+        session_gen: Arc::new(std::sync::atomic::AtomicU64::new(session_gen)),
     })
 }

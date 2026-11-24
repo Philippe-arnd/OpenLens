@@ -101,6 +101,18 @@ pub(crate) fn routes() -> Router<AppState> {
         )
         .route("/p/{project}/tickets/new", get(crate::tickets::new))
         .route("/p/{project}/tickets/target", post(crate::tickets::target))
+        .route(
+            "/settings/tokens",
+            get(crate::tokens::page).post(crate::tokens::create),
+        )
+        .route(
+            "/settings/tokens/{id}/revoke",
+            post(crate::tokens::revoke),
+        )
+        .route(
+            "/settings/sessions/revoke",
+            post(crate::tokens::sign_out_everywhere),
+        )
         .route("/settings/storage", get(crate::storage::page))
         .route("/settings/storage/s3", post(crate::storage::s3))
         .route("/settings/storage/backups", post(crate::storage::plan))
