@@ -271,7 +271,7 @@ fn build_state() -> Result<openlens_server::AppState, String> {
     Ok(openlens_server::AppState {
         meta: Arc::new(meta),
         writer: Arc::new(Mutex::new(writer)),
-        query: openlens_query::QueryEngine::new(&data_dir, openlens_query::Limits::default()),
+        query: openlens_query::QueryEngine::new(&data_dir, openlens_query::Limits::from_host()),
         data_dir,
         admin_token_hash: admin_token_hash.into(),
         session_key: session_key.into(),

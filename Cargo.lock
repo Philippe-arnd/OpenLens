@@ -2474,6 +2474,7 @@ name = "openlens-featuremap"
 version = "0.6.0"
 dependencies = [
  "openlens-sqlgen",
+ "regex",
  "serde",
  "serde_json",
  "serde_norway",

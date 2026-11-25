@@ -27,6 +27,10 @@ use datafusion::prelude::{SQLOptions, SessionConfig, SessionContext};
 use futures::StreamExt;
 
 mod aggregate;
+pub mod functions;
+mod host;
+mod internal;
+mod rebatch;
 mod rollup;
 pub use aggregate::MIN_USERS;
 use serde::Serialize;
@@ -34,6 +38,8 @@ use serde::Serialize;
 /// How long the anonymous-id table of a project is reused before it is
 /// read again. Events are flushed every ~10 s, so this stays fresh enough.
 const ALIAS_TTL: Duration = Duration::from_secs(30);
+/// Rows per batch of a snapshot.
+const SNAPSHOT_BATCH_ROWS: usize = 8192;
 /// How long a shared snapshot outlives its last user (#418).
 const SNAPSHOT_LINGER: Duration = Duration::from_secs(15);
 
@@ -85,12 +91,17 @@ struct Identity {
     aliases: Option<Arc<MemTable>>,
     /// `persons`; may be empty.
     persons: Arc<MemTable>,
+    /// The people of `persons` marked internal, for `is_internal`.
+    internal: internal::Internal,
 }
 
 type AliasCache = Arc<std::sync::Mutex<HashMap<String, (Instant, Identity)>>>;
 
-/// Run `sql` and keep its result as an in-memory table, with its row count.
-async fn collect(ctx: &SessionContext, sql: &str) -> Result<(Arc<MemTable>, usize), QueryError> {
+/// Run `sql` and keep its result as an in-memory table, with its rows.
+async fn collect(
+    ctx: &SessionContext,
+    sql: &str,
+) -> Result<(Arc<MemTable>, Vec<arrow::array::RecordBatch>), QueryError> {
     let df = ctx
         .sql(sql)
         .await
@@ -100,10 +111,9 @@ async fn collect(ctx: &SessionContext, sql: &str) -> Result<(Arc<MemTable>, usiz
         .collect()
         .await
         .map_err(|e| QueryError::Storage(e.to_string()))?;
-    let rows = batches.iter().map(|b| b.num_rows()).sum();
-    let table =
-        MemTable::try_new(schema, vec![batches]).map_err(|e| QueryError::Storage(e.to_string()))?;
-    Ok((Arc::new(table), rows))
+    let table = MemTable::try_new(schema, vec![batches.clone()])
+        .map_err(|e| QueryError::Storage(e.to_string()))?;
+    Ok((Arc::new(table), batches))
 }
 
 /// The DataFusion runtime shared by every query.
@@ -137,10 +147,6 @@ pub enum QueryError {
     #[error("this query needs more memory than the server allows: narrow the dates or the filters")]
     TooBig,
 }
-
-/// One long query at a time, so the board and ingestion never wait behind
-/// two of them (#326).
-static COLD: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
 
 /// Limits applied to every query.
 #[derive(Debug, Clone, Copy)]
@@ -224,6 +230,11 @@ pub struct QueryEngine {
     shared: Arc<SharedSnaps>,
     /// Per project: the identity tables and when they were read.
     aliases: AliasCache,
+    /// One long (cold) query at a time per engine, so the board and
+    /// ingestion never wait behind two of them (#326). Shared by every copy
+    /// of the engine: one per process in the server. Not a process-wide
+    /// static, so engines in the same test binary do not take turns (#458).
+    cold_turn: Arc<tokio::sync::Semaphore>,
     /// Queries stopped at the time limit, shared by every copy (#346).
     timeouts: Arc<std::sync::atomic::AtomicU64>,
     /// Values for the `$name` placeholders of this copy's queries (#310).
@@ -244,6 +255,7 @@ impl QueryEngine {
             snapshots: Arc::default(),
             shared: Arc::default(),
             aliases: AliasCache::default(),
+            cold_turn: Arc::new(tokio::sync::Semaphore::new(1)),
             timeouts: Arc::default(),
             params: Arc::default(),
             cold: false,
@@ -429,6 +441,8 @@ impl QueryEngine {
                 }
                 batches.push(batch);
             }
+            let received = batches.len();
+            let batches = rebatch::rebatch(&schema, batches, SNAPSHOT_BATCH_ROWS)?;
             // The snapshot counts against the same memory cap as the
             // queries (#329): when the pool cannot hold it, read the files.
             let Some(runtime) = &self.runtime else {
@@ -440,6 +454,14 @@ impl QueryEngine {
                 .sum();
             let reservation =
                 MemoryConsumer::new(format!("snapshot {name}")).register(&runtime.memory_pool);
+            tracing::debug!(
+                name,
+                rows,
+                received,
+                kept = batches.len(),
+                bytes,
+                "snapshot built"
+            );
             if reservation.try_grow(bytes).is_err() {
                 tracing::debug!(
                     bytes,
@@ -474,6 +496,7 @@ impl QueryEngine {
         std::fs::create_dir_all(&dir).map_err(|e| QueryError::Storage(e.to_string()))?;
 
         let ctx = self.session()?;
+        functions::register(&ctx);
 
         let url = ListingTableUrl::parse(format!("{}/", dir.display()))
             .map_err(|e| QueryError::Storage(e.to_string()))?;
@@ -491,6 +514,7 @@ impl QueryEngine {
         let identity = self.identity(project, &ctx).await?;
         ctx.register_table("persons", identity.persons)
             .map_err(|e| QueryError::Storage(e.to_string()))?;
+        ctx.register_udf(internal::is_internal_udf(identity.internal));
         match identity.aliases {
             // Nobody to merge: `events` is the stored table, at no cost.
             None => {
@@ -545,10 +569,12 @@ impl QueryEngine {
             return Ok(t.clone());
         }
         let (aliases, alias_rows) = collect(ctx, ALIAS_SQL).await?;
-        let (persons, _) = collect(ctx, PERSONS_SQL).await?;
+        let (persons, person_rows) = collect(ctx, PERSONS_SQL).await?;
+        let any = alias_rows.iter().any(|b| b.num_rows() > 0);
         let identity = Identity {
-            aliases: (alias_rows > 0).then_some(aliases),
+            aliases: any.then_some(aliases),
             persons,
+            internal: internal::internal_set(&person_rows),
         };
         if let Ok(mut cache) = self.aliases.lock() {
             cache.insert(project.to_owned(), (Instant::now(), identity.clone()));
@@ -685,7 +711,7 @@ impl QueryEngine {
                 .map_err(|e| QueryError::Storage(e.to_string()))?,
         };
         let config = SessionConfig::new()
-            .with_target_partitions(2)
+            .with_target_partitions(host::query_threads())
             .with_information_schema(false);
         Ok(SessionContext::new_with_config_rt(config, runtime))
     }
@@ -700,7 +726,7 @@ impl QueryEngine {
             return Err(QueryError::Rejected("query is too long".into()));
         }
         let _turn = if self.cold {
-            Some(COLD.try_acquire().map_err(|_| QueryError::Busy)?)
+            Some(self.cold_turn.try_acquire().map_err(|_| QueryError::Busy)?)
         } else {
             None
         };
@@ -724,7 +750,7 @@ impl QueryEngine {
 fn query_runtime() -> Option<&'static tokio::runtime::Runtime> {
     static RT: std::sync::OnceLock<Option<tokio::runtime::Runtime>> = std::sync::OnceLock::new();
     RT.get_or_init(|| {
-        let threads = std::thread::available_parallelism().map_or(2, |n| n.get().clamp(1, 8));
+        let threads = host::query_threads();
         tokio::runtime::Builder::new_multi_thread()
             .worker_threads(threads)
             .thread_name("openlens-query")
@@ -850,7 +876,7 @@ mod tests {
     async fn one_cold_query_at_a_time_and_hot_ones_never_wait() {
         let dir = tempfile::tempdir().unwrap();
         let q = QueryEngine::new(dir.path(), Limits::default());
-        let held = COLD.try_acquire().unwrap();
+        let held = q.cold_turn.try_acquire().unwrap();
         assert!(matches!(
             q.cold().sql("a", "SELECT 1 AS n").await,
             Err(QueryError::Busy)
@@ -859,6 +885,24 @@ mod tests {
         drop(held);
         assert_eq!(
             q.cold().sql("a", "SELECT 1 AS n").await.unwrap().rows[0]["n"],
+            1
+        );
+    }
+
+    /// #458: a cold query on one engine does not make another engine's
+    /// cold query busy (the server's tests run many engines at once).
+    #[tokio::test]
+    async fn engines_take_cold_turns_on_their_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = QueryEngine::new(dir.path(), Limits::default());
+        let b = QueryEngine::new(dir.path(), Limits::default());
+        let _held = a.cold_turn.try_acquire().unwrap();
+        assert!(matches!(
+            a.cold().sql("p", "SELECT 1 AS n").await,
+            Err(QueryError::Busy)
+        ));
+        assert_eq!(
+            b.cold().sql("p", "SELECT 1 AS n").await.unwrap().rows[0]["n"],
             1
         );
     }

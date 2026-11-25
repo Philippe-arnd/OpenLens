@@ -8,6 +8,9 @@
 //!
 //! Layer: L2 (see `docs/architecture.md`).
 
+mod resolver;
+pub use resolver::Resolver;
+
 use serde::{Deserialize, Serialize};
 
 /// Largest accepted map, in bytes.

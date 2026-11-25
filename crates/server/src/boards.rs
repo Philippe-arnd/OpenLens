@@ -114,6 +114,17 @@ impl BoardCache {
         self.len() == 0
     }
 
+    /// Wait until no board is being computed, and hold every compute slot
+    /// until the returned permit drops. Background rollups run under it,
+    /// so a rollup pass and a board never split the query memory pool
+    /// between them (#444). The semaphore is fair: boards asked for after
+    /// this call wait for the permit to drop, and this call is never
+    /// starved by a stream of boards.
+    pub async fn exclusive(&self) -> Option<tokio::sync::SemaphorePermit<'_>> {
+        let all = u32::try_from(PARALLEL).unwrap_or(u32::MAX);
+        self.inner.permits.acquire_many(all).await.ok()
+    }
+
     /// How many boards were actually computed since the start.
     pub fn computed(&self) -> u64 {
         self.inner.computed.load(Ordering::Relaxed)
