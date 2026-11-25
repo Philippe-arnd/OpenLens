@@ -13,12 +13,14 @@ import pathlib
 import sys
 
 LIMIT = 0.20
-# (label, path in the JSON, higher is better)
+# (label, path in the JSON, higher is better, smallest change that counts)
+# The floor keeps a whole-millisecond metric from flagging a 1 ms wobble:
+# a cached board at 2 ms against 3 ms is +50 % and means nothing (#457).
 METRICS = [
-    ("ingestion, events/s", ("ingest", "events_per_sec"), True),
-    ("/capture p99.9, ms", ("ingest", "latency_ms", "p99_9"), False),
-    ("/capture p99.9 while boards compute, ms", ("with_board", "latency_ms", "p99_9"), False),
-    ("board, p50 ms", ("with_board", "board", "ms", "p50"), False),
+    ("ingestion, events/s", ("ingest", "events_per_sec"), True, 0),
+    ("/capture p99.9, ms", ("ingest", "latency_ms", "p99_9"), False, 5),
+    ("/capture p99.9 while boards compute, ms", ("with_board", "latency_ms", "p99_9"), False, 5),
+    ("board, p50 ms", ("with_board", "board", "ms", "p50"), False, 5),
 ]
 
 
@@ -41,7 +43,7 @@ def main() -> int:
     print(f"## Nightly benchmark\n\nCompared with the average of the last {len(earlier)} runs (more than {int(LIMIT * 100)} % worse = regression).\n")
     print("| Metric | Tonight | Average | Change |\n| --- | ---: | ---: | ---: |")
     worse = []
-    for label, path, higher in METRICS:
+    for label, path, higher, floor in METRICS:
         now = get(tonight, path)
         past = [v for v in (get(e, path) for e in earlier) if v is not None]
         if now is None:
@@ -52,7 +54,7 @@ def main() -> int:
             continue
         avg = sum(past) / len(past)
         change = (now - avg) / avg if avg else 0.0
-        bad = (change < -LIMIT) if higher else (change > LIMIT)
+        bad = ((change < -LIMIT) if higher else (change > LIMIT)) and abs(now - avg) >= floor
         mark = " ⚠️" if bad else ""
         print(f"| {label} | {now:g} | {avg:.1f} | {change * 100:+.0f} %{mark} |")
         if bad and len(past) >= 3:
