@@ -15,6 +15,7 @@
 //!
 //! Layer: L1 (see `docs/architecture.md`).
 
+mod merge;
 mod pending;
 mod segments;
 pub use pending::Pending;
@@ -498,6 +499,22 @@ fn write_parquet(dir: &Path, batch: &RecordBatch) -> Result<PathBuf> {
 /// Write a batch to `dir/<name>.parquet` atomically, replacing any file of
 /// that name, with the same durability as [`write_parquet`].
 pub(crate) fn write_parquet_as(dir: &Path, name: &str, batch: &RecordBatch) -> Result<PathBuf> {
+    write_parquet_stream(
+        dir,
+        name,
+        batch.schema(),
+        std::iter::once(Ok(batch.clone())),
+    )
+}
+
+/// [`write_parquet_as`] for batches produced one at a time: only the row
+/// group being filled is held in memory (#418).
+pub(crate) fn write_parquet_stream(
+    dir: &Path,
+    name: &str,
+    schema: SchemaRef,
+    batches: impl Iterator<Item = Result<RecordBatch>>,
+) -> Result<PathBuf> {
     let created = !dir.is_dir();
     fs::create_dir_all(dir)?;
     if created && let Some(parent) = dir.parent() {
@@ -513,8 +530,18 @@ pub(crate) fn write_parquet_as(dir: &Path, name: &str, batch: &RecordBatch) -> R
         .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Page)
         .build();
     let file = File::create(&tmp)?;
-    let mut writer = ArrowWriter::try_new(file, batch.schema(), Some(props))?;
-    writer.write(batch)?;
+    let mut writer = ArrowWriter::try_new(file, schema, Some(props))?;
+    for b in batches {
+        let b = match b {
+            Ok(b) => b,
+            Err(e) => {
+                drop(writer);
+                let _ = fs::remove_file(&tmp);
+                return Err(e);
+            }
+        };
+        writer.write(&b)?;
+    }
     let file = writer.into_inner()?;
     file.sync_all()?;
     fs::rename(&tmp, &dst)?;
@@ -612,17 +639,8 @@ fn compact_dir(dir: &Path, min_files: usize) -> Result<bool> {
     if files.len() < min_files {
         return Ok(false);
     }
-    let mut batches = Vec::new();
-    for f in &files {
-        let reader = ParquetRecordBatchReaderBuilder::try_new(File::open(f)?)?.build()?;
-        for b in reader {
-            batches.push(b?);
-        }
-    }
-    let merged = arrow::compute::concat_batches(&event_schema(), &batches)?;
-    let merged = sorted(&unique_uuids(&merged)?)?;
-    // The merged segment is durable before the old ones go.
-    write_parquet(dir, &merged)?;
+    // Streamed: the day is never held whole in memory (#418).
+    merge::merge_segments(dir, &files)?;
     for f in files {
         fs::remove_file(f)?;
     }
@@ -878,49 +896,6 @@ fn trim_batch(b: &RecordBatch) -> Result<(RecordBatch, usize)> {
     let mut cols = b.columns().to_vec();
     cols[idx] = Arc::new(out) as ArrayRef;
     Ok((RecordBatch::try_new(b.schema(), cols)?, changed))
-}
-
-/// `batch` ordered by event then time (#326): each row group then covers a
-/// few event names and a short span, so its statistics let a query skip it.
-fn sorted(batch: &RecordBatch) -> Result<RecordBatch> {
-    let (Some(ev), Some(ts)) = (
-        batch.column_by_name("event"),
-        batch.column_by_name("timestamp"),
-    ) else {
-        return Ok(batch.clone());
-    };
-    let idx = arrow::compute::lexsort_to_indices(
-        &[
-            arrow::compute::SortColumn {
-                values: ev.clone(),
-                options: None,
-            },
-            arrow::compute::SortColumn {
-                values: ts.clone(),
-                options: None,
-            },
-        ],
-        None,
-    )?;
-    Ok(arrow::compute::take_record_batch(batch, &idx)?)
-}
-
-/// Keep the first row of each uuid (a resent event is stored once).
-fn unique_uuids(batch: &RecordBatch) -> Result<RecordBatch> {
-    let Some(col) = batch
-        .column_by_name("uuid")
-        .and_then(|c| c.as_any().downcast_ref::<arrow::array::StringArray>())
-    else {
-        return Ok(batch.clone());
-    };
-    let mut seen = HashSet::with_capacity(col.len());
-    let keep: arrow::array::BooleanArray = (0..col.len())
-        .map(|i| Some(col.is_null(i) || seen.insert(col.value(i))))
-        .collect();
-    if keep.true_count() == batch.num_rows() {
-        return Ok(batch.clone());
-    }
-    Ok(arrow::compute::filter_record_batch(batch, &keep)?)
 }
 
 /// Days of events kept: 400, a little over 13 months, so a month can be
