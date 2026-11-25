@@ -579,6 +579,8 @@ async fn roll_up(state: &AppState, now: chrono::DateTime<chrono::Utc>) -> usize 
         for day in days.into_iter().take(ROLLUPS_PER_PASS) {
             let generation = openlens_storage::rollup::generation();
             let label = day.format("%Y-%m-%d").to_string();
+            // One day at a time, never beside a board (#444).
+            let quiet = state.boards.exclusive().await;
             let batches = match state.query.rollup_day(&p.id, &label).await {
                 Ok(b) => b,
                 Err(err) => {
@@ -586,6 +588,7 @@ async fn roll_up(state: &AppState, now: chrono::DateTime<chrono::Utc>) -> usize 
                     continue;
                 }
             };
+            drop(quiet);
             let Ok(_guard) = privacy::MAINTENANCE.lock() else {
                 return written;
             };

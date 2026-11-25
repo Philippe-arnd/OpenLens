@@ -13,6 +13,8 @@ openlens-sqlgen = { path = "../sqlgen" }
 serde.workspace = true
 serde_json.workspace = true
 serde_norway.workspace = true
+# Already built for DataFusion's `regexp_like`: the same engine (#446).
+regex = "1"
 
 [[test]]
 name = "it"
