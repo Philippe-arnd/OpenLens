@@ -7,6 +7,8 @@ summary and the top-level bullets of "Highlights" become the list.
 """
 import html, os, re, shutil, sys
 
+from stamp import stamp
+
 tag, date, url = sys.argv[1:4]
 notes_path = sys.argv[4] if len(sys.argv) > 4 else f"docs/releases/{tag}.md"
 
@@ -33,9 +35,16 @@ out = "_site"
 shutil.rmtree(out, ignore_errors=True)
 shutil.copytree("site", out)
 os.makedirs(f"{out}/img", exist_ok=True)
-for f in ["logo.svg", "board-light.png", "board-dark.png", "social-preview.png"]:
-    shutil.copy(f"docs/img/{f}", f"{out}/img/{f}")
 page = open(f"{out}/index.html", encoding="utf-8").read()
+# Every image the page names is copied, and a missing one fails the build.
+# PNGs are stamped with their hash (#439), so a new screenshot gets a new URL.
+for f in sorted(set(re.findall(r"img/([A-Za-z0-9_.-]+\.(?:png|svg))", page))):
+    if not os.path.isfile(f"docs/img/{f}"):
+        sys.exit(f"index.html names img/{f}, which is not in docs/img")
+    shutil.copy(f"docs/img/{f}", f"{out}/img/{f}")
+page, missing = stamp(page, "img/")
+if missing:
+    sys.exit("index.html names missing images: " + ", ".join(missing))
 for k, v in {"VERSION": html.escape(tag), "DATE": html.escape(date), "RELEASE_URL": html.escape(url),
              "CHANNEL": html.escape(minor), "SUMMARY": inline(summary), "HIGHLIGHTS": highlights}.items():
     page = page.replace("{{" + k + "}}", v)
