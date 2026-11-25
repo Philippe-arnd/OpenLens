@@ -15,6 +15,7 @@ use serde_json::{Map, Value};
 mod acquisition;
 pub mod churn;
 mod digest;
+pub mod environments;
 mod errors;
 mod events;
 mod explore;

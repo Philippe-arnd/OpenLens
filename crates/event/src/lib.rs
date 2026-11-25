@@ -151,6 +151,79 @@ pub fn normalize_environment(raw: &str) -> String {
     }
 }
 
+/// Environment of an event whose host no rule and no hostname pattern
+/// classifies (D-034): kept apart, counted in no production number.
+pub const UNKNOWN_ENVIRONMENT: &str = "unknown";
+
+/// The host of a page URL, lowercase, without port: `https://App.x:8080/a`
+/// gives `app.x`. `None` when the URL has no `scheme://host`.
+#[must_use]
+pub fn host_of(url: &str) -> Option<String> {
+    let (_, rest) = url.split_once("://")?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = if authority.starts_with('[') {
+        // IPv6 literal: keep the brackets, drop the port.
+        authority.split_once(']').map(|(h, _)| format!("{h}]"))?
+    } else {
+        authority.split(':').next().unwrap_or_default().to_owned()
+    };
+    let host = host.trim().to_ascii_lowercase();
+    (!host.is_empty() && host.len() <= 253).then_some(host)
+}
+
+/// The environment a hostname pattern gives `host`, as the browser SDK
+/// detects it (`sdk/js/src/env.ts`, D-012), or `None` when no pattern
+/// matches (the SDK then says `production`).
+#[must_use]
+pub fn detected_environment(host: &str) -> Option<&'static str> {
+    let h = host.to_ascii_lowercase();
+    if h == "localhost"
+        || h == "0.0.0.0"
+        || h == "[::1]"
+        || h.starts_with("127.")
+        || h.ends_with(".local")
+        || h.ends_with(".localhost")
+        || h.ends_with(".test")
+    {
+        return Some("development");
+    }
+    // Labels split on `.` and `-`, as the SDK's `(^|[.-])word([.-]|$)`.
+    let labels: Vec<&str> = h.split(['.', '-']).collect();
+    if labels
+        .iter()
+        .any(|l| matches!(*l, "staging" | "stage" | "stg"))
+    {
+        return Some("staging");
+    }
+    if labels.iter().any(|l| matches!(*l, "preview" | "review"))
+        || pull_request_label(&h)
+        || h.ends_with(".vercel.app")
+        || h.ends_with(".netlify.app")
+    {
+        return Some("preview");
+    }
+    None
+}
+
+/// `pr-<digits>` between separators (`.`, `-`) or the ends, as the SDK's
+/// `(^|[.-])pr-\d+([.-]|$)`.
+fn pull_request_label(h: &str) -> bool {
+    let b = h.as_bytes();
+    h.match_indices("pr-").any(|(i, _)| {
+        let starts = i == 0 || matches!(b[i - 1], b'.' | b'-');
+        let digits = b[i + 3..].iter().take_while(|c| c.is_ascii_digit()).count();
+        let end = i + 3 + digits;
+        starts && digits > 0 && (end == b.len() || matches!(b[end], b'.' | b'-'))
+    })
+}
+
+/// What the browser SDK sends for `host` when the app sets no environment:
+/// the pattern's environment, or `production` (D-012).
+#[must_use]
+pub fn sdk_guess(host: &str) -> &'static str {
+    detected_environment(host).unwrap_or(DEFAULT_ENVIRONMENT)
+}
+
 /// Why an event or batch was rejected.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EventError {

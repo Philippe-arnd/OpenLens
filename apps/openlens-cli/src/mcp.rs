@@ -155,6 +155,11 @@ impl Tools for OpenLensTools {
                 input_schema: json!({"type":"object","properties":proj}),
             },
             ToolSpec {
+                name: "environments",
+                description: "The app's environments: hosts per environment over 30 days (events, last seen, the rule that applies), the host rules, and hosts no rule classifies yet (stored as 'unknown', counted in no production number). With host and env, first sets the rule for that host (an exact host or *.suffix; env is an environment name or 'ignore' to drop its events); with remove, first removes the rule for that host. Rules apply to the next events, with no change to the app.",
+                input_schema: json!({"type":"object","properties":with(json!({"host":{"type":"string"},"env":{"type":"string"},"remove":{"type":"string"}}))}),
+            },
+            ToolSpec {
                 name: "verify",
                 description: "Wiring checklist: events arrive, users identified with a role, release tagged, map pushed, events per feature. Each failing check carries its fix.",
                 input_schema: json!({"type":"object","properties":proj}),
@@ -371,6 +376,27 @@ impl Tools for OpenLensTools {
                     &format!("/api/projects/{}/tickets", project(args)),
                     None,
                 )?;
+                ok_or(st, v)
+            }
+            "environments" => {
+                let p = project(args);
+                let change = match (s(args, "host"), s(args, "env"), s(args, "remove")) {
+                    (Some(host), Some(env), None) => {
+                        Some(json!({ "environment_rule": { "host": host, "env": env } }))
+                    }
+                    (None, None, Some(host)) => Some(json!({ "remove_environment_rule": host })),
+                    (None, None, None) => None,
+                    _ => return Err("send host and env to set a rule, or remove alone".into()),
+                };
+                if let Some(body) = change {
+                    let (st, v) = c.call(
+                        "PATCH",
+                        &format!("/api/projects/{p}"),
+                        Some(Body::Json(body)),
+                    )?;
+                    ok_or(st, v)?;
+                }
+                let (st, v) = c.call("GET", &format!("/api/projects/{p}/environments"), None)?;
                 ok_or(st, v)
             }
             "verify" => crate::verify_report(c, &project(args)),

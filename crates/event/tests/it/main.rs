@@ -158,3 +158,43 @@ fn stored_urls_drop_query_and_fragment_but_keep_campaign_tags() {
     assert!(stored.contains("utm_source=news") && stored.contains("gclid=g1"));
     assert!(!out.events[0].properties.contains("SECRET123"));
 }
+
+/// The server reads the environment the browser SDK would detect (D-034),
+/// so the two must agree, pattern by pattern, with `sdk/js/src/env.ts`.
+#[test]
+fn hostname_patterns_agree_with_the_browser_sdk() {
+    use openlens_event::{detected_environment, sdk_guess};
+    for (host, env) in [
+        ("localhost", Some("development")),
+        ("127.0.0.1", Some("development")),
+        ("app.local", Some("development")),
+        ("shop.test", Some("development")),
+        ("staging.app.com", Some("staging")),
+        ("app-stg.example.org", Some("staging")),
+        ("pr-42.app.com", Some("preview")),
+        ("app-pr-7.example.org", Some("preview")),
+        ("x.vercel.app", Some("preview")),
+        ("review.app.com", Some("preview")),
+        // Look-alikes the SDK does not match.
+        ("prestaging.app.com", None),
+        ("pr-x.app.com", None),
+        ("pr-12abc.app.com", None),
+        ("kanban-test.philapps.com", None),
+        ("app.com", None),
+    ] {
+        assert_eq!(detected_environment(host), env, "{host}");
+    }
+    assert_eq!(sdk_guess("kanban-test.philapps.com"), "production");
+}
+
+#[test]
+fn the_host_of_a_page_has_no_port_path_or_case() {
+    use openlens_event::host_of;
+    assert_eq!(
+        host_of("https://App.Example.com:8443/a/b?x=1").as_deref(),
+        Some("app.example.com")
+    );
+    assert_eq!(host_of("http://[::1]:3000/").as_deref(), Some("[::1]"));
+    assert_eq!(host_of("/relative/path"), None);
+    assert_eq!(host_of("https:///nohost"), None);
+}

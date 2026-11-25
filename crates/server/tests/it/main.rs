@@ -17,6 +17,7 @@ use tower::ServiceExt;
 mod access;
 mod agents;
 mod auth;
+mod environments;
 mod features;
 mod ingest;
 mod manage;
