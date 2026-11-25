@@ -47,6 +47,23 @@ if [ -n "$pages" ]; then
   else
     row "Site" "❌ failed" "$pages does not name $v yet"
   fi
+  # The images the site serves are the ones on main (#439): Pages builds
+  # from main, after the screenshots PR of the release merges. A warning,
+  # not a failure: Pages and its CDN can lag a few minutes.
+  shots=$(curl -fsSL --max-time 20 "$pages" | grep -o 'img/[A-Za-z0-9_.-]*\.png' | sort -u || true)
+  stale=""
+  for img in $shots; do
+    served=$(curl -fsSL --max-time 20 "${pages%/}/$img" | sha256sum | cut -c1-64)
+    want=$(curl -fsSL --max-time 20 "https://raw.githubusercontent.com/$repo/main/docs/$img" | sha256sum | cut -c1-64)
+    [ "$served" = "$want" ] || stale="$stale ${img#img/}"
+  done
+  if [ -z "$shots" ]; then
+    row "Images" "⚠️ warning" "the site names no image"
+  elif [ -n "$stale" ]; then
+    row "Images" "⚠️ warning" "differ from docs/img on main:$stale"
+  else
+    row "Images" "✅ ok" "$(wc -w <<< "$shots") images match docs/img on main"
+  fi
 else
   row "Site" "⏭️ skipped" "no Pages site"
 fi
