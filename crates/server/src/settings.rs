@@ -32,13 +32,68 @@ pub(crate) struct Notice {
     done: Option<String>,
 }
 
-/// `GET /p/{id}/settings`.
+/// `GET /p/{id}/settings`: the *General* tab.
 pub(crate) async fn page(
+    viewer: crate::access::Signed,
+    state: State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    nq: Query<Notice>,
+) -> Response {
+    page_at(
+        viewer,
+        state,
+        headers,
+        id,
+        nq,
+        openlens_ui::SettingsTab::General,
+    )
+    .await
+}
+
+/// `GET /p/{id}/settings/{install|alerts|sharing|data}` (#438).
+pub(crate) async fn tab_page(
+    viewer: crate::access::Signed,
+    state: State<AppState>,
+    headers: HeaderMap,
+    Path((id, slug)): Path<(String, String)>,
+    nq: Query<Notice>,
+) -> Response {
+    let Some(tab) = openlens_ui::SettingsTab::from_slug(&slug) else {
+        return html_page(
+            StatusCode::NOT_FOUND,
+            openlens_ui::message("Not found", "No such settings tab."),
+        );
+    };
+    page_at(viewer, state, headers, id, nq, tab).await
+}
+
+/// `GET /p/{id}/settings/alerts`.
+pub(crate) async fn alerts_page(
+    viewer: crate::access::Signed,
+    state: State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    nq: Query<Notice>,
+) -> Response {
+    page_at(
+        viewer,
+        state,
+        headers,
+        id,
+        nq,
+        openlens_ui::SettingsTab::Alerts,
+    )
+    .await
+}
+
+async fn page_at(
     crate::access::Signed(viewer): crate::access::Signed,
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path(id): Path<String>,
+    id: String,
     Query(nq): Query<Notice>,
+    tab: openlens_ui::SettingsTab,
 ) -> Response {
     let Some(p) = load(&state, &id).await else {
         return html_page(
@@ -123,6 +178,7 @@ pub(crate) async fn page(
         openlens_ui::project_settings(
             &info,
             &openlens_ui::SettingsView {
+                tab,
                 timezone: &p.timezone,
                 app_url: app_url.as_deref(),
                 detected_url: detected.as_deref(),
@@ -210,7 +266,7 @@ pub(crate) fn setup_steps(
             "First event received",
             has_events,
             true,
-            format!("{base}#install"),
+            format!("{base}/install"),
         ),
         step(
             "App address known (for uptime)",
@@ -222,13 +278,13 @@ pub(crate) fn setup_steps(
             "An alert channel (email, webhook or ntfy)",
             (a.email && smtp) || !a.webhook.is_empty() || !a.ntfy.is_empty(),
             true,
-            format!("{base}#alerts"),
+            format!("{base}/alerts"),
         ),
         step(
             "Releases detected",
             releases,
             false,
-            format!("{base}#install"),
+            format!("{base}/install"),
         ),
         step(
             "Source maps uploaded",
@@ -345,7 +401,7 @@ pub(crate) async fn rotate(
     match tokio::task::spawn_blocking(move || meta.rotate_project_key(&pid)).await {
         Ok(Ok(Some(_))) => {
             crate::privacy::audit(&state, &headers, Some(&id), "project.rotate_key", "");
-            Redirect::to(&format!("/p/{id}/settings?done=rotated")).into_response()
+            Redirect::to(&format!("/p/{id}/settings/install?done=rotated")).into_response()
         }
         _ => oops("No such project."),
     }
@@ -452,7 +508,7 @@ pub(crate) async fn create(
     {
         Ok(Ok(id)) => {
             crate::privacy::audit(&state, &headers, Some(&id), "project.create", "");
-            Redirect::to(&format!("/p/{id}/settings?done=created")).into_response()
+            Redirect::to(&format!("/p/{id}/settings/install?done=created")).into_response()
         }
         Ok(Err(_)) => oops("A project with that name already exists."),
         Err(_) => oops("Try again."),
@@ -529,7 +585,7 @@ pub(crate) async fn alerts(
         Ok(j) => {
             let _ = state.meta.set_project_setting(&id, "alerts", &j);
             crate::privacy::audit(&state, &headers, Some(&id), "alerts.update", "");
-            Redirect::to(&format!("/p/{id}/settings?done=alerts#alerts")).into_response()
+            Redirect::to(&format!("/p/{id}/settings/alerts?done=alerts")).into_response()
         }
         Err(e) => oops(&e.to_string()),
     }
@@ -554,14 +610,14 @@ pub(crate) async fn alerts_test(
     )
     .await;
     if sent.is_empty() {
-        return Redirect::to(&format!("/p/{id}/settings?done=test-none#alerts")).into_response();
+        return Redirect::to(&format!("/p/{id}/settings/alerts?done=test-none")).into_response();
     }
     let failed: Vec<String> = sent
         .iter()
         .filter_map(|(ch, r)| r.as_ref().err().map(|e| format!("{ch}: {e}")))
         .collect();
     if failed.is_empty() {
-        Redirect::to(&format!("/p/{id}/settings?done=test#alerts")).into_response()
+        Redirect::to(&format!("/p/{id}/settings/alerts?done=test")).into_response()
     } else {
         oops(&format!("Not delivered: {}", failed.join("; ")))
     }

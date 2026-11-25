@@ -175,6 +175,11 @@ const ROUTES: &[(&str, &str, Access)] = &[
     ("POST", "/users/{id}/{action}", Admin),
     ("GET", "/me", Signed),
     ("POST", "/me", Signed),
+    ("GET", "/me/sign-in", Signed),
+    ("GET", "/me/appearance", Signed),
+    ("POST", "/me/appearance", Signed),
+    ("GET", "/settings", Admin),
+    ("GET", "/settings/about", Admin),
     ("POST", "/me/password", Signed),
     ("POST", "/logout", Signed),
     ("GET", "/l/{token}", Public),
@@ -202,7 +207,9 @@ const ROUTES: &[(&str, &str, Access)] = &[
     ("POST", "/p/{project}/settings/share", Write),
     ("POST", "/p/{project}/settings/share/{lid}/revoke", Write),
     ("GET", "/s/{token}", Public),
+    ("GET", "/p/{project}/settings/alerts", Read),
     ("POST", "/p/{project}/settings/alerts", Write),
+    ("GET", "/p/{project}/settings/{tab}", Read),
     ("POST", "/p/{project}/settings/alerts/test", Write),
     ("GET", "/p/{project}/uptime", Read),
     ("GET", "/settings/ai", Admin),
@@ -713,17 +720,49 @@ async fn new_data_in_another_project_keeps_this_board_cached() {
 async fn instance_pages_keep_the_project_menu_and_a_breadcrumb() {
     let h = harness();
     let owner = login_cookie(&h).await;
-    for page in ["/settings/ai", "/settings/storage", "/users", "/me"] {
+    // Three scopes (#438): the instance's, mine, and the project's.
+    for (page, scope) in [
+        ("/settings/ai", "Instance settings"),
+        ("/settings/storage", "Instance settings"),
+        ("/settings/about", "Instance settings"),
+        ("/users", "Instance settings"),
+        ("/me", "My profile"),
+        ("/me/sign-in", "My profile"),
+        ("/me/appearance", "My profile"),
+    ] {
         let html = body_text(get(&h, page, Some(&owner), false).await).await;
-        // The only project's menu (#403), the instance tabs and the trail.
+        // The only project's menu (#403), the scope's tabs and the trail.
         assert!(html.contains("class=\"side-nav\""), "{page}");
         assert!(html.contains("href=\"/p/default/events\""), "{page}");
-        assert!(html.contains("aria-label=\"Instance\""), "{page}");
+        assert!(html.contains(&format!("aria-label=\"{scope}\"")), "{page}");
         assert!(html.contains("aria-label=\"Breadcrumb\""), "{page}");
+        // The theme is chosen in My profile, not in the sidebar.
+        assert!(!html.contains("href=\"/theme/dark\""), "{page}");
     }
     let settings = body_text(get(&h, "/p/default/settings", Some(&owner), false).await).await;
     assert!(settings.contains("list=\"tz-all\"") && settings.contains("Europe/Paris"));
-    assert!(settings.contains("name=\"quiet_start\""));
+    assert!(
+        !settings.contains("name=\"quiet_start\""),
+        "alerts have their own tab"
+    );
+    let alerts = body_text(get(&h, "/p/default/settings/alerts", Some(&owner), false).await).await;
+    assert!(alerts.contains("name=\"quiet_start\""));
+    for tab in ["install", "sharing", "data"] {
+        let r = get(
+            &h,
+            &format!("/p/default/settings/{tab}"),
+            Some(&owner),
+            false,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::OK, "{tab}");
+    }
+    assert_eq!(
+        get(&h, "/p/default/settings/nope", Some(&owner), false)
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
     // The setup progress (#403): required steps as a bar, the rest optional.
     assert!(settings.contains("aria-label=\"Setup\""), "{settings}");
     assert!(settings.contains("An alert channel") && settings.contains("· optional"));

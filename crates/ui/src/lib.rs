@@ -162,7 +162,14 @@ const NAV: &[NavGroup] = &[
     NavGroup {
         label: "Settings",
         icon: "gear",
-        tabs: &[("/settings", "Settings", &["Settings"])],
+        // One scope per project (#438): its tabs, by what they hold.
+        tabs: &[
+            ("/settings", "General", &["Settings"]),
+            ("/settings/install", "Install", &["Install"]),
+            ("/settings/alerts", "Alerts", &["Alert settings"]),
+            ("/settings/sharing", "Sharing", &["Share links"]),
+            ("/settings/data", "Data", &["Project data"]),
+        ],
     },
 ];
 
@@ -198,24 +205,57 @@ fn section_tabs(title: &str, p: &ProjectInfo<'_>) -> Markup {
     components::tabs(g.label, &items)
 }
 
-/// The instance pages, as one tab group (#403): path, label, titles.
-const INSTANCE_TABS: &[(&str, &str, &[&str])] = &[
+/// A tab group outside projects: path, label, titles.
+type Tabs = &'static [(&'static str, &'static str, &'static [&'static str])];
+
+/// The whole install's settings, for admins (#403, #438).
+const INSTANCE_TABS: Tabs = &[
+    ("/users", "Team", &["Team"]),
     ("/settings/tokens", "API tokens", &["API tokens"]),
     ("/settings/ai", "AI", &["AI"]),
     ("/settings/storage", "Storage", &["Storage and backups"]),
-    ("/users", "Team", &["Team"]),
-    ("/me", "My profile", &["My profile"]),
+    ("/settings/about", "About", &["About"]),
 ];
 
+/// The signed-in person's own settings (#438).
+const PROFILE_TABS: Tabs = &[
+    ("/me", "Profile", &["My profile"]),
+    ("/me/sign-in", "Sign-in", &["Sign-in"]),
+    ("/me/appearance", "Appearance", &["Appearance"]),
+];
+
+/// The scope a page outside projects belongs to: its name, where it
+/// starts, and its tabs.
+fn scope_of(title: &str) -> Option<(&'static str, &'static str, Tabs)> {
+    [
+        ("Instance settings", "/settings", INSTANCE_TABS),
+        ("My profile", "/me", PROFILE_TABS),
+    ]
+    .into_iter()
+    .find(|(_, _, tabs)| tabs.iter().any(|t| t.2.contains(&title)))
+}
+
 fn instance_tabs(title: &str) -> Markup {
-    if !INSTANCE_TABS.iter().any(|t| t.2.contains(&title)) {
+    let Some((name, _, tabs)) = scope_of(title) else {
         return html! {};
-    }
-    let items: Vec<(String, &str, bool)> = INSTANCE_TABS
+    };
+    let items: Vec<(String, &str, bool)> = tabs
         .iter()
         .map(|(href, label, titles)| ((*href).to_owned(), *label, titles.contains(&title)))
         .collect();
-    components::tabs("Instance", &items)
+    components::tabs(name, &items)
+}
+
+static ADMIN: std::sync::OnceLock<fn() -> bool> = std::sync::OnceLock::new();
+
+/// Where pages learn whether the reader is an admin (the sidebar shows
+/// the instance settings to admins only). Set once.
+pub fn set_admin_source(source: fn() -> bool) {
+    let _ = ADMIN.set(source);
+}
+
+fn viewer_is_admin() -> bool {
+    ADMIN.get().is_some_and(|f| f())
 }
 
 /// The project whose menu the instance pages keep (#403), decided by the
@@ -249,11 +289,13 @@ pub(crate) struct Crumbs(pub Vec<(String, Option<String>)>);
 
 impl Crumbs {
     /// The default trail of a page: `Projects › <project> › <section> ›
-    /// <tab>`, or `Instance › <page>`.
+    /// <tab>`, or `<scope> › <tab>` (Instance settings, My profile).
     pub(crate) fn of(title: &str, project: Option<&ProjectInfo<'_>>) -> Self {
         let mut c = Vec::new();
-        if let Some(t) = INSTANCE_TABS.iter().find(|t| t.2.contains(&title)) {
-            c.push(("Instance".to_owned(), None));
+        if let Some((name, home, tabs)) = scope_of(title)
+            && let Some(t) = tabs.iter().find(|t| t.2.contains(&title))
+        {
+            c.push((name.to_owned(), Some(home.to_owned())));
             c.push((t.1.to_owned(), None));
             return Self(c);
         }
@@ -450,7 +492,7 @@ fn layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -> Marku
         return shared_layout(title, project, body);
     }
     // Instance pages keep the last project's menu (#403).
-    let remembered = if project.is_none() && INSTANCE_TABS.iter().any(|t| t.2.contains(&title)) {
+    let remembered = if project.is_none() && scope_of(title).is_some() {
         nav_project()
     } else {
         None
@@ -507,13 +549,12 @@ fn layout_with(
                             }
                         }
                         div.side-bottom {
-                            nav.theme aria-label="Theme" {
-                                a.auto href="/theme/auto" title="Follow the system" aria-label="Theme: follow the system" { (icon("auto")) }
-                                a.light href="/theme/light" title="Light" aria-label="Theme: light" { (icon("sun")) }
-                                a.dark href="/theme/dark" title="Dark" aria-label="Theme: dark" { (icon("moon")) }
-                            }
                             @if project.is_some() {
-                                a.side-link href="/me" title="My profile" { (icon("users")) span.label { "My profile" } }
+                                // The theme is a personal choice: My profile → Appearance (#438).
+                                @if viewer_is_admin() {
+                                    a.side-link href="/settings" title="Instance settings" aria-current=[(scope_of(title).is_some_and(|s| s.1 == "/settings")).then_some("page")] { (icon("gear")) span.label { "Instance settings" } }
+                                }
+                                a.side-link href="/me" title="My profile" aria-current=[(scope_of(title).is_some_and(|s| s.1 == "/me")).then_some("page")] { (icon("users")) span.label { "My profile" } }
                                 form method="post" action="/logout" {
                                     button.side-link type="submit" title="Log out" { (icon("logout")) span.label { "Log out" } }
                                 }
@@ -750,6 +791,33 @@ mod tests {
                 .contains("href=\"/settings/ai\" aria-current=\"page\"")
         );
         assert!(instance_tabs("Events").into_string().is_empty());
+        // #438: the profile is its own scope, not an instance tab.
+        let me = Crumbs::of("Appearance", None).render().into_string();
+        assert!(
+            me.contains("href=\"/me\">My profile")
+                && me.contains("aria-current=\"page\">Appearance")
+        );
+        let tabs = instance_tabs("Appearance").into_string();
+        assert!(tabs.contains("/me/appearance") && !tabs.contains("/settings/ai"));
+        // Every settings page is in exactly one scope.
+        let project: Vec<&str> = NAV
+            .iter()
+            .filter(|g| g.label == "Settings")
+            .flat_map(|g| g.tabs.iter().flat_map(|t| t.2.iter().copied()))
+            .collect();
+        let all: Vec<&str> = project
+            .iter()
+            .copied()
+            .chain(
+                INSTANCE_TABS
+                    .iter()
+                    .chain(PROFILE_TABS)
+                    .flat_map(|t| t.2.iter().copied()),
+            )
+            .collect();
+        let unique: std::collections::HashSet<_> = all.iter().collect();
+        assert_eq!(unique.len(), all.len());
+        assert!(project.len() > 1);
     }
 
     #[test]

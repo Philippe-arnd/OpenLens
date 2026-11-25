@@ -20,6 +20,12 @@ export interface Bridge {
   ids(): { sid: string; uid: string };
   /** False once consent is withdrawn. */
   allowed(): boolean;
+  /** The page's own `fetch`, before the SDK wrapped it: the recorder's
+   * requests stay out of the host app's error monitoring (#433). */
+  fetch?: typeof fetch;
+  /** Send while the page goes away, within the budget the core SDK shares
+   * with its own last batch, or park it for the next visit (#433). */
+  unload?: (url: string, body: string) => unknown;
 }
 
 declare global {
@@ -30,9 +36,13 @@ declare global {
 
 const FLUSH_MS = 10_000;
 const MAX_EVENTS = 300;
+/** About 30 KB of buffered events: the chunk sent as the page goes away
+ * then fits the browsers' ~64 KB unload budget (#433). */
+const MAX_CHARS = 30_000;
 
 function start(b: Bridge): void {
   let buf: unknown[] = [];
+  let chars = 0;
   let sid = b.ids().sid;
   const url = `${b.host.replace(/\/$/, "")}/r?key=${encodeURIComponent(b.key)}`;
 
@@ -52,8 +62,13 @@ function start(b: Bridge): void {
   const send = (events: unknown[], s: string, uid: string, unloading: boolean) => {
     if (!events.length || !b.allowed()) return;
     const body = JSON.stringify({ session_id: s.replace(/[^A-Za-z0-9_-]/g, ""), distinct_id: uid, seq: nextSeq(s), events });
+    if (unloading && b.unload) {
+      b.unload(url, body);
+      return;
+    }
+    const post = b.fetch ?? fetch;
     const go = (payload: BodyInit) =>
-      fetch(url, { method: "POST", body: payload, keepalive: unloading && body.length < 60_000, headers: { "content-type": "text/plain" } }).catch(
+      post(url, { method: "POST", body: payload, keepalive: unloading && body.length < 60_000, headers: { "content-type": "text/plain" } }).catch(
         () => undefined,
       );
     if (!unloading && typeof CompressionStream !== "undefined") {
@@ -67,6 +82,7 @@ function start(b: Bridge): void {
     const { sid: cur, uid } = b.ids();
     const events = buf;
     buf = [];
+    chars = 0;
     send(events, sid, uid, unloading);
     if (cur !== sid) {
       // A new session started: its recording needs its own full snapshot.
@@ -78,7 +94,8 @@ function start(b: Bridge): void {
   record({
     emit(e) {
       buf.push(e);
-      if (buf.length >= MAX_EVENTS) flush();
+      chars += JSON.stringify(e).length;
+      if (buf.length >= MAX_EVENTS || chars >= MAX_CHARS) flush();
     },
     maskAllInputs: true,
     // Every text is masked unless the app opts a part in with

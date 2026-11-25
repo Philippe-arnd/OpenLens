@@ -287,6 +287,13 @@ fn migrate(c: &Connection) -> rusqlite::Result<()> {
             "password_at",
             "ALTER TABLE users ADD COLUMN password_at INTEGER",
         ),
+        // #438: the user's theme (`light`, `dark`; NULL follows the
+        // system) and whether the sidebar starts folded, across browsers.
+        ("theme", "ALTER TABLE users ADD COLUMN theme TEXT"),
+        (
+            "nav_folded",
+            "ALTER TABLE users ADD COLUMN nav_folded INTEGER NOT NULL DEFAULT 0",
+        ),
     ] {
         let has: bool = c
             .prepare("SELECT 1 FROM pragma_table_info('users') WHERE name = ?1")?

@@ -10,6 +10,7 @@
 import { detectEnvironment } from "./env";
 import { trackVitals } from "./vitals";
 import type { Bridge } from "./replay";
+import { type Sender, type Store, UnloadBudget, clearParked, park, takeParked } from "./unload";
 
 declare global {
   interface Window {
@@ -324,7 +325,18 @@ export function reset(): void {
 /** Grant or withdraw consent at runtime. */
 export function setConsent(granted: boolean): void {
   consent = granted ? "granted" : "denied";
-  if (!granted) queue = [];
+  if (!granted) {
+    queue = [];
+    // Forget what was parked for the next visit (#433). Not through
+    // deviceStore(): consent is already withdrawn here.
+    if (cfg && !cfg.cookieless) {
+      try {
+        clearParked(localStorage);
+      } catch {
+        // storage blocked: nothing was parked
+      }
+    }
+  }
   else {
     flush();
     if (cfg?.replay !== false && !cfg?.cookieless) startReplay();
@@ -338,8 +350,12 @@ export function flush(beacon = false): void {
   const body = JSON.stringify({ sent_at: new Date().toISOString(), batch });
   queue = [];
   const url = `${cfg.host.replace(/\/$/, "")}/capture?key=${encodeURIComponent(cfg.key)}`;
-  // text/plain keeps this a "simple" request: no CORS preflight.
-  if (beacon && navigator.sendBeacon && navigator.sendBeacon(url, new Blob([body], { type: "text/plain" }))) return;
+  // The page is going away: send within the unload budget, or park it
+  // for the next visit (#433).
+  if (beacon) {
+    unloadBudget.send(unloadSender(), url, body);
+    return;
+  }
   // Offline or server unavailable: keep the events for the next flush (same
   // uuids), so a network blip loses nothing.
   const retry = () => {
@@ -352,6 +368,51 @@ export function flush(beacon = false): void {
 }
 
 let origFetch: typeof fetch | undefined;
+
+/** What a leaving page may still send, shared with the replay bundle (#433). */
+const unloadBudget = new UnloadBudget();
+
+/** localStorage, when the SDK may write to the device at all: not in
+ * cookieless mode, not without consent. */
+function deviceStore(): Store | undefined {
+  if (!cfg || cfg.cookieless || consent !== "granted") return undefined;
+  try {
+    return localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+function unloadSender(): Sender {
+  // text/plain keeps these "simple" requests: no CORS preflight.
+  const beacon = navigator.sendBeacon
+    ? (url: string, body: string) => navigator.sendBeacon(url, new Blob([body], { type: "text/plain" }))
+    : undefined;
+  return {
+    beacon,
+    keepalive: (url, body) =>
+      void origFetch?.(url, { method: "POST", body, keepalive: true, headers: { "content-type": "text/plain" } }).catch(
+        () => undefined,
+      ),
+    store: deviceStore(),
+    now: Date.now,
+  };
+}
+
+/** Send what the last visit could not, before anything else. */
+function resendParked(): void {
+  const s = deviceStore();
+  if (!s || !cfg) return;
+  const host = cfg.host.replace(/\/$/, "");
+  for (const p of takeParked(s, Date.now())) {
+    if (!p.url.startsWith(`${host}/`)) continue;
+    const again = () => park(s, p);
+    origFetch?.(p.url, { method: "POST", body: p.body, headers: { "content-type": "text/plain" } }).then(
+      (r) => (r.status >= 500 || r.status === 429) && again(),
+      again,
+    );
+  }
+}
 
 // Deepest scroll on the current page, as % of the document height.
 let maxScroll = 0;
@@ -610,10 +671,14 @@ export function init(config: Config): void {
     if (doc.prerendering) document.addEventListener("prerenderingchange", autocapture, { once: true });
     else autocapture();
   }
+  resendParked();
   if (config.replay !== false && !config.cookieless && consent === "granted") startReplay();
   timer = setInterval(() => flush(), 5000);
-  addEventListener("visibilitychange", () => document.visibilityState === "hidden" && flush(true));
+  addEventListener("visibilitychange", () =>
+    document.visibilityState === "hidden" ? flush(true) : unloadBudget.reset(),
+  );
   addEventListener("pagehide", () => flush(true));
+  addEventListener("pageshow", () => unloadBudget.reset());
 }
 
 /** Load the replay recorder once the page is idle (it is a separate, larger bundle). */
@@ -625,6 +690,8 @@ function startReplay(): void {
     key: c.key,
     ids: () => ({ sid: state.sid, uid: state.uid ?? state.anon }),
     allowed: () => consent === "granted",
+    fetch: origFetch,
+    unload: (url, body) => unloadBudget.send(unloadSender(), url, body),
   };
   const load = () => {
     const s = document.createElement("script");

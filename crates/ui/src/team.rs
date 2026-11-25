@@ -332,17 +332,52 @@ pub struct MePassword {
     pub error: bool,
 }
 
-/// My profile: the time zone I read times in, my name (#215, #216) and my
-/// password (#428).
+/// The tabs of *My profile* (#438).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MeTab {
+    /// Name and time zone.
+    #[default]
+    Profile,
+    /// Password.
+    SignIn,
+    /// Theme and sidebar.
+    Appearance,
+}
+
+impl MeTab {
+    fn title(self) -> &'static str {
+        match self {
+            Self::Profile => "My profile",
+            Self::SignIn => "Sign-in",
+            Self::Appearance => "Appearance",
+        }
+    }
+}
+
+/// How the reader wants pages to look (#438).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MeLook<'a> {
+    /// `light`, `dark`, or `None` to follow the system.
+    pub theme: Option<&'a str>,
+    /// The sidebar starts folded.
+    pub nav_folded: bool,
+    /// Saved for the account (across browsers), not only this browser.
+    pub per_account: bool,
+}
+
+/// My profile: the time zone I read times in, my name (#215, #216), my
+/// password (#428) and how pages look (#438), one tab each.
 pub fn me(
+    tab: MeTab,
     name: Option<&str>,
     email: Option<&str>,
     tz: Option<&str>,
     notice: Option<&str>,
     pw: &MePassword,
+    look: &MeLook<'_>,
 ) -> Markup {
     layout(
-        "My profile",
+        tab.title(),
         None,
         html! {
             div.heading { div {
@@ -352,7 +387,10 @@ pub fn me(
             @if let Some(n) = notice {
                 @if pw.error { p.alert role="alert" { (n) } } @else { p.notice role="status" { (n) } }
             }
-            @if pw.enabled {
+            @if tab == MeTab::SignIn && !pw.enabled {
+                section.card { p.muted { "Password sign-in is turned off on this server: you sign in with a link or your identity provider." } }
+            }
+            @if tab == MeTab::SignIn && pw.enabled {
                 section.card.wide #password {
                     @if pw.owner {
                         h2.violet { (icon("shield")) "Create your admin account" }
@@ -378,6 +416,26 @@ pub fn me(
                     }
                 }
             }
+            @if tab == MeTab::Appearance {
+                section.card.wide {
+                    h2.violet { (icon("sun")) "Appearance" }
+                    form.settings method="post" action="/me/appearance" {
+                        fieldset {
+                            legend { "Theme" }
+                            label.check { input type="radio" name="theme" value="auto" checked[look.theme.is_none()]; " Follow the system" }
+                            label.check { input type="radio" name="theme" value="light" checked[look.theme == Some("light")]; " Light" }
+                            label.check { input type="radio" name="theme" value="dark" checked[look.theme == Some("dark")]; " Dark" }
+                        }
+                        label.check { input type="checkbox" name="nav_folded" value="on" checked[look.nav_folded]; " Start with the menu folded (icons only)" }
+                        button type="submit" { "Save" }
+                    }
+                    p.muted.small {
+                        @if look.per_account { "Saved with your account: it follows you to every browser you sign in from." }
+                        @else { "Saved in this browser (the admin token has no account)." }
+                    }
+                }
+            }
+            @if tab == MeTab::Profile {
             section.card.wide {
                 form.settings method="post" action="/me" {
                     @if email.is_some() {
@@ -389,12 +447,88 @@ pub fn me(
                 }
                 p.muted.small { "Every time and every day on the boards follows this zone (an IANA name like Europe/Paris). Empty: each project's own zone." }
             }
+            }
         },
     )
 }
 
+/// Instance settings → About (#438): the version, whether a newer one is
+/// out, and where the docs are.
+pub fn about() -> Markup {
+    let update = crate::update_available();
+    layout(
+        "About",
+        None,
+        html! {
+            div.heading { div {
+                h1 { "Instance settings" }
+                p.muted { "What runs here, for the whole install." }
+            } }
+            section.card.wide {
+                h2.violet { (icon("idea")) "About" }
+                dl.facts {
+                    dt { "Version" } dd { "OpenLens " (env!("CARGO_PKG_VERSION")) }
+                    dt { "Updates" } dd {
+                        @match &update {
+                            Some(u) => (crate::update_notice(u)),
+                            None => "Up to date, as far as the last daily check knows.",
+                        }
+                    }
+                }
+                p.small {
+                    a href="/agents.md" { "Wiring guide for agents" } " · "
+                    a href="https://github.com/Philippe-arnd/OpenLens/tree/main/docs" { "Documentation" } " · "
+                    a href="https://github.com/Philippe-arnd/OpenLens/blob/main/SECURITY.md" { "Security policy" }
+                }
+            }
+        },
+    )
+}
+
+/// The tabs of a project's settings (#438).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SettingsTab {
+    /// Name, app address, time zone, setup progress.
+    #[default]
+    General,
+    /// Snippets, capture key, wiring check.
+    Install,
+    /// Alerts.
+    Alerts,
+    /// Share links.
+    Sharing,
+    /// Explore, export, delete.
+    Data,
+}
+
+impl SettingsTab {
+    /// The tab of `/p/<id>/settings/<slug>`.
+    pub fn from_slug(slug: &str) -> Option<Self> {
+        Some(match slug {
+            "install" => Self::Install,
+            "alerts" => Self::Alerts,
+            "sharing" => Self::Sharing,
+            "data" => Self::Data,
+            _ => return None,
+        })
+    }
+
+    /// The page title, as the sidebar's tabs name it.
+    fn title(self) -> &'static str {
+        match self {
+            Self::General => "Settings",
+            Self::Install => "Install",
+            Self::Alerts => "Alert settings",
+            Self::Sharing => "Share links",
+            Self::Data => "Project data",
+        }
+    }
+}
+
 /// What the settings page shows of a project (#219).
 pub struct SettingsView<'a> {
+    /// The tab shown (#438).
+    pub tab: SettingsTab,
     /// Time zone of the project's days (D-017).
     pub timezone: &'a str,
     /// The app address set by an admin, if any.
@@ -465,15 +599,17 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
         v.host, p.key
     );
     let server = format!("OPENLENS_HOST={}\nOPENLENS_KEY={}", v.host, p.key);
+    let tab = v.tab;
     layout(
-        "Settings",
+        tab.title(),
         Some(p),
         html! {
             div.heading { div {
-                h1 { "Settings" }
+                h1 { "Project settings" }
                 p.muted { "Everything agents do with " code { "openlens-cli" } " for this project, here too." }
             } }
             @if let Some(n) = v.notice { p.notice role="status" { (n) } }
+            @if tab == SettingsTab::General {
             @if !v.setup.is_empty() { (setup_progress(&v.setup)) }
             section.card.wide {
                 h2.violet { (icon("gear")) "Project" }
@@ -500,6 +636,8 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
                     " Days and weeks of every KPI start in the time zone (an IANA name like Europe/Paris)."
                 }
             }
+            }
+            @if tab == SettingsTab::Install {
             section.card.wide #install {
                 h2.sky { (icon("code")) "Install" }
                 p { "Capture key " code.mono { (p.key) } " (public: it only sends events)." }
@@ -535,6 +673,8 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
                     }
                 }
             }
+            }
+            @if tab == SettingsTab::Alerts {
             section.card.wide #alerts {
                 h2.coral { (icon("bolt")) "Alerts" }
                 p.small { "Know when the app is down: OpenLens checks the app address every minute (" a href={ "/p/" (p.id) "/uptime" } { "Uptime" } "), notices when the traffic stops for much longer than usual (after four weeks of history), and, every hour, when the board finds a regression (a release or flag with more errors, pages turning slow) or a new error hits several users. One message when an incident starts, one when it ends." }
@@ -559,6 +699,9 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
                     p.muted.small { "Emails go to " code { "OPENLENS_ALERT_TO" } " (or the digest list, or the admins). ntfy: a topic on ntfy.sh, or a full https:// topic URL of your own server; install the ntfy app to get pushes on a phone. Quiet hours (the project's time zone) hold non-urgent alerts until they end; " em { "down" } " and an expired certificate always go out. An incident that lasts is repeated at most once an hour." }
                 }
             }
+            }
+            @if tab == SettingsTab::Sharing {
+            @if !v.admin { section.card { p.muted { "Admins make and revoke share links." } } }
             @if v.admin {
                 section.card.wide #share {
                     h2.sky { (icon("route")) "Share links" }
@@ -586,6 +729,10 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
                         } }
                     }
                 }
+            }
+            }
+            @if tab == SettingsTab::Data {
+            @if v.admin {
                 section.card.wide {
                     h2.violet { (icon("code")) "Explore the data" }
                     p { a.button href={ "/p/" (p.id) "/sql" } { "Read-only SQL" } " " a.button href={ "/p/" (p.id) "/breakdown?by=role" } { "Break down" } }
@@ -608,6 +755,7 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
                         button.danger type="submit" { "Delete forever" }
                     }
                 }
+            }
             }
         },
     )

@@ -12,9 +12,11 @@ use serde_json::json;
 use crate::api::FilterQuery;
 use crate::{AppState, auth};
 
+mod appearance;
 mod heatmap;
 mod login;
 mod replays;
+pub(crate) use appearance::{current_admin, display_layer};
 use heatmap::*;
 use login::*;
 use replays::*;
@@ -41,6 +43,13 @@ pub(crate) fn routes() -> Router<AppState> {
             "/me",
             get(crate::users::me_page).post(crate::users::me_save),
         )
+        .route("/me/sign-in", get(crate::users::sign_in_page))
+        .route(
+            "/me/appearance",
+            get(appearance::appearance_page).post(appearance::appearance_save),
+        )
+        .route("/settings", get(appearance::instance_home))
+        .route("/settings/about", get(appearance::about))
         .route("/logout", post(logout))
         .route("/l/{token}", get(login_link_page).post(login_link))
         .route("/p/{project}", get(board))
@@ -84,7 +93,11 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/s/{token}", get(crate::share::view))
         .route(
             "/p/{project}/settings/alerts",
-            post(crate::settings::alerts),
+            get(crate::settings::alerts_page).post(crate::settings::alerts),
+        )
+        .route(
+            "/p/{project}/settings/{tab}",
+            get(crate::settings::tab_page),
         )
         .route(
             "/p/{project}/settings/alerts/test",
@@ -663,6 +676,7 @@ pub(crate) async fn nav_layer(
         .filter(|id| openlens_replay::valid_id(id))
         .map(str::to_owned);
     let instance = [
+        "/settings/about",
         "/settings/tokens",
         "/settings/ai",
         "/settings/storage",
