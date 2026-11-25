@@ -165,7 +165,7 @@ pub(crate) async fn invite(
     }
 }
 
-async fn load(state: &AppState, id: &str) -> Option<openlens_meta::User> {
+pub(crate) async fn load(state: &AppState, id: &str) -> Option<openlens_meta::User> {
     let meta = state.meta.clone();
     let id = id.to_owned();
     tokio::task::spawn_blocking(move || meta.user(&id))
@@ -289,16 +289,26 @@ pub(crate) async fn action(
             if u.disabled {
                 return oops("Enable sign-in first.");
             }
+            // #440: the second factor goes with it, in the same statement.
             let pid = id.clone();
             match tokio::task::spawn_blocking(move || {
+                let had_totp = meta.totp_enabled(&pid)?;
                 meta.clear_password(&pid, chrono::Utc::now().timestamp())?;
-                meta.create_login_link_for(Some(&pid), 24 * 3600)
+                Ok::<_, openlens_meta::MetaError>((
+                    meta.create_login_link_for(Some(&pid), 24 * 3600)?,
+                    had_totp,
+                ))
             })
             .await
             {
-                Ok(Ok(t)) => {
+                Ok(Ok((t, had_totp))) => {
                     let link = format!("{}/l/{t}", crate::public_url(&headers));
-                    crate::privacy::audit(&state, &headers, None, "user.password_reset", &u.email);
+                    let what = if had_totp {
+                        format!("{} (second factor cleared)", u.email)
+                    } else {
+                        u.email.clone()
+                    };
+                    crate::privacy::audit(&state, &headers, None, "user.password_reset", &what);
                     render(&state, Some((u.email, link)), "", None).await
                 }
                 _ => oops("Try again."),
@@ -383,6 +393,9 @@ pub(crate) async fn sign_in_page(
     };
     let notice = match q.done.as_deref() {
         Some("password") => Some("Password saved. Your other sessions are signed out."),
+        Some("totp-off") => {
+            Some("The authenticator app is off. Your other sessions are signed out.")
+        }
         Some("account") => Some(
             "Your admin account is ready: log in with your email and password from now on. The admin token still works, as the way back in.",
         ),
@@ -399,7 +412,7 @@ pub(crate) async fn sign_in_page(
     )
 }
 
-fn me_view(
+pub(crate) fn me_view(
     state: &AppState,
     v: &auth::Viewer,
     user: Option<&openlens_meta::User>,
@@ -408,6 +421,10 @@ fn me_view(
     tab: openlens_ui::MeTab,
 ) -> Response {
     let has_password = user.is_some_and(|u| state.meta.password_of(&u.id).ok().flatten().is_some());
+    let totp = match user {
+        Some(u) if has_password && crate::password::enabled() => crate::web::totp_card(state, u),
+        _ => openlens_ui::TotpCard::Hidden,
+    };
     html_page(
         if error.is_some() {
             StatusCode::BAD_REQUEST
@@ -425,6 +442,7 @@ fn me_view(
                 owner: v.id == auth::OWNER,
                 has_password,
                 error: error.is_some(),
+                totp,
             },
             &openlens_ui::MeLook::default(),
         ),

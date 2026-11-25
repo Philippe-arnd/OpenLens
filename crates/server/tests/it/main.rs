@@ -23,6 +23,7 @@ mod manage;
 mod pages;
 mod privacy;
 mod team;
+mod totp;
 
 struct Harness {
     _dir: tempfile::TempDir,

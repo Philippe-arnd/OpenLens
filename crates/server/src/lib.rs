@@ -47,6 +47,7 @@ mod tickets;
 mod timeline;
 mod tls;
 pub mod tokens;
+mod totp;
 mod users;
 mod web;
 

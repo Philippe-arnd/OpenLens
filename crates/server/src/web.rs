@@ -16,10 +16,12 @@ mod appearance;
 mod heatmap;
 mod login;
 mod replays;
+mod second_factor;
 pub(crate) use appearance::{current_admin, display_layer};
 use heatmap::*;
 use login::*;
 use replays::*;
+pub(crate) use second_factor::totp_card;
 
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
@@ -27,7 +29,12 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/login", get(login_page).post(login))
         .route("/login/email", post(login_email))
         .route("/login/password", post(login_password))
+        .route("/login/totp", post(second_factor::login_totp))
         .route("/me/password", post(crate::users::me_password))
+        .route("/me/totp/start", post(second_factor::me_totp_start))
+        .route("/me/totp/enable", post(second_factor::me_totp_enable))
+        .route("/me/totp/cancel", post(second_factor::me_totp_cancel))
+        .route("/me/totp/disable", post(second_factor::me_totp_disable))
         .route(
             "/projects",
             get(projects_page).post(crate::settings::create),

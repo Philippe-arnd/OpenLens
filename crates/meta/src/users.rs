@@ -51,12 +51,14 @@ impl Meta {
         })
     }
 
-    /// Drop a user's password (#428, an admin's reset): they sign in with a
-    /// one-time link and set a new one; sessions issued before `at` end.
+    /// Drop a user's password and second factor (#428, #440, an admin's
+    /// reset) in one statement: they sign in with a one-time link and set a
+    /// new one; sessions issued before `at` end.
     pub fn clear_password(&self, id: &str, at: i64) -> Result<bool> {
         self.with(|c| {
             Ok(c.execute(
-                "UPDATE users SET password_hash = NULL, password_at = ?2 WHERE id = ?1",
+                "UPDATE users SET password_hash = NULL, password_at = ?2, totp_secret = NULL, \
+                 totp_at = NULL, totp_step = NULL, totp_recovery = NULL WHERE id = ?1",
                 params![id, at],
             )? == 1)
         })

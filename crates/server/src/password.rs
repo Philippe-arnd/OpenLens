@@ -173,6 +173,15 @@ impl Attempt {
         .flatten()
     }
 
+    /// This step passed but sign-in is not complete (the password was
+    /// right, a second-factor code comes next, #440): free the email
+    /// without forgetting its failures, so a known password cannot reset
+    /// the slow-down on code guesses.
+    pub(crate) fn keep(self) {
+        // Dropping without `done` frees the email and counts nothing.
+        drop(self);
+    }
+
     /// The password was right (`true`: forget this email's failures) or
     /// wrong (`false`: count one for the email and the address).
     pub(crate) fn done(mut self, ok: bool) {

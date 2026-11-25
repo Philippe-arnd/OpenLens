@@ -137,6 +137,7 @@ pub(crate) async fn appearance_page(
                 owner,
                 has_password: false,
                 error: false,
+                totp: openlens_ui::TotpCard::Hidden,
             },
             &openlens_ui::MeLook {
                 theme: theme.as_deref(),
