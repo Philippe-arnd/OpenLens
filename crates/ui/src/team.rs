@@ -330,6 +330,8 @@ pub struct MePassword {
     pub has_password: bool,
     /// The notice is an error.
     pub error: bool,
+    /// The second factor (#440).
+    pub totp: crate::TotpCard,
 }
 
 /// The tabs of *My profile* (#438).
@@ -415,6 +417,7 @@ pub fn me(
                         p.muted.small { "At least 12 characters; a few words work well. Saving it signs out your other sessions." }
                     }
                 }
+                (crate::totp::totp_card(&pw.totp))
             }
             @if tab == MeTab::Appearance {
                 section.card.wide {

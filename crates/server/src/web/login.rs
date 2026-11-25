@@ -77,17 +77,19 @@ pub(super) async fn login_password(
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         return fail(&state);
     };
+    crate::privacy::audit_as(&state, &u.id, None, "auth.password_ok", "");
+    // #440: an enrolled account gets the code step, not a session; its
+    // failures are kept so a known password cannot reset the slow-down.
+    if super::second_factor::enrolled(&state, &u.id) {
+        if let Some(a) = attempt {
+            a.keep();
+        }
+        return super::second_factor::code_form(&state, &u.id, StatusCode::OK);
+    }
     if let Some(a) = attempt {
         a.done(true);
     }
-    let _ = state.meta.touch_sign_in(&u.id);
-    crate::privacy::audit_as(&state, &u.id, None, "auth.password_ok", "");
-    let c = auth::set_cookie(
-        &auth::new_session(&state, &u.id),
-        &headers,
-        auth::SESSION_SECS,
-    );
-    with_cookie(Redirect::to("/").into_response(), &c)
+    super::second_factor::sign_in(&state, &u, &headers)
 }
 
 #[derive(Deserialize)]

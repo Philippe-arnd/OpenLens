@@ -21,6 +21,7 @@ mod icons;
 mod manage;
 mod settings;
 mod team;
+mod totp;
 mod world;
 pub use audience::*;
 pub use board::*;
@@ -35,6 +36,7 @@ pub use manage::*;
 use openlens_engine::{Board, EventRow, Filters};
 pub use settings::*;
 pub use team::*;
+pub use totp::{TotpCard, login_code, totp_recovery_codes};
 
 /// Stylesheet, served at `/assets/app.css`.
 pub const CSS: &str = include_str!("../assets/app.css");

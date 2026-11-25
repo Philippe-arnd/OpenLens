@@ -355,6 +355,7 @@ dl.facts dt { color: var(--muted); } dl.facts dd { margin: 0; }
 .notice { background: color-mix(in srgb, var(--mint) var(--tint), transparent); color: var(--good); padding: 8px 12px; border-radius: var(--radius-s); font-size: 13px; }
 section.danger { border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
 button.danger { background: var(--bad); color: var(--surface); }
+.qr svg { display: block; width: 200px; height: 200px; margin: 8px 0; border-radius: var(--radius-s); }
 details.new-project summary { cursor: pointer; display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13.5px; }
 details.new-project[open] summary { margin-bottom: 12px; }
 .project-list h2 img.picon { margin-right: 2px; }

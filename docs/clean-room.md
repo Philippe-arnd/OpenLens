@@ -48,3 +48,4 @@ A pass over every mention of another product in the repository:
 - **Third-party code shipped:** rrweb (MIT) in the recorder (`/r.js`) and the player (`/assets/player.js`, `/assets/player.css`). Both are recorded in `ATTRIBUTION.md`.
 
 | 2026-11-22 | Public feature pages of five hosted and self-hosted product and web analytics suites | capabilities common to the category: path flows, world map and devices, acquisition and UTM, alerts and annotations, live view, share links, privacy tools, revenue, form analytics, importers | M11 issues #224–#233, target-app-parity.md |
+| 2026-11-26 | RFC 4226 (HOTP), RFC 6238 (TOTP) and its Appendix B test vectors, RFC 4648 (base32), the public "Key Uri Format" description of `otpauth://` links | one-time codes, the drift window, how authenticator apps read a key from a QR code | server totp.rs (#440) |
