@@ -15,6 +15,7 @@
 //!
 //! Layer: L1 (see `docs/architecture.md`).
 
+mod compaction;
 mod pending;
 pub use pending::Pending;
 use pending::projects_of;
@@ -470,7 +471,8 @@ fn write_segments(root: &Path, events: &[Event]) -> Result<()> {
     }
     for (key, evs) in groups {
         let dir = partition_dir(root, &key)?;
-        write_parquet(&dir, &to_batch(&evs)?)?;
+        // Sorted as compaction sorts, so compaction is a streaming merge (#418).
+        write_parquet(&dir, &sorted(&to_batch(&evs)?)?)?;
     }
     Ok(())
 }
@@ -503,21 +505,25 @@ pub(crate) fn write_parquet_as(dir: &Path, name: &str, batch: &RecordBatch) -> R
     }
     let tmp = dir.join(format!(".{name}.tmp"));
     let dst = dir.join(format!("{name}.parquet"));
-    // Row groups of 64k rows (not 1M) with page statistics: a query on one
-    // event or a short time range reads only the groups that hold it (#326).
-    let props = WriterProperties::builder()
-        .set_compression(Compression::ZSTD(ZstdLevel::try_new(3)?))
-        .set_max_row_group_row_count(Some(64 * 1024))
-        .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Page)
-        .build();
     let file = File::create(&tmp)?;
-    let mut writer = ArrowWriter::try_new(file, batch.schema(), Some(props))?;
+    let mut writer = ArrowWriter::try_new(file, batch.schema(), Some(writer_props()?))?;
     writer.write(batch)?;
     let file = writer.into_inner()?;
     file.sync_all()?;
     fs::rename(&tmp, &dst)?;
     sync_dir(dir)?;
     Ok(dst)
+}
+
+/// How every segment is written. Row groups of 64k rows (not 1M) with
+/// page statistics: a query on one event or a short time range reads only
+/// the groups that hold it (#326).
+fn writer_props() -> Result<WriterProperties> {
+    Ok(WriterProperties::builder()
+        .set_compression(Compression::ZSTD(ZstdLevel::try_new(3)?))
+        .set_max_row_group_row_count(Some(64 * 1024))
+        .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Page)
+        .build())
 }
 
 fn to_batch(events: &[&Event]) -> Result<RecordBatch> {
@@ -595,37 +601,11 @@ pub fn compact(root: &Path, project: &str, now: DateTime<Utc>) -> Result<usize> 
         } else {
             2
         };
-        if compact_dir(&date, min)? {
+        if compaction::compact_dir(&date, min)? {
             compacted += 1;
         }
     }
     Ok(compacted)
-}
-
-fn compact_dir(dir: &Path, min_files: usize) -> Result<bool> {
-    let files: Vec<PathBuf> = fs::read_dir(dir)?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x == "parquet"))
-        .collect();
-    if files.len() < min_files {
-        return Ok(false);
-    }
-    let mut batches = Vec::new();
-    for f in &files {
-        let reader = ParquetRecordBatchReaderBuilder::try_new(File::open(f)?)?.build()?;
-        for b in reader {
-            batches.push(b?);
-        }
-    }
-    let merged = arrow::compute::concat_batches(&event_schema(), &batches)?;
-    let merged = sorted(&unique_uuids(&merged)?)?;
-    // The merged segment is durable before the old ones go.
-    write_parquet(dir, &merged)?;
-    for f in files {
-        fs::remove_file(f)?;
-    }
-    sync_dir(dir)?;
-    Ok(true)
 }
 
 /// Remove every event of these people from a project's files (#230,
@@ -901,24 +881,6 @@ fn sorted(batch: &RecordBatch) -> Result<RecordBatch> {
         None,
     )?;
     Ok(arrow::compute::take_record_batch(batch, &idx)?)
-}
-
-/// Keep the first row of each uuid (a resent event is stored once).
-fn unique_uuids(batch: &RecordBatch) -> Result<RecordBatch> {
-    let Some(col) = batch
-        .column_by_name("uuid")
-        .and_then(|c| c.as_any().downcast_ref::<arrow::array::StringArray>())
-    else {
-        return Ok(batch.clone());
-    };
-    let mut seen = HashSet::with_capacity(col.len());
-    let keep: arrow::array::BooleanArray = (0..col.len())
-        .map(|i| Some(col.is_null(i) || seen.insert(col.value(i))))
-        .collect();
-    if keep.true_count() == batch.num_rows() {
-        return Ok(batch.clone());
-    }
-    Ok(arrow::compute::filter_record_batch(batch, &keep)?)
 }
 
 /// Days of events kept: 400, a little over 13 months, so a month can be
