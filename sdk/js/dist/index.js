@@ -84,6 +84,86 @@ function trackVitals(report) {
   addEventListener("pagehide", () => flush2(true), true);
 }
 
+// src/unload.ts
+var KEY = "openlens_unsent";
+var UNLOAD_BUDGET = 6e4;
+var PARK_CAP = 256e3;
+var PARK_TTL_MS = 24 * 3600 * 1e3;
+function bytes(s) {
+  return new TextEncoder().encode(s).length;
+}
+function read(store2, now) {
+  try {
+    const list = JSON.parse(store2.getItem(KEY) || "[]");
+    if (!Array.isArray(list)) return [];
+    return list.filter(
+      (p) => p && typeof p.url === "string" && typeof p.body === "string" && typeof p.at === "number" && now - p.at < PARK_TTL_MS
+    );
+  } catch {
+    return [];
+  }
+}
+function park(store2, item) {
+  const list = read(store2, item.at);
+  list.push(item);
+  let total = list.reduce((n, p) => n + bytes(p.body), 0);
+  while (list.length && total > PARK_CAP) {
+    const old = list.shift();
+    if (old) total -= bytes(old.body);
+  }
+  try {
+    if (list.length) store2.setItem(KEY, JSON.stringify(list));
+    else store2.removeItem(KEY);
+  } catch {
+  }
+}
+function takeParked(store2, now) {
+  const list = read(store2, now);
+  try {
+    store2.removeItem(KEY);
+  } catch {
+  }
+  return list;
+}
+function clearParked(store2) {
+  try {
+    store2.removeItem(KEY);
+  } catch {
+  }
+}
+var UnloadBudget = class {
+  constructor() {
+    this.spent = 0;
+  }
+  /** A new unload can spend the whole budget again (the page came back). */
+  reset() {
+    this.spent = 0;
+  }
+  /** Send `body` to `url` if it fits in what is left, else park it.
+   * Returns how it went. */
+  send(s, url, body) {
+    var _a;
+    const n = bytes(body);
+    if (this.spent + n <= UNLOAD_BUDGET) {
+      if ((_a = s.beacon) == null ? void 0 : _a.call(s, url, body)) {
+        this.spent += n;
+        return "sent";
+      }
+      if (!s.beacon) {
+        this.spent += n;
+        s.keepalive(url, body);
+        return "sent";
+      }
+    }
+    if (s.store) {
+      park(s.store, { url, body, at: s.now() });
+      return "parked";
+    }
+    s.keepalive(url, body);
+    return "dropped";
+  }
+};
+
 // src/index.ts
 var VERSION = "0.1.0";
 var SESSION_GAP = 30 * 60 * 1e3;
@@ -293,8 +373,15 @@ function reset() {
 }
 function setConsent(granted) {
   consent = granted ? "granted" : "denied";
-  if (!granted) queue = [];
-  else {
+  if (!granted) {
+    queue = [];
+    if (cfg && !cfg.cookieless) {
+      try {
+        clearParked(localStorage);
+      } catch {
+      }
+    }
+  } else {
     flush();
     if ((cfg == null ? void 0 : cfg.replay) !== false && !(cfg == null ? void 0 : cfg.cookieless)) startReplay();
   }
@@ -305,7 +392,10 @@ function flush(beacon = false) {
   const body = JSON.stringify({ sent_at: (/* @__PURE__ */ new Date()).toISOString(), batch });
   queue = [];
   const url = `${cfg.host.replace(/\/$/, "")}/capture?key=${encodeURIComponent(cfg.key)}`;
-  if (beacon && navigator.sendBeacon && navigator.sendBeacon(url, new Blob([body], { type: "text/plain" }))) return;
+  if (beacon) {
+    unloadBudget.send(unloadSender(), url, body);
+    return;
+  }
   const retry = () => {
     queue = batch.concat(queue).slice(-MAX_QUEUE);
   };
@@ -315,6 +405,39 @@ function flush(beacon = false) {
   );
 }
 var origFetch;
+var unloadBudget = new UnloadBudget();
+function deviceStore() {
+  if (!cfg || cfg.cookieless || consent !== "granted") return void 0;
+  try {
+    return localStorage;
+  } catch {
+    return void 0;
+  }
+}
+function unloadSender() {
+  const beacon = navigator.sendBeacon ? (url, body) => navigator.sendBeacon(url, new Blob([body], { type: "text/plain" })) : void 0;
+  return {
+    beacon,
+    keepalive: (url, body) => void (origFetch == null ? void 0 : origFetch(url, { method: "POST", body, keepalive: true, headers: { "content-type": "text/plain" } }).catch(
+      () => void 0
+    )),
+    store: deviceStore(),
+    now: Date.now
+  };
+}
+function resendParked() {
+  const s = deviceStore();
+  if (!s || !cfg) return;
+  const host = cfg.host.replace(/\/$/, "");
+  for (const p of takeParked(s, Date.now())) {
+    if (!p.url.startsWith(`${host}/`)) continue;
+    const again = () => park(s, p);
+    origFetch == null ? void 0 : origFetch(p.url, { method: "POST", body: p.body, headers: { "content-type": "text/plain" } }).then(
+      (r) => (r.status >= 500 || r.status === 429) && again(),
+      again
+    );
+  }
+}
 var maxScroll = 0;
 function measureScroll() {
   const doc = document.documentElement;
@@ -537,10 +660,15 @@ function init(config) {
     if (doc.prerendering) document.addEventListener("prerenderingchange", autocapture, { once: true });
     else autocapture();
   }
+  resendParked();
   if (config.replay !== false && !config.cookieless && consent === "granted") startReplay();
   timer = setInterval(() => flush(), 5e3);
-  addEventListener("visibilitychange", () => document.visibilityState === "hidden" && flush(true));
+  addEventListener(
+    "visibilitychange",
+    () => document.visibilityState === "hidden" ? flush(true) : unloadBudget.reset()
+  );
   addEventListener("pagehide", () => flush(true));
+  addEventListener("pageshow", () => unloadBudget.reset());
 }
 function startReplay() {
   if (!cfg || window.__openlensReplay) return;
@@ -552,7 +680,9 @@ function startReplay() {
       var _a;
       return { sid: state.sid, uid: (_a = state.uid) != null ? _a : state.anon };
     },
-    allowed: () => consent === "granted"
+    allowed: () => consent === "granted",
+    fetch: origFetch,
+    unload: (url, body) => unloadBudget.send(unloadSender(), url, body)
   };
   const load2 = () => {
     const s = document.createElement("script");
