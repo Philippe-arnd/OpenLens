@@ -267,6 +267,49 @@ pub fn list(root: &Path, project: &str, distinct_id: Option<&str>) -> Result<Vec
     Ok(out)
 }
 
+/// How a listing is ordered and filtered (#404).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct View {
+    /// Most active time first, instead of most recently updated first.
+    pub by_active: bool,
+    /// Only recordings with more than this many seconds of active time
+    /// (0: all of them).
+    pub min_active_secs: u64,
+}
+
+impl View {
+    /// From the list's query parameters: `sort=active`, and `active` in
+    /// minutes. Anything else (missing, empty, not a number) is ignored.
+    pub fn from_query(sort: Option<&str>, active_minutes: Option<&str>) -> Self {
+        View {
+            by_active: sort == Some("active"),
+            min_active_secs: active_minutes
+                .and_then(|m| m.trim().parse::<u64>().ok())
+                .map_or(0, |m| m.saturating_mul(60)),
+        }
+    }
+}
+
+/// [`list`], then ordered and filtered by active time. A recording whose
+/// active time is not computed yet (at most 20 are per listing) sorts last
+/// and does not pass a filter, until a later listing computes it.
+pub fn list_view(
+    root: &Path,
+    project: &str,
+    distinct_id: Option<&str>,
+    view: View,
+) -> Result<Vec<Summary>> {
+    let mut out = list(root, project, distinct_id)?;
+    if view.min_active_secs > 0 {
+        out.retain(|s| s.active_secs.is_some_and(|a| a > view.min_active_secs));
+    }
+    if view.by_active {
+        // Stable: equal active times stay most recent first.
+        out.sort_by_key(|s| std::cmp::Reverse(s.active_secs));
+    }
+    Ok(out)
+}
+
 fn cache_active(path: &Path) -> Result<u64> {
     let mut decoded = Vec::new();
     let files = chunk_files(path)?;
@@ -415,6 +458,45 @@ mod tests {
         .unwrap();
         append(d.path(), "p", "s1", "ann", 1, &more, Utc::now()).unwrap();
         assert_eq!(list(d.path(), "p", None).unwrap()[0].active_secs, Some(120));
+    }
+
+    #[test]
+    fn the_list_sorts_and_filters_on_active_time() {
+        let d = tempfile::tempdir().unwrap();
+        let chunk = |end: i64| {
+            RawValue::from_string(format!(
+                r#"[{{"type":2,"timestamp":0}},{{"type":3,"timestamp":{end},"data":{{"source":1}}}}]"#
+            ))
+            .unwrap()
+        };
+        let t0 = Utc::now();
+        append(d.path(), "p", "quick", "bob", 0, &chunk(5_000), t0).unwrap();
+        append(d.path(), "p", "busy", "ann", 0, &chunk(110_000), t0).unwrap();
+        // The busier recording is the older one.
+        fs::File::options()
+            .write(true)
+            .open(d.path().join("replay/project=p/busy/00000.zst"))
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(3600))
+            .unwrap();
+        let ids = |v: View| -> Vec<String> {
+            list_view(d.path(), "p", None, v)
+                .unwrap()
+                .into_iter()
+                .map(|s| s.session_id)
+                .collect()
+        };
+        assert_eq!(ids(View::default()), ["quick", "busy"], "most recent first");
+        let by_active = View {
+            by_active: true,
+            ..View::default()
+        };
+        assert_eq!(ids(by_active), ["busy", "quick"]);
+        let over_a_minute = View {
+            min_active_secs: 60,
+            ..View::default()
+        };
+        assert_eq!(ids(over_a_minute), ["busy"]);
     }
     use serde_json::value::RawValue;
 

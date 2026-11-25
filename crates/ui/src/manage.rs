@@ -306,14 +306,17 @@ pub fn errors(
     )
 }
 
-/// Recorded sessions, most recent first.
+/// Recorded sessions, most recent or most active first, optionally only
+/// those with more than some active time (#404).
 pub fn replays(
     p: &ProjectInfo<'_>,
     list: &[openlens_replay::Summary],
     who: Option<&str>,
+    view: openlens_replay::View,
     tz: &str,
     comments: &[(String, i64)],
 ) -> Markup {
+    let min_minutes = view.min_active_secs / 60;
     layout(
         "Replays",
         Some(p),
@@ -322,12 +325,28 @@ pub fn replays(
                 div {
                     h1 { "Replays" }
                     p.muted {
-                        "Recorded sessions, most recent first. Inputs are always masked."
+                        "Recorded sessions, " (if view.by_active { "most active first" } else { "most recent first" }) ". Inputs are always masked."
                         @if let Some(w) = who { " Only " span.mono { (w) } ". " a href={ "/p/" (p.id) "/replays" } { "Show everyone" } }
                     }
                 }
             }
-            @if list.is_empty() {
+            form.filters method="get" action={ "/p/" (p.id) "/replays" } aria-label="Sort and filter" {
+                @if let Some(w) = who { input type="hidden" name="u" value=(w); }
+                label { "Sort "
+                    select name="sort" {
+                        option value="recent" selected[!view.by_active] { "Most recent first" }
+                        option value="active" selected[view.by_active] { "Most active first" }
+                    }
+                }
+                label { "More than "
+                    input type="number" name="active" min="0" max="1440" step="1" value=[(min_minutes > 0).then_some(min_minutes)] placeholder="0";
+                    " min active"
+                }
+                button type="submit" { "Show" }
+            }
+            @if list.is_empty() && min_minutes > 0 {
+                section.card { p { "No recording has more than " (min_minutes) " min of active time." } }
+            } @else if list.is_empty() {
                 section.card { p { (icon("play")) " No recordings yet. The SDK records sessions once a page has loaded; they show up here within a few seconds." } }
             } @else {
                 section.card.wide {

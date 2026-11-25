@@ -6,10 +6,16 @@
  * idle", keyboard shortcuts, and the list of events that follows the
  * playhead (click one to jump there).
  *
+ * The seek bar and the times shown cover active time only: each idle gap
+ * (see `gaps.ts`) is a "⏸ … idle" marker and playback jumps it (#404).
+ * Positions handed to rrweb stay real offsets from the first event.
+ *
  * Markup it expects: `<div id="ol-player" data-src="…events.json"
  * data-timeline="…timeline.json" data-at="time?">`.
  */
 import { Replayer } from "rrweb";
+
+import { type Ev, type Gap, gapAt, gaps, idleLabel, toActive, toReal } from "./gaps";
 
 const root = document.getElementById("ol-player");
 const src = root?.dataset.src;
@@ -67,14 +73,24 @@ async function main(): Promise<void> {
 
   const rep = new Replayer(events, { root: stage, skipInactive: true, mouseTail: false, showWarning: false });
   const total = rep.getMetaData().totalTime;
-  seek.max = String(total);
+  const idle = gaps(events as unknown as Ev[]);
+  // Real offset -> position on the seek bar (active time).
+  const pos = (t: number) => toActive(idle, t);
+  const span = pos(total);
+  seek.max = String(span);
   let playing = false;
   let items: { t: number; li: HTMLLIElement }[] = [];
   let current: HTMLLIElement | undefined;
   const show = () => {
-    const t = rep.getCurrentTime();
-    seek.value = String(t);
-    time.textContent = `${fmt(t)} / ${fmt(total)}`;
+    let t = rep.getCurrentTime();
+    const gap = playing ? gapAt(idle, t) : undefined;
+    if (gap) {
+      // Playback reached an idle gap: jump it.
+      t = Math.min(total, gap.end);
+      rep.play(t);
+    }
+    seek.value = String(pos(t));
+    time.textContent = `${fmt(pos(t))} / ${fmt(span)}`;
     // The event list follows the playhead.
     const now = [...items].reverse().find((x) => x.t <= t + 250)?.li;
     if (now !== current) {
@@ -95,15 +111,17 @@ async function main(): Promise<void> {
     else rep.pause(at);
     show();
   };
+  // Move by `d` ms of active time.
+  const step = (d: number) => go(toReal(idle, pos(rep.getCurrentTime()) + d));
   const toggle = () => {
     if (playing) rep.pause();
     else rep.play(rep.getCurrentTime() >= total ? 0 : rep.getCurrentTime());
     setPlaying(!playing);
   };
   play.addEventListener("click", toggle);
-  back.addEventListener("click", () => go(rep.getCurrentTime() - 10_000));
-  fwd.addEventListener("click", () => go(rep.getCurrentTime() + 10_000));
-  seek.addEventListener("input", () => go(Number(seek.value)));
+  back.addEventListener("click", () => step(-10_000));
+  fwd.addEventListener("click", () => step(10_000));
+  seek.addEventListener("input", () => go(toReal(idle, Number(seek.value))));
   const setSpeed = (v: string) => {
     speed.value = v;
     rep.setConfig({ speed: Number(v) });
@@ -117,10 +135,10 @@ async function main(): Promise<void> {
     const keys: Record<string, () => void> = {
       " ": toggle,
       k: toggle,
-      j: () => go(rep.getCurrentTime() - 10_000),
-      l: () => go(rep.getCurrentTime() + 10_000),
-      ArrowLeft: () => go(rep.getCurrentTime() - 5_000),
-      ArrowRight: () => go(rep.getCurrentTime() + 5_000),
+      j: () => step(-10_000),
+      l: () => step(10_000),
+      ArrowLeft: () => step(-5_000),
+      ArrowRight: () => step(5_000),
       "+": () => setSpeed(opts[Math.min(opts.length - 1, i + 1)] ?? "1"),
       "-": () => setSpeed(opts[Math.max(0, i - 1)] ?? "1"),
       z: () => zoom.click(),
@@ -179,11 +197,16 @@ async function main(): Promise<void> {
   }
 
   const first0 = (events[0] as { timestamp: number }).timestamp;
+  const sc: Scale = { total, span, pos };
   if (root.dataset.timeline) {
-    items = await timeline(root.dataset.timeline, first0, total, marks, legend, log, (t) => go(t - 1000));
+    items = await timeline(root.dataset.timeline, first0, sc, marks, legend, log, (t) => go(t - 1000));
   }
-  items = items.concat(comments(root.dataset.comments, total, marks, (t) => go(t))).sort((a, b) => a.t - b.t);
+  items = items
+    .concat(comments(root.dataset.comments, sc, marks, (t) => go(t)))
+    .concat(idleMarks(idle, sc, marks, (t) => go(t)))
+    .sort((a, b) => a.t - b.t);
   for (const x of items) log.append(x.li);
+  legend.hidden = !legend.childElementCount;
   if (!items.length) {
     legend.hidden = true;
     log.hidden = true;
@@ -253,11 +276,45 @@ function labelOf(m: Mark): string {
   }
 }
 
+/** Real offsets (what rrweb plays) and their place on the seek bar, which
+ * covers active time only (#404). */
+interface Scale {
+  /** Real length of the recording, ms. */
+  total: number;
+  /** Active length, ms: the seek bar's range. */
+  span: number;
+  /** Real offset -> active time. */
+  pos: (t: number) => number;
+}
+
+function left(sc: Scale, t: number): string {
+  return `${sc.span ? (sc.pos(t) / sc.span) * 100 : 0}%`;
+}
+
+/** A "⏸ … idle" marker on the track and in the list for each gap; a click
+ * goes to where activity resumes. */
+function idleMarks(gs: readonly Gap[], sc: Scale, marks: HTMLElement, jump: (t: number) => void): { t: number; li: HTMLLIElement }[] {
+  return gs.map((g) => {
+    const label = `${idleLabel(g.end - g.start)} idle`;
+    const at = fmt(sc.pos(g.start));
+    const b = el("button", { type: "button", class: "ol-mark ol-gap k-idle", title: `${at} · ${label}`, "aria-label": `${at}, ${label}` }, "⏸");
+    b.style.left = left(sc, g.start);
+    b.addEventListener("click", () => jump(g.end));
+    marks.append(b);
+    const li = el("li", { class: "k-idle" });
+    const go = el("button", { type: "button" });
+    go.append(el("span", { class: "ol-at" }, at), el("span", { class: "ol-dot", "aria-hidden": "true" }), el("span", { class: "ol-what" }, `⏸ ${label}`));
+    go.addEventListener("click", () => jump(g.end));
+    li.append(go);
+    return { t: g.start, li };
+  });
+}
+
 /** Markers on the seek bar, a legend, and the list of events. */
 async function timeline(
   url: string,
   first: number,
-  total: number,
+  sc: Scale,
   marks: HTMLElement,
   legend: HTMLElement,
   log: HTMLElement,
@@ -269,17 +326,17 @@ async function timeline(
   const seen = new Set<string>();
   const out: { t: number; li: HTMLLIElement }[] = [];
   for (const m of data.events ?? []) {
-    const t = Math.max(0, Math.min(total, m.ms - first));
+    const t = Math.max(0, Math.min(sc.total, m.ms - first));
     const k = kindOf(m);
     seen.add(k);
     const label = labelOf(m);
-    const b = el("button", { type: "button", class: `ol-mark k-${k}`, title: `${fmt(t)} · ${label}`, "aria-label": `${fmt(t)}, ${label}` });
-    b.style.left = `${total ? (t / total) * 100 : 0}%`;
+    const b = el("button", { type: "button", class: `ol-mark k-${k}`, title: `${fmt(sc.pos(t))} · ${label}`, "aria-label": `${fmt(sc.pos(t))}, ${label}` });
+    b.style.left = left(sc, t);
     b.addEventListener("click", () => jump(t));
     marks.append(b);
     const li = el("li", { class: `k-${k}` });
     const go = el("button", { type: "button" });
-    go.append(el("span", { class: "ol-at" }, fmt(t)), el("span", { class: "ol-dot", "aria-hidden": "true" }), el("span", { class: "ol-what" }, label));
+    go.append(el("span", { class: "ol-at" }, fmt(sc.pos(t))), el("span", { class: "ol-dot", "aria-hidden": "true" }), el("span", { class: "ol-what" }, label));
     go.addEventListener("click", () => jump(t));
     li.append(go);
     log.append(li);
@@ -298,7 +355,7 @@ async function timeline(
  * the list, distinct from events. */
 function comments(
   raw: string | undefined,
-  total: number,
+  sc: Scale,
   marks: HTMLElement,
   jump: (t: number) => void,
 ): { t: number; li: HTMLLIElement }[] {
@@ -309,15 +366,15 @@ function comments(
     return [];
   }
   return list.map((c) => {
-    const t = Math.max(0, Math.min(total, c.ms));
+    const t = Math.max(0, Math.min(sc.total, c.ms));
     const label = `${c.author}: ${c.body}`;
-    const b = el("button", { type: "button", class: "ol-mark k-note", title: `${fmt(t)} · ${label}`, "aria-label": `Comment at ${fmt(t)}, ${label}` });
-    b.style.left = `${total ? (t / total) * 100 : 0}%`;
+    const b = el("button", { type: "button", class: "ol-mark k-note", title: `${fmt(sc.pos(t))} · ${label}`, "aria-label": `Comment at ${fmt(sc.pos(t))}, ${label}` });
+    b.style.left = left(sc, t);
     b.addEventListener("click", () => jump(t));
     marks.append(b);
     const li = el("li", { class: "k-note" });
     const go = el("button", { type: "button" });
-    go.append(el("span", { class: "ol-at" }, fmt(t)), el("span", { class: "ol-dot", "aria-hidden": "true" }), el("span", { class: "ol-what" }, `💬 ${label}`));
+    go.append(el("span", { class: "ol-at" }, fmt(sc.pos(t))), el("span", { class: "ol-dot", "aria-hidden": "true" }), el("span", { class: "ol-what" }, `💬 ${label}`));
     go.addEventListener("click", () => jump(t));
     li.append(go);
     return { t, li };

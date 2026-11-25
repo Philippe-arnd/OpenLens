@@ -38,6 +38,10 @@ pub(super) struct ReplayQuery {
     at: Option<String>,
     /// Playback position to open at, milliseconds (comment links).
     t: Option<u64>,
+    /// List order: `active` for most active first (#404).
+    sort: Option<String>,
+    /// List filter: more than this many minutes of active time (#404).
+    active: Option<String>,
 }
 
 pub(super) async fn replays_page(
@@ -56,9 +60,11 @@ pub(super) async fn replays_page(
     let root = state.data_dir.clone();
     let pid = p.id.clone();
     let who = q.u.clone();
-    let list =
-        tokio::task::spawn_blocking(move || openlens_replay::list(&root, &pid, who.as_deref()))
-            .await;
+    let view = openlens_replay::View::from_query(q.sort.as_deref(), q.active.as_deref());
+    let list = tokio::task::spawn_blocking(move || {
+        openlens_replay::list_view(&root, &pid, who.as_deref(), view)
+    })
+    .await;
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
         name: &p.name,
@@ -71,6 +77,7 @@ pub(super) async fn replays_page(
                 &info,
                 &l,
                 q.u.as_deref(),
+                view,
                 &auth::tz_for(&state, &headers, &p.timezone),
                 &state.meta.replay_comment_counts(&p.id).unwrap_or_default(),
             ),

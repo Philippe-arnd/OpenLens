@@ -692,6 +692,11 @@ function startReplay(): void {
     allowed: () => consent === "granted",
     fetch: origFetch,
     unload: (url, body) => unloadBudget.send(unloadSender(), url, body),
+    touch: () => {
+      refresh();
+      touchSession(Date.now());
+      save();
+    },
   };
   const load = () => {
     const s = document.createElement("script");

@@ -682,7 +682,12 @@ function startReplay() {
     },
     allowed: () => consent === "granted",
     fetch: origFetch,
-    unload: (url, body) => unloadBudget.send(unloadSender(), url, body)
+    unload: (url, body) => unloadBudget.send(unloadSender(), url, body),
+    touch: () => {
+      refresh();
+      touchSession(Date.now());
+      save();
+    }
   };
   const load2 = () => {
     const s = document.createElement("script");
