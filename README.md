@@ -115,7 +115,7 @@ openlens.identify(user.id, { role: user.role, account: user.orgId, plan: user.pl
   - [strict CSP](docs/agents/wire.md#strict-content-security-policy);
   - an [ad-blocker proxy](docs/agents/wire.md#ad-blockers-proxy-through-the-apps-domain).
 - **Server events:** [Node, Python, Go, Ruby and PHP](sdk/SERVER.md) thin clients, or a plain `POST /capture`.
-- **Examples:** [`examples/`](examples/) has two reference apps, which CI clicks through every night until `verify` is green.
+- **Examples:** [`examples/`](examples/) has two reference apps (script tag and npm package), which CI clicks through every night until `verify` is green. Journal, a real app wired outside this repo, is the third.
 
 ## 🌐 Try it in two minutes
 
