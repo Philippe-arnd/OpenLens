@@ -6,7 +6,7 @@
 //!   users, planted patterns) into the `default` project of a data dir, to
 //!   look at the board: `OPENLENS_DATA_DIR=<data-dir> cargo run -p openlens`.
 //! - `cargo xtask bench <url> <key>`: ingestion load test (docs/benchmarks.md).
-//! - `cargo xtask bench-gen <data-dir> [--events N] [--users N]`: a large
+//! - `cargo xtask bench-gen <data-dir> [--events N] [--users N] [--profile realistic]`: a large
 //!   synthetic app (63 M events over 90 days by default) for scale runs (#321).
 //! - `cargo xtask crash [--secs N] [--kills N] [--seed N]`: SIGKILL the real
 //!   server while it ingests, and check no acknowledged event is lost or

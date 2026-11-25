@@ -11,6 +11,7 @@ publish = false
 serde_json = "1"
 chrono.workspace = true
 openlens-testkit = { path = "../crates/testkit" }
+openlens-event = { path = "../crates/event" }
 openlens-storage = { path = "../crates/storage" }
 openlens-meta = { path = "../crates/meta" }
 
