@@ -31,6 +31,7 @@ pub mod functions;
 mod host;
 mod internal;
 mod rebatch;
+mod retry;
 mod rollup;
 pub use aggregate::MIN_USERS;
 use serde::Serialize;
@@ -309,7 +310,8 @@ impl QueryEngine {
         let this = self.clone();
         let (project, name, sql) = (project.to_owned(), name.to_owned(), sql.to_owned());
         offload(async move {
-            let data = this.build_snapshot(&project, &name, &sql, max_rows).await?;
+            let data =
+                retry::once_more(|| this.build_snapshot(&project, &name, &sql, max_rows)).await?;
             Ok(data.map(|d| this.with_snapshot(&project, &name, d)))
         })
         .await
@@ -366,7 +368,8 @@ impl QueryEngine {
                 Last::TooBig(at) if at.elapsed() < Duration::from_secs(60) => return Ok(None),
                 _ => {}
             }
-            let data = this.build_snapshot(&project, &name, &sql, max_rows).await?;
+            let data =
+                retry::once_more(|| this.build_snapshot(&project, &name, &sql, max_rows)).await?;
             *last = match &data {
                 Some(d) => {
                     // Boards waiting for a compute permit start after the
@@ -586,7 +589,7 @@ impl QueryEngine {
     pub async fn sql(&self, project: &str, sql: &str) -> Result<QueryResult, QueryError> {
         let this = self.clone();
         let (project, sql) = (project.to_owned(), sql.to_owned());
-        offload(async move { this.sql_here(&project, &sql).await }).await
+        offload(async move { retry::once_more(|| this.sql_here(&project, &sql)).await }).await
     }
 
     async fn sql_here(&self, project: &str, sql: &str) -> Result<QueryResult, QueryError> {
@@ -615,7 +618,10 @@ impl QueryEngine {
     ) -> Result<QueryResult, QueryError> {
         let this = self.clone();
         let (project, source, sql) = (project.to_owned(), source.to_owned(), sql.to_owned());
-        offload(async move { this.sql_over_here(&project, &source, &sql).await }).await
+        offload(
+            async move { retry::once_more(|| this.sql_over_here(&project, &source, &sql)).await },
+        )
+        .await
     }
 
     async fn sql_over_here(
@@ -667,7 +673,10 @@ impl QueryEngine {
             key.to_vec(),
             sql.to_owned(),
         );
-        offload(async move { this.sql_aggregate_here(&project, &source, &key, &sql).await }).await
+        offload(async move {
+            retry::once_more(|| this.sql_aggregate_here(&project, &source, &key, &sql)).await
+        })
+        .await
     }
 
     async fn sql_aggregate_here(
