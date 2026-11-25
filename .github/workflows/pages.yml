@@ -1,6 +1,7 @@
 # Product page on GitHub Pages (site/), rebuilt for every stable release so
 # the version, the highlights and the install tag follow it. Also on changes
-# to the page itself, and by hand.
+# to the page itself, by hand, and every morning after the nightly CI, so the
+# agent wiring badge (#305) follows the latest reference-app run.
 name: Pages
 
 on:
@@ -9,10 +10,13 @@ on:
   push:
     branches: [main]
     paths: ["site/**", "scripts/site/**", "docs/img/**", "docs/releases/**", "sdk/js/dist/openlens.min.js", "sdk/js/scripts/size.mjs", ".github/workflows/pages.yml"]
+  schedule:
+    - cron: "41 5 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
   pages: write
   id-token: write
 
@@ -40,6 +44,17 @@ jobs:
           python3 scripts/site/build.py "${{ steps.rel.outputs.tag }}" "${{ steps.rel.outputs.date }}" "${{ steps.rel.outputs.url }}" "$notes"
       - name: SDK size badge (#302)
         run: mkdir -p _site/badges && node sdk/js/scripts/size.mjs --badge _site/badges/sdk-size.json
+      - name: agent wiring badge (#305), from the latest green nightly CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run=$(gh run list -R "${{ github.repository }}" -w ci.yml -b main -e schedule -s success -L 1 --json databaseId --jq '.[0].databaseId // empty')
+          if [ -n "$run" ] && gh run download "$run" -R "${{ github.repository }}" -n reference-numbers -D ref; then
+            cp ref/badges/wiring.json _site/badges/wiring.json
+            cp ref/reference.json _site/reference.json
+          else
+            echo "no reference numbers yet: the badge keeps its last value"
+          fi
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: _site

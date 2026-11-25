@@ -22,6 +22,7 @@
   <a href="https://github.com/Philippe-arnd/OpenLens/releases"><img alt="Release" src="https://img.shields.io/github/v/release/Philippe-arnd/OpenLens?color=6d5efc"></a>
   <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-6d5efc"></a>
   <a href=".github/workflows/pages.yml"><img alt="SDK size, gzipped" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fphilippe-arnd.github.io%2FOpenLens%2Fbadges%2Fsdk-size.json"></a>
+  <a href="scripts/e2e/reference.sh"><img alt="Agent wiring of the reference apps, measured every night" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fphilippe-arnd.github.io%2FOpenLens%2Fbadges%2Fwiring.json"></a>
   <a href="docs/stability.md"><img alt="Status: beta" src="https://img.shields.io/badge/status-beta-d99400"></a>
   <a href="docs/deploy/README.md#optional-settings-d-016"><img alt="No setting required" src="https://img.shields.io/badge/settings-none%20required-d99400"></a>
 </p>
