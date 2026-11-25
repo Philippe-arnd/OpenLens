@@ -212,6 +212,41 @@ async fn concurrent_shared_snapshots_are_built_once() {
 }
 
 #[tokio::test]
+async fn aliases_resolve_without_a_join_on_the_events() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let mut rows = Vec::new();
+    for (i, who) in ["zed", "bob"].into_iter().enumerate() {
+        let mut identify = ev("a", "user", 0);
+        identify.uuid = format!("id-{i}");
+        identify.event = "$identify".into();
+        identify.distinct_id = who.into();
+        identify.properties = r#"{"$anon_distinct_id":"anon-1"}"#.into();
+        rows.push(identify);
+    }
+    let mut before = ev("a", "user", 0);
+    before.distinct_id = "anon-1".into();
+    rows.push(before);
+    w.append(&rows).unwrap();
+    w.flush().unwrap();
+    let q = QueryEngine::new(dir.path(), Limits::default());
+
+    // An anonymous id identified as several users goes to the smallest.
+    let r = q
+        .sql(
+            "a",
+            "SELECT count(*) AS n FROM events WHERE distinct_id = 'bob'",
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.rows[0]["n"].as_i64().unwrap(), 2);
+
+    let plan = q.sql("a", "EXPLAIN SELECT * FROM events").await.unwrap();
+    let text = serde_json::to_string(&plan.rows).unwrap();
+    assert!(!text.contains("HashJoin"), "{text}");
+}
+
+#[tokio::test]
 async fn anonymous_events_before_identify_belong_to_the_user() {
     let dir = tempfile::tempdir().unwrap();
     let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
