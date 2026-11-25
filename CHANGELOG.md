@@ -59,14 +59,6 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ## [0.3.0] - 2026-11-24
 
-### Security
-
-Upgrade now if you run v0.2.x. Each fix is published as an advisory on the repository's Security tab (affected `< 0.3.0`, patched `0.3.0`).
-
-- Flag and survey edit pages were readable without signing in (#294). Every `/p/...` page now refuses anonymous visitors in one place.
-- A login link could be used up by a link preview before the person opened it (#315). Opening a link now needs a *Continue* click.
-- The admin token was stored in clear and printed in the first-start log (#342). It is now stored hashed, and the first start prints a one-time owner link.
-
 ### Added
 
 - **Cold tier on S3** (#326, part B; opt-in since 0.5.0, see #417 / D-032): with S3 set, event days older than 120 days leave the disk once S3 holds every file, verified. Forgetting someone and a person's export still cover them, and they are deleted from S3 after 400 days (D-031).
