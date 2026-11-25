@@ -215,18 +215,17 @@ struct SharedSnaps {
 
 /// Per segment file: (size, modified, what it holds). A segment is never
 /// edited once written, so a file with the same size and time is the same.
-type FactsCache = Arc<
-    std::sync::Mutex<
-        HashMap<
-            PathBuf,
-            (
-                u64,
-                Option<std::time::SystemTime>,
-                Arc<openlens_storage::SegmentFacts>,
-            ),
-        >,
-    >,
+type Facts = HashMap<
+    PathBuf,
+    (
+        u64,
+        Option<std::time::SystemTime>,
+        Arc<openlens_storage::SegmentFacts>,
+    ),
 >;
+/// [`Facts`] per project: a board replaces only its own project's entry,
+/// so projects never evict each other.
+type FactsCache = Arc<std::sync::Mutex<HashMap<String, Facts>>>;
 
 /// The stored rows of a project, counted without a query (#447).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -242,6 +241,8 @@ pub struct RawSummary {
 pub struct QueryEngine {
     /// What each segment holds, read once (#447).
     facts: FactsCache,
+    /// Segments whose facts were read from disk, since the start.
+    facts_read: Arc<std::sync::atomic::AtomicU64>,
     root: PathBuf,
     limits: Limits,
     /// One runtime for every query: a single memory cap for the process, and
@@ -279,6 +280,7 @@ impl QueryEngine {
             limits,
             runtime,
             facts: FactsCache::default(),
+            facts_read: Arc::default(),
             snapshots: Arc::default(),
             shared: Arc::default(),
             aliases: AliasCache::default(),
@@ -616,6 +618,7 @@ impl QueryEngine {
     /// the segments written since the last one (#447).
     pub async fn raw_summary(&self, project: &str) -> Result<RawSummary, QueryError> {
         let (root, facts, project) = (self.root.clone(), self.facts.clone(), project.to_owned());
+        let read = self.facts_read.clone();
         let work = move || -> Result<RawSummary, QueryError> {
             let storage = |e: &dyn std::fmt::Display| QueryError::Storage(e.to_string());
             let files =
@@ -628,14 +631,19 @@ impl QueryEngine {
                     continue; // compacted away since the listing
                 };
                 let stamp = (meta.len(), meta.modified().ok());
-                let cached = facts
-                    .lock()
-                    .ok()
-                    .and_then(|c| c.get(&path).filter(|(l, m, _)| (*l, *m) == stamp).cloned());
+                let cached = facts.lock().ok().and_then(|c| {
+                    c.get(&project)?
+                        .get(&path)
+                        .filter(|(l, m, _)| (*l, *m) == stamp)
+                        .cloned()
+                });
                 let f = match cached {
                     Some((_, _, f)) => f,
                     None => match openlens_storage::segment_facts(&path) {
-                        Ok(f) => Arc::new(f),
+                        Ok(f) => {
+                            read.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            Arc::new(f)
+                        }
                         Err(_) if !path.exists() => continue,
                         Err(e) => return Err(storage(&e)),
                     },
@@ -645,15 +653,21 @@ impl QueryEngine {
                 seen.insert(path, (stamp.0, stamp.1, f));
             }
             summary.environments = envs.into_iter().collect();
-            // Forget the segments that are gone.
+            // Forget this project's segments that are gone.
             if let Ok(mut c) = facts.lock() {
-                *c = seen;
+                c.insert(project, seen);
             }
             Ok(summary)
         };
         tokio::task::spawn_blocking(work)
             .await
             .map_err(|e| QueryError::Storage(format!("summary task: {e}")))?
+    }
+
+    /// Segments read by [`QueryEngine::raw_summary`] since the start: the
+    /// others came from its cache.
+    pub fn segments_read(&self) -> u64 {
+        self.facts_read.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Run one read-only SQL query on `project`'s events.
