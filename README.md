@@ -5,6 +5,7 @@
 <p align="center"><b>Product analytics as a method, not a toolbox.<br>Your agents wire it in. Your PM opens a board that already says where the value is.</b></p>
 
 <p align="center">
+  <a href="https://philippe-arnd.github.io/OpenLens/demo/"><b>See the demo</b></a> (read-only, nothing to install) ·
   <a href="#-try-it-in-two-minutes"><b>Try it</b></a> ·
   <a href="#-what-the-board-answers">The board</a> ·
   <a href="#-zero-human-setup">Agents</a> ·
