@@ -122,8 +122,8 @@ pub(crate) fn viewer(state: &AppState, headers: &HeaderMap) -> Option<Viewer> {
     if u.disabled {
         return None;
     }
-    // A password change signs out the sessions issued before it (#428).
-    if let Ok(Some((_, changed))) = state.meta.password_of(&id) {
+    // A password change or reset signs out the sessions issued before it (#428).
+    if let Ok(Some(changed)) = state.meta.password_changed_at(&id) {
         let issued = session_cookie(headers)
             .and_then(|v| v.split('.').next()?.parse::<i64>().ok())
             .map_or(0, |exp| exp - SESSION_SECS);

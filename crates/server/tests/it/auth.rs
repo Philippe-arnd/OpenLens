@@ -304,3 +304,141 @@ async fn the_token_holder_creates_an_account_then_signs_in_with_a_password() {
     // The token always works: the way back in.
     assert!(login_cookie(&h).await.starts_with("ol_session="));
 }
+
+#[tokio::test]
+async fn an_admin_resets_a_password_with_a_one_time_link() {
+    let h = harness();
+    let token = login_cookie(&h).await;
+    // An invited viewer signs in with their link and sets a password.
+    let vic = h
+        .state
+        .meta
+        .upsert_user("vic@example.com", "viewer", None)
+        .unwrap();
+    let t = h
+        .state
+        .meta
+        .create_login_link_for(Some(&vic.id), 3600)
+        .unwrap();
+    let (_, link_session) = post_cookie(&h, &format!("/l/{t}"), "", "").await;
+    let link_session = link_session.expect("signed in by the link");
+    let (s, _) = post_cookie(
+        &h,
+        "/me/password",
+        &link_session,
+        "password=violet+tram+seven&again=violet+tram+seven",
+    )
+    .await;
+    assert_eq!(s, StatusCode::SEE_OTHER, "a viewer sets a password");
+    let (s, session) = post_cookie(
+        &h,
+        "/login/password",
+        "",
+        "email=vic%40example.com&password=violet+tram+seven",
+    )
+    .await;
+    assert_eq!(s, StatusCode::SEE_OTHER);
+    let session = session.unwrap();
+    // The token holder can't take over that email as their own account.
+    let (s, page) = post_form_body(
+        &h,
+        "/me/password",
+        &token,
+        "email=vic%40example.com&password=amber+kite+river&again=amber+kite+river",
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert!(page.contains("already belongs"), "{page}");
+    assert_eq!(h.state.meta.user(&vic.id).unwrap().unwrap().role, "viewer");
+    // The admin resets it: a one-time link, the old password and sessions out.
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    let (s, page) =
+        post_form_body(&h, &format!("/users/{}/reset-password", vic.id), &token, "").await;
+    assert_eq!(s, StatusCode::OK, "{page}");
+    let link = page
+        .split("/l/")
+        .nth(1)
+        .and_then(|r| r.split('<').next())
+        .expect("a link on the page")
+        .to_owned();
+    assert!(!page.contains("violet tram"), "no password shown");
+    assert_ne!(
+        get(&h, "/me", Some(&session), false).await.status(),
+        StatusCode::OK,
+        "sessions end"
+    );
+    let (s, _) = post_cookie(
+        &h,
+        "/login/password",
+        "",
+        "email=vic%40example.com&password=violet+tram+seven",
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "old password gone");
+    let (_, fresh) = post_cookie(&h, &format!("/l/{link}"), "", "").await;
+    let fresh = fresh.expect("the reset link signs in once");
+    let (s, _) = post_cookie(
+        &h,
+        "/me/password",
+        &fresh,
+        "password=amber+kite+river&again=amber+kite+river",
+    )
+    .await;
+    assert_eq!(s, StatusCode::SEE_OTHER, "a new one, no current needed");
+    let (s, _) = post_cookie(&h, &format!("/l/{link}"), "", "").await;
+    assert_ne!(s, StatusCode::SEE_OTHER, "the link works once");
+}
+
+#[tokio::test]
+async fn wrong_current_passwords_are_slowed_down_and_audited() {
+    let h = harness();
+    let u = h
+        .state
+        .meta
+        .upsert_user("cur@example.com", "viewer", None)
+        .unwrap();
+    let t = h
+        .state
+        .meta
+        .create_login_link_for(Some(&u.id), 3600)
+        .unwrap();
+    let (_, s0) = post_cookie(&h, &format!("/l/{t}"), "", "").await;
+    let s0 = s0.unwrap();
+    let (s, _) = post_cookie(
+        &h,
+        "/me/password",
+        &s0,
+        "password=violet+tram+seven&again=violet+tram+seven",
+    )
+    .await;
+    assert_eq!(s, StatusCode::SEE_OTHER);
+    let (_, s1) = post_cookie(
+        &h,
+        "/login/password",
+        "",
+        "email=cur%40example.com&password=violet+tram+seven",
+    )
+    .await;
+    let s1 = s1.unwrap();
+    let start = std::time::Instant::now();
+    for _ in 0..4 {
+        let (s, _) = post_form_body(
+            &h,
+            "/me/password",
+            &s1,
+            "current=nope&password=amber+kite+river&again=amber+kite+river",
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+    }
+    assert!(
+        start.elapsed() >= std::time::Duration::from_secs(1),
+        "the 4th try waited"
+    );
+    let audit = h.state.meta.audit_log(50).unwrap();
+    let n = audit
+        .iter()
+        .filter(|e| e.3 == "auth.password_failed")
+        .count();
+    assert!(n >= 4, "{n} failures audited");
+}

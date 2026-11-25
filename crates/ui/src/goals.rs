@@ -226,7 +226,7 @@ pub fn goals(
                 section.card.wide {
                     h2.mint { (icon("plus")) "Set a goal" }
                     div.table-scroll { table.plain {
-                        thead { tr { th { "KPI" } th.num { "Now" } th { "Target" } th { "By" } th { "Owner" } th { span.sr-only { "Actions" } } } }
+                        thead { tr { th { "KPI" } (th_num("Now")) th { "Target" } th { "By" } th { "Owner" } th { span.sr-only { "Actions" } } } }
                         tbody { @for c in choices {
                             tr {
                                 th scope="row" { (c.label) span.muted.small { " · " (if c.up { "higher is better" } else { "lower is better" }) } }
@@ -342,7 +342,7 @@ pub fn forms(
                         @if fm.starts < 20 { " " span.chip title="Under 20 starts: the rates move a lot" { "low sample" } }
                     }
                     div.table-scroll { table.plain {
-                        thead { tr { th { "Field" } th.num { "Sessions" } th.num { "Last before leaving" } th { span.sr-only { "Share" } } th.num { "Came back to it" } th.num { "Time spent" } } }
+                        thead { tr { th { "Field" } (th_num("Sessions")) (th_num("Last before leaving")) th { span.sr-only { "Share" } } (th_num("Came back to it")) (th_num("Time spent")) } }
                         tbody { @for fl in &fm.fields {
                             @let left = fl.last_before_leaving as f64 / (fm.starts - fm.submits).max(1) as f64;
                             tr {

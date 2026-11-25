@@ -161,7 +161,7 @@ pub fn digest(p: &ProjectInfo<'_>, d: &openlens_engine::Digest, mailed: bool) ->
             } }
             section.card.wide {
                 table.plain {
-                    thead { tr { th { span.sr-only { "Metric" } } th.num { "This week" } th.num { "Last week" } th.num { "Change" } } }
+                    thead { tr { th { span.sr-only { "Metric" } } (th_num("This week")) (th_num("Last week")) (th_num("Change")) } }
                     tbody {
                         (row("Active users", &d.users))
                         (row("Sessions", &d.sessions))
@@ -219,7 +219,7 @@ pub fn users(
             @if let Some((email, link)) = new_link {
                 section.card.wide {
                     h2.mint { (icon("task")) "Login link for " (email) }
-                    p { "Send this one-time link (valid 7 days):" }
+                    p { "Send this one-time link (valid 7 days, 24 hours after a password reset):" }
                     pre.snippet { code { (link) } }
                 }
             }
@@ -295,6 +295,9 @@ pub fn user_edit(u: &openlens_meta::User, status: &str, projects: &[String]) -> 
                 h2.sky { (icon("shield")) "Sign-in" }
                 div.actions {
                     form.inline method="post" action={ (base) "/link" } { button type="submit" { (if status == "invited" || status == "expired" { "Resend the invitation" } else { "New login link" }) } }
+                    @if !u.disabled && status != "invited" {
+                        form.inline method="post" action={ (base) "/reset-password" } { button.ghost type="submit" { "Reset the password" } }
+                    }
                     @if status == "invited" {
                         form.inline method="post" action={ (base) "/revoke" } { button.ghost type="submit" { "Revoke the invitation" } }
                     }
@@ -304,7 +307,7 @@ pub fn user_edit(u: &openlens_meta::User, status: &str, projects: &[String]) -> 
                         form.inline method="post" action={ (base) "/disable" } { button.ghost type="submit" { "Disable sign-in" } }
                     }
                 }
-                p.muted.small { "Disabling ends their sessions at once and keeps the account; enabling lets them sign in again." }
+                p.muted.small { "Disabling ends their sessions at once and keeps the account; enabling lets them sign in again. Resetting the password ends their sessions and gives you a one-time link (24 h) for them to set a new one; no password is ever shown." }
             }
             section.card.wide.danger {
                 h2.coral { (icon("alert")) "Remove" }
@@ -416,6 +419,8 @@ pub struct SettingsView<'a> {
     pub shares: Vec<openlens_meta::ShareLink>,
     /// Setup steps (#403).
     pub setup: Vec<SetupStep>,
+    /// The latest releases, suggested for a share link (#403).
+    pub releases: &'a [String],
 }
 
 /// A project's alert settings as the page shows them (#256).
@@ -560,7 +565,8 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
                     p.small { "A read-only link to the Focus board or the weekly digest, for people without an account: no SQL, people, replays or settings behind it. Filters are fixed when the link is made." }
                     form.settings method="post" action={ (base) "/share" } {
                         label { "What " select name="scope" { option value="board" { "Focus board" } option value="digest" { "Weekly digest" } } }
-                        label { "Release " input type="text" name="release" placeholder="all" maxlength="100"; }
+                        label { "Release " input type="text" name="release" placeholder="all" maxlength="100" list="share-releases"; }
+                        datalist id="share-releases" { @for r in v.releases { option value=(r) {} } }
                         label { "Expires after (days, 0 = never) " input type="number" name="days" min="0" max="366" value="30"; }
                         label { "May be embedded on " input type="text" name="embed" placeholder="https://intranet.example.com" maxlength="500" list="embed-on"; }
                         datalist id="embed-on" { @if let Some(u) = v.app_url.or(v.detected_url) { option value=(u) {} } }

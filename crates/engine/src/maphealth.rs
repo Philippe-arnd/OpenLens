@@ -631,6 +631,66 @@ pub struct FeatureContext {
     pub required_by: Vec<String>,
     /// Other features in its area.
     pub area_peers: Vec<String>,
+    /// Use per release, newest first (#411), last 90 days.
+    pub releases: Vec<FeatureRelease>,
+    /// Errors in the sessions that used it (#411), most users first, last 30 days.
+    pub errors: Vec<FeatureError>,
+    /// Latest sessions that used it (#411; the page keeps those with a replay).
+    pub sessions: Vec<FeatureSession>,
+    /// Flags active while it was used (#411, from `$flags`), last 30 days.
+    pub flags: Vec<FeatureFlag>,
+}
+
+/// One release's use of a feature.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct FeatureRelease {
+    /// The release (`untagged` when none was sent).
+    pub release: String,
+    /// When its events started.
+    pub first_seen: String,
+    /// Users.
+    pub users: i64,
+    /// Uses.
+    pub uses: i64,
+    /// Users who reached the success event.
+    pub success_users: i64,
+}
+
+/// An error message seen in sessions that used a feature.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct FeatureError {
+    /// One message.
+    pub message: String,
+    /// Occurrences.
+    pub count: i64,
+    /// Users hit.
+    pub users: i64,
+    /// The session of the latest one.
+    pub last_session: Option<String>,
+}
+
+/// A session that used a feature.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct FeatureSession {
+    /// Session id.
+    pub session_id: String,
+    /// Who.
+    pub distinct_id: String,
+    /// When it last used the feature.
+    pub at: String,
+    /// It reached the success event.
+    pub succeeded: bool,
+}
+
+/// A flag active while a feature was used.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct FeatureFlag {
+    /// Flag key.
+    pub flag: String,
+    /// Users of the feature with it on.
+    pub users: i64,
+    /// Of whom reached the success event.
+    pub success_users: i64,
 }
 
 /// [`FeatureContext`] for `key` (its current key or a former one).
@@ -664,7 +724,42 @@ pub async fn feature_context(
         "SELECT path, count(*) AS n FROM {src} WHERE {w30} AND feature = {k} AND path IS NOT NULL \
          GROUP BY path ORDER BY n DESC LIMIT 10"
     );
-    let (r, p) = futures::join!(q.sql(project, &roles), q.sql(project, &pages));
+    let w90 = f.clause(90)?;
+    let ok = succ.as_deref().unwrap_or("NULL");
+    let releases = format!(
+        "SELECT coalesce(release, 'untagged') AS release, CAST(min(timestamp) AS VARCHAR) AS first_seen, \
+         count(DISTINCT distinct_id) AS u, count(*) AS n, \
+         count(DISTINCT CASE WHEN event = {ok} THEN distinct_id END) AS s \
+         FROM {src} WHERE {w90} AND feature = {k} GROUP BY 1 ORDER BY first_seen DESC LIMIT 10"
+    );
+    let errors = format!(
+        "SELECT coalesce(regexp_match(properties, '\"\\$message\":\"((?:[^\"\\\\]|\\\\.)*)\"')[1], '(no message)') AS msg, \
+         count(*) AS n, count(DISTINCT distinct_id) AS u, last_value(session_id ORDER BY timestamp) AS last_session \
+         FROM {src} WHERE {w30} AND event = '$error' AND session_id IN \
+         (SELECT DISTINCT session_id FROM {src} WHERE {w30} AND feature = {k}) \
+         GROUP BY 1 ORDER BY u DESC, n DESC LIMIT 10"
+    );
+    let sessions = format!(
+        "SELECT session_id, min(distinct_id) AS who, CAST(max(timestamp) AS VARCHAR) AS at, \
+         max(CASE WHEN event = {ok} THEN 1 ELSE 0 END) AS ok \
+         FROM {src} WHERE {w30} AND feature = {k} AND session_id IS NOT NULL \
+         GROUP BY session_id ORDER BY at DESC LIMIT 50"
+    );
+    let flags = format!(
+        "WITH y AS (SELECT distinct_id, event, unnest(string_to_array(flags, ',')) AS flag \
+           FROM {src} WHERE {w30} AND feature = {k} AND flags IS NOT NULL) \
+         SELECT flag, count(DISTINCT distinct_id) AS u, \
+         count(DISTINCT CASE WHEN event = {ok} THEN distinct_id END) AS s \
+         FROM y WHERE flag <> '' GROUP BY flag ORDER BY u DESC LIMIT 10"
+    );
+    let (r, p, rel, err, ses, fl) = futures::join!(
+        q.sql(project, &roles),
+        q.sql(project, &pages),
+        q.sql(project, &releases),
+        q.sql(project, &errors),
+        q.sql(project, &sessions),
+        q.sql(project, &flags)
+    );
     let area = def.as_ref().and_then(|d| d.area.clone());
     Ok(Some(FeatureContext {
         health: health.features.iter().find(|x| x.key == key).cloned(),
@@ -701,6 +796,53 @@ pub async fn feature_context(
             .iter()
             .filter(|x| area.is_some() && x.area == area && x.key != key)
             .map(|x| x.key.clone())
+            .collect(),
+        releases: rel?
+            .rows
+            .iter()
+            .map(|x| FeatureRelease {
+                release: text(x, "release").unwrap_or_default(),
+                first_seen: text(x, "first_seen").unwrap_or_default(),
+                users: int(x, "u"),
+                uses: int(x, "n"),
+                success_users: int(x, "s"),
+            })
+            .collect(),
+        errors: err?
+            .rows
+            .iter()
+            .map(|x| FeatureError {
+                // A JSON string body: undo its escapes.
+                message: text(x, "msg")
+                    .map(|m| serde_json::from_str(&format!("\"{m}\"")).unwrap_or(m))
+                    .unwrap_or_default(),
+                count: int(x, "n"),
+                users: int(x, "u"),
+                last_session: text(x, "last_session"),
+            })
+            .collect(),
+        sessions: ses?
+            .rows
+            .iter()
+            .filter_map(|x| {
+                Some(FeatureSession {
+                    session_id: text(x, "session_id")?,
+                    distinct_id: text(x, "who").unwrap_or_default(),
+                    at: text(x, "at").unwrap_or_default(),
+                    succeeded: int(x, "ok") > 0,
+                })
+            })
+            .collect(),
+        flags: fl?
+            .rows
+            .iter()
+            .filter_map(|x| {
+                Some(FeatureFlag {
+                    flag: text(x, "flag")?,
+                    users: int(x, "u"),
+                    success_users: int(x, "s"),
+                })
+            })
             .collect(),
         definition: def,
     }))

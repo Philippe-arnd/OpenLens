@@ -147,7 +147,7 @@ pub fn board(
                 @if !unused.is_empty() {
                     section.card {
                         h2.coral { (icon("ban")) (to(&detail_url(p.id, "/features", f), "Never used (last 30 days)")) }
-                        ul.tags { @for x in &unused { li { (x.name.as_deref().unwrap_or(&x.key)) } } }
+                        ul.tags { @for x in &unused { li { (feature_link(p.id, &x.key, x.name.as_deref().unwrap_or(&x.key), true, f)) } } }
                         p.muted.small { "Declared in the feature map, but nobody reached them. Hidden, broken, or not needed?" }
                     }
                 }
@@ -189,7 +189,7 @@ pub fn board(
                     section.card.wide {
                         h2.violet { (icon("flag")) (to(&detail_url(p.id, "/flags", f), "Flags: with vs without")) }
                         table.plain {
-                            thead { tr { th { "Flag" } th.num { "Users with / without" } th.num { "Avg session" } th.num { "Tasks / session" } th.num { "Sessions with errors" } th { "Confidence" } } }
+                            thead { tr { th { "Flag" } (th_num("Users with / without")) (th_num("Avg session")) (th_num("Tasks / session")) (th_num("Sessions with errors")) (th_def("Confidence")) } }
                             tbody { @for c in &b.flag_cohorts {
                                 tr {
                                     th scope="row" { code { (c.flag) } }
@@ -225,10 +225,10 @@ pub fn board(
                     @else {
                         (release_compare(&b.releases))
                         table.plain {
-                            thead { tr { th { "Release" } th.num { "Users" } th.num { "Sessions" } th.num { "Avg session" } th.num { "Bounce" } th.num { "Tasks / session" } th.num { "Sessions with errors" } th { "First seen" } } }
+                            thead { tr { th { "Release" } (th_num("Users")) (th_num("Sessions")) (th_num("Avg session")) (th_num("Bounce")) (th_num("Tasks / session")) (th_num("Sessions with errors")) th { "First seen" } } }
                             tbody { @for (i, r) in b.releases.iter().enumerate() {
                                 tr {
-                                    th scope="row" { (r.release) @if i == 0 { " " span.badge { "latest" } } }
+                                    th scope="row" { (row_link(&detail_url(p.id, "", &Filters { release: Some(r.release.clone()), ..f.clone() }), &r.release)) @if i == 0 { " " span.badge { "latest" } } }
                                     td.num { (compact(r.users)) }
                                     td.num { (compact(r.sessions)) }
                                     td.num { (duration(r.avg_secs)) }
@@ -370,16 +370,16 @@ pub(crate) fn feature_pulse(pid: &str, f: &Filters, b: &Board, empty: bool) -> M
                     thead { tr {
                         th { "Feature" }
                         th { "Adoption" }
-                        th.num title="Share of active users who used it" { span.sr-only { "Adoption " } "% users" }
-                        th.num title="Average uses per user" { "Uses / user" }
-                        th.num title="Average distinct days each user came back to it" { "Days / user" }
-                        th.num title="Users who reached its success event" { "Completion" }
-                        th.num title="Median time from the first use to the success event (p90 below)" { "Task time" }
+                        (th_num("% users"))
+                        (th_num("Uses / user"))
+                        (th_num("Days / user"))
+                        (th_num("Completion"))
+                        (th_num("Task time"))
                     } }
                     tbody { @for x in b.features.iter().filter(|x| x.users > 0) {
                         @let adoption = (x.users as f64 / mau).min(1.0);
                         tr {
-                            th scope="row" { (x.name.as_deref().unwrap_or(&x.key)) }
+                            th scope="row" { (feature_link(pid, &x.key, x.name.as_deref().unwrap_or(&x.key), x.declared, f)) }
                             td.meter { (meter(adoption)) }
                             td.num { strong { (pct(adoption)) } br; span.muted.small { (compact(x.users)) " users" } }
                             td.num { (format!("{:.1}", ratio(x.uses, x.users))) }
@@ -431,7 +431,7 @@ pub(crate) fn retention_grid(pid: &str, f: &Filters, b: &Board) -> Markup {
             table.plain.matrix {
                 thead { tr {
                     th { "First seen (week of)" }
-                    th.num { "Users" }
+                    (th_num("Users"))
                     @for k in 1..=cols { th.num scope="col" { "Week " (k) } }
                 } }
                 tbody { @for r in &rows {
@@ -476,6 +476,7 @@ pub(crate) fn role_matrix(pid: &str, f: &Filters, b: &Board) -> Markup {
             .find(|(r, f, _)| r == role && f == feat)
             .map_or(0, |x| x.2)
     };
+    let flt = f;
     html! {
         section.card.wide {
             h2.violet { (icon("users")) (to(&detail_url(pid, "/features", f), "Who uses what")) }
@@ -483,7 +484,7 @@ pub(crate) fn role_matrix(pid: &str, f: &Filters, b: &Board) -> Markup {
                 thead { tr { th { "Feature" } @for (r, n) in &roles { th.num scope="col" { (r) br; span.muted.small { (compact(*n)) " users" } } } } }
                 tbody { @for f in &feats {
                     tr {
-                        th scope="row" { (f.name.as_deref().unwrap_or(&f.key)) }
+                        th scope="row" { (feature_link(pid, &f.key, f.name.as_deref().unwrap_or(&f.key), f.declared, flt)) }
                         @for (r, n) in &roles {
                             @let share = cell(r, &f.key) as f64 / (*n).max(1) as f64;
                             @let level = if share <= 0.0 { 0 } else { ((share * 5.0).ceil() as u8).clamp(1, 5) };

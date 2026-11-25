@@ -110,7 +110,7 @@ pub fn flag_edit(
                 section.card.wide {
                     h2.violet { (icon("funnel")) "Variants, last 30 days" }
                     div.table-scroll { table.plain {
-                        thead { tr { th { "Variant" } th.num { "Users" } th.num { "Reached value" } th { "vs baseline" } th.num { "Sessions with errors" } th { "vs baseline" } } }
+                        thead { tr { th { "Variant" } (th_num("Users")) (th_num("Reached value")) (th_def("vs baseline")) (th_num("Sessions with errors")) (th_def("vs baseline")) } }
                         tbody { @for r in readout {
                             tr {
                                 th scope="row" { code { (r.variant) } @if r.baseline { " " span.chip { "baseline" } } @if r.users < 30 { " " span.chip { "low sample" } } }
@@ -270,7 +270,7 @@ pub fn errors(
             } @else {
                 section.card.wide {
                     table.plain {
-                        thead { tr { th { "Error" } th.num { "Users" } th.num { "Sessions" } th.num { "Times" } th { "Roles" } th { "Releases" } th { "Where" } th { "Last seen" } th { span.sr-only { "Replay" } } } }
+                        thead { tr { th { "Error" } (th_num("Users")) (th_num("Sessions")) (th_num("Times")) th { "Roles" } th { "Releases" } th { "Where" } th { "Last seen" } th { span.sr-only { "Replay" } } } }
                         tbody { @for (i, g) in groups.iter().enumerate() {
                             tr {
                                 th scope="row" {
@@ -332,7 +332,7 @@ pub fn replays(
             } @else {
                 section.card.wide {
                     table.plain {
-                        thead { tr { th { "Started (" (tz_label(tz)) ")" } th { "User" } th.num { "Active time" } th.num { "Size" } th.num { "Comments" } th { span.sr-only { "Play" } } } }
+                        thead { tr { th { "Started (" (tz_label(tz)) ")" } th { "User" } (th_num("Active time")) th.num { "Size" } th.num { "Comments" } th { span.sr-only { "Play" } } } }
                         tbody { @for r in list {
                             @let started = tz.parse::<chrono_tz::Tz>().map_or_else(|_| r.started.format("%Y-%m-%d %H:%M").to_string(), |z| r.started.with_timezone(&z).format("%Y-%m-%d %H:%M").to_string());
                             @let secs = (r.updated - r.started).num_seconds().max(0) as f64;

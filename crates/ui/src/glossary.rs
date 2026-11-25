@@ -86,6 +86,223 @@ pub(crate) const KPI: &[(&str, &str)] = &[
     ),
 ];
 
+/// Metric column headers (#405, part 2): (header, definition). Every
+/// numeric header (`th.num`) goes through [`th_num`]; the test below fails
+/// on a literal one left plain, except the counts in [`NOT_METRIC`].
+pub(crate) const COLUMNS: &[(&str, &str)] = &[
+    (
+        "Users",
+        "Distinct people in this row, over the page's window. Robots and, unless ticked, the team are left out.",
+    ),
+    (
+        "Sessions",
+        "Visits in this row. A session ends after 30 minutes without an event.",
+    ),
+    (
+        "Tasks",
+        "Feature uses (events tied to a feature of the map) in this row.",
+    ),
+    ("Errors", "Captured errors in this row."),
+    (
+        "Events",
+        "Every event received for this row, page views and clicks included.",
+    ),
+    (
+        "Now",
+        "The KPI's current value, over the window the goal is measured on.",
+    ),
+    (
+        "Last before leaving",
+        "Sessions whose last interaction was this field: where people gave up.",
+    ),
+    (
+        "Came back to it",
+        "Sessions that left this field and returned to it later: a sign of hesitation.",
+    ),
+    (
+        "Time spent",
+        "Median time spent in this field, from focus to blur.",
+    ),
+    ("Features", "Features declared in this area of the map."),
+    (
+        "Uses (30 d)",
+        "Times the features were used in the last 30 days.",
+    ),
+    (
+        "Uses (7 d)",
+        "Times the feature was used in the last 7 days.",
+    ),
+    (
+        "Went on",
+        "Users of the first feature who used the second one afterwards.",
+    ),
+    (
+        "Skipped the first",
+        "Users of the second feature who never used the first one.",
+    ),
+    ("Share", "This row's part of the total."),
+    (
+        "Length",
+        "How long it lasted, from the first failed check to the first good one.",
+    ),
+    (
+        "Reached value",
+        "Share of these users who reached a success event (a value moment) in the window.",
+    ),
+    (
+        "Came back",
+        "Share of these users active again in a later week.",
+    ),
+    (
+        "Churned",
+        "Users with no event for longer than the churn window, ÷ users in this row.",
+    ),
+    (
+        "Stayed",
+        "Users still active after this day, ÷ users in this row.",
+    ),
+    (
+        "Tried it",
+        "Users who used this feature at least once in the window.",
+    ),
+    (
+        "Did not",
+        "Users active in the window who never used this feature.",
+    ),
+    (
+        "Still here at 30 days",
+        "Share of this role's users still active 30 days after their first visit.",
+    ),
+    (
+        "Churned users",
+        "Churned users whose last session ended here.",
+    ),
+    (
+        "Users who stayed",
+        "Users still active who also went through this place.",
+    ),
+    ("Quiet for", "Time since this user's last event."),
+    (
+        "Active days, last window",
+        "Distinct days with an event in the latest churn window.",
+    ),
+    (
+        "Window before",
+        "Distinct days with an event in the window before it: the drop is the risk.",
+    ),
+    ("Nudged", "Users who saw this flag's nudge (flag on)."),
+    (
+        "Active, last 7 days",
+        "Share of these users with an event in the last 7 days.",
+    ),
+    (
+        "Held out",
+        "Users kept without the nudge (flag off), to compare with.",
+    ),
+    ("This week", "The last 7 days."),
+    ("Last week", "The 7 days before."),
+    ("Change", "This week compared with last week, in percent."),
+    (
+        "Sessions with errors",
+        "Share of these sessions with at least one captured error.",
+    ),
+    (
+        "Times",
+        "Occurrences: how many times it happened in the window.",
+    ),
+    (
+        "Active time",
+        "Time with user input in the recording; idle stretches of over 2 minutes are left out. The full length is below.",
+    ),
+    (
+        "Users with / without",
+        "Users who had the flag on, and users who did not, in the last 30 days.",
+    ),
+    ("Avg session", "Mean session length."),
+    (
+        "Tasks / session",
+        "Feature uses per session: higher means more gets done in a visit.",
+    ),
+    ("Bounce", "Share of sessions with at most one interaction."),
+    (
+        "% users",
+        "Share of active users who used it (last 30 days).",
+    ),
+    ("Uses / user", "Average uses per user."),
+    (
+        "Days / user",
+        "Average distinct days each user came back to it.",
+    ),
+    (
+        "Completion",
+        "Users who reached its success event, ÷ its users.",
+    ),
+    (
+        "Task time",
+        "Median time from the first use to the success event (p90 below).",
+    ),
+    (
+        "Succeeded",
+        "Users who reached its declared success event, ÷ its users.",
+    ),
+    (
+        "Users with it on",
+        "Users of this feature who had the flag on while using it, last 30 days.",
+    ),
+    ("Uses", "Times the feature was used."),
+    (
+        "Confidence",
+        "Whether the difference can be trusted yet: a two-sided test at p < 0.05, with at least 30 sessions on each side.",
+    ),
+    (
+        "vs baseline",
+        "The difference with the baseline variant, and whether it is significant yet (p < 0.05, at least 30 users each).",
+    ),
+];
+
+/// Numeric headers that are plain facts, not metrics (no definition).
+#[cfg(test)]
+pub(crate) const NOT_METRIC: &[&str] = &["Size", "Files", "Took", "Comments", "Step"];
+
+thread_local! {
+    /// Distinct ids for the tooltips of one page (a header can repeat).
+    static SEQ: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// The definition of a column header, if there is one.
+pub(crate) fn column(label: &str) -> Option<&'static str> {
+    COLUMNS.iter().find(|(k, _)| *k == label).map(|(_, d)| *d)
+}
+
+fn col_info(label: &str) -> Markup {
+    let Some(def) = column(label) else {
+        return html! {};
+    };
+    let id = format!(
+        "col-{}",
+        SEQ.with(|c| {
+            c.set(c.get().wrapping_add(1));
+            c.get()
+        })
+    );
+    html! {
+        span.kpi-info tabindex="0" aria-describedby=(id) aria-label={ "What is " (label) "?" } {
+            "ⓘ"
+            span.kpi-def role="tooltip" id=(id) { (def) }
+        }
+    }
+}
+
+/// A numeric (metric) column header with its definition on an ⓘ.
+pub(crate) fn th_num(label: &str) -> Markup {
+    html! { th.num scope="col" { (label) " " (col_info(label)) } }
+}
+
+/// A text column header that holds a computed judgement (significance).
+pub(crate) fn th_def(label: &str) -> Markup {
+    html! { th scope="col" { (label) " " (col_info(label)) } }
+}
+
 /// The definition of a tile label, if there is one.
 pub(crate) fn definition(label: &str) -> Option<&'static str> {
     let key = label.split(" (").next().unwrap_or(label);
@@ -143,7 +360,7 @@ mod tests {
                     .split('"')
                     .skip(1)
                     .step_by(2)
-                    .filter(|l| !l.starts_with('/'))
+                    .filter(|l| !l.starts_with('/') && !l.starts_with('#'))
                     .take(3)
                     .collect();
                 if let Some(label) = lits.get(2) {
@@ -171,6 +388,61 @@ mod tests {
             }
         }
         assert!(seen >= 17, "found {seen} tiles");
+    }
+
+    /// No literal numeric header is left without a definition, and every
+    /// `th_num("…")` / `th_def("…")` label has one.
+    #[test]
+    fn every_metric_column_has_a_definition() {
+        let sources = [
+            include_str!("board.rs"),
+            include_str!("audience.rs"),
+            include_str!("settings.rs"),
+            include_str!("manage.rs"),
+            include_str!("goals.rs"),
+            include_str!("team.rs"),
+            include_str!("features.rs"),
+            include_str!("explore.rs"),
+            include_str!("feature_page.rs"),
+        ];
+        let mut seen = 0;
+        for src in sources {
+            for rest in src.split("th.num { \"").skip(1) {
+                let label = rest.split('"').next().unwrap();
+                assert!(
+                    super::NOT_METRIC.contains(&label),
+                    "numeric header {label:?}: use th_num, or list it in NOT_METRIC"
+                );
+            }
+            assert!(
+                !src.contains("th.num title="),
+                "a title= header: use th_num"
+            );
+            for f in ["th_num(\"", "th_def(\""] {
+                for rest in src.split(f).skip(1) {
+                    let label = rest.split('"').next().unwrap();
+                    seen += 1;
+                    assert!(
+                        super::column(label).is_some(),
+                        "header {label:?} has no definition"
+                    );
+                }
+            }
+        }
+        assert!(seen >= 70, "found {seen} metric headers");
+    }
+
+    #[test]
+    fn column_tooltips_have_distinct_ids() {
+        let a = super::th_num("Users").into_string();
+        let b = super::th_num("Users").into_string();
+        assert!(a.contains("aria-describedby=\"col-") && a.contains("role=\"tooltip\""));
+        assert_ne!(a, b, "a repeated header gets its own id");
+        assert!(
+            super::th_def("Confidence")
+                .into_string()
+                .contains("p &lt; 0.05")
+        );
     }
 
     #[test]

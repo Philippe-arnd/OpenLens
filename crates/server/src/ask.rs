@@ -368,12 +368,18 @@ async fn run_tool(
             match openlens_engine::feature_context(&state.query, &p.id, m, &f, &k).await {
                 Ok(Some(ctx)) => {
                     let mut v = serde_json::to_value(&ctx).unwrap_or_default();
+                    let key = ctx.definition.as_ref().map_or(k.clone(), |d| d.key.clone());
                     if let Some(o) = v.as_object_mut() {
                         o.remove("definition");
+                        // Session ids help the page, not the answer.
+                        o.remove("sessions");
                     }
                     (
                         v.to_string().chars().take(4000).collect(),
-                        Some((format!("Feature {k}"), format!("{base}/features"))),
+                        Some((
+                            format!("Feature {k}"),
+                            format!("{base}/features/{}", openlens_ui::url_enc(&key)),
+                        )),
                     )
                 }
                 Ok(None) => (format!("no feature `{k}`"), None),

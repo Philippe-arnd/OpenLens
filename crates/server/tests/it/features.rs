@@ -255,6 +255,9 @@ async fn map_health_finds_planted_defects_and_versions_keep_author_and_message()
     );
     let mut events = vec![
         serde_json::json!({"event": "$pageview", "distinct_id": "u1", "properties": {"$pathname": "/docs/1/edit"}}),
+        // One session that used `reading`, with flags, a release and an error (#411).
+        serde_json::json!({"event": "$click", "distinct_id": "u9", "session_id": "s-feat", "properties": {"$pathname": "/docs/3", "$feature": "reading", "$flags": "beta-x,new-nav", "$release": "1.2.0"}}),
+        serde_json::json!({"event": "$error", "distinct_id": "u9", "session_id": "s-feat", "properties": {"$pathname": "/docs/3", "$message": "Boom \"quoted\" here", "$release": "1.2.0"}}),
     ];
     for i in 0..5 {
         events.push(serde_json::json!({"event": "$pageview", "distinct_id": format!("p{i}"), "properties": {"$pathname": format!("/billing/{i}")}}));
@@ -326,6 +329,35 @@ async fn map_health_finds_planted_defects_and_versions_keep_author_and_message()
         "a former key finds the feature"
     );
     assert_eq!(ctx["required_by"][0], "edit");
+    // #411: per release, errors in its sessions, flags while used.
+    assert!(
+        ctx["releases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["release"] == "1.2.0"),
+        "{ctx}"
+    );
+    assert_eq!(ctx["errors"][0]["message"], "Boom \"quoted\" here", "{ctx}");
+    assert_eq!(ctx["errors"][0]["last_session"], "s-feat");
+    let flags: Vec<&str> = ctx["flags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|f| f["flag"].as_str())
+        .collect();
+    assert!(
+        flags.contains(&"beta-x") && flags.contains(&"new-nav"),
+        "{ctx}"
+    );
+    assert!(
+        ctx["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|x| x["session_id"] == "s-feat"),
+        "{ctx}"
+    );
     assert_eq!(ctx["area_peers"][0], "edit");
     assert_eq!(
         get(
@@ -362,6 +394,28 @@ async fn map_health_finds_planted_defects_and_versions_keep_author_and_message()
     )
     .await;
     assert!(hist.contains("aria-current=\"page\">History") && hist.contains("Map versions"));
+    // Every tab carries the filters and has its own view (#411).
+    assert!(
+        page.contains("/p/default/features/reading?tab=errors&amp;env="),
+        "{page}"
+    );
+    for (tab, needle) in [
+        ("errors", "Boom"),
+        ("replays", "Recorded sessions that used it"),
+        ("flags", "beta-x"),
+        ("releases", "1.2.0"),
+    ] {
+        let r = get(
+            &h,
+            &format!("/p/default/features/reading?tab={tab}"),
+            Some(&owner),
+            false,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::OK, "{tab}");
+        let body = body_text(r).await;
+        assert!(body.contains(needle), "{tab}: {body}");
+    }
     let old = get(&h, "/p/default/features/docs", Some(&owner), false).await;
     assert!(old.status().is_redirection());
     let gone = get(&h, "/p/default/features/nope", Some(&owner), false).await;

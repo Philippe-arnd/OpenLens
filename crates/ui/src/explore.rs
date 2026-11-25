@@ -145,7 +145,7 @@ pub fn breakdown(
                 @if rows.is_empty() { p.muted { "No data in this window." } }
                 @else {
                     div.table-scroll { table.plain {
-                        thead { tr { th { (label) } th.num { "Users" } th { span.sr-only { "Share" } } th.num { "Sessions" } th.num { "Tasks" } th.num { "Errors" } th.num { "Events" } } }
+                        thead { tr { th { (label) } (th_num("Users")) th { span.sr-only { "Share" } } (th_num("Sessions")) (th_num("Tasks")) (th_num("Errors")) (th_num("Events")) } }
                         tbody { @for r in rows {
                             tr {
                                 th scope="row" { @match &r.value { Some(v) => span.mono { (v) }, None => span.muted { "(none)" } } }

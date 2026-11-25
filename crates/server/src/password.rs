@@ -5,8 +5,12 @@
 //!   2 passes), a random 16-byte salt each, stored as a PHC string.
 //! - A wrong password, an unknown email, a disabled account or one with no
 //!   password all get the same answer after the same delay.
-//! - After [`MAX_FAILS`] failures for one email within [`WINDOW`], that email
-//!   is refused for the rest of the window, even with the right password.
+//! - Failures slow the next attempt down instead of locking the account
+//!   (no one can lock someone else out): after [`FREE_FAILS`] failures for one
+//!   email within [`WINDOW`], each attempt waits [`backoff`] first, and only
+//!   one attempt per email runs at a time. One client address gets at most
+//!   [`MAX_IP_FAILS`] failures per window, whatever the emails.
+//! - The counters live in memory: a restart clears them (one pod).
 //! - Changing a password signs out that user's other sessions: a session
 //!   issued before `password_at` is refused ([`crate::auth::viewer`]).
 //! - `OPENLENS_PASSWORD_LOGIN=off` turns it off (SSO-only installs).
@@ -18,8 +22,10 @@ use std::time::{Duration, Instant};
 use argon2::password_hash::{PasswordHash, SaltString};
 use argon2::{Argon2, PasswordHasher, PasswordVerifier};
 
-/// Failures allowed per email within [`WINDOW`].
-pub(crate) const MAX_FAILS: u32 = 5;
+/// Failures per email before attempts slow down.
+pub(crate) const FREE_FAILS: u32 = 3;
+/// Failures one client address may make within [`WINDOW`].
+pub(crate) const MAX_IP_FAILS: u32 = 30;
 /// The failure window.
 pub(crate) const WINDOW: Duration = Duration::from_secs(15 * 60);
 /// Shortest password accepted.
@@ -87,34 +93,129 @@ pub(crate) fn check_new(password: &str, again: &str) -> Result<(), &'static str>
     Ok(())
 }
 
-static FAILS: Mutex<Option<HashMap<String, (u32, Instant)>>> = Mutex::new(None);
-
-/// Is this email locked out after too many failures?
-pub(crate) fn locked(email: &str) -> bool {
-    let Ok(mut g) = FAILS.lock() else { return true };
-    let m = g.get_or_insert_with(HashMap::new);
-    m.retain(|_, (_, at)| at.elapsed() < WINDOW);
-    m.get(email).is_some_and(|(n, _)| *n >= MAX_FAILS)
+/// Failures per key (`e:<email>` or `ip:<address>`), and whether an
+/// attempt for it is running.
+#[derive(Clone, Copy)]
+struct Fails {
+    n: u32,
+    at: Instant,
+    busy: bool,
 }
 
-/// Count a failure for this email.
-pub(crate) fn failed(email: &str) {
-    if let Ok(mut g) = FAILS.lock() {
-        let m = g.get_or_insert_with(HashMap::new);
-        if m.len() > 10_000 {
-            m.retain(|_, (_, at)| at.elapsed() < WINDOW);
-        }
-        let e = m.entry(email.to_owned()).or_insert((0, Instant::now()));
-        e.0 += 1;
+static FAILS: Mutex<Option<HashMap<String, Fails>>> = Mutex::new(None);
+
+/// The wait before an attempt after `n` failures: none for the first
+/// [`FREE_FAILS`], then 1 s, 2 s, 4 s… up to 30 s.
+pub(crate) fn backoff(n: u32) -> Duration {
+    match n.checked_sub(FREE_FAILS) {
+        None => Duration::ZERO,
+        Some(k) => Duration::from_secs((1u64 << k.min(5)).min(30)),
     }
 }
 
-/// Forget the failures of this email (a good sign-in).
-pub(crate) fn succeeded(email: &str) {
-    if let Ok(mut g) = FAILS.lock()
-        && let Some(m) = g.as_mut()
-    {
-        m.remove(email);
+fn with<T>(f: impl FnOnce(&mut HashMap<String, Fails>) -> T) -> Option<T> {
+    let mut g = FAILS.lock().ok()?;
+    let m = g.get_or_insert_with(HashMap::new);
+    if m.len() > 10_000 {
+        m.retain(|_, v| v.busy || v.at.elapsed() < WINDOW);
+    }
+    Some(f(m))
+}
+
+fn count(m: &HashMap<String, Fails>, key: &str) -> u32 {
+    m.get(key)
+        .filter(|v| v.at.elapsed() < WINDOW)
+        .map_or(0, |v| v.n)
+}
+
+/// One sign-in attempt for an email, from a client address (`None`: direct
+/// local traffic, not limited per address). Hold it while checking the
+/// password, then call [`Attempt::done`].
+pub(crate) struct Attempt {
+    email: String,
+    ip: Option<String>,
+    /// How long to wait before checking the password.
+    pub(crate) wait: Duration,
+    finished: bool,
+}
+
+impl Attempt {
+    /// Start an attempt; `None` when it is refused at once: this address
+    /// failed too often, or another attempt for this email is running.
+    pub(crate) fn begin(email: &str, ip: Option<&str>) -> Option<Attempt> {
+        let e = format!("e:{email}");
+        with(|m| {
+            if let Some(ip) = ip
+                && count(m, &format!("ip:{ip}")) >= MAX_IP_FAILS
+            {
+                return None;
+            }
+            let n = count(m, &e);
+            let v = m.entry(e).or_insert(Fails {
+                n: 0,
+                at: Instant::now(),
+                busy: false,
+            });
+            if v.busy {
+                return None;
+            }
+            if v.at.elapsed() >= WINDOW {
+                v.n = 0;
+            }
+            v.busy = true;
+            Some(Attempt {
+                email: email.to_owned(),
+                ip: ip.map(str::to_owned),
+                wait: backoff(n),
+                finished: false,
+            })
+        })
+        .flatten()
+    }
+
+    /// The password was right (`true`: forget this email's failures) or
+    /// wrong (`false`: count one for the email and the address).
+    pub(crate) fn done(mut self, ok: bool) {
+        self.finished = true;
+        let (email, ip) = (format!("e:{}", self.email), self.ip.take());
+        with(|m| {
+            if ok {
+                m.remove(&email);
+                return;
+            }
+            let mut bump = |k: String| {
+                let v = m.entry(k).or_insert(Fails {
+                    n: 0,
+                    at: Instant::now(),
+                    busy: false,
+                });
+                if v.at.elapsed() >= WINDOW {
+                    v.n = 0;
+                }
+                v.n += 1;
+                v.at = Instant::now();
+                v.busy = false;
+            };
+            bump(email);
+            if let Some(ip) = ip {
+                bump(format!("ip:{ip}"));
+            }
+        });
+    }
+}
+
+impl Drop for Attempt {
+    /// An attempt dropped without [`Attempt::done`] (an error on the way)
+    /// frees its email.
+    fn drop(&mut self) {
+        if !self.finished {
+            let e = format!("e:{}", self.email);
+            with(|m| {
+                if let Some(v) = m.get_mut(&e) {
+                    v.busy = false;
+                }
+            });
+        }
     }
 }
 
@@ -144,14 +245,31 @@ mod tests {
     }
 
     #[test]
-    fn five_failures_lock_the_email_until_the_window_ends() {
-        let e = "lock-test@example.com";
-        for _ in 0..MAX_FAILS {
-            assert!(!locked(e));
-            failed(e);
+    fn failures_slow_down_one_email_never_lock_it() {
+        let e = "backoff-test@example.com";
+        for i in 0..FREE_FAILS + 2 {
+            let a = Attempt::begin(e, None).unwrap();
+            assert_eq!(a.wait, backoff(i));
+            assert!(Attempt::begin(e, None).is_none(), "one at a time");
+            a.done(false);
         }
-        assert!(locked(e));
-        succeeded(e);
-        assert!(!locked(e));
+        assert_eq!(backoff(FREE_FAILS), Duration::from_secs(1));
+        assert_eq!(backoff(FREE_FAILS + 1), Duration::from_secs(2));
+        assert_eq!(backoff(FREE_FAILS + 20), Duration::from_secs(30));
+        // Still allowed (slowly), and a good sign-in forgets the failures.
+        Attempt::begin(e, None).unwrap().done(true);
+        assert_eq!(Attempt::begin(e, None).unwrap().wait, Duration::ZERO);
+    }
+
+    #[test]
+    fn one_address_has_a_failure_budget_across_emails() {
+        let ip = Some("203.0.113.77");
+        for i in 0..MAX_IP_FAILS {
+            Attempt::begin(&format!("ip-test-{i}@example.com"), ip)
+                .unwrap()
+                .done(false);
+        }
+        assert!(Attempt::begin("ip-test-last@example.com", ip).is_none());
+        assert!(Attempt::begin("ip-test-last@example.com", Some("203.0.113.78")).is_some());
     }
 }
