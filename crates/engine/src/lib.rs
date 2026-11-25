@@ -165,7 +165,9 @@ impl Filters {
             w.push_str(" AND release = $release");
         }
         if !self.internal {
-            w.push_str(" AND distinct_id NOT IN (SELECT person FROM persons WHERE internal)");
+            // A lookup, not `NOT IN (SELECT … FROM persons)`: that anti join
+            // was built on the events and returned them as one batch (#444).
+            w.push_str(" AND NOT is_internal(distinct_id)");
         }
         Ok(w)
     }
@@ -389,14 +391,72 @@ fn rating(name: &str, v: f64) -> &'static str {
 pub fn source(map: Option<&FeatureMap>) -> String {
     match map {
         None => "events".into(),
-        Some(m) => format!(
-            "(SELECT uuid, event, distinct_id, session_id, timestamp, received_at, url, path, \
-             account, plan, environment, release, flags, properties, date, \
-             {} AS role, {} AS feature FROM events) AS events",
-            m.role_sql(),
-            m.feature_sql()
-        ),
+        Some(m) => {
+            let (role, feature) = lookups(m);
+            format!(
+                "(SELECT uuid, event, distinct_id, session_id, timestamp, received_at, url, path, \
+                 account, plan, environment, release, flags, properties, date, \
+                 {role} AS role, {feature} AS feature FROM events) AS events"
+            )
+        }
     }
+}
+
+/// The role and feature expressions of `map` (#446): calls to functions
+/// that apply its rules in Rust, defined once per set of rules, or the
+/// reference `CASE` expressions when the rules cannot be applied in Rust
+/// with the same result.
+fn lookups(m: &FeatureMap) -> (String, String) {
+    use std::hash::{Hash, Hasher};
+    let (role_sql, feature_sql) = (m.role_sql(), m.feature_sql());
+    // The SQL is the rules, written out: same SQL, same functions.
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (&role_sql, &feature_sql).hash(&mut h);
+    let id = h.finish();
+    let (role_fn, feature_fn) = (
+        format!("role_of_{id:016x}"),
+        format!("feature_of_{id:016x}"),
+    );
+    let defined = openlens_query::functions::is_defined(&role_fn)
+        && openlens_query::functions::is_defined(&feature_fn);
+    if !defined {
+        let Some(r) = openlens_featuremap::Resolver::new(m) else {
+            return (role_sql, feature_sql);
+        };
+        let r = std::sync::Arc::new(r);
+        let rr = r.clone();
+        openlens_query::functions::define(
+            &role_fn,
+            1,
+            std::sync::Arc::new(move |a: &[Option<&str>], out: &mut String| {
+                match rr.role(a.first().copied().flatten()) {
+                    Some(v) => {
+                        out.push_str(&v);
+                        true
+                    }
+                    None => false,
+                }
+            }),
+        );
+        openlens_query::functions::define(
+            &feature_fn,
+            3,
+            std::sync::Arc::new(move |a: &[Option<&str>], out: &mut String| {
+                let arg = |i: usize| a.get(i).copied().flatten();
+                match r.feature(arg(0), arg(1), arg(2)) {
+                    Some(v) => {
+                        out.push_str(v);
+                        true
+                    }
+                    None => false,
+                }
+            }),
+        );
+    }
+    (
+        format!("{role_fn}(role)"),
+        format!("{feature_fn}(event, path, feature)"),
+    )
 }
 
 /// Only identified users (`persons`), unless the project never identified
@@ -671,6 +731,7 @@ async fn board_with(
                GROUP BY release, session_id) s \
          GROUP BY release ORDER BY min(first) DESC LIMIT 5"
     );
+
     // Neither depends on who did what: read the stored rows, without the
     // identity join.
     let env_sql = "SELECT DISTINCT environment FROM raw_events ORDER BY environment".to_owned();
