@@ -3,12 +3,18 @@ name: Screenshots
 # README and site images regenerated from the released UI (#246): after
 # each stable release (and on demand), demo data, a real browser, first
 # screen at 1440×900 ×2 plus a phone; optimised with oxipng. A PR with the
-# new images is opened (and merges itself when it can), so the README, the
-# Pages site (#241) and the next notes show what was released.
+# new images and their stamped references is opened, CI runs on it and it
+# merges; Pages is rebuilt last (#439), so the README and the site show
+# what was released.
 on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to wait for (the train passes it); empty: shoot main now"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -23,7 +29,22 @@ jobs:
   shots:
     if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.event.release.tag_name || '' }}
     steps:
+      - name: wait for the release
+        if: env.TAG != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The train starts this right after tagging; the release is made
+          # by release.yml a few minutes later. Shoot once it is out.
+          for _ in $(seq 1 60); do
+            d=$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isDraft -q .isDraft 2>/dev/null || true)
+            [ "$d" = false ] && exit 0
+            sleep 60
+          done
+          echo "::error::$TAG was not published within an hour"; exit 1
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
@@ -76,6 +97,8 @@ jobs:
             fi
           done
           echo "rows=$(wc -l < "$table")" >> "$GITHUB_OUTPUT"
+          # The references follow the kept images (?v=<hash>, #439).
+          python3 scripts/site/stamp.py
           { echo "### Screenshots that changed"; echo; echo "| Image | Changed |"; echo "|---|---|"; sed 's/$/ |/' "$table"; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -85,15 +108,17 @@ jobs:
       - name: open a PR with the new images
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name || 'main' }}
+          # A PR opened with the owner's token starts its checks (#431).
+          PR_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         run: |
           set -euo pipefail
+          TAG=${TAG:-main}
           if git diff --quiet -- docs/img; then echo "::notice::screenshots unchanged"; exit 0; fi
           git config user.name "openlens-release-train"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           branch="docs/screenshots-$TAG-$(date -u +%y%m%d%H%M)"
           git checkout -q -b "$branch"
-          git add docs/img
+          git add docs/img README.md site/index.html
           git commit -qm "Screenshots of $TAG"
           git push -q origin "$branch"
           repo="https://github.com/$GITHUB_REPOSITORY"
@@ -108,10 +133,22 @@ jobs:
           $row | [before]($repo/blob/$old/docs/img/$name?raw=1) → [after]($repo/blob/$new/docs/img/$name?raw=1) |"
           done < "$RUNNER_TEMP/diff.md"
           body=$(sed 's/^          //' <<< "$body")
-          if url=$(gh pr create --base main --head "$branch" --title "Screenshots of $TAG" --body "$body"); then
-            # A merge made with this token starts no workflow: rebuild Pages.
-            gh pr merge "$url" --merge --delete-branch && gh workflow run pages.yml \
-              || echo "::warning::$url waits for a merge"
-          else
-            echo "::warning::could not open the PR; the images are on $branch and in the artifact"
+          # As the release train does: start CI on the branch, wait, merge.
+          if ! url=$(GH_TOKEN="$PR_TOKEN" gh pr create --base main --head "$branch" --title "Screenshots of $TAG" --body "$body"); then
+            echo "::error::could not open the PR; the images are on $branch and in the artifact"; exit 1
           fi
+          gh workflow run ci.yml --ref "$branch"
+          sleep 20
+          run=$(gh run list --workflow ci.yml --branch "$branch" --event workflow_dispatch --limit 1 --json databaseId -q '.[0].databaseId')
+          if [ -z "$run" ] || ! gh run watch "$run" --exit-status --interval 60 > /dev/null; then
+            echo "::error::CI did not pass on $url; it waits for a merge"; exit 1
+          fi
+          GH_TOKEN="$PR_TOKEN" gh pr merge "$url" --merge --delete-branch
+      # Last, whatever happened above: the site names the new version even
+      # when the images did not change (a merge made with the workflow token
+      # starts no workflow, so Pages is started here).
+      - name: rebuild the site
+        if: always() && env.TAG != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --ref main
