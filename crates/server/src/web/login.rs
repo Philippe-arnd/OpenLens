@@ -28,9 +28,11 @@ pub(super) struct PasswordForm {
 }
 
 /// `POST /login/password` (#428): one answer for every failure, after the
-/// same delay; a locked email is refused even with the right password.
+/// same delay. Repeated failures slow the next attempts down (per email and
+/// per client address, see [`crate::password::Attempt`]); nothing locks.
 pub(super) async fn login_password(
     State(state): State<AppState>,
+    peer: crate::capture::Peer,
     headers: HeaderMap,
     Form(f): Form<PasswordForm>,
 ) -> Response {
@@ -49,26 +51,35 @@ pub(super) async fn login_password(
     if !crate::password::enabled() || email.len() > 200 || f.password.len() > 200 {
         return fail(&state);
     }
-    let meta = state.meta.clone();
-    let (e2, pw) = (email.clone(), f.password.clone());
-    let user = tokio::task::spawn_blocking(move || {
-        if crate::password::locked(&e2) {
-            return None;
+    let ip = crate::capture::client_ip(&peer, &headers);
+    let attempt = crate::password::Attempt::begin(&email, ip.as_deref());
+    let user = match &attempt {
+        None => None,
+        Some(a) => {
+            tokio::time::sleep(a.wait).await;
+            let meta = state.meta.clone();
+            let (e2, pw) = (email.clone(), f.password.clone());
+            tokio::task::spawn_blocking(move || {
+                let u = meta.user_by_email(&e2).ok()??;
+                let (hash, _) = meta.password_of(&u.id).ok()??;
+                (!u.disabled && crate::password::verify(&hash, &pw)).then_some(u)
+            })
+            .await
+            .ok()
+            .flatten()
         }
-        let u = meta.user_by_email(&e2).ok()??;
-        let (hash, _) = meta.password_of(&u.id).ok()??;
-        (!u.disabled && crate::password::verify(&hash, &pw)).then_some(u)
-    })
-    .await
-    .ok()
-    .flatten();
+    };
     let Some(u) = user else {
-        crate::password::failed(&email);
+        if let Some(a) = attempt {
+            a.done(false);
+        }
         crate::privacy::audit_as(&state, "anonymous", None, "auth.password_failed", &email);
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         return fail(&state);
     };
-    crate::password::succeeded(&email);
+    if let Some(a) = attempt {
+        a.done(true);
+    }
     let _ = state.meta.touch_sign_in(&u.id);
     crate::privacy::audit_as(&state, &u.id, None, "auth.password_ok", "");
     let c = auth::set_cookie(

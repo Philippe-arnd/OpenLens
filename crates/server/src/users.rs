@@ -282,6 +282,28 @@ pub(crate) async fn action(
                 _ => oops("Try again."),
             }
         }
+        "reset-password" => {
+            // #428: no password is ever shown or sent; the old one stops
+            // working, their sessions end, and a one-time link (24 h) lets
+            // them in to set a new one on My profile.
+            if u.disabled {
+                return oops("Enable sign-in first.");
+            }
+            let pid = id.clone();
+            match tokio::task::spawn_blocking(move || {
+                meta.clear_password(&pid, chrono::Utc::now().timestamp())?;
+                meta.create_login_link_for(Some(&pid), 24 * 3600)
+            })
+            .await
+            {
+                Ok(Ok(t)) => {
+                    let link = format!("{}/l/{t}", crate::public_url(&headers));
+                    crate::privacy::audit(&state, &headers, None, "user.password_reset", &u.email);
+                    render(&state, Some((u.email, link)), "", None).await
+                }
+                _ => oops("Try again."),
+            }
+        }
         "revoke" | "disable" | "enable" | "delete" => {
             if action == "delete" && f.confirm.trim().to_lowercase() != u.email {
                 return oops("Type the user's email exactly to remove them.");
@@ -394,6 +416,7 @@ pub(crate) struct PasswordForm {
 pub(crate) async fn me_password(
     crate::access::Signed(v): crate::access::Signed,
     State(state): State<AppState>,
+    peer: crate::capture::Peer,
     headers: HeaderMap,
     Form(f): Form<PasswordForm>,
 ) -> Response {
@@ -411,33 +434,73 @@ pub(crate) async fn me_password(
     }
     let meta = state.meta.clone();
     let owner = v.id == auth::OWNER;
+    // Guessing the current password from a stolen session is slowed down
+    // like the sign-in page, and audited (#428).
+    let mine = user.as_ref().map(|u| u.email.clone()).unwrap_or_default();
+    let attempt = if owner {
+        None
+    } else {
+        let ip = crate::capture::client_ip(&peer, &headers);
+        match crate::password::Attempt::begin(&mine, ip.as_deref()) {
+            Some(a) => Some(a),
+            None => return err("Too many attempts; wait a moment and try again."),
+        }
+    };
+    if let Some(a) = &attempt {
+        tokio::time::sleep(a.wait).await;
+    }
     let (id, email, current, pw) = (
         v.id.clone(),
-        f.email.clone(),
+        f.email.trim().to_lowercase(),
         f.current.clone(),
         f.password.clone(),
     );
-    let res = tokio::task::spawn_blocking(move || -> Result<String, String> {
+    let res = tokio::task::spawn_blocking(move || -> Result<String, (bool, String)> {
+        let other = |e: String| (false, e);
         let target = if owner {
-            // The token holder becomes a real admin account.
+            // The token holder becomes a real admin account, never by
+            // taking over an existing member's.
+            if meta
+                .user_by_email(&email)
+                .map_err(|e| other(e.to_string()))?
+                .is_some()
+            {
+                return Err(other(
+                    "That email already belongs to a team member: sign in as them, or use another email.".into(),
+                ));
+            }
             meta.upsert_user(&email, "admin", None)
-                .map_err(|e| e.to_string())?
+                .map_err(|e| other(e.to_string()))?
                 .id
         } else {
-            if let Some((hash, _)) = meta.password_of(&id).map_err(|e| e.to_string())?
+            if let Some((hash, _)) = meta.password_of(&id).map_err(|e| other(e.to_string()))?
                 && !crate::password::verify(&hash, &current)
             {
-                return Err("The current password is not right.".into());
+                return Err((true, "The current password is not right.".into()));
             }
             id
         };
-        let h = crate::password::hash(&pw)?;
+        let h = crate::password::hash(&pw).map_err(other)?;
         meta.set_password_hash(&target, &h, chrono::Utc::now().timestamp())
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| other(e.to_string()))?;
         Ok(target)
     })
     .await
-    .unwrap_or_else(|e| Err(e.to_string()));
+    .unwrap_or_else(|e| Err((false, e.to_string())));
+    if let Some(a) = attempt {
+        let wrong = matches!(&res, Err((true, _)));
+        if wrong {
+            crate::privacy::audit_as(
+                &state,
+                &v.id,
+                None,
+                "auth.password_failed",
+                "current password on My profile",
+            );
+        }
+        a.done(!wrong);
+    }
+    let res = res.map_err(|(_, m)| m);
     match res {
         Ok(target) => {
             crate::privacy::audit_as(

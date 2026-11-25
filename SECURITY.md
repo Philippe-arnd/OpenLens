@@ -19,7 +19,7 @@ You are credited in the advisory unless you ask not to be.
 
 ## Passwords
 
-Dashboard passwords (#428) are stored only as Argon2id hashes (a random salt each) in `meta.db`, and never logged. After 5 failed tries in 15 minutes an email is refused for the rest of that window, and every failure gets the same answer, whether the account exists or not. Changing a password signs out that user's other sessions. The admin token stays the recovery path.
+Dashboard passwords (#428) are stored only as Argon2id hashes (a random salt each) in `meta.db`, and never logged. Failures never lock an account (no one can lock someone else out): after 3 failed tries in 15 minutes, each new try for that email waits 1 s, then 2 s, 4 s… up to 30 s, one try at a time; one client address gets at most 30 failures per 15 minutes, whatever the emails. Wrong *current* passwords on *My profile* count the same way. Every failure gets the same answer, whether the account exists or not, and goes to the audit log. These counters live in memory, so a restart clears them. Changing a password signs out that user's other sessions. An admin can reset a member's password from *Team*: the old password stops working, their sessions end, and the admin gets a one-time link (24 h) for them to set a new one; no password is ever shown or sent. The admin token stays the recovery path.
 
 ## Knowing you are affected
 

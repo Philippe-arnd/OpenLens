@@ -51,6 +51,32 @@ impl Meta {
         })
     }
 
+    /// Drop a user's password (#428, an admin's reset): they sign in with a
+    /// one-time link and set a new one; sessions issued before `at` end.
+    pub fn clear_password(&self, id: &str, at: i64) -> Result<bool> {
+        self.with(|c| {
+            Ok(c.execute(
+                "UPDATE users SET password_hash = NULL, password_at = ?2 WHERE id = ?1",
+                params![id, at],
+            )? == 1)
+        })
+    }
+
+    /// When the user's password last changed or was reset (sessions issued
+    /// before that are refused), with or without a password now.
+    pub fn password_changed_at(&self, id: &str) -> Result<Option<i64>> {
+        self.with(|c| {
+            Ok(c
+                .query_row(
+                    "SELECT password_at FROM users WHERE id = ?1",
+                    [id],
+                    |r| r.get::<_, Option<i64>>(0),
+                )
+                .optional()?
+                .flatten())
+        })
+    }
+
     /// A user's password hash and when it was set, if they have one.
     pub fn password_of(&self, id: &str) -> Result<Option<(String, i64)>> {
         self.with(|c| {
