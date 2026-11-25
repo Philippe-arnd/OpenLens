@@ -315,7 +315,11 @@ async fn an_admin_resets_a_password_with_a_one_time_link() {
         .meta
         .upsert_user("vic@example.com", "viewer", None)
         .unwrap();
-    let t = h.state.meta.create_login_link_for(Some(&vic.id), 3600).unwrap();
+    let t = h
+        .state
+        .meta
+        .create_login_link_for(Some(&vic.id), 3600)
+        .unwrap();
     let (_, link_session) = post_cookie(&h, &format!("/l/{t}"), "", "").await;
     let link_session = link_session.expect("signed in by the link");
     let (s, _) = post_cookie(
@@ -348,7 +352,8 @@ async fn an_admin_resets_a_password_with_a_one_time_link() {
     assert_eq!(h.state.meta.user(&vic.id).unwrap().unwrap().role, "viewer");
     // The admin resets it: a one-time link, the old password and sessions out.
     tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
-    let (s, page) = post_form_body(&h, &format!("/users/{}/reset-password", vic.id), &token, "").await;
+    let (s, page) =
+        post_form_body(&h, &format!("/users/{}/reset-password", vic.id), &token, "").await;
     assert_eq!(s, StatusCode::OK, "{page}");
     let link = page
         .split("/l/")
@@ -392,7 +397,11 @@ async fn wrong_current_passwords_are_slowed_down_and_audited() {
         .meta
         .upsert_user("cur@example.com", "viewer", None)
         .unwrap();
-    let t = h.state.meta.create_login_link_for(Some(&u.id), 3600).unwrap();
+    let t = h
+        .state
+        .meta
+        .create_login_link_for(Some(&u.id), 3600)
+        .unwrap();
     let (_, s0) = post_cookie(&h, &format!("/l/{t}"), "", "").await;
     let s0 = s0.unwrap();
     let (s, _) = post_cookie(
@@ -422,7 +431,10 @@ async fn wrong_current_passwords_are_slowed_down_and_audited() {
         .await;
         assert_eq!(s, StatusCode::BAD_REQUEST);
     }
-    assert!(start.elapsed() >= std::time::Duration::from_secs(1), "the 4th try waited");
+    assert!(
+        start.elapsed() >= std::time::Duration::from_secs(1),
+        "the 4th try waited"
+    );
     let audit = h.state.meta.audit_log(50).unwrap();
     let n = audit
         .iter()

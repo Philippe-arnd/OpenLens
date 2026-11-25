@@ -122,7 +122,7 @@ pub(crate) fn map_health(pid: &str, h: &openlens_engine::MapHealth) -> Markup {
             section.card {
                 h2.violet { (icon("layers")) "Areas" }
                 div.table-scroll { table.plain {
-                    thead { tr { th { "Area" } th.num { "Features" } th.num { "Uses (30 d)" } th.num { "Users" } } }
+                    thead { tr { th { "Area" } (th_num("Features")) (th_num("Uses (30 d)")) (th_num("Users")) } }
                     tbody { @for a in &h.areas {
                         tr { th scope="row" { (a.area) } td.num { (a.features) } td.num { (compact(a.uses)) } td.num { (compact(a.users)) } }
                     } }
@@ -133,7 +133,7 @@ pub(crate) fn map_health(pid: &str, h: &openlens_engine::MapHealth) -> Markup {
             section.card {
                 h2.sky { (icon("funnel")) "Adoption ladder" }
                 div.table-scroll { table.plain {
-                    thead { tr { th { "From" } th { "Then" } th.num { "Users" } th.num { "Went on" } th.num { "Skipped the first" } } }
+                    thead { tr { th { "From" } th { "Then" } (th_num("Users")) (th_num("Went on")) (th_num("Skipped the first")) } }
                     tbody { @for r in &h.ladder {
                         tr {
                             th scope="row" { code { (r.from) } }
@@ -219,7 +219,7 @@ pub fn feature_map(v: &MapView<'_>) -> Markup {
                 section.card.wide {
                     h2.violet { (icon("layers")) (m.features.len()) " features · " (m.roles.len()) " roles · churn after " (m.churn_days()) " days" }
                     div.table-scroll { table.plain {
-                        thead { tr { th { "Feature" } th { "Entry" } th { "Success" } th.num { "Uses (7 d)" } th.num { "Users" } th { "Status" } } }
+                        thead { tr { th { "Feature" } th { "Entry" } th { "Success" } (th_num("Uses (7 d)")) (th_num("Users")) th { "Status" } } }
                         tbody { @for f in &m.features {
                             @let u = uses(&f.key);
                             @let h = f.success.as_deref().map(hits);

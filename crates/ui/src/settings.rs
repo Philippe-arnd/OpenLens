@@ -195,6 +195,7 @@ pub fn tickets(
                 p.muted { "From a finding to a ticket, a release, and the measured effect: OpenLens follows each issue to the release that ships it, measures its metric 14 days later and comments on the issue." }
             } }
             @if !measured.is_empty() {
+                // no_detail (#409): the measured tickets are listed below.
                 section.tiles aria-label="Learning" {
                     (tile("mint", "star", "Changes that moved their metric", &format!("{improved} of {}", measured.len()), "measured 14 days after their release"))
                 }

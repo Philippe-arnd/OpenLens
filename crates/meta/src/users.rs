@@ -66,14 +66,13 @@ impl Meta {
     /// before that are refused), with or without a password now.
     pub fn password_changed_at(&self, id: &str) -> Result<Option<i64>> {
         self.with(|c| {
-            Ok(c
-                .query_row(
-                    "SELECT password_at FROM users WHERE id = ?1",
-                    [id],
-                    |r| r.get::<_, Option<i64>>(0),
-                )
+            Ok(
+                c.query_row("SELECT password_at FROM users WHERE id = ?1", [id], |r| {
+                    r.get::<_, Option<i64>>(0)
+                })
                 .optional()?
-                .flatten())
+                .flatten(),
+            )
         })
     }
 

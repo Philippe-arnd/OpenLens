@@ -114,6 +114,31 @@ pub(crate) fn detail_url(project: &str, path: &str, f: &Filters) -> String {
     format!("/p/{project}{path}{sep}{}", q.join("&"))
 }
 
+/// A row's own link inside a linked card (#409): its page, filters kept;
+/// plain text on a share link. Inner links sit above the card's stretched
+/// link (CSS), so both work.
+pub(crate) fn row_link(href: &str, label: &str) -> Markup {
+    html! { @if crate::shared() { (label) } @else { a href=(href) { (label) } } }
+}
+
+/// A feature name that opens its page (#411), when it is in the map.
+pub(crate) fn feature_link(
+    project: &str,
+    key: &str,
+    name: &str,
+    declared: bool,
+    f: &Filters,
+) -> Markup {
+    if declared {
+        row_link(
+            &detail_url(project, &format!("/features/{}", url_enc(key)), f),
+            name,
+        )
+    } else {
+        html! { (name) }
+    }
+}
+
 /// A card title that opens its detail (#409): the link stretches over the
 /// whole card (CSS `.stretch::after`), one tab stop per card. Plain text
 /// on a share link, whose detail pages need a login.

@@ -71,7 +71,7 @@ pub fn audience(
                 @if !a.countries.is_empty() {
                     details.table-view {
                         summary { "As a table" }
-                        table.plain { thead { tr { th { "Country" } th.num { "Users" } th.num { "Share" } } }
+                        table.plain { thead { tr { th { "Country" } (th_num("Users")) (th_num("Share")) } }
                             tbody { @for (iso, n) in &a.countries { tr { th scope="row" { (name(iso)) " " span.muted.small { (iso) } } td.num { (compact(*n)) } td.num { (pct(*n as f64 / users)) } } } } }
                     }
                 }
@@ -212,7 +212,7 @@ pub fn flows(
                     details.table-view {
                         summary { "As a table" }
                         table.plain {
-                            thead { tr { th.num { "Step" } th { "From" } th { "To" } th.num { "Sessions" } } }
+                            thead { tr { th.num { "Step" } th { "From" } th { "To" } (th_num("Sessions")) } }
                             tbody { @for l in &flow.links {
                                 tr { td.num { (l.step + 1) } td { (label(&l.from)) } td { @if l.to == EXIT { span.status.bad { "exit" } } @else { (label(&l.to)) } } td.num { (compact(l.sessions)) } }
                             } }
@@ -247,9 +247,10 @@ pub fn live(p: &ProjectInfo<'_>, f: &Filters, l: &openlens_engine::Live) -> Mark
                 p.muted { "Last 30 minutes in " strong { (f.environment) } ". Refreshes every 10 seconds; events show up within the flush delay (a few seconds)." }
             } }
             section.tiles aria-label="Right now" {
-                (tile("violet", "users", "Active now", &compact(l.users_5m), "users, last 5 minutes"))
-                (tile("sky", "clock", "Last 30 minutes", &compact(l.users_30m), "users"))
-                (tile("coral", "alert", "Errors", &compact(l.errors_30m), "last 30 minutes"))
+                // Each opens its detail with the filters kept (#409).
+                (tile_to(&detail_url(p.id, "/events", f), "violet", "users", "Active now", &compact(l.users_5m), "users, last 5 minutes"))
+                (tile_to(&detail_url(p.id, "/events", f), "sky", "clock", "Last 30 minutes", &compact(l.users_30m), "users"))
+                (tile_to(&detail_url(p.id, "/errors", f), "coral", "alert", "Errors", &compact(l.errors_30m), "last 30 minutes"))
             }
             div.grid {
                 (list("Releases", "release", &l.releases))
@@ -321,6 +322,7 @@ pub fn uptime(p: &ProjectInfo<'_>, v: &UptimeView<'_>) -> Markup {
             @if v.url.is_none() {
                 section.card.wide { p { "Set the app address in " a href={ "/p/" (p.id) "/settings#alerts" } { "Settings" } " and OpenLens checks it every minute. Without it, only the traffic tells (after four weeks of history)." } }
             } @else {
+                // no_detail (#409): this page is the uptime detail already.
                 section.tiles aria-label="Availability" {
                     (tile("mint", "task", "Last 24 hours", &v.avail.0.map_or_else(|| "—".into(), |a| format!("{:.2}%", a * 100.0)), "available"))
                     (tile("sky", "clock", "Last 7 days", &v.avail.1.map_or_else(|| "—".into(), |a| format!("{:.2}%", a * 100.0)), "available"))
@@ -333,7 +335,7 @@ pub fn uptime(p: &ProjectInfo<'_>, v: &UptimeView<'_>) -> Markup {
                 @if v.incidents.is_empty() { p.muted { "None." } }
                 @else {
                     div.table-scroll { table.plain {
-                        thead { tr { th { "What" } th { "Started" } th { "Ended" } th.num { "Length" } th { "Cause" } } }
+                        thead { tr { th { "What" } th { "Started" } th { "Ended" } (th_num("Length")) th { "Cause" } } }
                         tbody { @for (rule, start, end, mins, cause) in &v.incidents {
                             tr {
                                 td { span class={ "status " (if end.is_none() { "bad" } else { "muted" }) } { (match rule.as_str() {
@@ -404,7 +406,7 @@ pub fn acquisition(
                 @if rows.is_empty() { p.muted { "No landing with a channel yet. The SDK sends the referrer and the campaign parameters on the first page view of a visit (SDK builds from 2026-11-23 on)." } }
                 @else {
                     div.table-scroll { table.plain {
-                        thead { tr { th { (dims.iter().find(|d| d.0 == by).map_or("Channel", |d| d.1)) } th.num { "Users" } th.num { "Reached value" } th { span.sr-only { "Share" } } th.num { "Came back" } th.num { "Churned" } } }
+                        thead { tr { th { (dims.iter().find(|d| d.0 == by).map_or("Channel", |d| d.1)) } (th_num("Users")) (th_num("Reached value")) th { span.sr-only { "Share" } } (th_num("Came back")) (th_num("Churned")) } }
                         tbody { @for r in rows {
                             tr {
                                 th scope="row" { span.mono { (r.value) } @if r.users < 20 { " " span.chip title="Under 20 users: the rates move a lot" { "low sample" } } }
@@ -478,10 +480,12 @@ pub fn churn(
                 }
             }
             (filter_bar(p.id, b, f, "/churn"))
+            // The churn page is the detail (#409): only "At risk now" opens
+            // its list below; the others stay plain on purpose (no_detail).
             section.tiles aria-label="How many" {
                 (tile("coral", "ban", "Churn rate", &pct(rate), &format!("{} of {} users active {} days ago left", compact(c.churned_recent), compact(c.active_at_start), c.window)))
                 (tile("mint", "users", "Net change", &format!("{}{}", if net >= 0 { "+" } else { "" }, compact(net)), &format!("{} new + {} back − {} gone", compact(c.new_recent), compact(c.resurrected), compact(c.churned_recent))))
-                (tile("sun", "alert", "At risk now", &compact(c.at_risk.len() as i64), "quiet for over half the window, less active than before"))
+                (tile_to("#at-risk", "sun", "alert", "At risk now", &compact(c.at_risk.len() as i64), "quiet for over half the window, less active than before"))
                 (tile("violet", "clock", "Median lifetime", &c.median_days.map_or_else(|| "over 90 days".into(), |d| format!("{d} days")), "half the users are gone by then"))
             }
             div.grid {
@@ -512,7 +516,7 @@ pub fn churn(
                     p { "On their last active day, " strong { (pct(c.errors_at_end.0)) } " of churned users hit an error, against " (pct(c.errors_at_end.1)) " of users who stayed." }
                     @if !c.friction.is_empty() {
                         div.table-scroll { table.plain {
-                            thead { tr { th { "On the last day" } th.num { "Churned" } th.num { "Stayed" } } }
+                            thead { tr { th { "On the last day" } (th_num("Churned")) (th_num("Stayed")) } }
                             tbody { @for (k, ch, st) in &c.friction {
                                 tr { th scope="row" { (k) } td.num { strong { (pct(*ch)) } } td.num { (pct(*st)) } }
                             } }
@@ -533,7 +537,7 @@ pub fn churn(
                 section.card.wide {
                     h2.mint { (icon("star")) "Features tried in the first 14 days" }
                     div.table-scroll { table.plain {
-                        thead { tr { th { "Feature" } th.num { "Tried it" } th.num { "Churned" } th.num { "Did not" } th.num { "Churned" } } }
+                        thead { tr { th { "Feature" } (th_num("Tried it")) (th_num("Churned")) (th_num("Did not")) (th_num("Churned")) } }
                         tbody { @for l in &c.lift {
                             tr {
                                 th scope="row" { code { (l.feature) } }
@@ -550,7 +554,7 @@ pub fn churn(
                     section.card {
                         h2.sky { (icon("release")) "By arrival release" }
                         table.plain {
-                            thead { tr { th { "Release" } th.num { "Users" } th.num { "Churned" } } }
+                            thead { tr { th { "Release" } (th_num("Users")) (th_num("Churned")) } }
                             tbody { @for (r, n, s) in &c.by_release { tr { th scope="row" { code { (r) } } td.num { (compact(*n)) } td.num { (pct(*s)) } } } }
                         }
                     }
@@ -559,7 +563,7 @@ pub fn churn(
                     section.card {
                         h2.violet { (icon("users")) "By role" }
                         table.plain {
-                            thead { tr { th { "Role" } th.num { "Users" } th.num { "Still here at 30 days" } } }
+                            thead { tr { th { "Role" } (th_num("Users")) (th_num("Still here at 30 days")) } }
                             tbody { @for (r, n, s) in &c.by_role { tr { th scope="row" { (r) } td.num { (compact(*n)) } td.num { (pct(*s)) } } } }
                         }
                     }
@@ -596,7 +600,7 @@ pub fn churn(
                 @if c.last_place.is_empty() { p.muted { "Nobody has churned in the window." } }
                 @else {
                     div.table-scroll { table.plain {
-                        thead { tr { th { "Feature or page" } th.num { "Churned users" } th.num { "Share" } th.num { "Users who stayed" } th { span.sr-only { "Actions" } } } }
+                        thead { tr { th { "Feature or page" } (th_num("Churned users")) (th_num("Share")) (th_num("Users who stayed")) th { span.sr-only { "Actions" } } } }
                         tbody { @for (place, n, share, base) in &c.last_place {
                             tr {
                                 th scope="row" { span.mono { (place) } }
@@ -610,12 +614,12 @@ pub fn churn(
                     p.muted.small { "Where churned users were last active, against where users who stayed were last seen. A place far above its usual share is where to look (and replay)." }
                 }
             }
-            section.card.wide {
+            section.card.wide #at-risk {
                 h2.sun { (icon("users")) "At risk now" }
                 @if c.at_risk.is_empty() { p.muted { "Nobody: active users keep their pace." } }
                 @else {
                     div.table-scroll { table.plain {
-                        thead { tr { th { "User" } th { "Role" } th { "Last active" } th.num { "Quiet for" } th.num { "Active days, last window" } th.num { "Window before" } } }
+                        thead { tr { th { "User" } th { "Role" } th { "Last active" } (th_num("Quiet for")) (th_num("Active days, last window")) (th_num("Window before")) } }
                         tbody { @for r in &c.at_risk {
                             tr {
                                 td.mono { a href={ "/p/" (p.id) "/people/" (url_enc(&r.distinct_id)) } { (r.distinct_id) } }
@@ -645,7 +649,7 @@ pub fn churn(
                 section.card.wide {
                     h2.violet { (icon("flag")) "Win-back flags" }
                     div.table-scroll { table.plain {
-                        thead { tr { th { "Flag" } th.num { "Nudged" } th.num { "Active, last 7 days" } th.num { "Held out" } th.num { "Active, last 7 days" } } }
+                        thead { tr { th { "Flag" } (th_num("Nudged")) (th_num("Active, last 7 days")) (th_num("Held out")) (th_num("Active, last 7 days")) } }
                         tbody { @for a in &x.audiences {
                             tr {
                                 th scope="row" { a href={ "/p/" (p.id) "/flags-edit?key=" (a.flag) } { code { (a.flag) } } @if !a.enabled { " " span.chip { "off" } } }
@@ -699,6 +703,7 @@ pub fn revenue(
             @match r {
                 None => section.card.wide { p { "No success event carries an amount yet. Send one with the event, for example " code { "openlens.track(\"order_paid\", { revenue: 49, currency: \"EUR\" })" } ", and declare it as a feature's success event." } },
                 Some(r) => {
+                    // no_detail (#409): the breakdowns below are the detail.
                     section.tiles aria-label="Totals" {
                         @for m in &r.totals {
                             (tile("mint", "star", &format!("Revenue ({})", m.currency), &money(m.total, &m.currency), &format!("{} orders · {} payers · {} per active user", compact(m.orders), compact(m.payers), money(m.per_active_user, &m.currency))))

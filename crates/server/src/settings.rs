@@ -87,6 +87,16 @@ pub(crate) async fn page(
         ),
     ];
     let map_version = state.meta.feature_map(&p.id).ok().flatten().map(|(v, _)| v);
+    // The latest releases, suggested on the share-link form (#403).
+    let releases: Vec<String> = openlens_engine::filter_options(
+        &state.query,
+        &p.id,
+        &crate::api::FilterQuery::default().filters(&p.timezone),
+        None,
+    )
+    .await
+    .map(|b| b.releases.into_iter().map(|r| r.release).collect())
+    .unwrap_or_default();
     let yesterday = {
         let now = chrono::Utc::now() - chrono::Duration::days(1);
         now.format("%Y-%m-%d").to_string()
@@ -123,6 +133,7 @@ pub(crate) async fn page(
                 notice,
                 yesterday: &yesterday,
                 shares: state.meta.share_links(&p.id).unwrap_or_default(),
+                releases: &releases,
                 setup: setup_steps(
                     &state,
                     &p.id,

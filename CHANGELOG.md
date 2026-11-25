@@ -4,6 +4,18 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **Feature page, part 2** (#411): Errors (errors in the sessions that used it, with the latest session's replay), Replays (recorded sessions that used it, succeeded or not), Flags (flags on while it was used, with their success rate) and Releases (use and success per release) tabs. Every tab and the prev/next links keep the board filters. Feature names on the board (*Feature pulse*, *Never used*, *Who uses what*) open their page, and Ask's `feature_context` links to it. The API's `feature_context` adds `releases`, `errors`, `sessions` and `flags`.
+- **Clickable rows and tiles beyond the board** (#409): each release row of the board opens the board on that release. *Live* tiles open Events and Errors, and *At risk now* on Churn jumps to its list. Tiles that are already on their detail page (uptime, churn, revenue, tickets) stay plain on purpose.
+- **Metric column definitions** (#405, part 2): every numeric column header has an ⓘ with what it counts (about 70 headers), and so do the *Confidence* and *vs baseline* columns of flags and experiments. A test fails on a numeric header left without one.
+- **Release suggestions on share links** (#403): the release field suggests the latest releases.
+- **Password reset by an admin** (#428): *Team → Reset the password* stops the old password, ends the user's sessions and gives a one-time link (24 h) to set a new one. No password is ever shown.
+
+### Changed
+
+- **Password sign-in slows down instead of locking** (#428): after 3 failures in 15 minutes, each try for that email waits 1 s, 2 s, 4 s… up to 30 s, one at a time, so nobody can lock someone else out. One client address gets at most 30 failures per 15 minutes. Wrong current passwords on *My profile* count the same and are audited. The token holder can no longer create their account on an existing member's email.
+
 ## [0.5.0] - 2026-11-24
 
 ### Added

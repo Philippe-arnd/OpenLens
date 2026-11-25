@@ -374,11 +374,32 @@ pub(crate) async fn feature_or_download(
         name: &p.name,
         key: &p.api_key,
     };
-    let tab = if q.tab.as_deref() == Some("history") {
-        "history"
+    let tab = q
+        .tab
+        .as_deref()
+        .and_then(|t| openlens_ui::TABS.iter().find(|x| **x == t))
+        .copied()
+        .unwrap_or("overview");
+    // The latest sessions that used it, kept when they have a recording.
+    let recorded: std::collections::HashSet<String> = if tab == "replays" {
+        let (root, pid) = (state.data_dir.clone(), p.id.clone());
+        tokio::task::spawn_blocking(move || openlens_replay::list(&root, &pid, None))
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|r| r.session_id)
+            .collect()
     } else {
-        "overview"
+        Default::default()
     };
+    let replays: Vec<&openlens_engine::maphealth::FeatureSession> = ctx
+        .sessions
+        .iter()
+        .filter(|x| recorded.contains(&x.session_id))
+        .take(20)
+        .collect();
     html_page(
         StatusCode::OK,
         openlens_ui::feature_page(&openlens_ui::FeaturePage {
@@ -386,6 +407,8 @@ pub(crate) async fn feature_or_download(
             feature,
             ctx: &ctx,
             tab,
+            filters: &f,
+            replays: &replays,
             versions: &versions,
             prev: near(at.checked_sub(1)),
             next: near(Some(at + 1)),
