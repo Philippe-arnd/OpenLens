@@ -220,6 +220,13 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 - **Sessions are signed with their own key**, `<data>/.session.key` (made on first start, mode 0600, not in backups), instead of the admin token. Upgrading signs everyone out once.
 - The sidebar's project switch lost its arrow (#214), and gained *Settings*.
 
+### Security
+
+- **Ask's SQL tool returned person-level data when person-level detail was off** (SEC-01, GHSA-p52g-xmcm-2wrj): Ask queries an aggregate-only view (D-021).
+- **The admin token was stored in plaintext** and reused as the session key (SEC-02, GHSA-v4mh-3vr2-7mxf): stored hashed, sessions have their own key.
+- **The ingestion rate limit applied only to proxied requests** (SEC-03, GHSA-f5h9-73gg-3vhv): clients are identified by their connection address; `X-Forwarded-For` is trusted only from private and loopback proxies (D-022).
+- Every version before 0.3.0 is affected.
+
 ### Fixed
 
 - **Review before v0.3.0:**
