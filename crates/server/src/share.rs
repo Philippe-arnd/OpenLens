@@ -136,7 +136,7 @@ pub(crate) async fn revoke(
     let _ = state.meta.revoke_share_link(&id, &lid);
     state.caches.share_pages.clear();
     crate::privacy::audit(&state, &headers, Some(&id), "share.revoke", &lid);
-    Redirect::to(&format!("/p/{id}/settings#share")).into_response()
+    Redirect::to(&format!("/p/{id}/settings/sharing")).into_response()
 }
 
 fn not_found() -> Response {

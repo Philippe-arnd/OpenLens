@@ -245,6 +245,37 @@ impl Meta {
         })
     }
 
+    /// The user's display choices (#438): the theme (`light`, `dark`, or
+    /// `None` to follow the system) and whether the sidebar is folded.
+    /// `None` for an unknown user.
+    pub fn user_display(&self, id: &str) -> Result<Option<(Option<String>, bool)>> {
+        self.with(|c| {
+            Ok(c.query_row(
+                "SELECT theme, nav_folded FROM users WHERE id = ?1",
+                [id],
+                |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)? != 0)),
+            )
+            .optional()?)
+        })
+    }
+
+    /// Save the user's display choices (#438). Any theme other than
+    /// `light` or `dark` follows the system.
+    pub fn set_user_display(
+        &self,
+        id: &str,
+        theme: Option<&str>,
+        nav_folded: bool,
+    ) -> Result<bool> {
+        let theme = theme.filter(|t| matches!(*t, "light" | "dark"));
+        self.with(|c| {
+            Ok(c.execute(
+                "UPDATE users SET theme = ?2, nav_folded = ?3 WHERE id = ?1",
+                params![id, theme, i64::from(nav_folded)],
+            )? == 1)
+        })
+    }
+
     /// Record a successful sign-in.
     pub fn touch_sign_in(&self, id: &str) -> Result<()> {
         self.with(|c| {

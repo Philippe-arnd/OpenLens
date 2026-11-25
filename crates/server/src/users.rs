@@ -359,6 +359,28 @@ pub(crate) async fn me_page(
     } else {
         load(&state, &v.id).await
     };
+    let notice = q.done.is_some().then_some("Saved.");
+    me_view(
+        &state,
+        &v,
+        user.as_ref(),
+        notice,
+        None,
+        openlens_ui::MeTab::Profile,
+    )
+}
+
+/// `GET /me/sign-in` (#438): the password.
+pub(crate) async fn sign_in_page(
+    crate::access::Signed(v): crate::access::Signed,
+    State(state): State<AppState>,
+    Query(q): Query<MeQuery>,
+) -> Response {
+    let user = if v.id == auth::OWNER {
+        None
+    } else {
+        load(&state, &v.id).await
+    };
     let notice = match q.done.as_deref() {
         Some("password") => Some("Password saved. Your other sessions are signed out."),
         Some("account") => Some(
@@ -367,7 +389,14 @@ pub(crate) async fn me_page(
         Some(_) => Some("Saved."),
         None => None,
     };
-    me_view(&state, &v, user.as_ref(), notice, None)
+    me_view(
+        &state,
+        &v,
+        user.as_ref(),
+        notice,
+        None,
+        openlens_ui::MeTab::SignIn,
+    )
 }
 
 fn me_view(
@@ -376,6 +405,7 @@ fn me_view(
     user: Option<&openlens_meta::User>,
     notice: Option<&str>,
     error: Option<&str>,
+    tab: openlens_ui::MeTab,
 ) -> Response {
     let has_password = user.is_some_and(|u| state.meta.password_of(&u.id).ok().flatten().is_some());
     html_page(
@@ -385,6 +415,7 @@ fn me_view(
             StatusCode::OK
         },
         openlens_ui::me(
+            tab,
             user.and_then(|u| u.name.as_deref()),
             user.map(|u| u.email.as_str()),
             v.tz.as_deref(),
@@ -395,6 +426,7 @@ fn me_view(
                 has_password,
                 error: error.is_some(),
             },
+            &openlens_ui::MeLook::default(),
         ),
     )
 }
@@ -425,7 +457,16 @@ pub(crate) async fn me_password(
     } else {
         load(&state, &v.id).await
     };
-    let err = |m: &str| me_view(&state, &v, user.as_ref(), None, Some(m));
+    let err = |m: &str| {
+        me_view(
+            &state,
+            &v,
+            user.as_ref(),
+            None,
+            Some(m),
+            openlens_ui::MeTab::SignIn,
+        )
+    };
     if !crate::password::enabled() {
         return err("Password sign-in is turned off (OPENLENS_PASSWORD_LOGIN=off).");
     }
@@ -516,9 +557,9 @@ pub(crate) async fn me_password(
                 auth::SESSION_SECS,
             );
             let to = if owner {
-                "/me?done=account"
+                "/me/sign-in?done=account"
             } else {
-                "/me?done=password"
+                "/me/sign-in?done=password"
             };
             let mut r = Redirect::to(to).into_response();
             if let Ok(h) = axum::http::HeaderValue::from_str(&c) {
