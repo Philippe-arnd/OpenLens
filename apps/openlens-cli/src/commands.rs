@@ -23,6 +23,37 @@ pub(super) enum TokensCmd {
 }
 
 #[derive(Subcommand)]
+pub(super) enum EnvCmd {
+    /// Hosts per environment (last 30 days), the host rules, and the
+    /// hosts no rule classifies yet (stored as `unknown`).
+    List {
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+    },
+    /// Say which environment a host is: `app.example.com production`,
+    /// `*.preview.example.com preview`, or `ignore` to drop its events.
+    /// Applies to the next events, with no change to the app.
+    Rule {
+        /// Exact host or `*.suffix`.
+        host: String,
+        /// Environment name, or `ignore`.
+        env: String,
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+    },
+    /// Remove the rule for a host.
+    Unrule {
+        /// The host of the rule.
+        host: String,
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+    },
+}
+
+#[derive(Subcommand)]
 pub(super) enum UsersCmd {
     /// Every user, with role, projects, time zone and last sign-in.
     List,
@@ -194,6 +225,12 @@ pub(super) enum Command {
     Tokens {
         #[command(subcommand)]
         action: TokensCmd,
+    },
+    /// The environments of a project and the host rules that classify
+    /// them (D-034).
+    Env {
+        #[command(subcommand)]
+        action: EnvCmd,
     },
     /// The team: list, update, disable, enable or remove users (invite
     /// with `login-link --email`).

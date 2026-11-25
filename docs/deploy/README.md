@@ -75,3 +75,14 @@ Guide: https://<your-domain>/agents.md — admin token: <token>.
 ```
 
 The agent creates the project, wires the SDK with roles, writes the feature map and sends you a login link.
+
+## Environments
+
+Every event carries an environment, and the board shows production by default.
+
+- **Detected:** the browser SDK reads the page's host. `localhost`, `*.local` and `*.test` are `development`. A host with `staging`, `stage` or `stg` is `staging`. `preview`, `review`, `pr-<n>`, `*.vercel.app` and `*.netlify.app` are `preview`.
+- **Unknown, not production:** a host that no pattern and no rule matches is stored as `unknown` and kept out of production numbers (D-034). `openlens-cli verify` lists these hosts.
+- **Say which one it is:** `openlens-cli env rule kanban-test.example.com staging`, or `*.preview.example.com preview`. `ignore` drops a host's events entirely, for example your developers' machines. The rule applies to the next events, with no change to the app. `openlens-cli env list` shows the hosts per environment, and agents use the MCP `environments` tool.
+- **Set in the app:** `init({ environment })`, or the server SDKs' option or `OPENLENS_ENVIRONMENT`, always wins over the rules.
+
+After an upgrade, every host that sent production events in the last 30 days gets a `production` rule, so nothing moves.

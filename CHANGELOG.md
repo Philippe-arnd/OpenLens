@@ -10,10 +10,12 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 - **Clickable rows and tiles beyond the board** (#409): each release row of the board opens the board on that release. *Live* tiles open Events and Errors, and *At risk now* on Churn jumps to its list. Tiles that are already on their detail page (uptime, churn, revenue, tickets) stay plain on purpose.
 - **Metric column definitions** (#405, part 2): every numeric column header has an ⓘ with what it counts (about 70 headers), and so do the *Confidence* and *vs baseline* columns of flags and experiments. A test fails on a numeric header left without one.
 - **Release suggestions on share links** (#403): the release field suggests the latest releases.
+- **Host rules for environments** (#410, part 1, D-034): say which environment a host is (`openlens-cli env rule <host> <env>`, `*.suffix` patterns, `ignore` to drop a host's events), applied on the server to the next events with no app change. `openlens-cli env list`, `GET /api/projects/{id}/environments` and the MCP `environments` tool show the hosts per environment and those not classified yet. `verify` reports them.
 - **Password reset by an admin** (#428): *Team → Reset the password* stops the old password, ends the user's sessions and gives a one-time link (24 h) to set a new one. No password is ever shown.
 
 ### Changed
 
+- **A host nothing classifies is `unknown`, not production** (#410, D-034): it is kept out of production numbers until a rule says what it is. On upgrade, every host that sent production events in the last 30 days keeps a `production` rule. An environment set in the app (`init({ environment })`) still wins.
 - **Password sign-in slows down instead of locking** (#428): after 3 failures in 15 minutes, each try for that email waits 1 s, 2 s, 4 s… up to 30 s, one at a time, so nobody can lock someone else out. One client address gets at most 30 failures per 15 minutes. Wrong current passwords on *My profile* count the same and are audited. The token holder can no longer create their account on an existing member's email.
 
 ## [0.5.0] - 2026-11-24

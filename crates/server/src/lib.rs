@@ -20,6 +20,7 @@ mod comments;
 mod cookieless;
 mod csrf;
 mod digest;
+mod environments;
 mod explore;
 mod features;
 mod flags;

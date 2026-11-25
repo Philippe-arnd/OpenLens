@@ -337,6 +337,9 @@ pub(crate) async fn capture(
         Metrics::add(&m.rate_limited, 1);
         return too_many();
     }
+    // Host rules of the project (#410, D-034): an ignored host's events go,
+    // an unclassified host is `unknown`, not production.
+    crate::environments::apply(&state, &project.id, &mut normalized.events);
     // Crawlers and monitors posting directly (the SDK already skips them in
     // browsers): kept, but in their own environment, out of every number.
     let ua = headers

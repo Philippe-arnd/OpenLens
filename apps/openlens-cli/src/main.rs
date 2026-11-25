@@ -485,6 +485,30 @@ fn run(cli: Cli) -> Result<bool, String> {
             out(&v);
             Ok(status == 200 || status == 201)
         }
+        Command::Env { action } => {
+            let c = client()?;
+            let (status, v) = match action {
+                EnvCmd::List { project } => c.call(
+                    "GET",
+                    &format!("/api/projects/{project}/environments"),
+                    None,
+                )?,
+                EnvCmd::Rule { host, env, project } => c.call(
+                    "PATCH",
+                    &format!("/api/projects/{project}"),
+                    Some(Body::Json(
+                        json!({ "environment_rule": { "host": host, "env": env } }),
+                    )),
+                )?,
+                EnvCmd::Unrule { host, project } => c.call(
+                    "PATCH",
+                    &format!("/api/projects/{project}"),
+                    Some(Body::Json(json!({ "remove_environment_rule": host }))),
+                )?,
+            };
+            out(&v);
+            Ok(status == 200)
+        }
         Command::Goals { project } => {
             let (status, v) =
                 client()?.call("GET", &format!("/api/projects/{project}/goals"), None)?;

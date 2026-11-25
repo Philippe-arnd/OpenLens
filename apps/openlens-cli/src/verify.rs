@@ -69,12 +69,25 @@ pub(crate) fn verify_report(c: &Client, project: &str) -> Result<Value, String> 
             features.push(json!({ "key": f.key, "events_last_day": counts.get(&f.key).copied().unwrap_or(0) }));
         }
     }
+    // Hosts stored as `unknown`: counted in no production number (D-034).
+    let (env_status, envs) = c.call(
+        "GET",
+        &format!("/api/projects/{project}/environments"),
+        None,
+    )?;
+    let unclassified = if env_status == 200 {
+        envs["unclassified"].clone()
+    } else {
+        json!([])
+    };
+    let classified = unclassified.as_array().is_none_or(Vec::is_empty);
     let checks = json!([
         { "check": "events arrive", "ok": events > 0, "detail": events, "fix": "add the SDK snippet and load a page" },
         { "check": "users are identified", "ok": identified > 0, "detail": identified, "fix": "call openlens.identify(user.id, { role }) after login" },
         { "check": "roles are sent", "ok": with_role > 0, "detail": with_role, "fix": "pass the user's real role field to identify()" },
         { "check": "release is tagged", "ok": releases > 0, "detail": releases, "fix": "pass release (version or git SHA) to init or data-release" },
         { "check": "feature map pushed", "ok": map_status == 200, "detail": map["version"], "fix": "openlens-cli features push" },
+        { "check": "hosts are classified", "ok": classified, "detail": unclassified, "fix": "openlens-cli env rule <host> <production|staging|preview|ignore>" },
     ]);
     let ok = checks
         .as_array()
