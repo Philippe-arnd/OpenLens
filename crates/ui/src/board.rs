@@ -125,10 +125,13 @@ pub fn board(
                         table.plain {
                             tbody { @for v in &b.vitals {
                                 tr {
-                                    th scope="row" { (v.name) }
+                                    th scope="row" { (v.name) " " (vital_info(&v.name)) }
                                     td.num { @if v.name == "CLS" { (format!("{:.3}", v.p75)) } @else { (format!("{:.0} ms", v.p75)) } }
                                     td { (status(&v.rating)) }
                                     td.num.muted { (compact(v.samples)) " samples" }
+                                }
+                                @if let Some(r) = b.vitals_why.iter().find(|r| r.name == v.name) {
+                                    tr { td colspan="4" { (vital_why(p.id, f, r)) } }
                                 }
                             } }
                         }
@@ -330,6 +333,34 @@ pub fn events(
             }
         },
     )
+}
+
+/// *Why and what to do* under a Web Vital that is not good (#408): the
+/// worst pages at p75, the dominant cause when known, then the actions,
+/// most likely first. A `<details>`, so it opens without script.
+pub(crate) fn vital_why(pid: &str, f: &Filters, r: &openlens_engine::VitalReport) -> Markup {
+    let show = |v| openlens_engine::vitals::show(r.name, v);
+    html! {
+        details.why {
+            summary { "Why and what to do" }
+            @if !r.worst_pages.is_empty() {
+                p.small { "Worst pages at p75, last 7 days:" }
+                ol.small { @for pg in &r.worst_pages {
+                    li {
+                        (row_link(&detail_url(pid, &format!("/events?family=vital&path={}", url_enc(&pg.path)), f), &pg.path))
+                        " · " strong { (show(pg.p75)) } " · " (status(pg.rating)) span.muted { " · " (compact(pg.samples)) " samples" }
+                    }
+                } }
+            } @else if openlens_engine::vitals_guide(r.name).is_some_and(|g| g.pages) {
+                p.small.muted { "No page has enough measurements yet to rank them." }
+            }
+            @if let Some(d) = &r.dominant_cause {
+                p.small { "Most likely cause: " strong { (d.what) } span.muted { " (the first byte is " (pct(d.ttfb_share)) " of LCP on " (d.pages) (if d.pages == 1 { " page" } else { " pages" }) ")" } }
+            }
+            p.small { "What to do, most likely first:" }
+            ol.small { @for a in &r.actions { li { (a) } } }
+        }
+    }
 }
 
 pub(crate) fn family_icon(fam: &str) -> &'static str {

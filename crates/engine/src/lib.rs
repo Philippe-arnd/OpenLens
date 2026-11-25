@@ -30,6 +30,7 @@ mod revenue;
 pub mod stats;
 mod tasks;
 mod variants;
+pub mod vitals;
 pub use acquisition::{AcquisitionRow, Touch, acquisition};
 pub use churn::{AtRisk, ChurnReport, churn};
 pub use digest::{Delta, Digest, digest, digest_markdown};
@@ -47,6 +48,7 @@ pub use people::*;
 pub use revenue::{Money, Revenue, revenue};
 pub use tasks::{RetentionRow, TaskTime};
 pub use variants::*;
+pub use vitals::{PageVital, VitalGuide, VitalReport, vitals, vitals_guide};
 
 /// Engine errors.
 #[derive(Debug, thiserror::Error)]
@@ -314,6 +316,8 @@ pub struct Board {
     pub dau_series: Vec<(String, i64)>,
     /// Web Vitals at p75, last 7 days.
     pub vitals: Vec<Vital>,
+    /// The vitals that are not good, explained: worst pages and what to do.
+    pub vitals_why: Vec<VitalReport>,
     /// Most used features, last 30 days.
     pub features: Vec<FeatureUse>,
     /// Users per role, last 30 days.
@@ -367,23 +371,7 @@ fn text(row: &Map<String, Value>, k: &str) -> Option<String> {
     row.get(k).and_then(Value::as_str).map(str::to_owned)
 }
 
-fn rating(name: &str, v: f64) -> &'static str {
-    let (good, poor) = match name {
-        "LCP" => (2500.0, 4000.0),
-        "INP" => (200.0, 500.0),
-        "CLS" => (0.1, 0.25),
-        "FCP" => (1800.0, 3000.0),
-        "TTFB" => (800.0, 1800.0),
-        _ => return "unknown",
-    };
-    if v <= good {
-        "good"
-    } else if v <= poor {
-        "needs-improvement"
-    } else {
-        "poor"
-    }
-}
+use vitals::rating;
 
 /// The event source: the raw `events` table, or, with a feature map, a
 /// projection where `role` is the canonical role and `feature` includes
@@ -682,13 +670,7 @@ async fn board_with(
     let dau_sql = format!(
         "SELECT {day} AS date, count(DISTINCT distinct_id) AS n FROM {src} WHERE {w14} AND {ident} GROUP BY 1 ORDER BY 1"
     );
-    let vitals_sql = format!(
-        "SELECT name, approx_percentile_cont(v, 0.75) AS p75, count(*) AS samples FROM ( \
-           SELECT regexp_match(properties, '\"\\$name\":\"([A-Z]+)\"')[1] AS name, \
-                  CAST(regexp_match(properties, '\"\\$value\":([0-9.eE+-]+)')[1] AS DOUBLE) AS v \
-           FROM {src} WHERE {w7} AND event = '$vital') x \
-         WHERE name IS NOT NULL AND v IS NOT NULL GROUP BY name ORDER BY name"
-    );
+    let vitals_sql = vitals::p75_sql(&src, &w7);
     let features_sql = format!(
         "SELECT feature AS key, count(*) AS uses, count(DISTINCT distinct_id) AS users, \
          count(DISTINCT concat(distinct_id, '|', {day})) AS user_days \
@@ -934,7 +916,16 @@ async fn board_with(
     b.journeys = journeys;
     cards.extend(insights::flag_cards(&cohorts));
     b.flag_cohorts = cohorts;
-    if let Some(c) = insights::slow_pages(&b.vitals) {
+    if b.vitals
+        .iter()
+        .any(|v| v.rating != "good" && vitals_guide(&v.name).is_some_and(|g| g.pages))
+    {
+        let pages = vitals::pages(q, project, &src, f).await?;
+        b.vitals_why = vitals::explain(&b.vitals, &pages, true);
+    } else {
+        b.vitals_why = vitals::explain(&b.vitals, &[], true);
+    }
+    if let Some(c) = insights::slow_pages(&b.vitals, &b.vitals_why) {
         cards.push(c);
         cards.sort_by(|a, b| b.score.total_cmp(&a.score));
     }

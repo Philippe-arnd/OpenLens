@@ -398,21 +398,33 @@ pub(crate) async fn compute(
     Ok((cards, readiness))
 }
 
-/// Slow pages, from the vitals already on the board.
-pub(crate) fn slow_pages(vitals: &[crate::Vital]) -> Option<Insight> {
+/// Slow pages, from the vitals already on the board. The next step is the
+/// vital's first action (#408), after its dominant cause when known.
+pub(crate) fn slow_pages(vitals: &[crate::Vital], why: &[crate::VitalReport]) -> Option<Insight> {
     let v = vitals
         .iter()
         .find(|v| v.rating == "poor" && v.samples >= MIN_GROUP)?;
-    let shown = if v.name == "CLS" {
-        format!("{:.2}", v.p75)
-    } else {
-        format!("{:.1} s", v.p75 / 1000.0)
-    };
+    let report = why.iter().find(|r| r.name == v.name);
+    let first = report
+        .and_then(crate::VitalReport::first_action)
+        .or_else(|| {
+            crate::vitals_guide(&v.name)
+                .and_then(|g| g.causes.first())
+                .and_then(|c| c.actions.first().copied())
+        })
+        .unwrap_or("Trim images, scripts and blocking requests.");
+    let worst = report
+        .and_then(|r| r.worst_pages.first())
+        .map_or_else(String::new, |p| format!(" Start with {}.", p.path));
     Some(Insight {
         kind: "slow_pages",
-        title: format!("Pages feel slow: {} p75 is {shown}", v.name),
+        title: format!(
+            "Pages feel slow: {} p75 is {}",
+            v.name,
+            crate::vitals::show(&v.name, v.p75)
+        ),
         evidence: format!("{} measurements in the last 7 days, rated poor", v.samples),
-        next_step: "Find the heaviest pages (Events, $vital) and trim images, scripts and blocking requests.".into(),
+        next_step: format!("{first}{worst}"),
         score: (v.samples as f64).sqrt() * 0.5,
         subject: v.name.clone(),
     })

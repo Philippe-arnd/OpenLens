@@ -35,6 +35,51 @@ Roles are the main way to slice every number, so they are declared explicitly, n
 | **Failed requests** | `fetch`/XHR calls answering 5xx or failing on the network, as a rate per page and per feature. Only the URL path and status are captured, never bodies. |
 | **Page load** | Navigation timing (time to load and time to interactive) at p50 and p75 per page. |
 
+### Web Vitals explained
+
+Generated from `crates/engine/src/vitals.rs`; a test fails when this section and the table differ. The board, Ask and the `vitals` MCP tool all read the same table.
+
+| Vital | What the visitor feels | Good | Poor |
+| --- | --- | --- | --- |
+| **LCP** (Largest Contentful Paint) | How long until the main content (the largest image or block of text) is on screen: when the visitor feels the page has loaded. | ≤ 2.5 s | > 4.0 s |
+| **INP** (Interaction to Next Paint) | How long the page takes to show a response after a click, tap or key press, for about the slowest interaction of the visit: lag. | ≤ 200 ms | > 500 ms |
+| **CLS** (Cumulative Layout Shift) | How much the content jumps while the visitor reads, over the worst burst of shifts: the reason people click the wrong thing. | ≤ 0.10 | > 0.25 |
+| **FCP** (First Contentful Paint) | How long until anything at all (text, an image, a background) appears: the time the visitor stares at a blank screen. | ≤ 1.8 s | > 3.0 s |
+| **TTFB** (Time to First Byte) | How long until the server starts answering the page request: everything else on the page waits for it. | ≤ 800 ms | > 1.8 s |
+
+A vital that is not good opens *Why and what to do* on the board: for LCP, INP and CLS, the worst pages at p75 (pages with at least 8 measurements in the last 7 days), then the causes and actions below, most likely first. For LCP, when TTFB is measured on the same pages and is more than half of LCP, the server cause comes first.
+
+**LCP: likely causes and what to do**
+
+1. The main image or text block is found late or downloads slowly. Put the main image in the HTML itself (not added by a script), do not lazy-load it, and give it fetchpriority="high". Make the main image lighter: a modern format, sized for the screen, served from a CDN with long caching.
+2. Styles and scripts keep the browser from drawing the page. Inline the styles the first screen needs and defer the scripts it does not need. Render the first screen on the server instead of in the browser.
+3. The server is slow to send the first byte of the page. Cache the page's HTML (or put a CDN in front of it), remove redirects, and speed up the server work behind the page.
+
+**INP: likely causes and what to do**
+
+1. The page is busy running scripts when the visitor acts. Split long scripts into small tasks that hand control back to the browser, and load third-party scripts later.
+2. The code that answers a click or key press does too much at once. Make the visible change first and move the rest of the work after the next paint (or to a worker).
+3. Drawing the next frame takes long. Keep the page's DOM small, do not read layout right after changing styles, and skip rendering off-screen content (content-visibility).
+
+**CLS: likely causes and what to do**
+
+1. Images, videos, ads or embeds arrive without space kept for them. Give every image, video and iframe a width and height (or a CSS aspect-ratio), and keep space for ads and embeds.
+2. Content is inserted above what the visitor is reading (banners, late results). Keep the space before the content arrives, or insert it below the visible part or only after a visitor action.
+3. Web fonts swap in and re-flow the text. Preload the main fonts and pick a fallback font of the same size (or font-display: optional).
+4. Animations move elements by changing their position or size. Animate with transform and opacity only.
+
+**FCP: likely causes and what to do**
+
+1. Styles and scripts in the page head block the first paint. Inline the critical styles, defer or async the scripts, and drop the CSS the page does not use.
+2. The first byte of the page arrives late. Speed up the server response first (see TTFB).
+3. Text stays invisible until the web fonts load. Preload the main fonts and show a fallback font meanwhile (font-display: swap).
+
+**TTFB: likely causes and what to do**
+
+1. The server does slow work (database, rendering) before it answers. Cache the page's HTML or the slow queries behind it, and measure where the server time goes.
+2. Visitors are far from the server. Serve the pages from a CDN or a region closer to the visitors.
+3. Redirects run before the page. Link straight to the final address (no http to https or trailing-slash hops).
+
 ## Features
 
 A **feature** is declared in the feature map. A **task** is one use of a feature, from its entry (route, `data-feature` element, or an `openlens.feature()` call) to its `success` event. A task with no success within 30 minutes is *abandoned*.

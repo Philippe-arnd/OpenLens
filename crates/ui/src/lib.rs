@@ -29,7 +29,7 @@ pub use components::*;
 pub use explore::*;
 pub use feature_page::*;
 pub use features::*;
-pub(crate) use glossary::{th_def, th_num};
+pub(crate) use glossary::{th_def, th_num, vital_info};
 pub use goals::*;
 pub use icons::icon;
 pub use manage::*;
