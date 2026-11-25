@@ -27,6 +27,21 @@ The image `ghcr.io/philippe-arnd/openlens` is public. Binaries for `x86_64` and 
 | `:vX.Y.Z` | one release, never moves |
 | `:edge` | `main`, for testing only |
 
+### Verify what you run
+
+Images and release assets are signed in CI with Sigstore, keyless: no key to leak, the signature names the GitHub workflow that built them. Each release also carries an SPDX SBOM (`openlens-vX.Y.Z.spdx.json`), and the image carries its own.
+
+```sh
+# The image (any tag: the signature covers the digest behind it).
+cosign verify ghcr.io/philippe-arnd/openlens:latest \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github.com/Philippe-arnd/OpenLens/\.github/workflows/release\.yml@refs/(heads/main|tags/v.*)$'
+# A downloaded binary, SDK bundle, chart or SBOM: its build provenance.
+gh attestation verify openlens-vX.Y.Z-x86_64-linux.tar.gz -R Philippe-arnd/OpenLens
+```
+
+Releases before 0.6 are not signed. The provenance is SLSA Build level 2: the build runs on GitHub's hosted runners in the same workflow that publishes.
+
 ## Updates without anyone
 - **Safety net, built in:** on start, OpenLens backs up its data when the version changed (`backups/upgrade/`). It refuses data written by a newer release, so going back to the previous tag (and restoring that copy) undoes an update.
 - **Pulling new images is your platform's job:** Kubernetes and Coolify have recipes in their guides; for Docker and the binary, see their guides. Hands-off updates for every setup are tracked in [#238](https://github.com/Philippe-arnd/OpenLens/issues/238).
