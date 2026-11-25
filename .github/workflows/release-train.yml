@@ -90,9 +90,10 @@ jobs:
           gh workflow run release.yml --ref "$TAG"
           gh workflow run k8s.yml --ref "$TAG"
           # The site and its screenshots follow `release: published`, which a
-          # release made with this token does not send either.
-          gh workflow run pages.yml --ref main || true
-          gh workflow run screenshots.yml --ref main || true
+          # release made with this token does not send either. The
+          # screenshots job waits for the release, merges its images, then
+          # rebuilds Pages (#439): one start, in that order.
+          gh workflow run screenshots.yml --ref main -f tag="$TAG" || true
           # 2b. An hour later, check that every part landed (#258).
           gh workflow run release-summary.yml -f tag="$TAG" -f wait_minutes=60 || true
           # 3. A PR names the release in the CHANGELOG and moves main to the
