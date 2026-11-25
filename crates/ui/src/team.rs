@@ -773,7 +773,7 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
                 h3 { "Hosts seen (last " (e.days) " days)" }
                 @if e.hosts.is_empty() { p.muted.small { "No events in the window." } } @else {
                     div.table-scroll { table.plain {
-                        thead { tr { th { "Environment" } th { "Host" } th.num { "Events" } th { "Last seen" } th { "Rule" } } }
+                        thead { tr { th { "Environment" } th { "Host" } (crate::glossary::th_num("Events")) th { "Last seen" } th { "Rule" } } }
                         tbody { @for h in &e.hosts {
                             tr {
                                 td { (h.environment) }
