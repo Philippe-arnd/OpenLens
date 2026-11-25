@@ -213,9 +213,35 @@ struct SharedSnaps {
     built: std::sync::atomic::AtomicU64,
 }
 
+/// Per segment file: (size, modified, what it holds). A segment is never
+/// edited once written, so a file with the same size and time is the same.
+type FactsCache = Arc<
+    std::sync::Mutex<
+        HashMap<
+            PathBuf,
+            (
+                u64,
+                Option<std::time::SystemTime>,
+                Arc<openlens_storage::SegmentFacts>,
+            ),
+        >,
+    >,
+>;
+
+/// The stored rows of a project, counted without a query (#447).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RawSummary {
+    /// Rows in `raw_events`.
+    pub rows: usize,
+    /// Its distinct environments, sorted.
+    pub environments: Vec<String>,
+}
+
 /// Runs read-only SQL against a data root.
 #[derive(Debug, Clone)]
 pub struct QueryEngine {
+    /// What each segment holds, read once (#447).
+    facts: FactsCache,
     root: PathBuf,
     limits: Limits,
     /// One runtime for every query: a single memory cap for the process, and
@@ -252,6 +278,7 @@ impl QueryEngine {
             root: root.into(),
             limits,
             runtime,
+            facts: FactsCache::default(),
             snapshots: Arc::default(),
             shared: Arc::default(),
             aliases: AliasCache::default(),
@@ -580,6 +607,53 @@ impl QueryEngine {
             cache.insert(project.to_owned(), (Instant::now(), identity.clone()));
         }
         Ok(identity)
+    }
+
+    /// The number of stored rows and the environments seen, as
+    /// `SELECT count(*)` and `SELECT DISTINCT environment` over `raw_events`
+    /// would answer, without scanning: each segment is read once (its footer
+    /// and its `environment` column) and remembered, so a board only reads
+    /// the segments written since the last one (#447).
+    pub async fn raw_summary(&self, project: &str) -> Result<RawSummary, QueryError> {
+        let (root, facts, project) = (self.root.clone(), self.facts.clone(), project.to_owned());
+        let work = move || -> Result<RawSummary, QueryError> {
+            let storage = |e: &dyn std::fmt::Display| QueryError::Storage(e.to_string());
+            let files =
+                openlens_storage::segment_files(&root, &project).map_err(|e| storage(&e))?;
+            let mut seen = HashMap::new();
+            let mut summary = RawSummary::default();
+            let mut envs = std::collections::BTreeSet::new();
+            for path in files {
+                let Ok(meta) = std::fs::metadata(&path) else {
+                    continue; // compacted away since the listing
+                };
+                let stamp = (meta.len(), meta.modified().ok());
+                let cached = facts
+                    .lock()
+                    .ok()
+                    .and_then(|c| c.get(&path).filter(|(l, m, _)| (*l, *m) == stamp).cloned());
+                let f = match cached {
+                    Some((_, _, f)) => f,
+                    None => match openlens_storage::segment_facts(&path) {
+                        Ok(f) => Arc::new(f),
+                        Err(_) if !path.exists() => continue,
+                        Err(e) => return Err(storage(&e)),
+                    },
+                };
+                summary.rows += f.rows;
+                envs.extend(f.environments.iter().cloned());
+                seen.insert(path, (stamp.0, stamp.1, f));
+            }
+            summary.environments = envs.into_iter().collect();
+            // Forget the segments that are gone.
+            if let Ok(mut c) = facts.lock() {
+                *c = seen;
+            }
+            Ok(summary)
+        };
+        tokio::task::spawn_blocking(work)
+            .await
+            .map_err(|e| QueryError::Storage(format!("summary task: {e}")))?
     }
 
     /// Run one read-only SQL query on `project`'s events.
