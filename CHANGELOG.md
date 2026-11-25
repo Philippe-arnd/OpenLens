@@ -11,6 +11,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 - **Clickable rows and tiles beyond the board** (#409): each release row of the board opens the board on that release. *Live* tiles open Events and Errors, and *At risk now* on Churn jumps to its list. Tiles that are already on their detail page (uptime, churn, revenue, tickets) stay plain on purpose.
 - **Metric column definitions** (#405, part 2): every numeric column header has an ⓘ with what it counts (about 70 headers), and so do the *Confidence* and *vs baseline* columns of flags and experiments. A test fails on a numeric header left without one.
 - **Release suggestions on share links** (#403): the release field suggests the latest releases.
+- **Replays pause when nobody is there** (#404): the recorder pauses after 2 minutes without input and as soon as the tab is hidden, and records and sends nothing meanwhile. The next input resumes the same replay with an `idle` marker and a fresh snapshot (a new replay after the 30-minute session gap). The player's seek bar covers active time only: each gap shows as *⏸ 1 h 52 min idle* and playback jumps it, for older replays too. The replay list sorts on active time and filters on *More than N min active* (`?sort=active&active=N`, also on the replays API).
 - **Password reset by an admin** (#428): *Team → Reset the password* stops the old password, ends the user's sessions and gives a one-time link (24 h) to set a new one. No password is ever shown.
 
 ### Changed

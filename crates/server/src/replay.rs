@@ -124,8 +124,13 @@ async fn list(
     }
     let root = state.data_dir.clone();
     let who = q.get("distinct_id").cloned();
+    // The same order and filter as the dashboard list (#404).
+    let view = openlens_replay::View::from_query(
+        q.get("sort").map(String::as_str),
+        q.get("active").map(String::as_str),
+    );
     match tokio::task::spawn_blocking(move || {
-        openlens_replay::list(&root, &project, who.as_deref())
+        openlens_replay::list_view(&root, &project, who.as_deref(), view)
     })
     .await
     {

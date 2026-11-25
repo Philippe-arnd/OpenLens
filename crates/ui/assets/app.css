@@ -278,6 +278,11 @@ html[data-theme="dark"] #ol-player { --k-page: #3a86d8; --k-goal: #b8862a; --k-s
 #ol-player .k-page { --k: var(--k-page); } #ol-player .k-goal { --k: var(--k-goal); } #ol-player .k-submit { --k: var(--k-submit); }
 #ol-player .k-note { --k: var(--ink-2); } #ol-player .ol-mark.k-note::before { border-radius: 2px; transform: rotate(45deg); }
 #ol-player .k-click { --k: var(--k-click); } #ol-player .k-rage { --k: var(--k-rage); } #ol-player .k-error { --k: var(--k-error); }
+/* Idle gaps (#404): a pause glyph where the seek bar jumps a gap. */
+#ol-player .k-idle { --k: var(--muted); }
+#ol-player .ol-mark.ol-gap { font-size: 11px; line-height: 24px; color: var(--muted); }
+#ol-player .ol-mark.ol-gap::before { content: none; }
+#ol-player .ol-mark.ol-gap:hover, #ol-player .ol-mark.ol-gap:focus-visible { color: var(--ink); }
 #ol-player .ol-dot { display: inline-block; flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--k); }
 #ol-player .k-error .ol-dot { width: 4px; height: 13px; border-radius: 2px; }
 #ol-player .ol-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; list-style: none; margin: 10px 0 0; padding: 0; font-size: 12px; color: var(--ink-2); }
