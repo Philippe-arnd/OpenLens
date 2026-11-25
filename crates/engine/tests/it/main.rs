@@ -10,6 +10,8 @@ use openlens_featuremap::parse;
 use openlens_query::{Limits, QueryEngine};
 use openlens_storage::{FlushPolicy, Writer};
 
+mod map_lookups;
+
 struct E<'a> {
     user: &'a str,
     role: &'a str,

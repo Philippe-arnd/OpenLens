@@ -222,3 +222,11 @@ Append-only. Each entry: id, date, decision, why, consequences.
 
 **Consequences:** a **breaking change** for installs that relied on the implicit move since v0.3.0 (announced in the 0.5.0 notes). A bucket with no lifecycle rule is accepted. The check reads `GetBucketLifecycleConfiguration`, so the S3 key needs that permission when the tier is on.
 
+
+## D-033 (2026-11-25, agent for #444) The query budget follows the container, with no setting
+
+**Decision:** the query memory pool is the process's memory limit minus 256 MiB, at least 256 MiB. The limit is read at startup from cgroup v2 (the smallest `memory.max` of the process's own cgroup, found in `/proc/self/cgroup`, and its ancestors: a container limit or a systemd `MemoryMax=` alike), else cgroup v1 (`memory.limit_in_bytes`), else `MemTotal` in `/proc/meminfo`; a limit of `max`, unreadable, or above physical memory counts as physical memory. When nothing can be read, the pool stays at 768 MiB. Each query uses as many partitions as the query runtime has threads (the CPUs the process may use, quota included, from 1 to 8), instead of 2. The startup log says what was chosen (`query limits from the host`). Background rollups wait until no board is being computed, one closed day at a time, and boards asked for meanwhile wait for that day to finish.
+
+**Why:** with a fixed 768 MiB pool, memory beyond 1 GiB never helped the board (it failed at 2 M realistic events with 7 GB free), and on a 512 MiB container the pool was larger than the container, so the kernel killed the process before DataFusion could spill. A rollup pass running beside a board split the same pool and made the board fail at a third of its usual size. Following the container keeps D-014's promise (no tuning variable) while making "give it more memory" actually work.
+
+**Consequences:** no new variable; if the detection is wrong, the detection is fixed. Under the Helm chart's default 1 GiB limit, the pool is 768 MiB as before. The [architecture challenge](https://github.com/Philippe-arnd/OpenLens/issues/442) measures the effect with the realistic profile of `xtask bench-gen` (#443).
