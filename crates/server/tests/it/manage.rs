@@ -549,7 +549,7 @@ async fn a_failing_probe_opens_one_incident_and_alerts_are_configurable() {
     assert!(api.contains(r#""state":"down""#), "{api}");
     let page = body_text(get(&h, "/p/default/uptime", Some(&owner), false).await).await;
     assert!(page.contains("Down") && page.contains("/healthz") && !page.contains(" style="));
-    let s = body_text(get(&h, "/p/default/settings", Some(&owner), false).await).await;
+    let s = body_text(get(&h, "/p/default/settings/alerts", Some(&owner), false).await).await;
     assert!(s.contains("ops-alerts"));
 }
 

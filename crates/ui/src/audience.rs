@@ -320,7 +320,7 @@ pub fn uptime(p: &ProjectInfo<'_>, v: &UptimeView<'_>) -> Markup {
                 p { span class={ "status big " (cls) } { (word) } @if let Some(s) = &v.since { " since " (s) } }
             } }
             @if v.url.is_none() {
-                section.card.wide { p { "Set the app address in " a href={ "/p/" (p.id) "/settings#alerts" } { "Settings" } " and OpenLens checks it every minute. Without it, only the traffic tells (after four weeks of history)." } }
+                section.card.wide { p { "Set the app address in " a href={ "/p/" (p.id) "/settings" } { "Settings" } " and OpenLens checks it every minute. Without it, only the traffic tells (after four weeks of history)." } }
             } @else {
                 // no_detail (#409): this page is the uptime detail already.
                 section.tiles aria-label="Availability" {

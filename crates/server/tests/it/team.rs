@@ -618,7 +618,8 @@ async fn project_time_zone_is_set_and_checked() {
 async fn project_settings_do_what_the_cli_does() {
     let h = harness();
     let owner = login_cookie(&h).await;
-    let page = get(&h, "/p/default/settings", Some(&owner), false).await;
+    // The key and the wiring check live on the Install tab (#438).
+    let page = get(&h, "/p/default/settings/install", Some(&owner), false).await;
     assert_eq!(page.status(), StatusCode::OK);
     let html = String::from_utf8(
         axum::body::to_bytes(page.into_body(), 1 << 20)
