@@ -15,7 +15,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use arrow::array::{RecordBatch, StringArray, cast::AsArray};
 use arrow::datatypes::DataType;
+use datafusion::common::DataFusionError;
 use datafusion::datasource::MemTable;
 use datafusion::datasource::file_format::parquet::ParquetFormat;
 use datafusion::datasource::listing::{
@@ -23,6 +25,7 @@ use datafusion::datasource::listing::{
 };
 use datafusion::execution::memory_pool::{FairSpillPool, MemoryConsumer, MemoryReservation};
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
+use datafusion::logical_expr::{ColumnarValue, ScalarUDF, Volatility, create_udf};
 use datafusion::prelude::{SQLOptions, SessionConfig, SessionContext};
 use futures::StreamExt;
 
@@ -55,7 +58,9 @@ const ALIAS_SQL: &str = "SELECT anon, min(person) AS person FROM (\
      WHERE anon IS NOT NULL AND anon <> person GROUP BY anon";
 
 /// The `events` table as callers see it: `raw_events` with every
-/// anonymous id found in `person_aliases` replaced by its user. Derived
+/// anonymous id found in `person_aliases` replaced by its user, through
+/// the scalar function `person_of` (a lookup in the cached alias map, not
+/// a join: a join would build its hash table on the events). Derived
 /// from the data, so it also fixes what was stored before, and nothing is
 /// rewritten.
 fn events_view_sql() -> String {
@@ -64,16 +69,13 @@ fn events_view_sql() -> String {
         .iter()
         .map(|f| {
             if f.name() == "distinct_id" {
-                "COALESCE(a.person, r.distinct_id) AS distinct_id".to_owned()
+                "person_of(r.distinct_id) AS distinct_id".to_owned()
             } else {
                 format!("r.{}", f.name())
             }
         })
         .collect();
-    format!(
-        "SELECT {}, r.date FROM raw_events r LEFT JOIN person_aliases a ON r.distinct_id = a.anon",
-        cols.join(", ")
-    )
+    format!("SELECT {}, r.date FROM raw_events r", cols.join(", "))
 }
 
 /// `persons(person, first_seen, internal)`: every identified user, their
@@ -93,6 +95,53 @@ struct Identity {
     persons: Arc<MemTable>,
     /// The people of `persons` marked internal, for `is_internal`.
     internal: internal::Internal,
+    /// The same aliases as a lookup, anon id to user, shared by every query.
+    lookup: Arc<HashMap<String, String>>,
+}
+
+/// The scalar function `person_of(distinct_id)`: the user an anonymous id
+/// was identified as, or the id itself when it is not an alias.
+fn person_of_udf(lookup: Arc<HashMap<String, String>>) -> ScalarUDF {
+    create_udf(
+        "person_of",
+        vec![DataType::Utf8],
+        DataType::Utf8,
+        Volatility::Immutable,
+        Arc::new(move |args: &[ColumnarValue]| {
+            let arrays = ColumnarValue::values_to_arrays(args)?;
+            let ids = arrays
+                .first()
+                .map(|a| a.as_string::<i32>())
+                .ok_or_else(|| DataFusionError::Internal("person_of takes one argument".into()))?;
+            let out: StringArray = ids
+                .iter()
+                .map(|id| id.map(|id| lookup.get(id).map_or(id, String::as_str)))
+                .collect();
+            Ok(ColumnarValue::Array(Arc::new(out)))
+        }),
+    )
+}
+
+/// Read the `(anon, person)` rows of the alias table into a lookup.
+fn alias_lookup(batches: &[RecordBatch]) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for b in batches {
+        let (Some(anon), Some(person)) = (b.column_by_name("anon"), b.column_by_name("person"))
+        else {
+            continue;
+        };
+        let (Some(anon), Some(person)) =
+            (anon.as_string_opt::<i32>(), person.as_string_opt::<i32>())
+        else {
+            continue;
+        };
+        for (a, p) in anon.iter().zip(person.iter()) {
+            if let (Some(a), Some(p)) = (a, p) {
+                map.insert(a.to_owned(), p.to_owned());
+            }
+        }
+    }
+    map
 }
 
 type AliasCache = Arc<std::sync::Mutex<HashMap<String, (Instant, Identity)>>>;
@@ -522,6 +571,7 @@ impl QueryEngine {
                     .map_err(|e| QueryError::Storage(e.to_string()))?;
             }
             Some(aliases) => {
+                ctx.register_udf(person_of_udf(identity.lookup));
                 ctx.register_table("person_aliases", aliases)
                     .map_err(|e| QueryError::Storage(e.to_string()))?;
                 let view = ctx
@@ -568,13 +618,14 @@ impl QueryEngine {
         {
             return Ok(t.clone());
         }
-        let (aliases, alias_rows) = collect(ctx, ALIAS_SQL).await?;
+        let (aliases, alias_batches) = collect(ctx, ALIAS_SQL).await?;
         let (persons, person_rows) = collect(ctx, PERSONS_SQL).await?;
-        let any = alias_rows.iter().any(|b| b.num_rows() > 0);
+        let lookup = alias_lookup(&alias_batches);
         let identity = Identity {
-            aliases: any.then_some(aliases),
+            aliases: (!lookup.is_empty()).then_some(aliases),
             persons,
             internal: internal::internal_set(&person_rows),
+            lookup: Arc::new(lookup),
         };
         if let Ok(mut cache) = self.aliases.lock() {
             cache.insert(project.to_owned(), (Instant::now(), identity.clone()));
