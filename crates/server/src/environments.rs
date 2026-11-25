@@ -87,7 +87,7 @@ pub(crate) fn apply(state: &AppState, project: &str, events: &mut Vec<Event>) {
 /// The upgrade seed (D-034), once per project, in the background: every
 /// host that sent production events in the last 30 days and that nothing
 /// classifies gets a `production` rule, so an upgrade moves no host out of
-/// production. A failure is logged and retried on a later batch.
+/// production. A failure is logged and retried ten minutes later.
 pub(crate) fn spawn_seed(state: &AppState, project: &str) {
     let key = project.to_owned();
     if state.caches.env_seeding.get(&key).is_some() {
@@ -122,6 +122,7 @@ pub(crate) fn spawn_seed(state: &AppState, project: &str) {
                 .await;
                 match stored {
                     Ok(Ok(n)) => {
+                        st.caches.env_seeding.remove(&key);
                         tracing::info!(project = %key, rules = n, "environments: hosts kept in production")
                     }
                     Ok(Err(err)) => {
@@ -134,7 +135,8 @@ pub(crate) fn spawn_seed(state: &AppState, project: &str) {
                 tracing::warn!(project = %key, %err, "environments: seed failed; retried later")
             }
         }
-        st.caches.env_seeding.remove(&key);
+        // On failure the marker stays until it expires (10 minutes), so a
+        // failing seed is retried then, not on every captured batch.
     });
 }
 
