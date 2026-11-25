@@ -4012,6 +4012,7 @@ dependencies = [
  "openlens-testkit",
  "serde_json",
  "tempfile",
+ "ureq",
 ]
 
 [[package]]
