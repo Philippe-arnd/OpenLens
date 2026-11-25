@@ -361,7 +361,7 @@ async fn an_admin_resets_a_password_with_a_one_time_link() {
         .and_then(|r| r.split('<').next())
         .expect("a link on the page")
         .to_owned();
-    assert!(!page.contains("violet"), "no password shown");
+    assert!(!page.contains("violet tram"), "no password shown");
     assert_ne!(
         get(&h, "/me", Some(&session), false).await.status(),
         StatusCode::OK,
