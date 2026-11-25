@@ -84,7 +84,7 @@ OpenLens is built for apps that agents write and maintain. Every server serves i
 
 From then on, agents keep the map current. Over **MCP** (`openlens-cli mcp`) they can ask:
 - `insights`, `kpi_report` (by role, account, plan, page or feature), `user_timeline`;
-- `errors`, `digest`, read-only `sql`, `flags`, `surveys`.
+- `errors`, `vitals`, `digest`, read-only `sql`, `flags`, `surveys`.
 
 ## 🔌 Wire an app
 

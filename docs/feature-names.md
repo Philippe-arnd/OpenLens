@@ -14,3 +14,4 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Who uses what | The roles × features grid: the share of each role's users who used each feature |
 | Do they come back? | Weekly retention cohorts |
 | Came back | Resurrected users: active again after a gap longer than the churn window |
+| Why and what to do | Under a Web Vital that is not good: its worst pages, the likely cause and what to fix first |

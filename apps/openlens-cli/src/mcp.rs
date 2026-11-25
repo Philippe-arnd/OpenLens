@@ -185,6 +185,11 @@ impl Tools for OpenLensTools {
                 input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"}}))}),
             },
             ToolSpec {
+                name: "vitals",
+                description: "Web Vitals explained (LCP, INP, CLS, FCP, TTFB), last 7 days: what each means for a visitor, p75, rating, good/poor thresholds, the worst pages at p75 (LCP, INP, CLS), the dominant cause for LCP, and what to do, most likely cause first.",
+                input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"}}))}),
+            },
+            ToolSpec {
                 name: "errors",
                 description: "Top error groups (normalised message + source), with users, sessions, roles, releases and places hit. Last 30 days.",
                 input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"}}))}),
@@ -431,6 +436,17 @@ impl Tools for OpenLensTools {
                     }
                     _ => v,
                 })
+            }
+            "vitals" => {
+                let mut q = Vec::new();
+                for k in ["env", "role", "release"] {
+                    if let Some(v) = s(args, k) {
+                        q.push(format!("{k}={}", v.replace(['&', '#', '?', ' '], "")));
+                    }
+                }
+                let path = format!("/api/projects/{}/vitals?{}", project(args), q.join("&"));
+                let (st, v) = c.call("GET", &path, None)?;
+                ok_or(st, v)
             }
             "digest" => {
                 let (st, v) = c.call(

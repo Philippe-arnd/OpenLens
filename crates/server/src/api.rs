@@ -72,6 +72,10 @@ pub(crate) fn routes() -> Router<AppState> {
             get(crate::settings::api_status),
         )
         .route(
+            "/api/projects/{project}/vitals",
+            get(crate::explore::api_vitals),
+        )
+        .route(
             "/api/projects/{project}/churn",
             get(crate::explore::api_churn),
         )

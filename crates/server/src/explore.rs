@@ -660,6 +660,28 @@ pub(crate) async fn api_churn(
     }
 }
 
+/// `GET /api/projects/{id}/vitals` (#408): every Web Vital explained, for
+/// agents (the `vitals` MCP tool).
+pub(crate) async fn api_vitals(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<crate::api::FilterQuery>,
+) -> Response {
+    if !auth::has_bearer(&state, &headers) {
+        return crate::apierr::json(StatusCode::UNAUTHORIZED, "admin bearer token required");
+    }
+    let Some(p) = project(&state, &id).await else {
+        return crate::apierr::json(StatusCode::NOT_FOUND, "unknown project");
+    };
+    let map = crate::load_map(&state, &p.id).await;
+    let f = q.filters(&p.timezone);
+    match openlens_engine::vitals(&state.query, &p.id, &f, map.as_ref().map(|(m, _)| m)).await {
+        Ok(v) => axum::Json(serde_json::json!({ "filters": f, "vitals": v })).into_response(),
+        Err(e) => crate::apierr::json(StatusCode::BAD_REQUEST, e.to_string()),
+    }
+}
+
 /// `GET /p/{id}/audience` (#225).
 pub(crate) async fn audience(
     _: crate::access::Session,

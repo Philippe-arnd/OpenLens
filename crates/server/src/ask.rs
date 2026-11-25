@@ -90,6 +90,11 @@ fn tools() -> Vec<Tool> {
             schema: obj(json!({ "query": { "type": "string" } }), &["query"]),
         },
         Tool {
+            name: "vitals",
+            description: "Web Vitals (LCP, INP, CLS, FCP, TTFB), last 7 days: what each means for a visitor, p75, rating, thresholds, the worst pages at p75 and what to do, most likely cause first.",
+            schema: obj(json!({}), &[]),
+        },
+        Tool {
             name: "goals",
             description: "Goals and objectives with their status.",
             schema: obj(json!({}), &[]),
@@ -437,6 +442,17 @@ async fn run_tool(
             };
             match run {
                 Ok(r) => (tsv(&r.rows), Some(("SQL".into(), q))),
+                Err(e) => (format!("error: {e}"), None),
+            }
+        }
+        "vitals" => {
+            match openlens_engine::vitals(&state.query, &p.id, &f, map.as_ref().map(|(m, _)| m))
+                .await
+            {
+                Ok(v) => (
+                    json!(v).to_string().chars().take(6000).collect(),
+                    Some(("Web Vitals".into(), base)),
+                ),
                 Err(e) => (format!("error: {e}"), None),
             }
         }

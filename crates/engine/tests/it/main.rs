@@ -12,6 +12,7 @@ use openlens_storage::{FlushPolicy, Writer};
 
 mod map_lookups;
 mod stored_totals;
+mod vitals;
 
 struct E<'a> {
     user: &'a str,
