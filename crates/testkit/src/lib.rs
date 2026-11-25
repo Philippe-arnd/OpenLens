@@ -36,6 +36,9 @@ pub fn hostile_capture_bodies() -> Vec<Vec<u8>> {
 use chrono::{DateTime, Duration, Utc};
 use openlens_event::Event;
 
+mod realistic;
+pub use realistic::{EVENTS_PER_USER, realistic_feature_map, realistic_user};
+
 /// Deterministic xorshift PRNG (no dependency, reproducible datasets).
 struct Rng(u64);
 impl Rng {

@@ -12,5 +12,8 @@ publish.workspace = true
 openlens-event = { path = "../event" }
 chrono.workspace = true
 
+[dev-dependencies]
+openlens-featuremap = { path = "../featuremap" }
+
 [lints]
 workspace = true
