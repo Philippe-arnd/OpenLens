@@ -168,6 +168,7 @@ const NAV: &[NavGroup] = &[
             ("/settings/install", "Install", &["Install"]),
             ("/settings/alerts", "Alerts", &["Alert settings"]),
             ("/settings/sharing", "Sharing", &["Share links"]),
+            ("/settings/environments", "Environments", &["Environments"]),
             ("/settings/data", "Data", &["Project data"]),
         ],
     },

@@ -12,6 +12,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 - **Metric column definitions** (#405, part 2): every numeric column header has an ⓘ with what it counts (about 70 headers), and so do the *Confidence* and *vs baseline* columns of flags and experiments. A test fails on a numeric header left without one.
 - **Release suggestions on share links** (#403): the release field suggests the latest releases.
 - **Host rules for environments** (#410, part 1, D-034): say which environment a host is (`openlens-cli env rule <host> <env>`, `*.suffix` patterns, `ignore` to drop a host's events), applied on the server to the next events with no app change. `openlens-cli env list`, `GET /api/projects/{id}/environments` and the MCP `environments` tool show the hosts per environment and those not classified yet. `verify` reports them.
+- **Environments tab in project settings** (#410, part 2): the hosts seen per environment over 30 days, the host rules, and the hosts still stored as `unknown`; admins add or remove a rule there, through the same engine commands as the API, the CLI and MCP.
 - **Password reset by an admin** (#428): *Team → Reset the password* stops the old password, ends the user's sessions and gives a one-time link (24 h) to set a new one. No password is ever shown.
 
 ### Changed

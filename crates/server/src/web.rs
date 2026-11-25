@@ -96,6 +96,10 @@ pub(crate) fn routes() -> Router<AppState> {
             get(crate::settings::alerts_page).post(crate::settings::alerts),
         )
         .route(
+            "/p/{project}/settings/environments",
+            get(crate::settings::environments_page).post(crate::settings::environments),
+        )
+        .route(
             "/p/{project}/settings/{tab}",
             get(crate::settings::tab_page),
         )

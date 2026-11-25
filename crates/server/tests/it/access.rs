@@ -210,6 +210,8 @@ const ROUTES: &[(&str, &str, Access)] = &[
     ("GET", "/s/{token}", Public),
     ("GET", "/p/{project}/settings/alerts", Read),
     ("POST", "/p/{project}/settings/alerts", Write),
+    ("GET", "/p/{project}/settings/environments", Read),
+    ("POST", "/p/{project}/settings/environments", Write),
     ("GET", "/p/{project}/settings/{tab}", Read),
     ("POST", "/p/{project}/settings/alerts/test", Write),
     ("GET", "/p/{project}/uptime", Read),

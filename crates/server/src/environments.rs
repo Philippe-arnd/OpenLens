@@ -24,10 +24,10 @@ const SEEDED: &str = "environments_seeded";
 /// A project's rules, as ingestion uses them.
 #[derive(Debug, Default)]
 pub(crate) struct ProjectEnv {
-    rules: Rules,
+    pub(crate) rules: Rules,
     /// The upgrade seed ran for this project: unclassified hosts become
     /// `unknown`. Until then they keep what they sent.
-    seeded: bool,
+    pub(crate) seeded: bool,
 }
 
 fn load(state: &AppState, project: &str) -> ProjectEnv {

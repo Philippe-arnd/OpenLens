@@ -87,6 +87,83 @@ pub(crate) async fn alerts_page(
     .await
 }
 
+/// `GET /p/{id}/settings/environments` (#410).
+pub(crate) async fn environments_page(
+    viewer: crate::access::Signed,
+    state: State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    nq: Query<Notice>,
+) -> Response {
+    page_at(
+        viewer,
+        state,
+        headers,
+        id,
+        nq,
+        openlens_ui::SettingsTab::Environments,
+    )
+    .await
+}
+
+/// The form of `POST /p/{id}/settings/environments`: set a host's rule, or
+/// remove it when `remove` is sent.
+#[derive(Debug, Deserialize)]
+pub(crate) struct EnvironmentForm {
+    host: String,
+    #[serde(default)]
+    env: String,
+    #[serde(default)]
+    remove: Option<String>,
+}
+
+/// `POST /p/{id}/settings/environments` (#410): the engine commands
+/// `set_environment_rule` and `remove_environment_rule`, as the API's
+/// `PATCH /api/projects/{id}` runs them.
+pub(crate) async fn environments(
+    _: crate::access::ProjectWrite,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Form(f): Form<EnvironmentForm>,
+) -> Response {
+    if load(&state, &id).await.is_none() {
+        return oops("No such project.");
+    }
+    let change = if f.remove.is_some() {
+        crate::environments::RuleChange {
+            remove_environment_rule: Some(f.host.trim().to_owned()),
+            ..Default::default()
+        }
+    } else {
+        crate::environments::RuleChange {
+            environment_rule: Some(openlens_engine::environments::Rule {
+                host: f.host.trim().to_owned(),
+                env: f.env.trim().to_owned(),
+            }),
+            ..Default::default()
+        }
+    };
+    let (st, pid) = (state.clone(), id.clone());
+    let done =
+        tokio::task::spawn_blocking(move || crate::environments::change(&st, &pid, &change)).await;
+    match done {
+        Ok(Ok(_)) => {
+            crate::privacy::audit(
+                &state,
+                &headers,
+                Some(&id),
+                "environments.update",
+                f.host.trim(),
+            );
+            Redirect::to(&format!("/p/{id}/settings/environments?done=environments"))
+                .into_response()
+        }
+        Ok(Err((_, msg))) => oops(&msg),
+        Err(_) => oops("The rules could not be saved."),
+    }
+}
+
 async fn page_at(
     crate::access::Signed(viewer): crate::access::Signed,
     State(state): State<AppState>,
@@ -161,11 +238,23 @@ async fn page_at(
         Some("rotated") => Some("New capture key: update every app that sends events."),
         Some("created") => Some("Project created. Add the snippet below to the app."),
         Some("alerts") => Some("Alert settings saved."),
+        Some("environments") => Some("Rules saved: they apply to events received from now on."),
         Some("test") => Some("Test alert sent: check every channel."),
         Some("test-none") => {
             Some("No channel is set: add an email (SMTP), a webhook or an ntfy topic.")
         }
         _ => None,
+    };
+    let environments = if tab == openlens_ui::SettingsTab::Environments {
+        let pe = crate::environments::current(&state, &p.id);
+        if !pe.seeded {
+            crate::environments::spawn_seed(&state, &p.id);
+        }
+        openlens_engine::environments::environments(&state.query, &p.id, &pe.rules)
+            .await
+            .ok()
+    } else {
+        None
     };
     let host = crate::public_url(&headers);
     let info = openlens_ui::ProjectInfo {
@@ -190,6 +279,7 @@ async fn page_at(
                 yesterday: &yesterday,
                 shares: state.meta.share_links(&p.id).unwrap_or_default(),
                 releases: &releases,
+                environments,
                 setup: setup_steps(
                     &state,
                     &p.id,

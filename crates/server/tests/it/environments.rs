@@ -194,3 +194,44 @@ async fn a_rule_set_through_the_api_applies_to_the_next_events() {
         "{s:?}"
     );
 }
+
+#[tokio::test]
+async fn the_settings_tab_sets_and_removes_a_rule_like_the_api() {
+    let h = harness();
+    capture(&h, vec![page("app.example.com", 1, Some("production"))]).await;
+    let owner = login_cookie(&h).await;
+    let uri = "/p/default/settings/environments";
+    let status = post_form(&h, uri, &owner, "host=Shop.Example.com&env=staging").await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let (_, v) = api(&h, "GET", "/api/projects/default/environments", None).await;
+    assert!(
+        v["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["host"] == "shop.example.com" && r["env"] == "staging"),
+        "{v}"
+    );
+    let html = body_text(get(&h, uri, Some(&owner), false).await).await;
+    assert!(html.contains("shop.example.com"), "{html}");
+    assert!(
+        html.contains("app.example.com"),
+        "the hosts seen are listed: {html}"
+    );
+
+    // A bad host is refused with a message, and the rules do not change.
+    let (status, _) = post_form_body(&h, uri, &owner, "host=bad+host&env=staging").await;
+    assert_ne!(status, StatusCode::SEE_OTHER);
+
+    let status = post_form(&h, uri, &owner, "host=shop.example.com&remove=yes").await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let (_, v) = api(&h, "GET", "/api/projects/default/environments", None).await;
+    assert!(
+        !v["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["host"] == "shop.example.com"),
+        "{v}"
+    );
+}
