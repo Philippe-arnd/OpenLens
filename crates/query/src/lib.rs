@@ -214,9 +214,36 @@ struct SharedSnaps {
     built: std::sync::atomic::AtomicU64,
 }
 
+/// Per segment file: (size, modified, what it holds). A segment is never
+/// edited once written, so a file with the same size and time is the same.
+type Facts = HashMap<
+    PathBuf,
+    (
+        u64,
+        Option<std::time::SystemTime>,
+        Arc<openlens_storage::SegmentFacts>,
+    ),
+>;
+/// [`Facts`] per project: a board replaces only its own project's entry,
+/// so projects never evict each other.
+type FactsCache = Arc<std::sync::Mutex<HashMap<String, Facts>>>;
+
+/// The stored rows of a project, counted without a query (#447).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RawSummary {
+    /// Rows in `raw_events`.
+    pub rows: usize,
+    /// Its distinct environments, sorted.
+    pub environments: Vec<String>,
+}
+
 /// Runs read-only SQL against a data root.
 #[derive(Debug, Clone)]
 pub struct QueryEngine {
+    /// What each segment holds, read once (#447).
+    facts: FactsCache,
+    /// Segments whose facts were read from disk, since the start.
+    facts_read: Arc<std::sync::atomic::AtomicU64>,
     root: PathBuf,
     limits: Limits,
     /// One runtime for every query: a single memory cap for the process, and
@@ -253,6 +280,8 @@ impl QueryEngine {
             root: root.into(),
             limits,
             runtime,
+            facts: FactsCache::default(),
+            facts_read: Arc::default(),
             snapshots: Arc::default(),
             shared: Arc::default(),
             aliases: AliasCache::default(),
@@ -585,6 +614,65 @@ impl QueryEngine {
         Ok(identity)
     }
 
+    /// The number of stored rows and the environments seen, as
+    /// `SELECT count(*)` and `SELECT DISTINCT environment` over `raw_events`
+    /// would answer, without scanning: each segment is read once (its footer
+    /// and its `environment` column) and remembered, so a board only reads
+    /// the segments written since the last one (#447).
+    pub async fn raw_summary(&self, project: &str) -> Result<RawSummary, QueryError> {
+        let (root, facts, project) = (self.root.clone(), self.facts.clone(), project.to_owned());
+        let read = self.facts_read.clone();
+        let work = move || -> Result<RawSummary, QueryError> {
+            let storage = |e: &dyn std::fmt::Display| QueryError::Storage(e.to_string());
+            let files =
+                openlens_storage::segment_files(&root, &project).map_err(|e| storage(&e))?;
+            let mut seen = HashMap::new();
+            let mut summary = RawSummary::default();
+            let mut envs = std::collections::BTreeSet::new();
+            for path in files {
+                let Ok(meta) = std::fs::metadata(&path) else {
+                    continue; // compacted away since the listing
+                };
+                let stamp = (meta.len(), meta.modified().ok());
+                let cached = facts.lock().ok().and_then(|c| {
+                    c.get(&project)?
+                        .get(&path)
+                        .filter(|(l, m, _)| (*l, *m) == stamp)
+                        .cloned()
+                });
+                let f = match cached {
+                    Some((_, _, f)) => f,
+                    None => match openlens_storage::segment_facts(&path) {
+                        Ok(f) => {
+                            read.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            Arc::new(f)
+                        }
+                        Err(_) if !path.exists() => continue,
+                        Err(e) => return Err(storage(&e)),
+                    },
+                };
+                summary.rows += f.rows;
+                envs.extend(f.environments.iter().cloned());
+                seen.insert(path, (stamp.0, stamp.1, f));
+            }
+            summary.environments = envs.into_iter().collect();
+            // Forget this project's segments that are gone.
+            if let Ok(mut c) = facts.lock() {
+                c.insert(project, seen);
+            }
+            Ok(summary)
+        };
+        tokio::task::spawn_blocking(work)
+            .await
+            .map_err(|e| QueryError::Storage(format!("summary task: {e}")))?
+    }
+
+    /// Segments read by [`QueryEngine::raw_summary`] since the start: the
+    /// others came from its cache.
+    pub fn segments_read(&self) -> u64 {
+        self.facts_read.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     /// Run one read-only SQL query on `project`'s events.
     pub async fn sql(&self, project: &str, sql: &str) -> Result<QueryResult, QueryError> {
         let this = self.clone();
@@ -878,53 +966,4 @@ async fn drain(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn one_cold_query_at_a_time_and_hot_ones_never_wait() {
-        let dir = tempfile::tempdir().unwrap();
-        let q = QueryEngine::new(dir.path(), Limits::default());
-        let held = q.cold_turn.try_acquire().unwrap();
-        assert!(matches!(
-            q.cold().sql("a", "SELECT 1 AS n").await,
-            Err(QueryError::Busy)
-        ));
-        assert_eq!(q.sql("a", "SELECT 1 AS n").await.unwrap().rows[0]["n"], 1);
-        drop(held);
-        assert_eq!(
-            q.cold().sql("a", "SELECT 1 AS n").await.unwrap().rows[0]["n"],
-            1
-        );
-    }
-
-    /// #458: a cold query on one engine does not make another engine's
-    /// cold query busy (the server's tests run many engines at once).
-    #[tokio::test]
-    async fn engines_take_cold_turns_on_their_own() {
-        let dir = tempfile::tempdir().unwrap();
-        let a = QueryEngine::new(dir.path(), Limits::default());
-        let b = QueryEngine::new(dir.path(), Limits::default());
-        let _held = a.cold_turn.try_acquire().unwrap();
-        assert!(matches!(
-            a.cold().sql("p", "SELECT 1 AS n").await,
-            Err(QueryError::Busy)
-        ));
-        assert_eq!(
-            b.cold().sql("p", "SELECT 1 AS n").await.unwrap().rows[0]["n"],
-            1
-        );
-    }
-
-    #[test]
-    fn running_out_of_memory_is_said_plainly() {
-        let e = friendly(QueryError::Rejected(
-            "Resources exhausted: Failed to allocate 1 GB for HashJoin".into(),
-        ));
-        assert!(matches!(e, QueryError::TooBig));
-        assert!(matches!(
-            friendly(QueryError::Rejected("syntax".into())),
-            QueryError::Rejected(_)
-        ));
-    }
-}
+mod tests;

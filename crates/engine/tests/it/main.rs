@@ -11,6 +11,7 @@ use openlens_query::{Limits, QueryEngine};
 use openlens_storage::{FlushPolicy, Writer};
 
 mod map_lookups;
+mod stored_totals;
 
 struct E<'a> {
     user: &'a str,

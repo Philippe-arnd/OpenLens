@@ -535,11 +535,10 @@ pub async fn filter_options(
         }
         .clause(90)?
     );
-    let env_sql = "SELECT DISTINCT environment FROM raw_events ORDER BY environment";
-    let (roles, releases, envs) = futures::join!(
+    let (roles, releases, stored) = futures::join!(
         q.sql(project, &roles_sql),
         q.sql(project, &releases_sql),
-        q.sql(project, env_sql),
+        q.raw_summary(project),
     );
     let mut b = Board {
         filters: Some(f.clone()),
@@ -563,11 +562,7 @@ pub async fn filter_options(
             ..ReleaseRow::default()
         })
         .collect();
-    b.environments = envs?
-        .rows
-        .iter()
-        .filter_map(|r| text(r, "environment"))
-        .collect();
+    b.environments = stored?.environments;
     Ok(b)
 }
 
@@ -731,11 +726,8 @@ async fn board_with(
                GROUP BY release, session_id) s \
          GROUP BY release ORDER BY min(first) DESC LIMIT 5"
     );
-
-    // Neither depends on who did what: read the stored rows, without the
-    // identity join.
-    let env_sql = "SELECT DISTINCT environment FROM raw_events ORDER BY environment".to_owned();
-    let total_sql = "SELECT count(*) AS n FROM raw_events".to_owned();
+    // Neither depends on who did what: they come from the segments, which
+    // are read once (#447), not from a query.
 
     let success_sql = if successes.is_empty() {
         "SELECT CAST(NULL AS VARCHAR) AS event, 0 AS n, 0 AS users WHERE false".to_owned()
@@ -752,8 +744,7 @@ async fn board_with(
         features,
         roles,
         releases,
-        envs,
-        total,
+        stored,
         success,
         role_features,
         anonymous,
@@ -766,8 +757,7 @@ async fn board_with(
         q.sql(project, &features_sql),
         q.sql(project, &roles_sql),
         q.sql(project, &releases_sql),
-        q.sql(project, &env_sql),
-        q.sql(project, &total_sql),
+        q.raw_summary(project),
         q.sql(project, &success_sql),
         q.sql(project, &role_features_sql),
         q.sql(project, &anonymous_sql),
@@ -897,11 +887,8 @@ async fn board_with(
             tasks_per_session: float(r, "tasks_per_session"),
         })
         .collect();
-    b.environments = envs?
-        .rows
-        .iter()
-        .filter_map(|r| text(r, "environment"))
-        .collect();
+    let stored = stored?;
+    b.environments = stored.environments;
     let churn = map.map_or(14, |(m, _)| i64::from(m.churn_days()));
     let successes: Vec<(String, String)> = map
         .map(|(m, _)| {
@@ -953,6 +940,6 @@ async fn board_with(
     cards.truncate(7);
     b.insights = cards;
     b.readiness = readiness;
-    b.total_events = total?.rows.first().map_or(0, |r| int(r, "n"));
+    b.total_events = i64::try_from(stored.rows).unwrap_or(i64::MAX);
     Ok(b)
 }

@@ -17,8 +17,10 @@
 
 mod compaction;
 mod pending;
+mod segments;
 pub use pending::Pending;
 use pending::projects_of;
+pub use segments::{SegmentFacts, count_rows, segment_facts, segment_files};
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Write};
@@ -913,26 +915,4 @@ pub fn prune(root: &Path, project: &str, now: DateTime<Utc>) -> Result<usize> {
         }
     }
     Ok(removed)
-}
-
-/// Count rows in all segments of a project (used by tests and `verify`).
-pub fn count_rows(root: &Path, project: &str) -> Result<usize> {
-    let mut total = 0;
-    let pdir = project_dir(root, project)?;
-    if !pdir.is_dir() {
-        return Ok(0);
-    }
-    let mut stack = vec![pdir];
-    while let Some(dir) = stack.pop() {
-        for entry in fs::read_dir(dir)? {
-            let p = entry?.path();
-            if p.is_dir() {
-                stack.push(p);
-            } else if p.extension().is_some_and(|x| x == "parquet") {
-                let meta = ParquetRecordBatchReaderBuilder::try_new(File::open(&p)?)?;
-                total += usize::try_from(meta.metadata().file_metadata().num_rows()).unwrap_or(0);
-            }
-        }
-    }
-    Ok(total)
 }
