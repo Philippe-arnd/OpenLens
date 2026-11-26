@@ -344,6 +344,7 @@ pub async fn churn(
         )),
         None => None,
     };
+    let active_rows = crate::tasks::event_rows(&src, f)?;
     let last_sql = format!(
         "WITH l AS (SELECT distinct_id, max(timestamp) AS t FROM {src} WHERE {w} AND {ident} AND {INTERACTION} GROUP BY distinct_id) \
          SELECT e.distinct_id, max(coalesce(e.feature, e.path)) AS place, \
@@ -358,7 +359,7 @@ pub async fn churn(
         q.sql(project, &users_sql),
         q.sql(project, &days_sql),
         q.sql(project, &last_sql),
-        crate::tasks::resurrected(q, project, &src, f, c),
+        crate::tasks::resurrected(q, project, &active_rows, f, c),
     );
     let (adopt, fr, rel) = futures::join!(
         q.sql(project, &adopt_sql),

@@ -11,6 +11,9 @@
 //!
 //! Alerts, goals, the digest, Ask and shared boards keep the fixed windows
 //! ([`Window::Fixed`]), so their numbers do not move with each deploy.
+//!
+//! A board page or the API may also ask for a date range or a past
+//! release instead (#513, D-060, [`crate::board_range`]).
 
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 
@@ -22,7 +25,7 @@ pub const MAX_DAYS: i64 = 90;
 /// The window when the environment has no release, in days.
 pub const FALLBACK_DAYS: i64 = 14;
 
-const DAY: i64 = 86_400;
+pub(crate) const DAY: i64 = 86_400;
 
 /// The numbers compared between the window and the period before it.
 #[derive(Debug, Clone, Default, Serialize)]
@@ -42,6 +45,8 @@ pub struct BoardWindow {
     pub release: Option<String>,
     /// When the window starts (UTC, `YYYY-MM-DD HH:MM`).
     pub since: String,
+    /// When it ends (UTC, `YYYY-MM-DD HH:MM`); none: now (D-060).
+    pub until: Option<String>,
     /// Its length in days, rounded up.
     pub days: i64,
     /// The release is at least as old as the longest window (90 days),
@@ -53,6 +58,9 @@ pub struct BoardWindow {
     pub current: Period,
     /// The same length just before the window.
     pub previous: Period,
+    /// The environment's releases a window can be asked since, newest
+    /// first (`releases.list`): the board page's picker (D-060).
+    pub releases: Vec<String>,
 }
 
 /// A window with the spans its queries read.
@@ -66,22 +74,43 @@ pub(crate) struct Resolved {
     pub previous: Span,
 }
 
-/// The release window of `f` at `now`: the current release of the
-/// environment from `releases.list`, then [`window`].
+/// The window of the period blocks `f` asks for at `now`; none: the
+/// fixed windows. The release window (and a past release's) needs no
+/// release filter: a board filtered on one release already reads that
+/// release, and keeps the fixed windows (D-055). A date range applies
+/// with any filter (D-060).
 ///
 /// # Errors
-/// A failed query or an invalid time zone.
+/// A failed query, an invalid time zone, a range that is not allowed or
+/// a release the environment does not show.
 pub(crate) async fn resolve(
     q: &QueryEngine,
     project: &str,
     f: &Filters,
     now: DateTime<Utc>,
-) -> Result<Resolved> {
+) -> Result<Option<Resolved>> {
+    // A range is checked before any query runs.
+    let range = match &f.window {
+        Window::Fixed => return Ok(None),
+        Window::Release | Window::Since { .. } if f.release.is_some() => return Ok(None),
+        Window::Range { from, to } => Some(crate::board_range::range(&f.tz, *from, *to, now)?),
+        Window::Release | Window::Since { .. } => None,
+    };
     let rs = crate::releases::releases(q, project, &f.tz, Some(&f.environment), &[], &[]).await?;
-    Ok(window(
-        current_release(&rs.releases, &f.environment, &f.tz),
-        now,
-    ))
+    let mut r = match (range, &f.window) {
+        (Some(r), _) => r,
+        (None, Window::Since { release }) => {
+            crate::board_range::since(&rs.releases, &f.environment, &f.tz, release, now)?
+        }
+        (None, _) => window(current_release(&rs.releases, &f.environment, &f.tz), now),
+    };
+    r.window.releases = rs
+        .releases
+        .iter()
+        .filter(|x| x.environment == f.environment)
+        .map(|x| x.release.clone())
+        .collect();
+    Ok(Some(r))
 }
 
 /// The current release of `environment` and its first event: the newest
@@ -104,7 +133,7 @@ pub(crate) fn current_release(
 
 /// A `YYYY-MM-DD HH:MM` wall-clock time of the zone `tz` (UTC when it is
 /// not a zone), as UTC; the earlier one when the clock was set back.
-fn parse_local(s: &str, tz: &str) -> Option<DateTime<Utc>> {
+pub(crate) fn parse_local(s: &str, tz: &str) -> Option<DateTime<Utc>> {
     let naive = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M").ok()?;
     let zone = tz.parse::<chrono_tz::Tz>().unwrap_or(chrono_tz::UTC);
     zone.from_local_datetime(&naive)
@@ -152,10 +181,10 @@ pub(crate) fn window(current: Option<(String, DateTime<Utc>)>, now: DateTime<Utc
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn rel(name: &str, env: &str, state: State, first_seen: &str) -> Release {
+    pub(crate) fn rel(name: &str, env: &str, state: State, first_seen: &str) -> Release {
         Release {
             release: name.into(),
             environment: env.into(),

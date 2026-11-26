@@ -15,6 +15,7 @@ use serde_json::{Map, Value};
 mod acquisition;
 mod board;
 mod board_people;
+mod board_range;
 mod board_sessions;
 mod board_window;
 pub mod churn;
@@ -89,8 +90,8 @@ pub enum EngineError {
 /// Result alias.
 pub type Result<T> = std::result::Result<T, EngineError>;
 
-/// The time window of the board's period blocks (D-055).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, serde::Deserialize)]
+/// The time window of the board's period blocks (D-055, D-060).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Window {
     /// Each block keeps its fixed window (7, 14 or 30 days): what alerts,
@@ -101,6 +102,21 @@ pub enum Window {
     /// against the same length before it; the last 14 days against the 14
     /// before when the environment has no release: the board pages.
     Release,
+    /// From the first day to the last, both included, in the project's
+    /// days (D-017), against the same length before (D-060). At most 400
+    /// days, none in the future, within the 400 days kept (D-015).
+    Range {
+        /// First day.
+        from: chrono::NaiveDate,
+        /// Last day (today at the latest).
+        to: chrono::NaiveDate,
+    },
+    /// While `release` was the environment's newest: from its first event
+    /// to the first event of the next release, or now (D-060).
+    Since {
+        /// The release, one `releases.list` shows for the environment.
+        release: String,
+    },
 }
 
 /// Filters every board number honours. No other knobs (D-014).

@@ -98,3 +98,61 @@ async fn without_a_release_the_window_is_14_days_against_the_14_before() {
     assert!(w.previous.users > w.current.users, "three users then two");
     assert!(w.current.users > 0);
 }
+
+#[tokio::test]
+async fn a_date_range_or_a_past_release_narrows_the_period_blocks() {
+    // v1 three weeks ago, v2 for the last two days.
+    let (_d, q) = store(&[(Some("v1"), 0..3, 20 * 24), (Some("v2"), 0..2, 2 * 24)]);
+    let today = Utc::now().date_naive();
+    let range = Filters {
+        window: Window::Range {
+            from: today - Duration::days(21),
+            to: today - Duration::days(10),
+        },
+        ..Filters::default()
+    };
+    let b = board(&q, "p", &range, None).await.unwrap();
+    let w = b.window.as_ref().unwrap();
+    assert_eq!(w.days, 12);
+    assert!(w.label.starts_with("From "), "{}", w.label);
+    assert!(w.until.is_some(), "a range in the past has an end");
+    assert!(
+        w.current.users > w.previous.users,
+        "v1's users, none before"
+    );
+    assert_eq!(b.sessions.count, w.current.sessions.count);
+    let recent = Filters {
+        window: Window::Range {
+            from: today - Duration::days(3),
+            to: today,
+        },
+        ..Filters::default()
+    };
+    let r = board(&q, "p", &recent, None).await.unwrap();
+    assert!(
+        r.sessions.count < b.sessions.count,
+        "two sessions, not three"
+    );
+    let picker = &r.window.as_ref().unwrap().releases;
+    assert!(picker.contains(&"v1".to_owned()), "{picker:?}");
+    // A past release ends where the next one starts.
+    let on_v1 = Filters {
+        window: Window::Since {
+            release: "v1".into(),
+        },
+        ..Filters::default()
+    };
+    let p = board(&q, "p", &on_v1, None).await.unwrap();
+    let pw = p.window.as_ref().unwrap();
+    assert!(pw.label.starts_with("During v1"), "{}", pw.label);
+    assert!(pw.until.is_some());
+    // A range in the future is refused.
+    let ahead = Filters {
+        window: Window::Range {
+            from: today,
+            to: today + Duration::days(2),
+        },
+        ..Filters::default()
+    };
+    assert!(board(&q, "p", &ahead, None).await.is_err());
+}
