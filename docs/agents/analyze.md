@@ -19,6 +19,12 @@ Start from the summaries and drill down only where something stands out. Every t
 | Every feature at a glance | `map_overview`: status, uses, users, success (30 days vs the 30 before), areas, adoption ladder | `feature_context { key }` |
 | Everything about one feature | `feature_context { key }`: definition, findings, users and success by role, top pages, ladder, area peers, features used with it, use per release with the map version in force | `sql` |
 | Which features go together? | `feature_relations { feature? }`: lift, which comes first, leads to value (30 days of sessions, no cap) | `feature_context { key }` |
+| Who leaves, and who is about to? | `churn`: churn rate, survival, where leavers were last, who is at risk now, and the win-back flags already made | `winback_flag { holdout? }`, then `flag_update { key, enabled: true }` |
+| Where do users come from? | `acquisition { by?, touch? }`: users, value reached, returning and churned per channel, source, campaign or referrer | `user_timeline` of a user |
+| Where do people give up on a form? | `forms`: starts, submits, the field they stop at | the abandoned session's replay |
+| How do sessions move between features? | `flows { from?, to? }` | `feature_context { key }` |
+| Who uses the app, on what? Who is on it now? | `audience` (devices, browsers, OS, countries, languages, screens), `live` (last 5 and 30 minutes) | `kpi_report` with `by` |
+| Is the app up? Will alerts reach us? | `status` around a deploy; `alerts`: uptime, incidents, settings | `alert_set { …, test: true }` |
 | Anything else | `sql` (read-only DataFusion on `events`) | prune with `date >= 'YYYY-MM-DD'` |
 | Deep, offline analysis | `openlens-cli export --from --to --out events.jsonl` (raw events, day by day) | your own tools |
 

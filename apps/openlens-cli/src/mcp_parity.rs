@@ -21,45 +21,53 @@ const TOOL_OF: &[(&str, &str)] = &[
     ("tickets.draft", "create_ticket"),
     ("tickets.file", "create_ticket"),
     ("deploys.rotate_hook", "deploy_hook"),
+    // #525: the tools of `mcp_commands.rs`, and the existing tools whose
+    // REST route runs the command.
+    ("goals.delete", "delete_goal"),
+    ("goals.set_objective", "set_objective"),
+    ("goals.delete_objective", "delete_objective"),
+    ("alerts.status", "status"),
+    ("alerts.uptime", "alerts"),
+    ("alerts.settings", "alerts"),
+    ("alerts.set", "alert_set"),
+    ("alerts.test", "alert_set"),
+    ("tickets.target", "ticket_target"),
+    ("flags.list", "flags"),
+    ("flags.update", "flag_update"),
+    ("explore.person", "user_timeline"),
+    ("explore.breakdown", "kpi_report"),
+    ("explore.acquisition", "acquisition"),
+    ("explore.forms", "forms"),
+    ("explore.churn", "churn"),
+    ("explore.flag_audiences", "churn"),
+    ("explore.make_audience", "winback_flag"),
+    ("explore.vitals", "vitals"),
+    ("explore.audience", "audience"),
+    ("explore.flows", "flows"),
+    ("explore.live", "live"),
+    // `GET /api/projects/{id}/board` runs it for a date range or a past
+    // release before reading the board.
+    ("board.estimate", "board"),
 ];
 
-/// Commands with no MCP tool yet. Cut this list down by adding the tool.
+/// Commands deliberately without an MCP tool, each with its reason.
 const PENDING: &[&str] = &[
-    "goals.delete",
-    "goals.set_objective",
-    "goals.delete_objective",
-    "alerts.status",
-    "alerts.uptime",
-    "alerts.settings",
-    "alerts.set",
-    "alerts.test",
-    "tickets.target",
     // Run by the deploy hook (`/hooks/deploy/<secret>`), which a platform
     // calls, not an agent.
     "deploys.record",
-    // Ask's lookups and the flags commands (#508), explore (#507): the
-    // MCP tools still call the REST routes these commands back.
+    // Ask's own lookups, in Ask's fixed filters (D-057). Agents get the same
+    // data from `board`/`insights`, `feature_context`, `errors`, `vitals`,
+    // `goals` and `sql`, whose routes run other code.
     "ask.board",
     "ask.feature",
     "ask.errors",
     "ask.vitals",
     "ask.goals",
     "ask.sql",
-    "flags.list",
-    "flags.update",
-    "explore.person",
-    "explore.breakdown",
+    // The SQL page's query. The `sql` tool runs the same query through
+    // `POST /api/projects/{id}/sql`, which answers a busy engine with a 503
+    // and `Retry-After` where the command only has an error text.
     "explore.sql",
-    "explore.acquisition",
-    "explore.forms",
-    "explore.churn",
-    "explore.flag_audiences",
-    "explore.make_audience",
-    "explore.vitals",
-    "explore.audience",
-    "explore.flows",
-    "explore.live",
-    "board.estimate",
 ];
 
 /// Tools that are not engine commands yet: their logic still sits behind
@@ -81,13 +89,8 @@ const NOT_COMMANDS: &[&str] = &[
     "verify",
     "insights",
     "digest",
-    "kpi_report",
-    "user_timeline",
-    "board",
-    "vitals",
     "errors",
     "sql",
-    "flags",
     "flag_set",
     "surveys",
     "survey_set",
