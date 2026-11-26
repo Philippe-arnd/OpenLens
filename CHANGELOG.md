@@ -33,6 +33,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 - **`:0` image channel** (#198): each stable release also moves `ghcr.io/philippe-arnd/openlens:0`, every release of major 0 (the same as `:latest` until 1.0; from then on `:1` follows 1.x).
 
 ### Changed
+- CI: a pull request waits for the gate only (5 minutes at most); the browser e2e, the chart on kind and the self-hosting recipes run on release tags, nightly and on demand.
 
 - **Board people blocks read the daily per-person rollup** (#492, part of #452, D-040): users (DAU, WAU, MAU), known, anonymous, roles, role × feature, features and the daily active series read `person_day` for each closed day fully inside their window that was rolled up with the feature map in force, and the events for every other day (today, yesterday, the day the window starts in, a day not rolled up yet or rolled with an older map), so the numbers do not change. Blocks grouped by day (the daily series, feature user-days) use the rollup only when the project's time zone is on UTC midnight over the window. The other blocks still read the 90-day snapshot.
 - **The Coolify template follows the minor channel** (#198): `deploy/coolify/openlens.yaml` uses `:0.5` instead of `:latest`, so a redeploy brings fixes and never a behaviour change. Moving to the next minor is a choice, after its **Changed** section; `:latest` still follows every release.

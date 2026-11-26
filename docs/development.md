@@ -18,9 +18,11 @@ cargo xtask bench http://127.0.0.1:PORT KEY   # ingestion load test, see docs/be
 ```
 
 ## CI
-- **PR gate** (about 3 min): `cargo xtask ci` plus the SDK build, size budget and freshness. Browser e2e runs on PRs only when the SDK or capture changes.
-- **Nightly and on demand** (`gh workflow run ci.yml`):
+- **PR gate** (5 minutes at most, so active development never waits longer): `cargo xtask ci`, the SDK build, size budget and freshness, the RustSec advisories, and shellcheck of the deploy scripts. Nothing heavier runs on a pull request or on a push to `main`.
+- **Heavy pipelines: release tags (`v*`), nightly and on demand** (`gh workflow run ci.yml`, `k8s.yml`, `deploy-recipes.yml`):
   - the browser e2e;
+  - the chart on kind (`k8s.yml`);
+  - the self-hosting recipes in containers (`deploy-recipes.yml`);
   - every dashboard page in Chromium, light and dark, under the real CSP, which fails on any console error;
   - the reference apps in `examples/`, which must reach a green `verify`.
 - The screenshots are in the `dashboard-screens` artifact: `gh run download <run-id> -n dashboard-screens`.

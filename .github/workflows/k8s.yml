@@ -3,13 +3,10 @@ name: Kubernetes
 # The Helm chart on a real cluster (kind): install, helm test, send events,
 # upgrade, and check that events and the admin token survive. Publishes the
 # chart to oci://ghcr.io/philippe-arnd/charts on v* tags.
+# Heavy (a kind cluster): release tags, nightly and on demand only.
 on:
-  pull_request:
-    paths: ["deploy/helm/**", "deploy/k8s/**", ".github/workflows/k8s.yml"]
   push:
-    branches: [main]
     tags: ["v*"]
-    paths: ["deploy/helm/**", "deploy/k8s/**", ".github/workflows/k8s.yml"]
   schedule:
     - cron: "53 3 * * *"
   workflow_dispatch:
