@@ -13,6 +13,7 @@ mod audience;
 mod auth;
 pub mod backup;
 mod backups;
+mod board_query;
 pub mod boards;
 pub mod cache;
 mod capture;
