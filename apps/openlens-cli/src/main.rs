@@ -8,6 +8,7 @@
 mod convert;
 mod lint;
 mod mcp;
+mod mcp_commands;
 #[cfg(test)]
 mod mcp_parity;
 

@@ -317,6 +317,10 @@ impl Tools for OpenLensTools {
                 input_schema: json!({"type":"object","properties":{"email":{"type":"string"},"role":{"type":"string","enum":["viewer","admin"]},"projects":{"type":"array","items":{"type":"string"}}}}),
             },
         ]
+        .into_iter()
+        // Tools over the commands only a page ran before (#525).
+        .chain(crate::mcp_commands::specs())
+        .collect()
     }
 
     fn call(&self, name: &str, args: &Value) -> Result<Value, String> {
@@ -782,7 +786,9 @@ impl Tools for OpenLensTools {
                 let (st, v) = c.call("POST", "/api/login-links", body)?;
                 ok_or(st, v)
             }
-            _ => Err(format!("unknown tool {name}")),
+            // Tools over the commands only a page ran before (#525).
+            _ => crate::mcp_commands::call(c, name, args)
+                .unwrap_or_else(|| Err(format!("unknown tool {name}"))),
         }
     }
 }

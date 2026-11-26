@@ -6,7 +6,8 @@
 //!   It also carries `replay_rate`, the share of sessions the SDK records
 //!   from their start (#327).
 //! - Admin (bearer): `GET /api/projects/{id}/flags`,
-//!   `PUT|DELETE /api/projects/{id}/flags/{key}`.
+//!   `PUT|DELETE /api/projects/{id}/flags/{key}`, and `PATCH` to switch a
+//!   flag on or off or change its rollout (`flags.update`).
 //! - Dashboard: `POST /p/{id}/flags/{key}` (session, same-origin) to switch
 //!   a flag or change its rollout.
 
@@ -17,6 +18,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
+use openlens_engine::commands::{Caller, Command};
 use openlens_flags::{Flag, Subject};
 use serde::Deserialize;
 use serde_json::json;
@@ -28,7 +30,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/api/projects/{project}/flags", get(admin_list))
         .route(
             "/api/projects/{project}/flags/{key}",
-            put(admin_put).delete(admin_delete),
+            put(admin_put).delete(admin_delete).patch(admin_switch),
         )
         .route("/p/{project}/flags", get(page))
         .route("/p/{project}/flags/{key}", post(page_update))
@@ -185,7 +187,50 @@ async fn admin_list(
     if let Some(r) = guard(&state, &headers) {
         return r;
     }
-    Json(json!({ "flags": load(&state, &project).await })).into_response()
+    // `flags.list` (#525): the same rows as `load`.
+    let input = openlens_engine::commands::flags::ListInput { project };
+    match openlens_engine::commands::flags::List::run(&state, &Caller::default(), input).await {
+        Ok(flags) => Json(json!({ "flags": flags })).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct FlagSwitch {
+    #[serde(default)]
+    enabled: Option<bool>,
+    #[serde(default)]
+    rollout: Option<u8>,
+}
+
+/// `PATCH /api/projects/{id}/flags/{key}` (#525): `flags.update`, switch an
+/// existing flag on or off and/or set its rollout, the rest unchanged.
+async fn admin_switch(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((project, key)): Path<(String, String)>,
+    Json(b): Json<FlagSwitch>,
+) -> Response {
+    use openlens_engine::commands::flags::{Update, UpdateInput};
+    if let Some(r) = guard(&state, &headers) {
+        return r;
+    }
+    if project_exists(&state, &project).await.is_none() {
+        return err(StatusCode::NOT_FOUND, "unknown project");
+    }
+    if !load(&state, &project).await.iter().any(|f| f.key == key) {
+        return err(StatusCode::NOT_FOUND, "no such flag");
+    }
+    let input = UpdateInput {
+        project,
+        key,
+        enabled: b.enabled,
+        rollout: b.rollout,
+    };
+    match Update::run(&state, &Caller::default(), input).await {
+        Ok(f) => Json(json!({ "flag": f })).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()),
+    }
 }
 
 async fn admin_put(
