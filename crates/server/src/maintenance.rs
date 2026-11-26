@@ -71,19 +71,24 @@ fn api_failed(e: Error) -> Response {
     crate::apierr::json(status, m)
 }
 
-async fn api_open(state: &AppState, headers: &HeaderMap, id: &str) -> Result<String, Response> {
+async fn api_open(
+    state: &AppState,
+    headers: &HeaderMap,
+    id: &str,
+) -> Result<String, Box<Response>> {
     if let Some(r) = crate::api::guard(state, headers) {
-        return Err(r);
+        return Err(Box::new(r));
     }
-    crate::api::known_project(state, id)
-        .await
-        .map(|p| p.id)
-        .map_err(|r| *r)
+    crate::api::known_project(state, id).await.map(|p| p.id)
 }
 
-fn window_id(raw: &str) -> Result<i64, Response> {
-    raw.parse::<i64>()
-        .map_err(|_| crate::apierr::json(StatusCode::NOT_FOUND, "no such maintenance window"))
+fn window_id(raw: &str) -> Result<i64, Box<Response>> {
+    raw.parse::<i64>().map_err(|_| {
+        Box::new(crate::apierr::json(
+            StatusCode::NOT_FOUND,
+            "no such maintenance window",
+        ))
+    })
 }
 
 /// `GET /api/projects/{id}/maintenance`: `maintenance.list`.
@@ -94,7 +99,7 @@ async fn api_list(
 ) -> Response {
     let project = match api_open(&state, &headers, &id).await {
         Ok(p) => p,
-        Err(r) => return r,
+        Err(r) => return *r,
     };
     match cmd::List::run(&state, &Caller::default(), ListInput { project }).await {
         Ok(v) => Json(serde_json::json!({ "windows": v })).into_response(),
@@ -123,7 +128,7 @@ async fn api_schedule(
 ) -> Response {
     let project = match api_open(&state, &headers, &id).await {
         Ok(p) => p,
-        Err(r) => return r,
+        Err(r) => return *r,
     };
     let input = ScheduleInput {
         project: project.clone(),
@@ -162,11 +167,11 @@ async fn api_extend(
 ) -> Response {
     let project = match api_open(&state, &headers, &id).await {
         Ok(p) => p,
-        Err(r) => return r,
+        Err(r) => return *r,
     };
     let id = match window_id(&window) {
         Ok(w) => w,
-        Err(r) => return r,
+        Err(r) => return *r,
     };
     let input = ExtendInput {
         project: project.clone(),
@@ -211,11 +216,11 @@ async fn api_window(
 ) -> Response {
     let project = match api_open(state, headers, id).await {
         Ok(p) => p,
-        Err(r) => return r,
+        Err(r) => return *r,
     };
     let id = match window_id(window) {
         Ok(w) => w,
-        Err(r) => return r,
+        Err(r) => return *r,
     };
     let input = WindowInput {
         project: project.clone(),
