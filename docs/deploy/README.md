@@ -49,7 +49,8 @@ Releases before 0.6 are not signed. The provenance is SLSA Build level 2: the bu
   - binary + systemd: `openlens-update` and its daily timer check the checksum and the build provenance before installing, and go back to the previous release (and if needed to the upgrade backup) when the new one is not healthy ([systemd.md](systemd.md#hands-off-updates));
   - Docker Compose: `openlens-compose-update` from cron, back to the previous image on failure ([docker.md](docker.md#updates));
   - Swarm: `docker service update --image` from cron, rolled back by Swarm itself ([swarm.md](swarm.md#updates));
-  - Kubernetes and Coolify: see their guides.
+  - Kubernetes: the chart's opt-in `autoUpdate` CronJob restarts the pod on its channel tag (no automatic rollback), or Argo CD Image Updater / Flux bump the tag in Git ([kubernetes.md](kubernetes.md#hands-off-updates));
+  - Coolify: the template follows the minor channel; a redeploy pulls it ([coolify.md](coolify.md#updates)).
 
   Each one follows `:latest` or a minor channel, never `:edge`. When the previous version refuses the data (a new release changed the data format), only `openlens-update` restores the upgrade backup by itself; the guides say how to do it by hand elsewhere.
 - **The dashboard footer** says *Update available: vX.Y.Z*, from a daily check of GitHub's public releases API. Nothing about the install is sent. `OPENLENS_UPDATE_CHECK=off` disables the check.

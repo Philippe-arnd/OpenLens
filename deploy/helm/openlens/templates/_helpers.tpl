@@ -23,8 +23,32 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- default (printf "%s-admin" (include "openlens.fullname" .)) .Values.adminToken.existingSecret -}}
 {{- end -}}
 
+{{/* The minor channel of the chart's release: appVersion v0.5.0 -> 0.5. */}}
+{{- define "openlens.channel" -}}
+{{- $v := semver (trimPrefix "v" .Chart.AppVersion) -}}
+{{- printf "%d.%d" $v.Major $v.Minor -}}
+{{- end -}}
+
+{{/* With autoUpdate, an empty tag follows the minor channel instead of the
+    pinned release, so a restart can bring its patches (#198). */}}
+{{- define "openlens.tag" -}}
+{{- if .Values.image.tag -}}{{ .Values.image.tag }}
+{{- else if .Values.autoUpdate.enabled -}}{{ include "openlens.channel" . }}
+{{- else -}}{{ .Chart.AppVersion }}{{- end -}}
+{{- end -}}
+
 {{- define "openlens.image" -}}
-{{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}
+{{ .Values.image.repository }}:{{ include "openlens.tag" . }}
+{{- end -}}
+
+{{/* A channel tag only moves if the node pulls it again. */}}
+{{- define "openlens.pullPolicy" -}}
+{{- if .Values.autoUpdate.enabled -}}Always{{- else -}}{{ .Values.image.pullPolicy }}{{- end -}}
+{{- end -}}
+
+{{/* kubectl for the auto-update Job: Kubernetes' own image (no shell). */}}
+{{- define "openlens.kubectlImage" -}}
+registry.k8s.io/kubectl:v1.33.0
 {{- end -}}
 
 {{/* `/readyz` only exists from v0.3.0 (#399, NOPS-01): pinning an older
@@ -32,7 +56,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
     tag that is not a plain semver (`latest`, a digest, a custom build) is
     assumed current. */}}
 {{- define "openlens.readinessPath" -}}
-{{- $v := default .Chart.AppVersion .Values.image.tag -}}
+{{- $v := include "openlens.tag" . -}}
 {{- if regexMatch "^v?[0-9]+\\.[0-9]+\\.[0-9]+" $v -}}
 {{- if semverCompare ">=0.3.0" $v -}}/readyz{{- else -}}/healthz{{- end -}}
 {{- else -}}/readyz{{- end -}}
