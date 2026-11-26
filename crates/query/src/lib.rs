@@ -15,9 +15,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use arrow::array::{RecordBatch, StringArray, cast::AsArray};
 use arrow::datatypes::DataType;
-use datafusion::common::DataFusionError;
 use datafusion::datasource::MemTable;
 use datafusion::datasource::file_format::parquet::ParquetFormat;
 use datafusion::datasource::listing::{
@@ -25,7 +23,6 @@ use datafusion::datasource::listing::{
 };
 use datafusion::execution::memory_pool::{FairSpillPool, MemoryConsumer, MemoryReservation};
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
-use datafusion::logical_expr::{ColumnarValue, ScalarUDF, Volatility, create_udf};
 use datafusion::prelude::{SQLOptions, SessionConfig, SessionContext};
 use futures::StreamExt;
 
