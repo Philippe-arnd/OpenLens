@@ -18,6 +18,7 @@ use serde::de::DeserializeOwned;
 use crate::{Board, Filters};
 
 pub mod alerts;
+pub mod deploys;
 pub mod goals;
 pub mod releases;
 pub mod tickets;
@@ -90,6 +91,8 @@ pub const REGISTRY: &[Spec] = &[
     spec::<tickets::DraftTicket>(),
     spec::<tickets::File>(),
     spec::<tickets::SetTarget>(),
+    spec::<deploys::RotateHook>(),
+    spec::<deploys::Record>(),
 ];
 
 /// A 12-character id from `s` (the first bytes of its SHA-256, in hex).

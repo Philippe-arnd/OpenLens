@@ -1,12 +1,18 @@
 //! Releases (#500, D-049): the Releases page and `GET
 //! /api/projects/{id}/releases`. Both run the engine's `releases.list`
 //! command; these handlers adapt it to HTML and JSON.
+//!
+//! The deploy hook's URL (#504, D-053) is made and rotated here too, on
+//! the page (`POST /p/{id}/releases/hook`) and the API (`POST
+//! /api/projects/{id}/deploy-hook`): the engine's `deploys.rotate_hook`.
+//! The URL is shown once, in the response, never in a redirect.
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{Form, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
+use openlens_engine::commands::deploys::{ProjectInput, RotateHook};
 use openlens_engine::commands::releases::{List, ListInput};
 use openlens_engine::commands::{Caller, Command, Error, Host};
 use serde::Deserialize;
@@ -18,6 +24,8 @@ pub(crate) fn routes() -> Router<AppState> {
     Router::new()
         .route("/p/{project}/releases", get(page))
         .route("/api/projects/{project}/releases", get(api))
+        .route("/p/{project}/releases/hook", post(rotate_page))
+        .route("/api/projects/{project}/deploy-hook", post(rotate_api))
 }
 
 #[derive(Deserialize, Default)]
@@ -29,31 +37,44 @@ pub(crate) struct EnvQuery {
 
 /// `GET /p/{id}/releases`.
 pub(crate) async fn page(
-    _: crate::access::Signed,
+    crate::access::Signed(viewer): crate::access::Signed,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
     Query(q): Query<EnvQuery>,
 ) -> Response {
-    let Some(p) = state.project(&id).await else {
+    render(&state, &headers, &id, q.env, viewer.admin, None).await
+}
+
+/// The Releases page; `new_url` is a deploy hook URL just made, shown once.
+async fn render(
+    state: &AppState,
+    headers: &HeaderMap,
+    id: &str,
+    env: Option<String>,
+    admin: bool,
+    new_url: Option<&str>,
+) -> Response {
+    let Some(p) = state.project(id).await else {
         return html_page(
             StatusCode::NOT_FOUND,
             openlens_ui::message("Not found", "No such project."),
         );
     };
-    let caller = crate::commands::caller(&state, &headers);
+    let caller = crate::commands::caller(state, headers);
     let input = ListInput {
         project: p.id.clone(),
-        environment: q.env,
+        environment: env,
     };
-    match List::run(&state, &caller, input).await {
+    match List::run(state, &caller, input).await {
         Ok(r) => {
             let info = openlens_ui::ProjectInfo {
                 id: &p.id,
                 name: &p.name,
                 key: &p.api_key,
             };
-            html_page(StatusCode::OK, openlens_ui::releases(&info, &r))
+            let hook = openlens_ui::HookView { admin, new_url };
+            html_page(StatusCode::OK, openlens_ui::releases(&info, &r, &hook))
         }
         Err(e) => html_page(
             StatusCode::BAD_REQUEST,
@@ -80,6 +101,90 @@ pub(crate) async fn api(
         Ok(r) => Json(r).into_response(),
         Err(Error::NotFound) => crate::apierr::json(StatusCode::NOT_FOUND, "unknown project"),
         Err(Error::Invalid(m)) => crate::apierr::json(StatusCode::BAD_REQUEST, m),
+        Err(e) => crate::apierr::json(StatusCode::SERVICE_UNAVAILABLE, e.to_string()),
+    }
+}
+
+#[derive(Deserialize, Default)]
+pub(crate) struct RotateForm {
+    #[serde(default)]
+    confirm: String,
+}
+
+/// `POST /p/{id}/releases/hook`: make the deploy hook URL, or rotate it
+/// (the box must be ticked: the old URL stops working at once). The page
+/// comes back with the new URL, shown once.
+pub(crate) async fn rotate_page(
+    _: crate::access::ProjectWrite,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Form(f): Form<RotateForm>,
+) -> Response {
+    let had = state.meta.deploy_hook_since(&id).ok().flatten().is_some();
+    if had && f.confirm != "yes" {
+        return html_page(
+            StatusCode::BAD_REQUEST,
+            openlens_ui::message(
+                "Can't do that",
+                "Tick the box: the old URL stops working at once.",
+            ),
+        );
+    }
+    match RotateHook::run(
+        &state,
+        &Caller::default(),
+        ProjectInput {
+            project: id.clone(),
+        },
+    )
+    .await
+    {
+        Ok(s) => {
+            crate::privacy::audit(&state, &headers, Some(&id), "deploys.rotate_hook", "");
+            let url = crate::hooks::url(&headers, &s.secret);
+            render(&state, &headers, &id, None, true, Some(&url)).await
+        }
+        Err(Error::NotFound) => html_page(
+            StatusCode::NOT_FOUND,
+            openlens_ui::message("Not found", "No such project."),
+        ),
+        Err(e) => html_page(
+            StatusCode::SERVICE_UNAVAILABLE,
+            openlens_ui::message("Can't do that", &e.to_string()),
+        ),
+    }
+}
+
+/// `POST /api/projects/{id}/deploy-hook` (bearer, write): a new deploy
+/// hook URL; the old one stops working at once. The URL is in this
+/// response only.
+pub(crate) async fn rotate_api(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    if !auth::has_bearer(&state, &headers) {
+        return crate::apierr::json(StatusCode::UNAUTHORIZED, "admin bearer token required");
+    }
+    match RotateHook::run(
+        &state,
+        &Caller::default(),
+        ProjectInput {
+            project: id.clone(),
+        },
+    )
+    .await
+    {
+        Ok(s) => {
+            crate::privacy::audit(&state, &headers, Some(&id), "deploys.rotate_hook", "");
+            Json(serde_json::json!({
+                "url": crate::hooks::url(&headers, &s.secret),
+                "note": "Shown once. Paste it in the platform's deploy notifications; the previous URL no longer works.",
+            }))
+            .into_response()
+        }
+        Err(Error::NotFound) => crate::apierr::json(StatusCode::NOT_FOUND, "unknown project"),
         Err(e) => crate::apierr::json(StatusCode::SERVICE_UNAVAILABLE, e.to_string()),
     }
 }

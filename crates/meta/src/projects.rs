@@ -164,6 +164,8 @@ impl Meta {
                 "share_links",
                 "notes",
                 "release_builds",
+                "deploy_hooks",
+                "deploys",
             ] {
                 tx.execute(&format!("DELETE FROM {table} WHERE project = ?1"), [id])?;
             }

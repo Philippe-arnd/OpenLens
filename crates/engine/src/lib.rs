@@ -18,6 +18,7 @@ mod board_people;
 mod board_sessions;
 pub mod churn;
 pub mod commands;
+pub mod deploys;
 mod digest;
 mod drift;
 pub mod environments;

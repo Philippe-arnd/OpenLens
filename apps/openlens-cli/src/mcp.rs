@@ -201,8 +201,13 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "releases",
-                description: "The app's releases per environment over 90 days: state (rolling out, live at 95 % or more of the latest day's users, superseded by a newer release, rolled back when an older release took the majority back), share of the latest day, first and last seen, users, events, and for production the time in staging (from the same name or build fingerprint first seen in staging). Optional env for one environment.",
+                description: "The app's releases per environment over 90 days: state (rolling out, live at 95 % or more of the latest day's users, superseded by a newer release, rolled back when an older release took the majority back), share of the latest day, first and last seen, users, events, and for production the time in staging (from the same name or build fingerprint first seen in staging). With the deploy hook: each release's deploy time and last deploy status, the deploys recorded, and releases with no traffic whose deploy failed ('failed'), was rolled back, or is under way ('deploying'). Optional env for one environment.",
                 input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"}}))}),
+            },
+            ToolSpec {
+                name: "deploy_hook",
+                description: "Make or rotate the app's deploy hook URL (/hooks/deploy/SECRET), shown in this result only: the previous URL stops working at once. Paste it in the platform's deploy notifications (Coolify, Vercel, Netlify, Render, GitHub deployment_status, Argo CD, Flux), or post {status: started|succeeded|failed|rolled_back, release?, commit?, environment?, at?} to it from a deploy step; add ?env=NAME when the platform does not say the environment. Deploys then show in `releases`.",
+                input_schema: json!({"type":"object","properties":proj}),
             },
             ToolSpec {
                 name: "create_ticket",
@@ -466,6 +471,14 @@ impl Tools for OpenLensTools {
                     "POST",
                     &format!("/api/projects/{}/tickets", project(args)),
                     Some(Body::Json(body)),
+                )?;
+                ok_or(st, v)
+            }
+            "deploy_hook" => {
+                let (st, v) = c.call(
+                    "POST",
+                    &format!("/api/projects/{}/deploy-hook", project(args)),
+                    None,
                 )?;
                 ok_or(st, v)
             }
