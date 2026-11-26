@@ -24,6 +24,21 @@ Numbers to keep OpenLens honest about "lean". Re-run them when ingestion, storag
 | 368 k events, with identities (2026-11-22) | about **0.8 s** (1.7 s before #159) |
 | 2.2 M events, with identities | about **3.7 s** (6–7 s before #190), peak memory 800 MB |
 
+### At scale, under a memory cap (#460, 2026-11-26)
+
+The `scale` job of `perf.yml`, on GitHub's hosted runners (a quiet 4-vCPU machine), `main` at `3b0d8ec` (lot A of #442 and DataFusion 55). Realistic profile of `xtask bench-gen` (#443), 90 days, map pushed. The server is capped with a cgroup v2 `memory.max` (what a container limit does; the query budget follows it, D-033), left to finish its rollups, then the cold board is measured three times, each after a restart. [Run 45730285319](https://github.com/Philippe-arnd/OpenLens/actions/runs/45730285319).
+
+| Events (people) | Cap | Cold board (3 runs) | Server CPU for it | Peak RSS | Data on disk |
+| --- | --- | --- | --- | --- | --- |
+| 1 M (5,420) | 1 GiB | 0.81 / 0.81 / 0.87 s | 3.2 s | 394–419 MB | 52 MB |
+| 1 M (5,420) | 2 GiB | 1.25 / 1.25 / 1.26 s | 4.9 s | 381–387 MB | 52 MB |
+| 2 M (11,037) | 1 GiB | 2.64 / 2.54 / 2.50 s | 9.8–10.2 s | 601–613 MB | 102 MB |
+| 2 M (11,037) | 2 GiB | 1.82 / 1.86 / 1.85 s | 7.1–7.2 s | 609–627 MB | 102 MB |
+| 4 M (22,230) | 1 GiB | 7.16 / 2.12 / 4.31 s | 8.1–13.5 s | 1,051–1,070 MB | 193 MB |
+| 4 M (22,230) | 2 GiB | 3.19 / 3.21 / 3.23 s | 12.4–12.7 s | 1,046–1,070 MB | 193 MB |
+
+Every board answered (HTTP 200); none ran out of memory. Memory grows by about 220 MB per million events in the window. At 4 M under 1 GiB the process works at its limit and the times scatter (the kernel reclaims file pages); with 2 GiB they are steady. On most rows the job's second request took about as long as the first, so it did not hit the board's cache; why is not established yet, and warm times are left out here.
+
 **With identities:** `xtask bench` sends realistic visits since #159. A third of the users browse anonymously before logging in, `$identify` links that visit, and one event in seven comes from a visitor who never logs in. So the board pays for the `persons` and `person_aliases` joins like a real app does.
 
 The board takes one in-memory snapshot of the 90-day projection, then filters it for every query (#75). The snapshot keeps only the columns the board reads, and `properties` only for `$vital` events: about 160 bytes per event (#190). Above 4 M rows in the window, about 650 MB, it reads the files instead, so memory stays bounded, at the cost of reading them once per query. At 2.2 M events, building the snapshot takes about 1.5 s, and the twenty queries take about 2 s on one core.
