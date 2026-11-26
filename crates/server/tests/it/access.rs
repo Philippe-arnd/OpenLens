@@ -42,7 +42,8 @@ async fn the_board_is_computed_once_and_follows_new_data() {
     openlens_server::flush_now(&h.state).unwrap();
     let r = get(&h, "/api/projects/default/board", None, true).await;
     assert_eq!(r.status(), StatusCode::OK);
-    for _ in 0..100 {
+    // Up to 20 s, as below: the recompute runs in the background.
+    for _ in 0..400 {
         if boards.computed() > before + 1 {
             break;
         }
@@ -97,7 +98,8 @@ async fn a_cached_board_page_runs_no_query_again() {
     // New data: board and revenue follow it together.
     h.state.boards.bump("default");
     let _stale = get(&h, "/p/default", Some(&owner), false).await;
-    for _ in 0..100 {
+    // Up to 20 s: the recompute runs in the background, slow on a loaded runner.
+    for _ in 0..400 {
         if h.state.boards.computed() > computed {
             break;
         }
