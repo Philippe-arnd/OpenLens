@@ -18,8 +18,10 @@ use openlens_meta::{Check, Meta, Project};
 use openlens_query::QueryEngine;
 use serde::{Deserialize, Serialize};
 
+use super::maintenance::MaintenanceWindow;
 use super::{Access, Caller, Command, Error, Host, short_hash};
 use crate::environments::{NOTIFY, incident_rule, split_incident_rule};
+use crate::maintenance::{PRODUCTION, counted, overlap_seconds, running_at};
 
 /// One project's alert settings (`project:<id>:alerts`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -117,12 +119,16 @@ impl Settings {
 /// The app's state for the status chip and the API.
 #[derive(Debug, Clone, Serialize)]
 pub struct Status {
-    /// `up`, `down`, `unknown` (no probe yet) or `off` (no address).
+    /// `up`, `down`, `maintenance` (a planned window covers production
+    /// now, #563), `unknown` (no probe yet) or `off` (no address).
     pub state: &'static str,
     /// Since when (Unix seconds), when known.
     pub since: Option<i64>,
     /// Open incidents: (rule, started_at, cause).
     pub open: Vec<(String, i64, String)>,
+    /// Maintenance windows running now or starting within 7 days, any
+    /// component (#563), dates in the project's zone.
+    pub maintenance: Vec<MaintenanceWindow>,
 }
 
 /// The app's state now.
@@ -142,7 +148,18 @@ pub fn status(m: &Meta, project: &str) -> Status {
         .flatten()
         .is_some();
     let last = m.checks(project, now - 600).unwrap_or_default();
-    let st = if open.iter().any(|o| o.0 == "down" || o.0 == "traffic") {
+    let tz = m
+        .project(project)
+        .ok()
+        .flatten()
+        .map_or_else(|| "UTC".to_owned(), |p| p.timezone);
+    let windows = m
+        .maintenance_windows(project, now, now + 7 * 86400)
+        .unwrap_or_default();
+    let planned = running_at(&windows, PRODUCTION, now);
+    let st = if planned.is_some() {
+        "maintenance"
+    } else if open.iter().any(|o| o.0 == "down" || o.0 == "traffic") {
         "down"
     } else if !has_url && last.is_empty() {
         "off"
@@ -153,11 +170,16 @@ pub fn status(m: &Meta, project: &str) -> Status {
     };
     Status {
         state: st,
-        since: open
+        since: planned.map(|w| w.starts_at).or_else(|| {
+            open.iter()
+                .find(|o| o.0 == "down" || o.0 == "traffic")
+                .or(open.first())
+                .map(|o| o.1)
+        }),
+        maintenance: windows
             .iter()
-            .find(|o| o.0 == "down" || o.0 == "traffic")
-            .or(open.first())
-            .map(|o| o.1),
+            .map(|w| MaintenanceWindow::of(w, now, &tz))
+            .collect(),
         open,
     }
 }
@@ -201,6 +223,9 @@ pub struct UptimeIncident {
     pub minutes: i64,
     /// What happened.
     pub cause: String,
+    /// It started during planned maintenance of its component (#563): it
+    /// was not announced while the window ran.
+    pub planned: bool,
 }
 
 /// What the Uptime page shows (#256).
@@ -210,8 +235,15 @@ pub struct Uptime {
     pub status: Status,
     /// The address the probe asks for, when the probe is on.
     pub url: Option<String>,
-    /// Share of successful checks over the last day and week.
+    /// Share of successful checks over the last day and week, the checks
+    /// during planned maintenance of production left out (#563, D-075).
     pub avail: (Option<f64>, Option<f64>),
+    /// Seconds of planned maintenance of production left out of the
+    /// availability of the last day and week.
+    pub maintenance_left_out: (i64, i64),
+    /// Planned and running maintenance windows, and those ended within 7
+    /// days, by start (dates in the project's zone).
+    pub maintenance: Vec<MaintenanceWindow>,
     /// Median and 95th percentile response time over the last day (ms).
     pub ms: (Option<i64>, Option<i64>),
     /// Incidents of the last 30 days.
@@ -242,8 +274,24 @@ impl Command for GetUptime {
             .flatten()
             .filter(|_| settings.down)
             .map(|o| format!("{o}{}", settings.health_path));
-        let week = meta.checks(&p.id, now - 7 * 86400).unwrap_or_default();
-        let day: Vec<_> = week.iter().filter(|c| c.0 >= now - 86400).collect();
+        let all = meta.checks(&p.id, now - 7 * 86400).unwrap_or_default();
+        // Planned maintenance is not counted (#563, D-075).
+        let windows = meta
+            .maintenance_windows(
+                &p.id,
+                now - 7 * 86400,
+                now + super::maintenance::MAX_AHEAD_DAYS * 86400,
+            )
+            .unwrap_or_default();
+        let week_refs = counted(&all, &windows, PRODUCTION);
+        let day: Vec<&Check> = week_refs
+            .iter()
+            .copied()
+            .filter(|c| c.0 >= now - 86400)
+            .collect();
+        let incident_windows = meta
+            .maintenance_windows(&p.id, now - 30 * 86400, now)
+            .unwrap_or_default();
         let share = |v: &[&Check]| {
             (!v.is_empty()).then(|| v.iter().filter(|c| c.1).count() as f64 / v.len() as f64)
         };
@@ -257,11 +305,18 @@ impl Command for GetUptime {
                 })
                 .flatten()
         };
-        let week_refs: Vec<_> = week.iter().collect();
         Ok(Uptime {
             status: st,
             url,
             avail: (share(&day), share(&week_refs)),
+            maintenance_left_out: (
+                overlap_seconds(&windows, PRODUCTION, now - 86400, now),
+                overlap_seconds(&windows, PRODUCTION, now - 7 * 86400, now),
+            ),
+            maintenance: windows
+                .iter()
+                .map(|w| MaintenanceWindow::of(w, now, &p.timezone))
+                .collect(),
             ms: (pct(0.5), pct(0.95)),
             incidents: meta
                 .incidents(&p.id, now - 30 * 86400)
@@ -269,13 +324,15 @@ impl Command for GetUptime {
                 .into_iter()
                 .map(|(rule, start, end, cause, _)| UptimeIncident {
                     minutes: (end.unwrap_or(now) - start).max(0) / 60,
+                    planned: crate::maintenance::held_component(&rule)
+                        .is_some_and(|c| running_at(&incident_windows, c, start).is_some()),
                     rule,
                     start,
                     end,
                     cause,
                 })
                 .collect(),
-            last: week.iter().rev().take(15).cloned().collect(),
+            last: all.iter().rev().take(15).cloned().collect(),
         })
     }
 }
@@ -459,6 +516,9 @@ pub async fn flush_queue<H: Host>(host: &H, project: &str, s: &Settings) {
 
 /// Open the rule's incident when `failing`, close it when not; announce
 /// it once it has lasted `wait` seconds, and announce its end if it was.
+/// During a planned maintenance window of its component (#563, D-075)
+/// the incident opens but is neither announced nor reminded; still
+/// failing when the window ends, it is announced from then.
 pub async fn track<H: Host>(
     host: &H,
     project: &str,
@@ -468,8 +528,38 @@ pub async fn track<H: Host>(
     cause: &str,
     wait: i64,
 ) {
-    let m = host.meta();
     let now = chrono::Utc::now().timestamp();
+    let seen = Seen {
+        rule,
+        failing,
+        cause,
+        wait,
+    };
+    track_at(host, project, name, &seen, now).await;
+}
+
+/// One check's result, as [`track`] takes it.
+#[derive(Debug, Clone, Copy)]
+pub struct Seen<'a> {
+    /// The incident rule.
+    pub rule: &'a str,
+    /// Failing now.
+    pub failing: bool,
+    /// What happened.
+    pub cause: &'a str,
+    /// Seconds an incident lasts before it is announced.
+    pub wait: i64,
+}
+
+/// [`track`] at `now` (Unix seconds).
+pub async fn track_at<H: Host>(host: &H, project: &str, name: &str, seen: &Seen<'_>, now: i64) {
+    let Seen {
+        rule,
+        failing,
+        cause,
+        wait,
+    } = *seen;
+    let m = host.meta();
     let open = m.open_incident(project, rule).ok().flatten();
     let env_name;
     let name = match split_incident_rule(rule) {
@@ -481,18 +571,29 @@ pub async fn track<H: Host>(
     };
     // At the `log` level an incident is recorded, never announced.
     let announce = announced(host, project, rule);
+    // Planned maintenance holds it: recorded, not announced (#563).
+    let held = crate::maintenance::holding(m, project, rule, now).is_some();
     match (open, failing) {
         (None, true) => {
             let _ = m.start_incident(project, rule, now, cause);
         }
-        (Some(_), true) if !announce => {}
+        (Some(_), true) if !announce || held => {}
         (Some((id, started, notified)), true) => {
             let since = chrono::DateTime::from_timestamp(started, 0)
                 .map_or_else(String::new, |t| t.format("%Y-%m-%d %H:%M").to_string());
             if !notified && now - started >= wait {
                 let _ = m.incident_notified(id, now);
                 let title = format!("🔴 {name} {}", label(rule));
-                let body = format!("Since {since} UTC: {cause}\nSee Uptime in OpenLens.");
+                let after = crate::maintenance::ended_between(m, project, rule, started, now)
+                    .and_then(|t| chrono::DateTime::from_timestamp(t, 0))
+                    .map(|t| {
+                        format!(
+                            "\nStill failing after the planned maintenance that ended at {} UTC.",
+                            t.format("%H:%M")
+                        )
+                    })
+                    .unwrap_or_default();
+                let body = format!("Since {since} UTC: {cause}{after}\nSee Uptime in OpenLens.");
                 notify(host, project, &title, &body, rule, false).await;
             } else if notified
                 && !rule.starts_with("insight:")

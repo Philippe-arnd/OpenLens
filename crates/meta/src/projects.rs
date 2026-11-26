@@ -167,6 +167,7 @@ impl Meta {
                 "release_maps",
                 "deploy_hooks",
                 "deploys",
+                "maintenance_windows",
             ] {
                 tx.execute(&format!("DELETE FROM {table} WHERE project = ?1"), [id])?;
             }

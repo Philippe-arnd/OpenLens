@@ -51,6 +51,12 @@ const TOOL_OF: &[(&str, &str)] = &[
     // release before reading the board.
     ("board.estimate", "board"),
     ("releases.record", "record_release"),
+    // Planned maintenance (#563).
+    ("maintenance.list", "maintenance"),
+    ("maintenance.schedule", "maintenance_set"),
+    ("maintenance.extend", "maintenance_set"),
+    ("maintenance.end_now", "maintenance_set"),
+    ("maintenance.cancel", "maintenance_set"),
 ];
 
 /// Commands deliberately without an MCP tool, each with its reason.
