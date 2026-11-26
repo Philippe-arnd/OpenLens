@@ -28,14 +28,12 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
-  bench:
-    name: ingestion and board
+  # The perf build, once per run: `bench` and every `scale` job download
+  # these three binaries instead of compiling them again.
+  build:
+    name: perf build
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    permissions:
-      contents: read
-      actions: read
-      issues: write
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
@@ -44,17 +42,44 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           shared-key: perf
-      - run: cargo build --profile perf -p openlens -p xtask
+      - run: cargo build --profile perf -p openlens -p openlens-cli -p xtask
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: perf-bin
+          path: |
+            target/perf/openlens
+            target/perf/openlens-cli
+            target/perf/xtask
+          if-no-files-found: error
+          retention-days: 1
+
+  bench:
+    name: ingestion and board
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: perf-bin
+          path: bin
+      # An artifact does not keep the exec bit.
+      - run: chmod +x bin/openlens bin/openlens-cli bin/xtask
       - name: run
         run: |
           set -euo pipefail
-          D="$RUNNER_TEMP/data"; ./target/perf/xtask demo "$D"
-          OPENLENS_DATA_DIR="$D" OPENLENS_ADDR=127.0.0.1:18740 OPENLENS_ADMIN_TOKEN=perf ./target/perf/openlens > server.log 2>&1 &
+          D="$RUNNER_TEMP/data"; ./bin/xtask demo "$D"
+          OPENLENS_DATA_DIR="$D" OPENLENS_ADDR=127.0.0.1:18740 OPENLENS_ADMIN_TOKEN=perf ./bin/openlens > server.log 2>&1 &
           for _ in $(seq 60); do curl -sf 127.0.0.1:18740/healthz > /dev/null && break; sleep 1; done
           KEY=$(curl -sf -H "authorization: Bearer perf" 127.0.0.1:18740/api/projects | python3 -c 'import json,sys; d=json.load(sys.stdin); d=d.get("projects", d); print(next(p for p in d if p["id"]=="default")["key"])')
-          ./target/perf/xtask bench http://127.0.0.1:18740 "$KEY" 60 4 50 > ingest.json
+          ./bin/xtask bench http://127.0.0.1:18740 "$KEY" 60 4 50 > ingest.json
           export OPENLENS_BENCH_COOKIE=$(curl -si -XPOST 127.0.0.1:18740/login -d token=perf | tr -d '\r' | sed -n 's/^[Ss]et-[Cc]ookie: \(ol_session=[^;]*\).*/\1/p')
-          ./target/perf/xtask bench http://127.0.0.1:18740 "$KEY" 60 4 50 --with-board default > with_board.json
+          ./bin/xtask bench http://127.0.0.1:18740 "$KEY" 60 4 50 --with-board default > with_board.json
           python3 -c 'import json; print(json.dumps({"sha": "'"$GITHUB_SHA"'", "ingest": json.load(open("ingest.json")), "with_board": json.load(open("with_board.json"))}))' > perf.json
           cat perf.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -91,10 +116,13 @@ jobs:
 
   # Board latency and memory at scale (#321), by hand only: a synthetic app
   # written by `xtask bench-gen`, then the board computed cold and warm,
-  # with the server's peak memory. One job per (events, memory cap): the
-  # cap is a cgroup v2 limit, which the server reads for its query budget
-  # (#444). The server is left to finish its rollups before measuring, and
-  # the cold board is measured three times, each after a restart (#460).
+  # with the server's peak memory. One job per event count: the app is
+  # generated once (or restored from the cache), then each memory cap is
+  # measured in turn on a fresh copy of it (.github/scripts/perf-scale-cap.sh).
+  # The cap is a cgroup v2 limit, which the server reads for its query
+  # budget (#444). The server is left to finish its rollups before
+  # measuring, and the cold board is measured three times, each after a
+  # restart (#460). Each cap keeps its own artifact, scale-EVENTS-CAP.
   scale-matrix:
     name: scale plan
     if: github.event_name == 'workflow_dispatch' && inputs.scale_events != '0'
@@ -110,136 +138,107 @@ jobs:
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json, os, re
           ev = [e for e in os.environ["EVENTS"].replace(" ", "").split(",") if re.fullmatch(r"[0-9]{1,9}", e)]
-          mem = [m for m in os.environ["MEMORY"].replace(" ", "").split(",") if re.fullmatch(r"[0-9]{1,4}[MG]", m)] or [""]
-          print("plan=" + json.dumps([{"events": e, "memory": m} for e in ev[:4] for m in mem[:3]]))
+          mem = [m for m in os.environ["MEMORY"].replace(" ", "").split(",") if re.fullmatch(r"[0-9]{1,4}[MG]", m)][:3] or ["nocap"]
+          c = (mem + ["", ""])[:3]
+          print("plan=" + json.dumps([{"events": e, "caps": " ".join(mem), "c0": c[0], "c1": c[1], "c2": c[2]} for e in ev[:4]]))
           PY
 
   scale:
-    name: board at scale (${{ matrix.events }} events, cap ${{ matrix.memory || 'none' }})
-    needs: scale-matrix
+    name: board at scale (${{ matrix.events }} events, caps ${{ matrix.caps }})
+    needs: [build, scale-matrix]
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    # Up to three caps in a row, each with up to three 30-minute idle waits.
+    timeout-minutes: 330
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.scale-matrix.outputs.plan) }}
+    env:
+      EVENTS: ${{ matrix.events }}
+      PROFILE: ${{ inputs.scale_profile }}
+      GEN: ${{ github.workspace }}/.scale-gen
+      BIN: ${{ github.workspace }}/bin
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          toolchain: stable
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+          name: perf-bin
+          path: bin
+      # An artifact does not keep the exec bit.
+      - run: chmod +x bin/openlens bin/openlens-cli bin/xtask
+      # bench-gen writes the 90 days before now and rolls up the closed
+      # ones, so the app depends on the UTC day: the cache only serves runs
+      # of the same day (a dispatch again with other caps, a re-run).
+      - id: day
+        run: echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+      - id: cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
-          shared-key: perf
-      - run: cargo build --profile perf -p openlens -p openlens-cli -p xtask
-      - name: generate and measure
-        env:
-          EVENTS: ${{ matrix.events }}
-          MEMORY: ${{ matrix.memory }}
-          PROFILE: ${{ inputs.scale_profile }}
+          path: ${{ env.GEN }}
+          key: scale-data-v1-${{ matrix.events }}-${{ inputs.scale_profile || 'default' }}-${{ steps.day.outputs.day }}-${{ hashFiles('xtask/src/bench_gen.rs', 'crates/query/src/rollup.rs', 'crates/storage/src/**', 'crates/testkit/src/**', 'Cargo.lock') }}
+      - name: generate
+        id: gen
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          D="$RUNNER_TEMP/scale"
+          rm -rf "$GEN"; mkdir -p "$GEN"
           gen_start=$(date +%s)
-          args=(--events "$EVENTS" --map-out map.yaml)
+          args=(--events "$EVENTS" --map-out "$GEN/map.yaml")
           [ "$PROFILE" = realistic ] && args+=(--profile realistic)
-          ./target/perf/xtask bench-gen "$D" "${args[@]}" > gen.json
-          gen_secs=$(( $(date +%s) - gen_start ))
-          # The memory cap: this shell and the server it starts go into a
-          # cgroup with memory.max (no swap), as a container limit would.
-          if [ -n "$MEMORY" ]; then
-            echo +memory | sudo tee /sys/fs/cgroup/cgroup.subtree_control > /dev/null || true
-            sudo mkdir -p /sys/fs/cgroup/openlens
-            echo "$MEMORY" | sudo tee /sys/fs/cgroup/openlens/memory.max > /dev/null
-            echo 0 | sudo tee /sys/fs/cgroup/openlens/memory.swap.max > /dev/null || true
-          fi
-          start() {
-            if [ -n "$MEMORY" ]; then echo $$ | sudo tee /sys/fs/cgroup/openlens/cgroup.procs > /dev/null; fi
-            # Each query with its time (the query layer logs it at debug), so a
-            # slow board says which block is slow: see queries.txt.
-            RUST_LOG=info,openlens_query=debug OPENLENS_DATA_DIR="$D" OPENLENS_ADDR=127.0.0.1:18741 OPENLENS_ADMIN_TOKEN=perf ./target/perf/openlens >> server.log 2>&1 &
-            PID=$!
-            for _ in $(seq 120); do curl -sf 127.0.0.1:18741/healthz > /dev/null && break; sleep 1; done
-          }
-          # Idle: less than half a CPU-second over 5 s, for at most 30 min
-          # (the rollups of closed days run in the background after start).
-          idle() {
-            local t0=$(date +%s)
-            while :; do
-              a=$(awk '{print $14+$15}' /proc/$PID/stat); sleep 5; b=$(awk '{print $14+$15}' /proc/$PID/stat)
-              [ $(( b - a )) -lt 50 ] && break
-              [ $(( $(date +%s) - t0 )) -gt 1800 ] && { echo "::warning::still busy after 30 min"; break; }
-            done
-          }
-          start
-          # Diagnostic (#452): which rollups exist and which map version the
-          # board will compare them with, before and after the push.
-          api() { curl -s -H "authorization: Bearer perf" "127.0.0.1:18741$1"; }
-          {
-            echo "map version before push: $(api /api/projects/default/feature-map | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version"))')"
-            R="$D/rollups/v1/project=default"
-            echo "rolled day dirs: $(ls "$R" 2>/dev/null | wc -l)"
-            for t in person_day session_day session_feature_day success_day; do
-              echo "days with $t: $(ls "$R"/*/"$t".parquet 2>/dev/null | wc -l)"
-            done
-            echo "one day: $(ls "$R/$(ls "$R" | sort | tail -3 | head -1)" | tr '\n' ' ')"
-          } > diag.txt
-          OPENLENS_SERVER=http://127.0.0.1:18741 OPENLENS_TOKEN=perf ./target/perf/openlens-cli features push --project default --file map.yaml > /dev/null
-          echo "map version after push: $(api /api/projects/default/feature-map | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version"))')" >> diag.txt
-          idle
-          # Days read from rollups vs events for the 30 closed days before
-          # yesterday, as the board's own estimate counts them (D-061).
-          from=$(date -u -d '32 days ago' +%F); to=$(date -u -d '3 days ago' +%F)
-          echo "estimate $from..$to: $(api "/api/projects/default/board/estimate?from=$from&to=$to")" >> diag.txt
-          cat diag.txt
-          runs=()
-          for run in 1 2 3; do
-            [ "$run" -gt 1 ] && { kill "$PID"; wait "$PID" || true; start; idle; }
-            C=$(curl -si -XPOST 127.0.0.1:18741/login -d token=perf | tr -d '\r' | sed -n 's/^[Ss]et-[Cc]ookie: \(ol_session=[^;]*\).*/\1/p')
-            cpu0=$(awk '{print $14+$15}' /proc/$PID/stat)
-            cold=$(curl -s -o cold.html -w '%{http_code} %{time_total}' -H "cookie: $C" 127.0.0.1:18741/p/default)
-            cpu1=$(awk '{print $14+$15}' /proc/$PID/stat)
-            # A board that failed still answers 200 (its page streams), and
-            # is not cached: the warm load then computes it again (D-071).
-            if grep -q "t show that" cold.html; then echo "::warning::run $run: the board failed, see server.log"; fi
-            warm=$(curl -s -o /dev/null -w '%{time_total}' -H "cookie: $C" 127.0.0.1:18741/p/default)
-            peak=$(awk '/VmHWM/ {print $2}' /proc/$PID/status)
-            runs+=("{\"status\": ${cold%% *}, \"board_cold_s\": ${cold##* }, \"board_warm_s\": $warm, \"cold_cpu_s\": $(( (cpu1 - cpu0) ))e-2, \"peak_rss_mb\": $(( peak / 1024 ))}")
-          done
-          role=$(curl -s -o /dev/null -w '%{time_total}' -H "cookie: $C" "127.0.0.1:18741/p/default?role=admin")
-          # Four filtered boards at once (#418): they should share one snapshot.
-          ( for r in member viewer owner guest; do
-              curl -s -o /dev/null -w '%{time_total}\n' -H "cookie: $C" "127.0.0.1:18741/p/default?role=$r" &
-            done; wait ) > concurrent.txt
-          concurrent_max=$(sort -n concurrent.txt | tail -1)
-          disk=$(du -sm "$D" | cut -f1)
-          printf '%s\n' "${runs[@]}" > runs.jsonl
-          python3 - "$gen_secs" "$role" "$disk" "$concurrent_max" "$MEMORY" "$PROFILE" <<'PY' > scale.json
-          import json, sys
-          gen, role, disk, conc, mem, profile = sys.argv[1:]
-          runs = [json.loads(l) for l in open("runs.jsonl") if l.strip()]
-          g = json.load(open("gen.json"))
-          # bench-gen also writes the rollups of closed days (D-046): report
-          # that time apart, so generation times stay comparable.
-          rolled = float(g.get("rollup_seconds") or 0)
-          print(json.dumps({
-              "generator": g, "profile": profile or "default",
-              "memory_cap": mem or None, "generate_seconds": int(gen),
-              "rollup_seconds": rolled, "days_rolled": g.get("days_rolled"),
-              "runs": runs, "board_role_filter_cold_s": float(role),
-              "four_filtered_boards_max_s": float(conc), "data_dir_mb": int(disk),
-          }, indent=2))
-          PY
-          cat scale.json
-          # The 25 slowest queries of the whole run, longest first.
-          sed 's/\x1b\[[0-9;]*m//g' server.log | grep ' query ' | sed -n 's/.* ms=\([0-9]*\) sql=\(.*\)/\1\t\2/p' | sort -rn | head -25 > queries.txt || true
-          { echo "## Board at scale: $EVENTS events, cap ${MEMORY:-none}"; echo; echo '```json'; cat scale.json; echo '```'; echo '```'; cat diag.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        if: always()
+          "$BIN/xtask" bench-gen "$GEN/data" "${args[@]}" > "$GEN/gen.json"
+          echo "GEN_SECONDS=$(( $(date +%s) - gen_start ))" >> "$GITHUB_ENV"
+      # Saved before any server runs on it: each cap works on a copy.
+      - if: steps.gen.outcome == 'success'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        continue-on-error: true
         with:
-          name: scale-${{ matrix.events }}-${{ matrix.memory || 'nocap' }}
+          path: ${{ env.GEN }}
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+      - name: memory cgroup
+        if: matrix.c0 != 'nocap'
+        run: |
+          echo +memory | sudo tee /sys/fs/cgroup/cgroup.subtree_control > /dev/null || true
+          sudo mkdir -p /sys/fs/cgroup/openlens
+      # One step per cap, so a cap that fails does not stop the next one.
+      - name: measure, cap ${{ matrix.c0 }}
+        if: ${{ !cancelled() && matrix.c0 != '' && (steps.cache.outputs.cache-hit == 'true' || steps.gen.outcome == 'success') }}
+        env:
+          CACHED: ${{ steps.cache.outputs.cache-hit == 'true' }}
+        run: bash .github/scripts/perf-scale-cap.sh "${{ matrix.c0 }}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: ${{ always() && matrix.c0 != '' }}
+        with:
+          name: scale-${{ matrix.events }}-${{ matrix.c0 }}
           path: |
-            scale.json
-            queries.txt
-            diag.txt
-            server.log
+            out/${{ matrix.c0 }}/scale.json
+            out/${{ matrix.c0 }}/queries.txt
+            out/${{ matrix.c0 }}/diag.txt
+            out/${{ matrix.c0 }}/server.log
+      - name: measure, cap ${{ matrix.c1 }}
+        if: ${{ !cancelled() && matrix.c1 != '' && (steps.cache.outputs.cache-hit == 'true' || steps.gen.outcome == 'success') }}
+        env:
+          CACHED: ${{ steps.cache.outputs.cache-hit == 'true' }}
+        run: bash .github/scripts/perf-scale-cap.sh "${{ matrix.c1 }}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: ${{ always() && matrix.c1 != '' }}
+        with:
+          name: scale-${{ matrix.events }}-${{ matrix.c1 }}
+          path: |
+            out/${{ matrix.c1 }}/scale.json
+            out/${{ matrix.c1 }}/queries.txt
+            out/${{ matrix.c1 }}/diag.txt
+            out/${{ matrix.c1 }}/server.log
+      - name: measure, cap ${{ matrix.c2 }}
+        if: ${{ !cancelled() && matrix.c2 != '' && (steps.cache.outputs.cache-hit == 'true' || steps.gen.outcome == 'success') }}
+        env:
+          CACHED: ${{ steps.cache.outputs.cache-hit == 'true' }}
+        run: bash .github/scripts/perf-scale-cap.sh "${{ matrix.c2 }}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: ${{ always() && matrix.c2 != '' }}
+        with:
+          name: scale-${{ matrix.events }}-${{ matrix.c2 }}
+          path: |
+            out/${{ matrix.c2 }}/scale.json
+            out/${{ matrix.c2 }}/queries.txt
+            out/${{ matrix.c2 }}/diag.txt
+            out/${{ matrix.c2 }}/server.log
