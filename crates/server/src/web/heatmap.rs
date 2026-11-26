@@ -6,6 +6,8 @@ use super::*;
 pub(super) struct HeatmapQuery {
     path: String,
     session: Option<String>,
+    /// The heatmap page's tab (#548): `rage` or `scroll`; clicks otherwise.
+    mode: Option<String>,
 }
 
 pub(super) async fn click_map_for(
@@ -52,9 +54,13 @@ pub(super) async fn heatmap_page(
         tz: auth::tz_for(&state, &headers, &p.timezone),
         ..openlens_engine::Filters::default()
     };
-    let sessions = openlens_engine::sessions_on_path(&state.query, &p.id, &src, &f, &q.path)
-        .await
-        .unwrap_or_default();
+    // The most viewed pages: the picker, and this page's labels and scroll
+    // depth (#548). Without them the map still shows.
+    let (sessions, pages) = tokio::join!(
+        openlens_engine::sessions_on_path(&state.query, &p.id, &src, &f, &q.path),
+        openlens_engine::pages(&state.query, &p.id, &src, &f)
+    );
+    let (sessions, pages) = (sessions.unwrap_or_default(), pages.unwrap_or_default());
     let root = state.data_dir.clone();
     let pid = p.id.clone();
     let recorded: std::collections::HashSet<String> =
@@ -79,7 +85,15 @@ pub(super) async fn heatmap_page(
     };
     html(
         StatusCode::OK,
-        openlens_ui::heatmap(&info, &map, overlay.as_deref()),
+        openlens_ui::heatmap(
+            &info,
+            &map,
+            overlay.as_deref(),
+            &openlens_ui::HeatmapView {
+                mode: q.mode.as_deref().unwrap_or("clicks"),
+                pages: &pages,
+            },
+        ),
     )
 }
 
