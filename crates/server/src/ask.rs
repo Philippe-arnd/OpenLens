@@ -91,7 +91,7 @@ fn tools() -> Vec<Tool> {
         },
         Tool {
             name: "vitals",
-            description: "Web Vitals (LCP, INP, CLS, FCP, TTFB), last 7 days: what each means for a visitor, p75, rating, thresholds, the worst pages at p75 and what to do, most likely cause first.",
+            description: "Web Vitals (LCP, INP, CLS, FCP, TTFB), last 7 days: what each means for a visitor, p75, rating, thresholds, the worst pages at p75, the guilty elements, p75 per device, the likely cause and what to do, most likely cause first.",
             schema: obj(json!({}), &[]),
         },
         Tool {

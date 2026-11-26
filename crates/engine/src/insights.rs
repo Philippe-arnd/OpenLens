@@ -413,9 +413,14 @@ pub(crate) fn slow_pages(vitals: &[crate::Vital], why: &[crate::VitalReport]) ->
                 .and_then(|c| c.actions.first().copied())
         })
         .unwrap_or("Trim images, scripts and blocking requests.");
-    let worst = report
-        .and_then(|r| r.worst_pages.first())
-        .map_or_else(String::new, |p| format!(" Start with {}.", p.path));
+    // The guilty element and its page when the SDK named one (#467), else
+    // the worst page.
+    let worst = match report.and_then(|r| r.elements.first()) {
+        Some(c) => format!(" Start with {} on {}.", c.element, c.path),
+        None => report
+            .and_then(|r| r.worst_pages.first())
+            .map_or_else(String::new, |p| format!(" Start with {}.", p.path)),
+    };
     Some(Insight {
         kind: "slow_pages",
         title: format!(

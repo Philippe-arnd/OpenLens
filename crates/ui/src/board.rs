@@ -336,7 +336,8 @@ pub fn events(
 }
 
 /// *Why and what to do* under a Web Vital that is not good (#408): the
-/// worst pages at p75, the dominant cause when known, then the actions,
+/// worst pages at p75, the p75 per device, the dominant cause and the
+/// guilty elements when the SDK sent attribution (#467), then the actions,
 /// most likely first. A `<details>`, so it opens without script.
 pub(crate) fn vital_why(pid: &str, f: &Filters, r: &openlens_engine::VitalReport) -> Markup {
     let show = |v| openlens_engine::vitals::show(r.name, v);
@@ -354,8 +355,34 @@ pub(crate) fn vital_why(pid: &str, f: &Filters, r: &openlens_engine::VitalReport
             } @else if openlens_engine::vitals_guide(r.name).is_some_and(|g| g.pages) {
                 p.small.muted { "No page has enough measurements yet to rank them." }
             }
+            @if !r.devices.is_empty() {
+                p.small { "By device at p75: "
+                    @for (i, d) in r.devices.iter().enumerate() {
+                        @if i > 0 { " · " }
+                        (d.device) " " strong { (show(d.p75)) } " " (status(d.rating))
+                    }
+                }
+            }
             @if let Some(d) = &r.dominant_cause {
-                p.small { "Most likely cause: " strong { (d.what) } span.muted { " (the first byte is " (pct(d.ttfb_share)) " of LCP on " (d.pages) (if d.pages == 1 { " page" } else { " pages" }) ")" } }
+                p.small { "Most likely cause: " strong { (d.what) }
+                    @if let Some(ph) = &d.phase {
+                        span.muted { " (" (ph.label) " is " (pct(ph.share)) " of " (r.name) " in " (compact(ph.samples)) " slow measurements of the worst pages)" }
+                    } @else if let Some(t) = d.ttfb_share {
+                        span.muted { " (the first byte is " (pct(t)) " of LCP on " (d.pages) (if d.pages == 1 { " page" } else { " pages" }) ")" }
+                    }
+                }
+            }
+            @if !r.elements.is_empty() {
+                p.small { "Elements most often behind slow measurements:" }
+                ol.small { @for c in &r.elements {
+                    li {
+                        code { (c.element) }
+                        @if let Some(k) = &c.kind { " · " (k) }
+                        @if let Some(res) = &c.resource { " · " code { (res) } }
+                        " on " (row_link(&detail_url(pid, &format!("/events?family=vital&path={}", url_enc(&c.path)), f), &c.path))
+                        span.muted { " · " (compact(c.samples)) " slow" }
+                    }
+                } }
             }
             p.small { "What to do, most likely first:" }
             ol.small { @for a in &r.actions { li { (a) } } }

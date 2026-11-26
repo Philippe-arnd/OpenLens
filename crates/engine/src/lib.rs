@@ -30,6 +30,7 @@ mod revenue;
 pub mod stats;
 mod tasks;
 mod variants;
+pub mod vital_parts;
 pub mod vitals;
 pub use acquisition::{AcquisitionRow, Touch, acquisition};
 pub use churn::{AtRisk, ChurnReport, churn};
@@ -48,6 +49,7 @@ pub use people::*;
 pub use revenue::{Money, Revenue, revenue};
 pub use tasks::{RetentionRow, TaskTime};
 pub use variants::*;
+pub use vital_parts::{Culprit, DeviceVital};
 pub use vitals::{PageVital, VitalGuide, VitalReport, vitals, vitals_guide};
 
 /// Engine errors.
@@ -920,10 +922,13 @@ async fn board_with(
         .iter()
         .any(|v| v.rating != "good" && vitals_guide(&v.name).is_some_and(|g| g.pages))
     {
-        let pages = vitals::pages(q, project, &src, f).await?;
-        b.vitals_why = vitals::explain(&b.vitals, &pages, true);
+        let (pages, attr) = futures::join!(
+            vitals::pages(q, project, &src, f),
+            vital_parts::attribution(q, project, &src, f)
+        );
+        b.vitals_why = vitals::explain(&b.vitals, &pages?, &attr?, true);
     } else {
-        b.vitals_why = vitals::explain(&b.vitals, &[], true);
+        b.vitals_why = vitals::explain(&b.vitals, &[], &vital_parts::Attribution::default(), true);
     }
     if let Some(c) = insights::slow_pages(&b.vitals, &b.vitals_why) {
         cards.push(c);

@@ -191,7 +191,7 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "vitals",
-                description: "Web Vitals explained (LCP, INP, CLS, FCP, TTFB), last 7 days: what each means for a visitor, p75, rating, good/poor thresholds, the worst pages at p75 (LCP, INP, CLS), the dominant cause for LCP, and what to do, most likely cause first.",
+                description: "Web Vitals explained (LCP, INP, CLS, FCP, TTFB), last 7 days: what each means for a visitor, p75, rating, good/poor thresholds, the worst pages at p75, the p75 per device class and the elements most often behind slow measurements (LCP, INP, CLS), the dominant cause with the part of the vital that weighs most (likely_cause), and what to do, most likely cause first.",
                 input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"}}))}),
             },
             ToolSpec {

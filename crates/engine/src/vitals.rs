@@ -11,6 +11,7 @@ use openlens_featuremap::FeatureMap;
 use openlens_query::QueryEngine;
 use serde::Serialize;
 
+use crate::vital_parts::{Attribution, Culprit, DeviceVital, PhaseShare};
 use crate::{Filters, Result, Vital, float, int, text};
 
 /// A likely cause of a poor vital and what fixes it.
@@ -59,9 +60,15 @@ pub const VITALS_GUIDE: &[VitalGuide] = &[
         causes: &[
             Cause {
                 key: "load",
-                what: "The main image or text block is found late or downloads slowly.",
+                what: "The main image is found late: added by a script, lazy-loaded, or queued behind other downloads.",
                 actions: &[
-                    "Put the main image in the HTML itself (not added by a script), do not lazy-load it, and give it fetchpriority=\"high\".",
+                    "Preload the main image (or put it in the HTML itself, not added by a script), do not lazy-load it, and give it fetchpriority=\"high\".",
+                ],
+            },
+            Cause {
+                key: "heavy",
+                what: "The main image takes long to download.",
+                actions: &[
                     "Make the main image lighter: a modern format, sized for the screen, served from a CDN with long caching.",
                 ],
             },
@@ -264,17 +271,23 @@ pub struct PageVital {
     pub rating: &'static str,
 }
 
-/// The cause that weighs most, when the data shows one.
+/// The cause that weighs most, when the data shows one: from the part
+/// of the vital that weighs most when the SDK sends the parts (#467), else,
+/// for LCP, from the share of TTFB on the same pages.
 #[derive(Debug, Clone, Serialize)]
 pub struct Dominant {
     /// Key of the cause in the table.
     pub cause: &'static str,
     /// The cause, in plain words.
     pub what: &'static str,
-    /// Mean share of LCP spent waiting for the first byte, 0-1.
-    pub ttfb_share: f64,
-    /// Pages where both LCP and TTFB were measured.
+    /// The part of the vital that weighs most in its slow measurements.
+    pub phase: Option<PhaseShare>,
+    /// Without parts: mean share of LCP spent waiting for the first byte, 0-1.
+    pub ttfb_share: Option<f64>,
+    /// Without parts: pages where both LCP and TTFB were measured.
     pub pages: usize,
+    /// The element most often behind the slow measurements, when known.
+    pub element: Option<String>,
 }
 
 /// A vital explained: the table entry, the measure and what to do.
@@ -300,8 +313,17 @@ pub struct VitalReport {
     pub samples: i64,
     /// Worst pages at p75 (LCP, INP, CLS; pages with enough measurements).
     pub worst_pages: Vec<PageVital>,
-    /// The dominant cause (LCP, when TTFB is measured on its worst pages).
+    /// The dominant cause (LCP and INP from their parts; LCP also when
+    /// TTFB is measured on its worst pages).
     pub dominant_cause: Option<Dominant>,
+    /// The elements most often behind slow measurements on the worst pages
+    /// (LCP, INP, CLS; SDK attribution, #467).
+    pub elements: Vec<Culprit>,
+    /// p75 per device class (phone, tablet, desktop), slowest first.
+    pub devices: Vec<DeviceVital>,
+    /// The likely cause in one sentence: the part, the element and the page
+    /// when known.
+    pub likely_cause: Option<String>,
     /// Likely causes, most likely first (the dominant one leads).
     pub causes: Vec<&'static str>,
     /// What to do, in the order of the causes.
@@ -375,9 +397,30 @@ pub(crate) async fn pages(
         .collect())
 }
 
-/// LCP's dominant cause, from the share of TTFB in LCP on the pages where
+/// The dominant cause: the heaviest part of the slow measurements when the
+/// SDK sent the parts, else for LCP the share of TTFB on the pages where
 /// both were measured.
-fn dominant(g: &VitalGuide, pages: &[PageVital]) -> Option<Dominant> {
+fn dominant(g: &VitalGuide, pages: &[PageVital], attr: &Attribution) -> Option<Dominant> {
+    let element = attr.elements(g.name).first().map(|c| c.element.clone());
+    if let Some((phase, share)) = attr.dominant_phase(g.name) {
+        let cause = g.causes.iter().find(|c| c.key == phase.cause)?;
+        return Some(Dominant {
+            cause: cause.key,
+            what: cause.what,
+            phase: Some(share),
+            ttfb_share: None,
+            pages: 0,
+            element,
+        });
+    }
+    let mut d = ttfb_dominant(g, pages)?;
+    d.element = element;
+    Some(d)
+}
+
+/// LCP's dominant cause, from the share of TTFB in LCP on the pages where
+/// both were measured (any SDK).
+fn ttfb_dominant(g: &VitalGuide, pages: &[PageVital]) -> Option<Dominant> {
     if g.name != "LCP" {
         return None;
     }
@@ -410,14 +453,83 @@ fn dominant(g: &VitalGuide, pages: &[PageVital]) -> Option<Dominant> {
     Some(Dominant {
         cause: cause.key,
         what: cause.what,
-        ttfb_share: share,
+        phase: None,
+        ttfb_share: Some(share),
         pages: shares.len(),
+        element: None,
     })
+}
+
+/// One sentence: the part that weighs most, the element and its page.
+fn likely(g: &VitalGuide, d: Option<&Dominant>, elements: &[Culprit]) -> Option<String> {
+    let mut s = match d {
+        Some(Dominant {
+            phase: Some(p),
+            what,
+            ..
+        }) => format!(
+            "{} is {} of {} in its slow measurements: {}",
+            capital(p.label),
+            pct(p.share),
+            g.name,
+            lower(what)
+        ),
+        Some(Dominant {
+            ttfb_share: Some(t),
+            what,
+            ..
+        }) => format!(
+            "The first byte is {} of {} on its worst pages: {}",
+            pct(*t),
+            g.name,
+            lower(what)
+        ),
+        _ => String::new(),
+    };
+    if let Some(c) = elements.first() {
+        if !s.is_empty() {
+            s.push(' ');
+        }
+        let kind = c
+            .kind
+            .as_deref()
+            .map_or_else(String::new, |k| format!(" ({k})"));
+        let res = c
+            .resource
+            .as_deref()
+            .map_or_else(String::new, |r| format!(", {r}"));
+        s.push_str(&format!(
+            "The element most often behind slow measurements is {}{kind}{res} on {}.",
+            c.element, c.path
+        ));
+    }
+    (!s.is_empty()).then_some(s)
+}
+
+fn pct(r: f64) -> String {
+    format!("{:.0}%", r * 100.0)
+}
+
+fn capital(s: &str) -> String {
+    let mut c = s.chars();
+    c.next()
+        .map_or_else(String::new, |f| f.to_uppercase().chain(c).collect())
+}
+
+fn lower(s: &str) -> String {
+    let mut c = s.chars();
+    c.next()
+        .map_or_else(String::new, |f| f.to_lowercase().chain(c).collect())
 }
 
 /// Explain the vitals: every vital of the table, or with `not_good` only
 /// the measured ones rated needs-improvement or poor.
-pub fn explain(vitals: &[Vital], pages: &[PageVital], not_good: bool) -> Vec<VitalReport> {
+pub fn explain(
+    vitals: &[Vital],
+    pages: &[PageVital],
+    attr: &Attribution,
+    not_good: bool,
+) -> Vec<VitalReport> {
     VITALS_GUIDE
         .iter()
         .filter_map(|g| {
@@ -433,7 +545,12 @@ pub fn explain(vitals: &[Vital], pages: &[PageVital], not_good: bool) -> Vec<Vit
             };
             worst.sort_by(|a, b| b.p75.total_cmp(&a.p75).then_with(|| a.path.cmp(&b.path)));
             worst.truncate(WORST_PAGES);
-            let dominant = dominant(g, pages);
+            let dominant = dominant(g, pages, attr);
+            let elements = if g.pages {
+                attr.elements(g.name)
+            } else {
+                Vec::new()
+            };
             let mut causes: Vec<&Cause> = g.causes.iter().collect();
             if let Some(d) = &dominant {
                 causes.sort_by_key(|c| c.key != d.cause);
@@ -449,6 +566,13 @@ pub fn explain(vitals: &[Vital], pages: &[PageVital], not_good: bool) -> Vec<Vit
                 rating,
                 samples: measured.map_or(0, |v| v.samples),
                 worst_pages: worst,
+                likely_cause: likely(g, dominant.as_ref(), &elements),
+                devices: if g.pages {
+                    attr.devices(g.name)
+                } else {
+                    Vec::new()
+                },
+                elements,
                 dominant_cause: dominant,
                 actions: causes
                     .iter()
@@ -472,7 +596,11 @@ pub async fn vitals(
     let src = crate::source(map);
     let w7 = f.clause(7)?;
     let p75 = p75_sql(&src, &w7);
-    let (overall, pages) = futures::join!(q.sql(project, &p75), pages(q, project, &src, f));
+    let (overall, pages, attr) = futures::join!(
+        q.sql(project, &p75),
+        pages(q, project, &src, f),
+        crate::vital_parts::attribution(q, project, &src, f)
+    );
     let measured: Vec<Vital> = overall?
         .rows
         .iter()
@@ -487,7 +615,7 @@ pub async fn vitals(
             })
         })
         .collect();
-    Ok(explain(&measured, &pages?, false))
+    Ok(explain(&measured, &pages?, &attr?, false))
 }
 
 /// The Web Vitals section of `docs/kpis.md`, generated from the table.
@@ -511,9 +639,20 @@ pub fn markdown() -> String {
     s.push_str(&format!(
         "\nA vital that is not good opens *Why and what to do* on the board: for LCP, INP and CLS, the worst pages at p75 \
          (pages with at least {} measurements in the last 7 days), then the causes and actions below, most likely first. \
-         For LCP, when TTFB is measured on the same pages and is more than half of LCP, the server cause comes first.\n",
+         For LCP, when TTFB is measured on the same pages and is more than half of LCP, the server cause comes first.\n\n\
+         The SDK also says where each vital comes from (raw facts, no text): the element (a short CSS selector), \
+         LCP's resource path and four parts, INP's interaction type and three parts, the element that moved most for CLS, \
+         and the device class. When at least {} slow measurements of the worst pages carry the parts, the part that weighs \
+         most picks the cause, and the elements most often behind them are listed:\n\n",
+        crate::insights::MIN_GROUP,
         crate::insights::MIN_GROUP
     ));
+    for p in crate::vital_parts::PHASES {
+        let what = vitals_guide(p.vital)
+            .and_then(|g| g.causes.iter().find(|c| c.key == p.cause))
+            .map_or("", |c| c.what);
+        s.push_str(&format!("- {} {}: {}\n", p.vital, p.label, what));
+    }
     for g in VITALS_GUIDE {
         s.push_str(&format!(
             "\n**{}: likely causes and what to do**\n\n",
@@ -575,8 +714,8 @@ mod tests {
         let v = [vital("LCP", 6000.0)];
         let slow_server = [page("LCP", "/a", 6000.0), page("TTFB", "/a", 4000.0)];
         let slow_image = [page("LCP", "/a", 6000.0), page("TTFB", "/a", 500.0)];
-        let server = &explain(&v, &slow_server, true)[0];
-        let image = &explain(&v, &slow_image, true)[0];
+        let server = &explain(&v, &slow_server, &Attribution::default(), true)[0];
+        let image = &explain(&v, &slow_image, &Attribution::default(), true)[0];
         assert_eq!(server.dominant_cause.as_ref().unwrap().cause, "server");
         assert_ne!(server.first_action(), image.first_action());
         assert_eq!(
@@ -585,16 +724,21 @@ mod tests {
             "the wait is after the first byte"
         );
         // Without TTFB on the same pages, no cause is claimed.
-        let alone = &explain(&v, &[page("LCP", "/a", 6000.0)], true)[0];
+        let alone = &explain(
+            &v,
+            &[page("LCP", "/a", 6000.0)],
+            &Attribution::default(),
+            true,
+        )[0];
         assert!(alone.dominant_cause.is_none());
     }
 
     #[test]
     fn only_vitals_that_are_not_good_are_explained_on_the_board() {
         let v = [vital("LCP", 1000.0), vital("CLS", 0.4)];
-        let why = explain(&v, &[], true);
+        let why = explain(&v, &[], &Attribution::default(), true);
         assert!(why.iter().all(|r| r.name == "CLS"), "{why:?}");
-        assert!(explain(&v, &[], false).len() > why.len());
+        assert!(explain(&v, &[], &Attribution::default(), false).len() > why.len());
     }
 
     #[test]
@@ -604,7 +748,7 @@ mod tests {
             .map(|i| page("INP", &format!("/p{i}"), 100.0 * f64::from(i)))
             .collect();
         pages.push(page("LCP", "/x", 9999.0));
-        let r = &explain(&v, &pages, true)[0];
+        let r = &explain(&v, &pages, &Attribution::default(), true)[0];
         assert!(r.worst_pages.len() <= WORST_PAGES);
         assert!(r.worst_pages.iter().all(|p| p.name == "INP"));
         assert!(r.worst_pages[0].p75 > r.worst_pages[1].p75);
