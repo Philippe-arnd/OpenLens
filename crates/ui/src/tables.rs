@@ -37,7 +37,7 @@ impl TableCard<'_> {
                     thead { tr { @for c in self.cols {
                         @match c {
                             Col::Shown(l) => th scope="col" { (l) },
-                            Col::Num(l) => th.num scope="col" { (l) },
+                            Col::Num(l) => (th_num(l)),
                             Col::Hidden(l) => th scope="col" { span.sr-only { (l) } },
                         }
                     } } }
