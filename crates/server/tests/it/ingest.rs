@@ -168,6 +168,8 @@ async fn the_replay_rate_follows_yesterdays_active_users() {
     )
     .unwrap();
     assert_eq!(api["replay_rate"]["rate"].as_f64(), Some(rate), "{api}");
+}
+
 /// People counted through `events`, by the server's engine.
 async fn users(q: &openlens_query::QueryEngine) -> i64 {
     q.sql(
