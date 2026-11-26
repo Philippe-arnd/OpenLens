@@ -4,6 +4,9 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Changed
+- CI: the four equivalence tests that roll up every closed day run with `cargo xtask ci --heavy` (nightly, release tags), not on every pull request, which went over 5 minutes.
+
 ### Added
 - **Period picker on the board** (#513, part 1 of #325, D-060): the board's period blocks can read a date range (the project's days, at most 400, none in the future) or a past release (from its first event to the next release's) instead of the current release, compared with the same length just before. A small form under the board's title picks it, with no JavaScript, and the choice is in the URL (`?from=&to=` or `?since=<release>`) to share or bookmark; `GET /api/projects/{id}/board` and the MCP `board` tool take the same parameters.
 - **Feature relations from every session** (#483, items 1 and 4, D-054): each closed UTC day gains an eighth rollup table, `session_feature_day` (one row per session and feature, with its first use and successes), added to older days that still have their events. The relations between features (lift, which comes first, leads to value) are now added up in SQL over every session of the 30 days instead of the first 300,000 rows, from this table for the closed days rolled up with the map in force and from the events for the rest. Map health's uses, users, successes and `requires` pairs, and a feature's users by role, read `person_day` the same way. The map page shows the relations (*Used with*), and they have their own route, `GET /api/projects/{id}/feature-map/relations`, and MCP tool, `feature_relations` (`feature` keeps the pairs it is part of). A feature's success now counts when one of its success events resolves to it, as the board counts tasks.

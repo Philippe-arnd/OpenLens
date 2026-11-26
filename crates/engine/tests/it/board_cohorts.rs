@@ -171,6 +171,7 @@ async fn boards(root: &std::path::Path) -> Vec<String> {
 }
 
 #[tokio::test]
+#[ignore = "heavy: rolls up every closed day; run by `cargo xtask ci --heavy` (nightly, release tags)"]
 async fn cohort_blocks_read_closed_days_from_the_rollups_with_the_same_numbers() {
     let dir = seed();
     let root = dir.path();

@@ -19,6 +19,7 @@ cargo xtask bench http://127.0.0.1:PORT KEY   # ingestion load test, see docs/be
 
 ## CI
 - **PR gate** (5 minutes at most, so active development never waits longer): `cargo xtask ci`, the SDK build, size budget and freshness, the RustSec advisories, and shellcheck of the deploy scripts. Nothing heavier runs on a pull request or on a push to `main`.
+- **Heavy tests:** the equivalence tests that roll up every closed day are `#[ignore]`d with a reason; `cargo xtask ci --heavy` runs them too (`--include-ignored`), nightly and on release tags.
 - **Heavy pipelines: release tags (`v*`), nightly and on demand** (`gh workflow run ci.yml`, `k8s.yml`, `deploy-recipes.yml`):
   - the browser e2e;
   - the chart on kind (`k8s.yml`);
