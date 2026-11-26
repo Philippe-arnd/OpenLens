@@ -2456,6 +2456,7 @@ dependencies = [
  "openlens-flags",
  "openlens-meta",
  "openlens-query",
+ "openlens-replay",
  "openlens-sqlgen",
  "openlens-storage",
  "openlens-testkit",

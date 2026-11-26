@@ -86,7 +86,7 @@ pub enum EngineError {
 pub type Result<T> = std::result::Result<T, EngineError>;
 
 /// Filters every board number honours. No other knobs (D-014).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
 pub struct Filters {
     /// Environment (default `production`).
     pub environment: String,

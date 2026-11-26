@@ -96,6 +96,10 @@ impl Host for AppState {
     fn random_hex(&self, bytes: usize) -> String {
         crate::cookieless::random_hex(bytes)
     }
+
+    fn data_dir(&self) -> &std::path::Path {
+        &self.data_dir
+    }
 }
 
 /// The caller of a command made from a dashboard request: the viewer's
