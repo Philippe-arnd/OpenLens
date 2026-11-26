@@ -86,7 +86,21 @@ pub async fn board(
     f: &Filters,
     map: Option<(&FeatureMap, i64)>,
 ) -> Result<Board> {
+    board_reusing(q, project, f, map, None).await
+}
+
+/// [`board`], with the period blocks `kept` from an earlier board of the
+/// same filters and map over the same closed days (#516, D-064): they are
+/// not read again, every other block is.
+pub async fn board_reusing(
+    q: &QueryEngine,
+    project: &str,
+    f: &Filters,
+    map: Option<(&FeatureMap, i64)>,
+    kept: Option<&board_kept::PeriodBlocks>,
+) -> Result<Board> {
     let q = &q.with_params(&f.params()?);
+    let reuse = kept.is_some();
     // Every query reads the events with roles and features resolved from
     // the map, cut to its own window of days (partition pruning on
     // `date`), and only the columns it names: no 90-day copy is held in
@@ -123,7 +137,7 @@ pub async fn board(
     )?;
     // A date range or a past release says what it read (D-061).
     let costed = match &win {
-        Some(w) if matches!(f.window, Window::Range { .. } | Window::Since { .. }) => {
+        Some(w) if !reuse && matches!(f.window, Window::Range { .. } | Window::Since { .. }) => {
             let sessions: std::collections::BTreeSet<_> = rolled_sessions.iter().collect();
             let rolled: std::collections::BTreeSet<chrono::NaiveDate> = rolled_people
                 .iter()
@@ -284,7 +298,7 @@ pub async fn board(
     // The release window's comparison (D-055): users of the window and of
     // the same length before it, and the sessions block before it.
     let compare = match &win {
-        Some(w) => {
+        Some(w) if !reuse => {
             let users = |s: Span| -> Result<String> {
                 Ok(format!(
                     "SELECT count(DISTINCT distinct_id) AS n FROM {} WHERE {ident}",
@@ -297,7 +311,7 @@ pub async fn board(
                 sessions.sessions_sql(f, w.previous)?,
             ))
         }
-        None => None,
+        _ => None,
     };
     let compared = async {
         let Some((now_users, before_users, before_sessions)) = &compare else {
@@ -326,15 +340,15 @@ pub async fn board(
         compared,
     ) = futures::join!(
         q.sql(project, &users_sql),
-        q.sql(project, &sessions_sql),
-        q.sql(project, &dau_sql),
+        board_kept::unless_kept(q, project, &sessions_sql, reuse),
+        board_kept::unless_kept(q, project, &dau_sql, reuse),
         q.sql(project, &vitals_sql),
-        q.sql(project, &features_sql),
-        q.sql(project, &roles_sql),
+        board_kept::unless_kept(q, project, &features_sql, reuse),
+        board_kept::unless_kept(q, project, &roles_sql, reuse),
         q.sql(project, &releases_sql),
         q.raw_summary(project),
-        q.sql(project, &success_sql),
-        q.sql(project, &role_features_sql),
+        board_kept::unless_kept(q, project, &success_sql, reuse),
+        board_kept::unless_kept(q, project, &role_features_sql, reuse),
         q.sql(project, &anonymous_sql),
         q.sql(project, &known_sql),
         compared,
@@ -471,6 +485,9 @@ pub async fn board(
             Some(raw) => b.role_gaps.push((raw.to_owned(), users)),
             None => b.roles.push(RoleUsers { role, users }),
         }
+    }
+    if let Some(k) = kept {
+        k.put_into(&mut b);
     }
     b.releases = releases?
         .rows
