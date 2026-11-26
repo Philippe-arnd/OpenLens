@@ -53,13 +53,16 @@ pub fn flags(p: &ProjectInfo<'_>, flags: &[openlens_flags::Flag]) -> Markup {
     )
 }
 
-/// Create or edit a flag (#220). `flag` is None for a new one.
+/// Create or edit a flag (#220). `flag` is None for a new one. Delete
+/// sits in the danger zone; `confirm` opens its dialog (#545).
 pub fn flag_edit(
     p: &ProjectInfo<'_>,
     flag: Option<&openlens_flags::Flag>,
     error: Option<&str>,
     readout: &[openlens_engine::VariantRow],
+    confirm: Option<Confirm>,
 ) -> Markup {
+    use crate::detail::{confirm_dialog, confirm_href, danger_item, danger_zone, typed_form};
     let new = flag.is_none_or(|f| f.key.is_empty());
     let f = flag.cloned().unwrap_or(openlens_flags::Flag {
         key: String::new(),
@@ -127,13 +130,14 @@ pub fn flag_edit(
                 }
             }
             @if !new {
-                section.card.wide.danger {
-                    h2.coral { (icon("alert")) "Delete the flag" }
-                    p { "The code then gets " code { "false" } " for it. Its past cohort stays in the data." }
-                    form.inline method="post" action={ "/p/" (p.id) "/flags/" (f.key) "/delete" } {
-                        label { "Type " code { (f.key) } " to confirm " input type="text" name="confirm" required autocomplete="off"; }
-                        button.danger type="submit" { "Delete" }
-                    }
+                @let page = format!("/p/{}/flags-edit?key={}", p.id, url_enc(&f.key));
+                (danger_zone("flag-danger", "Danger zone", danger_item("Delete the flag",
+                    html! { "The code then gets " code { "false" } " for it. Its past cohort stays in the data." },
+                    html! { a.btn.danger-btn href=(confirm_href(&page, Confirm::Delete)) { "Delete…" } })))
+                @if confirm == Some(Confirm::Delete) {
+                    (confirm_dialog(&format!("Delete the flag {}?", f.key),
+                        html! { "The code then gets " code { "false" } " for it. Its past cohort stays in the data." },
+                        typed_form(&format!("/p/{}/flags/{}/delete", p.id, f.key), &f.key, "Delete", &page)))
                 }
             }
         },

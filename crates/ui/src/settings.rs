@@ -396,6 +396,8 @@ pub struct TokensView {
     pub notice: Option<String>,
     /// What went wrong.
     pub error: Option<String>,
+    /// `?confirm=sign-out` opens the dialog of *Sign out everywhere* (#545).
+    pub confirm: Option<Confirm>,
 }
 
 /// Settings → API tokens and sessions (#342).
@@ -459,10 +461,19 @@ pub fn tokens(v: &TokensView) -> Markup {
                     } }
                 }
             }
-            section.card.wide {
-                h2.coral { (icon("users")) "Sessions" }
-                p { "Signs out every browser that is logged in, yours excepted: people log in again with a login link, SSO or the admin token. API tokens and the admin token keep working." }
-                form method="post" action="/settings/sessions/revoke" { button type="submit" { "Sign out everywhere" } }
+            @let what = "Signs out every browser that is logged in, yours excepted: people log in again with a login link, SSO or the admin token. API tokens and the admin token keep working.";
+            (crate::detail::danger_zone("sessions-danger", "Sessions", crate::detail::danger_item("Sign out everywhere",
+                html! { (what) },
+                html! { a.btn.danger-btn href=(crate::detail::confirm_href("/settings/tokens", Confirm::SignOut)) { "Sign out everywhere…" } })))
+            @if v.confirm == Some(Confirm::SignOut) {
+                (crate::detail::confirm_dialog("Sign out every other session?", html! { (what) }, html! {
+                    form.confirm-form method="post" action="/settings/sessions/revoke" {
+                        div.actions {
+                            a.btn href="/settings/tokens" autofocus { "Cancel" }
+                            button.btn.danger-solid type="submit" { "Sign out everywhere" }
+                        }
+                    }
+                }))
             }
         },
     )
