@@ -104,7 +104,7 @@ async fn told(q: &QueryEngine) -> String {
         }
     }
     let churn = openlens_engine::churn(q, "p", None, &f).await.unwrap();
-    let feature = openlens_engine::feature_context(q, "p", &map, &[], &f, "search")
+    let feature = openlens_engine::feature_context(q, "p", &map, &Default::default(), &f, "search")
         .await
         .unwrap();
     serde_json::to_string(&(&errors, &acquisition, &churn, &feature)).unwrap()

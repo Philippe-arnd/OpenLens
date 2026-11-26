@@ -89,6 +89,7 @@ pub fn board(
                 (window_line(w))
                 @if let Some(e) = &w.estimate { (crate::cost::cost_line(e)) }
             }
+            (crate::cost::unavailable_note(&b.unavailable_days))
             (window_picker(p.id, b, f))
             (filter_bar(p.id, b, f, ""))
             (insight_cards(p.id, b, plain))

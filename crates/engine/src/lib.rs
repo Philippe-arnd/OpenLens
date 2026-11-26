@@ -50,6 +50,7 @@ mod revenue;
 pub mod rollups;
 pub mod stats;
 mod tasks;
+mod unavailable;
 mod variants;
 pub mod verdict;
 mod verdict_read;
@@ -66,7 +67,7 @@ pub use errors::{ErrorGroup, error_groups};
 pub use events::*;
 pub use explore::*;
 pub use flows::{Flow, FlowLink, FlowQuery, flows};
-pub use inforce::MapAt;
+pub use inforce::{History, MapAt};
 pub use insights::{CohortStats, FlagCohort, Funnel, FunnelStep, Insight, Journey, Readiness};
 pub use mapdays::feature_relations;
 pub use maphealth::{FeatureContext, MapHealth, feature_context, map_health, map_health_in};
@@ -479,6 +480,10 @@ pub struct Board {
     /// The release window of the period blocks and its comparison, when
     /// the board was asked for it (D-055); none: the fixed windows.
     pub window: Option<BoardWindow>,
+    /// Closed UTC days the board reads that it cannot count (#489, D-070):
+    /// their events are gone (cold tier, retention) and their rollups were
+    /// not made with the map in force, so they count nobody. Oldest first.
+    pub unavailable_days: Vec<String>,
 }
 
 fn int(row: &Map<String, Value>, k: &str) -> i64 {

@@ -164,6 +164,7 @@ impl Meta {
                 "share_links",
                 "notes",
                 "release_builds",
+                "release_maps",
                 "deploy_hooks",
                 "deploys",
             ] {

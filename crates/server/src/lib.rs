@@ -753,13 +753,38 @@ pub(crate) async fn load_map(
 }
 
 /// The stored versions of a project's map (the newest 50) with when each
-/// was saved, for the numbers counted with the version in force (#283).
-pub(crate) async fn map_history(state: &AppState, project: &str) -> Vec<openlens_engine::MapAt> {
+/// was saved, and the releases of `environment` recorded with one, for the
+/// numbers counted with the version in force (#283, D-070).
+pub(crate) async fn map_history(
+    state: &AppState,
+    project: &str,
+    environment: &str,
+) -> openlens_engine::History {
     let meta = state.meta.clone();
-    let p = project.to_owned();
-    tokio::task::spawn_blocking(move || openlens_engine::inforce::history(&meta, &p))
+    let (p, e) = (project.to_owned(), environment.to_owned());
+    tokio::task::spawn_blocking(move || openlens_engine::History::load(&meta, &p, &e))
         .await
         .unwrap_or_default()
+}
+
+/// Keep the map versions a feature's releases were counted with for the
+/// first time (D-070); a failure is logged, the page is already computed.
+pub(crate) async fn record_release_maps(
+    state: &AppState,
+    project: &str,
+    f: &openlens_engine::Filters,
+    counted: &[openlens_engine::maphealth::FeatureRelease],
+) {
+    let rows = openlens_engine::inforce::to_record(f, counted);
+    if rows.is_empty() {
+        return;
+    }
+    let meta = state.meta.clone();
+    let p = project.to_owned();
+    let done = tokio::task::spawn_blocking(move || meta.record_release_maps(&p, &rows)).await;
+    if let Ok(Err(err)) = done {
+        tracing::warn!(project, %err, "release map versions not recorded");
+    }
 }
 
 /// Run one alert pass now (tests and tools; the server runs it every

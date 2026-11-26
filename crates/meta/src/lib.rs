@@ -72,6 +72,8 @@ pub use projects::Seen;
 pub mod deploys;
 /// Read-only connections next to the writer (#344).
 mod projects;
+/// The feature map version each release shipped with (#483).
+pub mod release_maps;
 /// Automatic release names per build fingerprint (#495).
 pub mod releases;
 mod totp;
@@ -258,6 +260,15 @@ CREATE TABLE IF NOT EXISTS release_builds (
   PRIMARY KEY (project, environment, build)
 );
 CREATE INDEX IF NOT EXISTS release_builds_day ON release_builds (project, day);
+CREATE TABLE IF NOT EXISTS release_maps (
+  project TEXT NOT NULL,
+  environment TEXT NOT NULL,
+  release TEXT NOT NULL,
+  first_seen TEXT NOT NULL,
+  map_version INTEGER NOT NULL,
+  before_first_map INTEGER NOT NULL,
+  PRIMARY KEY (project, environment, release)
+);
 CREATE TABLE IF NOT EXISTS deploy_hooks (
   project TEXT PRIMARY KEY,
   hash TEXT NOT NULL UNIQUE,

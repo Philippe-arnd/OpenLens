@@ -105,11 +105,16 @@ impl Command for Feature {
         let Some((m, _)) = host.feature_map(&p.id).await else {
             return Err(Error::Invalid("no feature map, or no key".into()));
         };
-        let history = crate::inforce::history(host.meta(), &p.id);
         let f = filters(caller, &p.timezone);
-        crate::feature_context(host.query(), &p.id, &m, &history, &f, &input.key)
+        let history = crate::inforce::History::load(host.meta(), &p.id, &f.environment);
+        let ctx = crate::feature_context(host.query(), &p.id, &m, &history, &f, &input.key)
             .await
-            .map_err(unavailable)
+            .map_err(unavailable)?;
+        // The versions derived for the first time are kept (D-070).
+        if let Some(c) = &ctx {
+            let _ = crate::inforce::record(host.meta(), &p.id, &f, &c.releases);
+        }
+        Ok(ctx)
     }
 }
 

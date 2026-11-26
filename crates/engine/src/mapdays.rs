@@ -55,6 +55,13 @@ impl MapDays {
         })
     }
 
+    /// The days of the 60 the map's numbers read that count nobody: no
+    /// events left, and no rollups made with the map in force (#489, D-070).
+    pub(crate) async fn unavailable(&self, q: &QueryEngine, project: &str) -> Result<Vec<String>> {
+        let from = (self.now - Duration::days(59)).date_naive();
+        crate::unavailable::days(q, project, from, &[&self.person, &self.sessions], self.now).await
+    }
+
     /// A table of people rows over the last 60 days: `distinct_id`, `role`
     /// (canonical), `feature`, `events`, `successes` and `cur` (the row is
     /// in the last 30 days). The day the 30 days start in is read from its

@@ -391,6 +391,24 @@ impl QueryEngine {
         .map_err(|e| QueryError::Storage(format!("day sizes task: {e}")))?
     }
 
+    /// The UTC days of `project` from `from` to `to` with a rollup but no
+    /// events on disk (#489, `openlens_storage::days_without_events`):
+    /// listings only.
+    pub async fn days_without_events(
+        &self,
+        project: &str,
+        from: chrono::NaiveDate,
+        to: chrono::NaiveDate,
+    ) -> Result<Vec<chrono::NaiveDate>, QueryError> {
+        let (root, project) = (self.root.clone(), project.to_owned());
+        tokio::task::spawn_blocking(move || {
+            openlens_storage::days_without_events(&root, &project, from, to)
+                .map_err(|e| QueryError::Storage(e.to_string()))
+        })
+        .await
+        .map_err(|e| QueryError::Storage(format!("stored days task: {e}")))?
+    }
+
     /// Segments read by [`QueryEngine::raw_summary`] since the start: the
     /// others came from its cache.
     pub fn segments_read(&self) -> u64 {
