@@ -167,12 +167,6 @@ pub(crate) async fn metrics(State(state): State<AppState>, headers: HeaderMap) -
             state.boards.computed(),
         ),
         (
-            "board_snapshots_total",
-            "counter",
-            "90-day board snapshots built (shared by boards computed together).",
-            state.query.snapshots_built(),
-        ),
-        (
             "board_cache_entries",
             "gauge",
             "Board results kept in memory.",

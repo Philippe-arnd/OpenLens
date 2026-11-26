@@ -41,7 +41,7 @@ Every board answered (HTTP 200); none ran out of memory. Memory grows by about 2
 
 **With identities:** `xtask bench` sends realistic visits since #159. A third of the users browse anonymously before logging in, `$identify` links that visit, and one event in seven comes from a visitor who never logs in. So the board pays for the `persons` and `person_aliases` joins like a real app does.
 
-The board takes one in-memory snapshot of the 90-day projection, then filters it for every query (#75). The snapshot keeps only the columns the board reads, and `properties` only for `$vital` events: about 160 bytes per event (#190). Above 4 M rows in the window, about 650 MB, it reads the files instead, so memory stays bounded, at the cost of reading them once per query. At 2.2 M events, building the snapshot takes about 1.5 s, and the twenty queries take about 2 s on one core.
+Until #502 the board took one in-memory snapshot of the 90-day projection, then filtered it for every query (#75): about 160 bytes per event (#190), up to 4 M rows, and the files above that. The figures above were measured with it. Since D-051 it keeps no copy: the people, sessions and releases blocks read the daily rollups for closed days (D-040, D-047), success events and Web Vitals are 30- and 7-day scans of their own events, and the other queries read their own window of days from the files. The `scale` job re-measures time and memory; the tables here are updated from its runs.
 
 **Watch out for subqueries in `OR`.** DataFusion turns `x IN (SELECT …)` into a semi-join, but not when it sits in an `OR` with `NOT EXISTS (…)`. The "identified users" filter written that way cost 20× more: 0.7 s instead of 35 ms per query. A scalar-subquery variant was fast, but it sometimes returned rows out of `ORDER BY` order. The engine now decides in Rust, from the cached `persons` count, and writes either the plain `IN` or `TRUE`. To see what each query costs, run with `RUST_LOG=openlens_query=debug`.
 
@@ -73,7 +73,7 @@ Measured on 2026-11-24 (perf build, `ubuntu-latest`, 4 vCPU and not pinned, so o
 | board with a role filter, first load | 15.2 s |
 | server peak memory | 2,590 MB |
 
-At this size the 90-day window is 16 times the snapshot cap (`BOARD_SNAPSHOT_ROWS`, 4 M rows), so every board query reads the Parquet files: this is the slow path, not the snapshot. What to do about it is D-023.
+At this size the 90-day window was 16 times the snapshot cap of the time (4 M rows), so every board query read the Parquet files: this was the slow path, not the snapshot (D-023). The snapshot is gone since D-051, and these numbers predate the rollups; the `scale` job measures them again.
 
 **Every night** (#314): `perf.yml` runs the perf build on demo data, one minute of ingestion and one minute with `--with-board`, keeps the JSON as an artifact, and compares it with the average of the last 7 runs (`scripts/perf/compare.py`). A metric more than 20 % worse opens or comments on one issue. The figures on this page are still measured by hand.
 
