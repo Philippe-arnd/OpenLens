@@ -641,3 +641,23 @@ The questions "is this component under maintenance at t?" and "how many seconds 
 **Why:** a team replacing a hosted status page needs one its users can open without an account, and the data is already here. Off by default and a chosen slug keep a project private until its admin decides; public names and the missing causes keep internal details inside; the cache and the separate bucket keep a popular page or a scan from costing more than one computation every 30 seconds.
 
 **Consequences:** a dedicated host name (`status.example.com`) is a reverse-proxy rule in front of `/status/<slug>` (docs/deploy), not a setting. Availability and the SLO come from `slo::report` (#560, D-078); a window it does not cover falls back to the checks.
+
+## D-080 (2026-11-26, agent for #553) No webfont: the UI keeps the system font stack
+
+**Decision:** OpenLens ships no webfont. The UI v2 mockups' Geist and Geist Mono stay on the design canvas only; the product keeps the system stacks of `app.css` (`ui-sans-serif, system-ui, …` for text, `ui-monospace, …` for code and numbers), with `font-variant-numeric: tabular-nums` where figures line up. No font file in `crates/ui/assets/`, no `font-src` in either CSP, no `ATTRIBUTION.md` entry.
+
+**Why:** a self-hosted server read by its own team gains little from a brand face, and each page would pay for it: about 60 kB of fonts on a cold cache, a CSP widened by one more source, a licence and subsetting to keep current, and a swap that needs metric overrides tuned per fallback to avoid shifting the layout. The system face already looks native on every platform, has every weight and script, costs no request, and cannot shift on load. Simpler and faster wins (rule 18).
+
+**Consequences:** the screens look slightly different from the mockups (letter shapes and widths); layouts must not depend on Geist's metrics. Revisit only with a measured readability problem, not for looks.
+
+## D-081 (2026-11-26, agent for #554) No speculation rules: no prerender or prefetch on hover
+
+**Decision:** OpenLens adds no speculation rules, neither inline (`script-src 'inline-speculation-rules'`) nor through the `Speculation-Rules` header. Both CSPs stay as they are. Navigation feels fast through what already exists: server-side caches of the board, cross-document view transitions (UI v2 item 11), and optionally sending the shell early.
+
+**Why:**
+- **Reach:** in November 2026 only Chromium browsers run them; Safari has them behind a flag and Firefox has not shipped them, so a part of the readers would get nothing.
+- **Cost on the server:** an OpenLens page is not a static file: a board, a funnel or a breakdown runs analytics queries. Prerendering on hover would start that work for pages the reader never opens, on an instance sized for what people actually look at (rule 18).
+- **Side effects:** a GET can still change state (sign-out link, `?confirm=` dialogs, pagers that warm caches); every such link would need excluding, and a missed one acts without a click.
+- **No script in HTML:** the UI v2 rule is "no `<script>` in any HTML"; an inline rule set would be its only exception, and the narrow keyword is not understood outside Chromium.
+
+**Consequences:** UI v2 item 13 is dropped. Revisit if Firefox and Safari ship speculation rules by default and a page's cost can be bounded (for example, prefetch limited to pages served from a cache).
