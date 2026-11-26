@@ -275,7 +275,10 @@ async fn the_timeline_gathers_changes_and_notes() {
     let list = body_text(get(&h, "/api/projects/default/timeline", None, true).await).await;
     assert!(list.contains("Deployed v2") && list.contains("Pricing page shipped"));
     let board = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
-    assert!(board.contains("class=\"mk"), "a dot under today's bar");
+    assert!(
+        board.contains("class=\"marker ") && board.contains("Pricing page shipped"),
+        "today's change is marked under the active users chart"
+    );
     // A viewer can't delete the owner's note… but can delete their own.
     let notes = h.state.meta.notes("default", "2000-01-01").unwrap();
     let api_note = notes.iter().find(|n| n.4 == "Deployed v2").unwrap().0;

@@ -222,6 +222,30 @@ pub(crate) fn event_table(
     .render()
 }
 
+/// The icon of an event family (the pills and the Events filter).
+pub(crate) fn family_icon(fam: &str) -> &'static str {
+    match fam {
+        "page" => "route",
+        "click" => "bolt",
+        "form" => "task",
+        "feature" => "star",
+        "identify" => "users",
+        "error" => "alert",
+        "vital" => "pulse",
+        "survey" => "idea",
+        "custom" => "spark",
+        _ => "events",
+    }
+}
+
+/// The readable name of an event family.
+pub(crate) fn family_label(fam: &str) -> &'static str {
+    openlens_engine::FAMILIES
+        .iter()
+        .find(|(k, _, _)| *k == fam)
+        .map_or("Other", |(_, l, _)| l)
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
