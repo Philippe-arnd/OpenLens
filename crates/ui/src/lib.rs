@@ -724,6 +724,18 @@ mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
 
+    /// Whether `html` holds an ISO time (`…6T20:49`) rather than the
+    /// `YYYY-MM-DD HH:MM` the screens print (#556).
+    pub(crate) fn has_iso_time(html: &str) -> bool {
+        html.as_bytes().windows(5).any(|w| {
+            w[0].is_ascii_digit()
+                && w[1] == b'T'
+                && w[2].is_ascii_digit()
+                && w[3].is_ascii_digit()
+                && w[4] == b':'
+        })
+    }
+
     #[test]
     fn a_security_release_gets_a_louder_notice() {
         let plain = update_notice(&Update {

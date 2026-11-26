@@ -754,7 +754,7 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
             }
             @if tab == SettingsTab::Environments {
             @if let Some(e) = &v.environments {
-                (crate::environments::tab(&base, v.admin, e, v.relabel.as_ref(), v.allow.as_ref(), v.allow_preview.as_ref()))
+                (crate::environments::tab(&base, v.admin, v.timezone, e, v.relabel.as_ref(), v.allow.as_ref(), v.allow_preview.as_ref()))
             } @else {
                 section.card { p.muted { "The environments could not be read just now." } }
             }
