@@ -69,20 +69,27 @@ pub(crate) async fn task_times(
 }
 
 /// Users active in the last 30 days whose previous active day was more than
-/// `churn` days earlier: they had churned and came back.
+/// `churn` days earlier: they had churned and came back. `rows` is a table
+/// of the last 90 days with `distinct_id`, `first_ts` and `last_ts`, one row
+/// per person and UTC day at most (the board's people rows, D-040, or
+/// [`event_rows`]): a UTC day spans at most two days of the project's zone,
+/// so a person's active days there are the days of its rows' first and last
+/// events (#452, D-059).
 pub(crate) async fn resurrected(
     q: &QueryEngine,
     project: &str,
-    src: &str,
+    rows: &str,
     f: &Filters,
     churn: i64,
 ) -> Result<i64> {
     let q = &q.with_params(&f.params()?);
-    let w = f.clause(90)?;
-    let day = f.day()?;
+    let (first, last) = (f.local("first_ts")?, f.local("last_ts")?);
     let today = f.local("now()")?;
     let sql = format!(
-        "WITH d AS (SELECT DISTINCT distinct_id, CAST({day} AS DATE) AS day FROM {src} WHERE {w}), \
+        "WITH r AS (SELECT distinct_id, first_ts, last_ts FROM {rows}), \
+         d AS (SELECT DISTINCT distinct_id, day FROM \
+               (SELECT distinct_id, CAST({first} AS DATE) AS day FROM r \
+                UNION ALL SELECT distinct_id, CAST({last} AS DATE) AS day FROM r) x), \
          g AS (SELECT distinct_id, day, lag(day) OVER (PARTITION BY distinct_id ORDER BY day) AS prev FROM d) \
          SELECT count(DISTINCT distinct_id) AS n FROM g \
          WHERE prev IS NOT NULL AND day >= CAST({today} AS DATE) - INTERVAL '30 days' \
@@ -93,6 +100,15 @@ pub(crate) async fn resurrected(
         .rows
         .first()
         .map_or(0, |r| int(r, "n")))
+}
+
+/// The events of the last 90 days as [`resurrected`]'s rows, one per event,
+/// for a page that does not read the rollups.
+pub(crate) fn event_rows(src: &str, f: &Filters) -> Result<String> {
+    Ok(format!(
+        "(SELECT distinct_id, timestamp AS first_ts, timestamp AS last_ts FROM {src} WHERE {}) AS r",
+        f.clause(90)?
+    ))
 }
 
 /// One weekly retention cohort: users first seen that week, and the share
@@ -109,26 +125,30 @@ pub struct RetentionRow {
 }
 
 /// Weekly retention cohorts for users first seen in the last 8 weeks.
+/// `rows` is the board's people rows of the last 90 days (D-040): a week
+/// in which a person was active is the week of one of its rows' first or
+/// last event, since a row is one UTC day, which spans two weeks at most
+/// (#452, D-059).
 pub(crate) async fn retention(
     q: &QueryEngine,
     project: &str,
-    src: &str,
+    rows: &str,
     f: &Filters,
     ident: &str,
 ) -> Result<Vec<RetentionRow>> {
     let q = &q.with_params(&f.params()?);
-    let w = f.clause(90)?;
     // Weeks start on Monday in the project's time zone (D-017).
-    let first = f.local("least(min(ev.timestamp), min(p.first_seen))")?;
-    let ts = f.local("ev.timestamp")?;
+    let first = f.local("least(min(ev.first_ts), min(p.first_seen))")?;
+    let ts = f.local("act.ts")?;
     let now = f.local("now()")?;
     let sql = format!(
-        "WITH ev AS (SELECT distinct_id, timestamp FROM {src} WHERE {w} AND {ident}), \
+        "WITH ev AS (SELECT distinct_id, first_ts, last_ts FROM {rows} WHERE {ident}), \
          fs AS (SELECT ev.distinct_id, date_trunc('week', {first}) AS cw \
                 FROM ev LEFT JOIN persons p ON ev.distinct_id = p.person GROUP BY ev.distinct_id), \
-         a AS (SELECT DISTINCT ev.distinct_id, fs.cw, \
+         act AS (SELECT distinct_id, first_ts AS ts FROM ev UNION ALL SELECT distinct_id, last_ts AS ts FROM ev), \
+         a AS (SELECT DISTINCT act.distinct_id, fs.cw, \
                  CAST(round((date_part('epoch', date_trunc('week', {ts})) - date_part('epoch', fs.cw)) / 604800) AS BIGINT) AS k \
-               FROM ev JOIN fs ON ev.distinct_id = fs.distinct_id \
+               FROM act JOIN fs ON act.distinct_id = fs.distinct_id \
                WHERE fs.cw >= date_trunc('week', {now}) - INTERVAL '49 days') \
          SELECT substr(CAST(cw AS VARCHAR), 1, 10) AS week, k, count(*) AS users FROM a GROUP BY cw, k ORDER BY cw, k"
     );

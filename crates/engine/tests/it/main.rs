@@ -10,6 +10,7 @@ use openlens_featuremap::parse;
 use openlens_query::{Limits, QueryEngine};
 use openlens_storage::{FlushPolicy, Writer};
 
+mod board_cohorts;
 mod board_people;
 mod board_window;
 mod commands;
@@ -446,9 +447,11 @@ async fn journeys_show_the_common_path_into_a_success() {
         .unwrap();
     let j = b.journeys.first().expect("a journey");
     assert_eq!(j.success, "entry_saved");
+    // Places are features, in the order of their first use in the
+    // session; a page without a feature is not one (D-059).
     assert_eq!(
         j.path,
-        ["/home", "search", "write"],
+        ["search", "write"],
         "repeats collapse; route resolves to the feature"
     );
     assert_eq!(j.users, 6);

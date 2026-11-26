@@ -22,6 +22,9 @@ pub(crate) struct People<'a> {
     pub src: &'a str,
     /// The canonical role of a raw `role`: the map's lookup, or `role`.
     pub role: String,
+    /// Whether an event is a completed task, on the board's source (the
+    /// rule `person_day` counts `successes` with, D-038).
+    pub task: &'a str,
     /// Closed days whose `person_day` rows were rolled with the map in
     /// force, oldest first.
     pub rolled: Vec<NaiveDate>,
@@ -32,8 +35,9 @@ pub(crate) struct People<'a> {
 impl People<'_> {
     /// A table of people rows for the filters `f` over the last `days`
     /// days: `distinct_id`, `environment`, `release`, `role` (canonical),
-    /// `feature`, `events`, `last_ts` (the last event of the row) and
-    /// `day` (the UTC day). A person active since a time inside the window
+    /// `feature`, `events`, `successes` (completed tasks), `first_ts` and
+    /// `last_ts` (the first and last event of the row) and `day` (the UTC
+    /// day). A person active since a time inside the window
     /// is one with a row whose `last_ts` is at or after it.
     pub(crate) fn rows(&self, f: &Filters, days: i64) -> Result<String> {
         self.rows_in(f, Span::days(days))
@@ -45,8 +49,11 @@ impl People<'_> {
         let (skip, rolled) = split_span(&self.rolled, self.now, span, f, &self.role);
         let events = format!(
             "SELECT distinct_id, environment, release, role, feature, count(*) AS events, \
-             max(timestamp) AS last_ts, date AS day FROM {src} WHERE {w}{skip} \
+             sum(CASE WHEN {task} THEN 1 ELSE 0 END) AS successes, \
+             min(timestamp) AS first_ts, max(timestamp) AS last_ts, date AS day \
+             FROM {src} WHERE {w}{skip} \
              GROUP BY distinct_id, environment, release, role, feature, date",
+            task = self.task,
             src = self.src,
             w = f.clause_span(span, self.now)?,
         );
@@ -56,7 +63,8 @@ impl People<'_> {
         let role = &self.role;
         Ok(format!(
             "({events} UNION ALL SELECT person AS distinct_id, environment, release, \
-             {role} AS role, feature, events, last_ts, date AS day FROM person_day WHERE {w}) AS people"
+             {role} AS role, feature, events, successes, first_ts, last_ts, date AS day \
+             FROM person_day WHERE {w}) AS people"
         ))
     }
 }

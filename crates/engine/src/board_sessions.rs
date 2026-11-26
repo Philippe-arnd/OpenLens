@@ -34,7 +34,7 @@ impl SessionRows<'_> {
     /// A table of per-session-day rows for the filters `f` over the span
     /// `span`: `session_id`, `distinct_id`, `release`, `first_ts`,
     /// `last_ts`, `n` (interactions), `errors` and `tasks`.
-    fn rows(&self, f: &Filters, span: Span) -> Result<String> {
+    pub(crate) fn rows(&self, f: &Filters, span: Span) -> Result<String> {
         let (skip, rolled) = board_people::split_span(&self.rolled, self.now, span, f, &self.role);
         let events = format!(
             "SELECT session_id, distinct_id, release, min(timestamp) AS first_ts, \
@@ -103,4 +103,39 @@ impl SessionRows<'_> {
             rows = self.rows(&any_release, Span::days(90))?
         ))
     }
+}
+
+/// A table of the first use of each feature in each session over the last
+/// `days` days, for the filters `f` (#452, D-059): `session_id`,
+/// `distinct_id`, `feature` and `first_ts`. A closed day comes from
+/// `session_feature_day` (D-054) when it is in `rolled` (chosen as the
+/// people blocks choose theirs, [`board_people::split`]), every other day
+/// from the events grouped the same way; a session crossing midnight is
+/// put back together (`min(first_ts)`). Events without a feature or a
+/// session have no row, as in the rollup.
+pub(crate) fn feature_rows(
+    src: &str,
+    role: &str,
+    rolled: &[NaiveDate],
+    now: DateTime<Utc>,
+    f: &Filters,
+    days: i64,
+) -> Result<String> {
+    let (skip, rolled) = board_people::split(rolled, now, days, f, role);
+    let mut rows = format!(
+        "SELECT session_id, distinct_id, feature, min(timestamp) AS first_ts \
+         FROM {src} WHERE {w}{skip} AND session_id IS NOT NULL AND feature IS NOT NULL \
+         GROUP BY session_id, distinct_id, feature, date",
+        w = f.clause_at(days, now)?,
+    );
+    if let Some(w) = rolled {
+        rows.push_str(&format!(
+            " UNION ALL SELECT session_id, person AS distinct_id, feature, first_ts \
+             FROM session_feature_day WHERE {w}"
+        ));
+    }
+    Ok(format!(
+        "(SELECT session_id, distinct_id, feature, min(first_ts) AS first_ts \
+         FROM ({rows}) r GROUP BY session_id, distinct_id, feature) AS sf"
+    ))
 }

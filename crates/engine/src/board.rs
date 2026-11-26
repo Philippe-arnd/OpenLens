@@ -2,8 +2,11 @@
 //! options. No block reads a projection held in memory (#502, D-051): the
 //! people, sessions and releases blocks combine the daily rollups of
 //! closed days with the events of the other days (D-040, D-047); success
-//! events and Web Vitals are event-filtered scans of 30 and 7 days; every
-//! other query reads its own window of days from the files.
+//! events and Web Vitals are event-filtered scans of 30 and 7 days. The
+//! insight cards, retention and resurrected users read the same people and
+//! session rows, and journeys `session_feature_day` with the first success
+//! from an event-filtered scan (#452, D-059); task times, flag cohorts and
+//! funnels read their own window of days from the files.
 //!
 //! The period blocks (sessions, tasks, errors, the daily active series,
 //! features, roles, role × feature and success events) read 7, 14 or 30
@@ -111,9 +114,11 @@ pub async fn board(
         .map_or(90, |w| w.previous.start / 86_400 + 2)
         .max(90);
     let version = map.map(|(_, v)| v);
-    let (rolled_people, rolled_sessions) = futures::try_join!(
+    // Journeys read `session_feature_day` the same way (#452, D-059).
+    let (rolled_people, rolled_sessions, rolled_features) = futures::try_join!(
         board_people::rolled_days_back(q, project, "person_day", version, now, back),
         board_people::rolled_days_back(q, project, "session_day", version, now, back),
+        board_people::rolled_days(q, project, "session_feature_day", version, now),
     )?;
     // A period block's span: its fixed days, or the release window.
     let span = |days: i64| win.as_ref().map_or(Span::days(days), |w| w.current);
@@ -122,12 +127,34 @@ pub async fn board(
         None => f.clause(days),
     };
     let role = map.map_or_else(|| "role".to_owned(), |(m, _)| lookups(m).0);
+    // Completed tasks are success events when the map declares them;
+    // without a map, every feature use counts.
+    let successes: Vec<&str> = map
+        .map(|(m, _)| {
+            m.features
+                .iter()
+                .filter_map(|x| x.success.as_deref())
+                .collect()
+        })
+        .unwrap_or_default();
+    let success_list = successes
+        .iter()
+        .map(|e| lit(e))
+        .collect::<Result<Vec<_>>>()?
+        .join(", ");
+    let task = if successes.is_empty() {
+        "feature IS NOT NULL".to_owned()
+    } else {
+        format!("event IN ({success_list})")
+    };
     let people = board_people::People {
         src: &src,
         role: role.clone(),
+        task: &task,
         rolled: rolled_people,
         now,
     };
+    let journey_rows = board_sessions::feature_rows(&src, &role, &rolled_features, now, f, 30)?;
     let any_role = Filters {
         role: None,
         ..f.clone()
@@ -155,26 +182,6 @@ pub async fn board(
     let day = f.day()?;
     let w7 = f.clause(7)?;
 
-    // Completed tasks are success events when the map declares them;
-    // without a map, every feature use counts.
-    let successes: Vec<&str> = map
-        .map(|(m, _)| {
-            m.features
-                .iter()
-                .filter_map(|x| x.success.as_deref())
-                .collect()
-        })
-        .unwrap_or_default();
-    let success_list = successes
-        .iter()
-        .map(|e| lit(e))
-        .collect::<Result<Vec<_>>>()?
-        .join(", ");
-    let task = if successes.is_empty() {
-        "feature IS NOT NULL".to_owned()
-    } else {
-        format!("event IN ({success_list})")
-    };
     let users_sql = format!(
         "SELECT count(DISTINCT CASE WHEN last_ts >= now() - INTERVAL '1 day' THEN distinct_id END) AS dau, \
          count(DISTINCT CASE WHEN last_ts >= now() - INTERVAL '7 days' THEN distinct_id END) AS wau, \
@@ -191,6 +198,20 @@ pub async fn board(
         now,
     };
     let sessions_sql = sessions.sessions_sql(f, span(7))?;
+    // The insight cards read the same rows as the blocks, over their own
+    // fixed windows (#452, D-059).
+    let card_rows = insights::CardRows {
+        people90: p90.clone(),
+        people30: p30.clone(),
+        roles30: people.rows(&any_role, 30)?,
+        sessions90: sessions.rows(
+            &Filters {
+                release: None,
+                ..f.clone()
+            },
+            Span::days(90),
+        )?,
+    };
     let dau_sql = if utc_days(14) {
         format!(
             "SELECT day AS date, count(DISTINCT distinct_id) AS n FROM {} WHERE {ident} GROUP BY 1 ORDER BY 1",
@@ -461,13 +482,13 @@ pub async fn board(
         .unwrap_or_default();
     let ((mut cards, readiness), journeys, cohorts, funnels, task_times, resurrected, retention) =
         futures::try_join!(
-            insights::compute(q, project, &src, f, ident, churn, &successes),
-            insights::journeys(q, project, &src, f, &successes),
+            insights::compute(q, project, &card_rows, f, ident, churn, &successes),
+            insights::journeys(q, project, &src, &journey_rows, f, &successes),
             insights::flag_cohorts(q, project, &src, f),
             insights::funnels(q, project, &src, f, &funnel_defs),
             tasks::task_times(q, project, &src, f, &successes),
-            tasks::resurrected(q, project, &src, f, churn),
-            tasks::retention(q, project, &src, f, ident),
+            tasks::resurrected(q, project, &p90, f, churn),
+            tasks::retention(q, project, &p90, f, ident),
         )?;
     b.retention = retention;
     b.task_times = task_times;
