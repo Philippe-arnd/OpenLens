@@ -60,6 +60,8 @@ taskset -c 1-3 ./target/perf/xtask bench http://127.0.0.1:18740 "$KEY" 10 4 50  
 
 **Realistic profile** (ARCH-10, #443): `cargo xtask bench-gen <data-dir> --events 2000000 --profile realistic --map-out map.yaml` writes what a real product's 90 days look like, for the range D-023 promises (1, 2 and 4 M events): about 160 events per user (12,500 users for 2 M), activity drawn from a Pareto law (α = 1.6) scaled to 20 % of days on average and clamped to 1–95 %, one session per active day (two in 30 % of cases) of Poisson(9) events 25 s apart, 80 % of paths in the session's feature (24 routes `/app/featN/:id`), a `$identify` with `$anon_distinct_id` as each user's first event, six raw roles with case variants, and a release every 15 days. `map.yaml` is the matching 24-feature, 3-role map: push it (`PUT /api/projects/default/feature-map`) before measuring the board. Running it in the `scale` job at 1, 2 and 4 M with the server capped at 1 GiB is a separate CI change.
 
+**Rollups** (D-046): bench-gen then rolls up every closed day with the server's own functions (`days_rolled` and `rollup_seconds` in its output), so the board reads `person_day` and `session_day` for the closed days, as on a server that has run for weeks. With `--map-out` the map is stored as the project's map (version 1) first, so the rollups carry the version the board expects, and pushing the same file again keeps it. `--no-rollups` leaves the rolling to the server's background pass (7 days per 10 minutes), as before.
+
 Measured on 2026-11-24 (perf build, `ubuntu-latest`, 4 vCPU and not pinned, so one vCPU is slower; run 45362175892):
 
 | 63 M events, 200,000 people, 90 days | |

@@ -347,3 +347,11 @@ Changing the list is the engine command `set_allowed_hosts`, audited as `environ
 **Why:** the routine reads CI logs and dependency text that come from outside the repository, a prompt-injection surface; a person merging keeps one review between that text and `main`, at the cost of one click per fix. Renovate's automerge is a bot outside AGENTS.md; an agent is inside it, and rule 3 says merging needs a person. Labels and deduplication let a routine (or a person) find one issue per breakage instead of one per red run.
 
 **Consequences:** "only real breakage reaches a person" is not met yet: a person still merges each fix, but no longer diagnoses it. A flaky job costs one extra run before it shows as a failure on `main`, and a job that fails twice on the same commit is a real failure, not a flaky one. No new setting.
+
+## D-046 (2026-11-26, agent for #489) The scale benchmark rolls up its days before measuring, with the map stored first
+
+**Decision:** `cargo xtask bench-gen` rolls up every closed day it generates, right after compacting, with the server's own path: `openlens_storage::rollup::{missing, lacking, generation, write}`, `QueryEngine::rollup_day` with `Limits::from_host()`, and `openlens_engine::rollups::day_features`. When `--map-out` is given, the map written to that file is also stored as the project's map (`save_feature_map`, version 1 on a fresh dir) before rolling, and the rollups use it and its version. Pushing the same file to the server later stores nothing new (an identical map keeps its version), so `map_version` in `person_day` matches what the board reads. `--no-rollups` skips the rolling; the output reports `days_rolled` and `rollup_seconds`.
+
+**Why:** the `scale` job measured the board seconds after generating 90 days, when the background pass (7 days per 10 minutes) had rolled nothing, so the people blocks read only events (D-040) and the numbers did not describe a server that has been running. Rolling with no map, then pushing the map, would have given rollups with another `map_version`, which the board reads from the events again.
+
+**Consequences:** generation takes longer by the rolling time, reported separately. xtask now builds the query engine (DataFusion), already compiled for the workspace. A data dir made without `--map-out` is rolled up with no map, as a server with no map would.
