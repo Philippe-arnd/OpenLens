@@ -15,6 +15,7 @@ use serde_json::{Map, Value};
 mod acquisition;
 pub mod churn;
 mod digest;
+mod drift;
 pub mod environments;
 mod errors;
 mod events;
@@ -22,10 +23,14 @@ mod explore;
 pub mod flows;
 pub mod forms;
 pub mod goals;
+pub mod inforce;
 mod insights;
 pub mod maphealth;
+pub mod mapsessions;
+pub mod mapshape;
 mod pages;
 mod people;
+pub mod relations;
 pub mod replay_rate;
 mod revenue;
 pub mod stats;
@@ -40,6 +45,7 @@ pub use errors::{ErrorGroup, error_groups};
 pub use events::*;
 pub use explore::*;
 pub use flows::{Flow, FlowLink, FlowQuery, flows};
+pub use inforce::MapAt;
 pub use insights::{CohortStats, FlagCohort, Funnel, FunnelStep, Insight, Journey, Readiness};
 pub use maphealth::{FeatureContext, MapHealth, feature_context, map_health};
 pub use pages::{
@@ -47,6 +53,7 @@ pub use pages::{
     sessions_on_path, survey_results,
 };
 pub use people::*;
+pub use relations::Relation;
 pub use replay_rate::{ReplayRate, replay_rate};
 pub use revenue::{Money, Revenue, revenue};
 pub use tasks::{RetentionRow, TaskTime};

@@ -155,14 +155,19 @@ pub fn feature_page(v: &FeaturePage<'_>) -> Markup {
                     @if v.ctx.releases.is_empty() { p.muted { "Not used in the last 90 days." } }
                     @else {
                         table.plain {
-                            thead { tr { th { "Release" } th { "Since" } (th_num("Users")) (th_num("Uses")) (th_num("Succeeded")) } }
+                            thead { tr { th { "Release" } th { "Since" } (th_num("Users")) (th_num("Uses")) (th_num("Succeeded")) th { "Counted with" } } }
                             tbody { @for r in &v.ctx.releases {
                                 tr { th scope="row" { @if r.release == "untagged" { span.muted { "untagged" } } @else { a href=(detail_url(pid, &format!("/features/{}?release={}", url_enc(&f.key), url_enc(&r.release)), &Filters { release: None, ..fl.clone() })) { code { (r.release) } } } }
                                      td.mono { (r.first_seen.get(..10).unwrap_or(&r.first_seen)) }
                                      td.num { (compact(r.users)) } td.num { (compact(r.uses)) }
-                                     td.num { @if f.success.is_some() { (share(r.success_users, r.users)) } @else { span.muted { "—" } } } }
+                                     td.num { @if f.success.is_some() { (share(r.success_users, r.users)) } @else { span.muted { "—" } } }
+                                     td.small { @match r.map_version {
+                                         Some(n) => { a href={ "/p/" (v.p.id) "/features?v=" (n) } { "map v" (n) } @if r.before_first_map { span.muted { " (released before the first map)" } } @if r.not_in_map { span.muted { " · not in that map" } } },
+                                         None => span.muted { "current map" },
+                                     } } }
                             } }
                         }
+                        p.muted.small { "Each release is counted with the map version in force when it came out, so a later push does not rewrite its numbers." }
                         p.small { a href=(detail_url(pid, "/timeline", fl)) { "Release timeline →" } }
                     }
                 }
@@ -217,6 +222,28 @@ pub fn feature_page(v: &FeaturePage<'_>) -> Markup {
                         @if !f.requires.is_empty() { p.small { "Requires: " @for (i, k) in f.requires.iter().enumerate() { @if i > 0 { ", " } a href={ "/p/" (v.p.id) "/features/" (k) } { (k) } } } }
                         @if !v.ctx.required_by.is_empty() { p.small { "Required by: " @for (i, k) in v.ctx.required_by.iter().enumerate() { @if i > 0 { ", " } a href={ "/p/" (v.p.id) "/features/" (k) } { (k) } } } }
                         @if !v.ctx.area_peers.is_empty() { p.small { "Same area: " @for (i, k) in v.ctx.area_peers.iter().enumerate() { @if i > 0 { ", " } a href={ "/p/" (v.p.id) "/features/" (k) } { (k) } } } }
+                    }
+                }
+                @if !v.ctx.relations.is_empty() {
+                    section.card.wide {
+                        h2.violet { (icon("route")) "Used with" }
+                        div.table-scroll { table.plain {
+                            thead { tr { th { "Before" } th { "After" } (th_num("Sessions together")) (th_num("Lift")) (th_num("Comes first")) th { "Leads to value" } } }
+                            tbody { @for r in &v.ctx.relations {
+                                tr {
+                                    td { a href={ "/p/" (v.p.id) "/features/" (r.first) } { code { (r.first) } } }
+                                    td { a href={ "/p/" (v.p.id) "/features/" (r.then) } { code { (r.then) } } }
+                                    td.num { (compact(r.together)) }
+                                    td.num { (format!("×{:.1}", r.lift)) }
+                                    td.num { (pct(r.first_share)) }
+                                    td.small { @match (r.success_after, r.success_without) {
+                                        (Some(a), Some(w)) => { @if r.leads_to_value { span.status.good { "yes" } " " } (pct(a)) " after vs " (pct(w)) " without" },
+                                        _ => span.muted { "—" },
+                                    } }
+                                }
+                            } }
+                        } }
+                        p.muted.small { "From sessions of the last 30 days (with the filters above). Lift: how many times more often the two are used in the same session than chance. Leads to value: the second one succeeds more often after the first, and the difference is significant." }
                     }
                 }
                 @if !v.ctx.findings.is_empty() {

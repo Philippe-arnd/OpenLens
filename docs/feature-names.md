@@ -10,6 +10,9 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Stick drivers | Features ranked by how much they lift retention |
 | Churn points | Last features and steps seen before users go inactive |
 | Role gap | A raw role value that the feature map does not match yet |
+| Used with | On a feature page: the features used in the same sessions, which comes first, and whether the first leads to value in the second |
+| Map drift | Routes new in the latest release that no feature of the map claims |
+| Counted with | On a feature's releases: the map version in force when the release came out |
 | Feature pulse | Per feature: adoption, uses per user, active days, completion and task time |
 | Who uses what | The roles × features grid: the share of each role's users who used each feature |
 | Do they come back? | Weekly retention cohorts |

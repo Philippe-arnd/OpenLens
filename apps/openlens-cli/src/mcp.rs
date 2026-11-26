@@ -109,7 +109,7 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "map_health",
-                description: "How good the pushed feature map is, measured on 30 days of usage: a score out of 100, findings ranked by impact (pages no feature claims, overlapping routes, dead features, success events that never fire or fire on every use, data-feature values not declared, requires contradicted by usage), each with evidence and a YAML fix.",
+                description: "How good the pushed feature map is, measured on 30 days of usage: a score out of 100, findings ranked by impact (pages no feature claims, overlapping routes, dead features, success events that never fire or fire on every use, data-feature values not declared, requires contradicted by usage, a feature whose users split into separate paths (split it), two features almost always used together (merge them), steps done in another order than declared, routes new in the latest release that no feature claims), each with evidence and a YAML fix, plus the relations inferred between features (lift, which comes first, leads to value). Nothing is applied: edit the file, then feature_map_push.",
                 input_schema: json!({"type":"object","properties":proj}),
             },
             ToolSpec {
@@ -119,7 +119,7 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "feature_context",
-                description: "One feature in depth: its definition (area, requires, renamed_from), health and findings, users and success by role, top pages, the ladder rungs it is on, features that require it and its area peers.",
+                description: "One feature in depth: its definition (area, requires, renamed_from), health and findings, users and success by role, top pages, the ladder rungs it is on, features that require it and its area peers, the features used with it (lift, which comes first, whether it leads to value) and its use per release, each counted with the map version in force when the release came out.",
                 input_schema: json!({"type":"object","properties":with(json!({"key":{"type":"string"}})),"required":["key"]}),
             },
             ToolSpec {

@@ -16,11 +16,22 @@ Start from the summaries and drill down only where something stands out. Every t
 | Where do our goals stand? | `goals`: status, guardrails, what moved each goal (releases and changes), objectives | `set_goal { kpi, target, deadline \| releases, guardrails }` |
 | Is the feature map any good? | `map_health`: score, findings with evidence and a YAML fix | `suggest_map_changes` (patches only) |
 | Every feature at a glance | `map_overview`: status, uses, users, success (30 days vs the 30 before), areas, adoption ladder | `feature_context { key }` |
-| Everything about one feature | `feature_context { key }`: definition, findings, users and success by role, top pages, ladder, area peers | `sql` |
+| Everything about one feature | `feature_context { key }`: definition, findings, users and success by role, top pages, ladder, area peers, features used with it, use per release with the map version in force | `sql` |
 | Anything else | `sql` (read-only DataFusion on `events`) | prune with `date >= 'YYYY-MM-DD'` |
 | Deep, offline analysis | `openlens-cli export --from --to --out events.jsonl` (raw events, day by day) | your own tools |
 
 **Map health score:** 100, minus up to 40 for the share of pages and clicks no feature claims, minus 10 per error and 4 per warning, never below 0. A coverage gap of 10% or more of all pages and clicks is an error; every other finding is a warning. Rates are not judged below 20 users. Fix the map first when the score is low: every per-feature number depends on it.
+
+**Suggestions from sessions (#283)**, last 30 days, each a warning with a YAML fix (nothing changes the map until you push it):
+
+- `too_big`: the feature's pages and events fall into two or more groups that sessions do not mix (used together in fewer than 10% of the smaller group's sessions), each group in at least 25% of its sessions and with 20 users; pages in more than 80% of its sessions (a shared entry page) are left out. The fix splits it, one feature per group.
+- `too_small`: two features used together in 90% or more of the sessions that use either, each with 20 users. The fix merges the second into the first (`renamed_from` keeps its history).
+- `step_order`: two consecutive `steps` happen in the other order in most of the 20 or more sessions that do both. The fix is the observed order.
+- `drift`: a route first seen with the newest release (the one whose first event is the latest, last 90 days), that no feature claims, and that weighs 1% of that release's pages and clicks. It replaces the `coverage` finding for that route.
+
+**Relations** (`map_health.relations`, `feature_context.relations`): pairs of features used in the same session by at least 20 sessions. `lift` is how many times more often than chance, `first_share` the share of shared sessions where `first` came first, and `leads_to_value` says the success rate of `then` after `first` beats its rate in sessions without `first` (two-proportion test, p < 0.05, 30 sessions per side). They follow the role and release filters.
+
+**Map version in force:** `feature_context.releases` counts each release with the map version saved last before the release's first event (`map_version`), so pushing a new map does not rewrite earlier releases. A release older than every stored version is counted with the oldest (`before_first_map`).
 
 Report findings with the numbers and the cohort sizes behind them, and say when a sample is too small to conclude: cards are hidden below 8 users per group for that reason. Backfilled events carry `"$backfill": true` in `properties`.
 

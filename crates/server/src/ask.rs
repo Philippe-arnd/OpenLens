@@ -370,7 +370,8 @@ async fn run_tool(
             let (Some((m, _)), Some(k)) = (&map, arg("key")) else {
                 return ("no feature map, or no key".into(), None);
             };
-            match openlens_engine::feature_context(&state.query, &p.id, m, &f, &k).await {
+            let history = crate::map_history(state, &p.id).await;
+            match openlens_engine::feature_context(&state.query, &p.id, m, &history, &f, &k).await {
                 Ok(Some(ctx)) => {
                     let mut v = serde_json::to_value(&ctx).unwrap_or_default();
                     let key = ctx.definition.as_ref().map_or(k.clone(), |d| d.key.clone());
