@@ -18,6 +18,7 @@ Start from the summaries and drill down only where something stands out. Every t
 | Is the feature map any good? | `map_health`: score, findings with evidence and a YAML fix | `suggest_map_changes` (patches only) |
 | Every feature at a glance | `map_overview`: status, uses, users, success (30 days vs the 30 before), areas, adoption ladder | `feature_context { key }` |
 | Everything about one feature | `feature_context { key }`: definition, findings, users and success by role, top pages, ladder, area peers, features used with it, use per release with the map version in force | `sql` |
+| Which features go together? | `feature_relations { feature? }`: lift, which comes first, leads to value (30 days of sessions, no cap) | `feature_context { key }` |
 | Anything else | `sql` (read-only DataFusion on `events`) | prune with `date >= 'YYYY-MM-DD'` |
 | Deep, offline analysis | `openlens-cli export --from --to --out events.jsonl` (raw events, day by day) | your own tools |
 
@@ -30,7 +31,7 @@ Start from the summaries and drill down only where something stands out. Every t
 - `step_order`: two consecutive `steps` happen in the other order in most of the 20 or more sessions that do both. The fix is the observed order.
 - `drift`: a route first seen with the newest release (the one whose first event is the latest, last 90 days), that no feature claims, and that weighs 1% of that release's pages and clicks. It replaces the `coverage` finding for that route.
 
-**Relations** (`map_health.relations`, `feature_context.relations`): pairs of features used in the same session by at least 20 sessions. `lift` is how many times more often than chance, `first_share` the share of shared sessions where `first` came first, and `leads_to_value` says the success rate of `then` after `first` beats its rate in sessions without `first` (two-proportion test, p < 0.05, 30 sessions per side). They follow the role and release filters.
+**Relations** (`feature_relations`, `map_health.relations`, `feature_context.relations`): pairs of features used in the same session by at least 20 sessions, counted over every session of the 30 days (the first 20 features of each), from the session rollup for closed days (D-054). A feature succeeds in a session when one of its success events resolves to it there. `lift` is how many times more often than chance, `first_share` the share of shared sessions where `first` came first, and `leads_to_value` says the success rate of `then` after `first` beats its rate in sessions without `first` (two-proportion test, p < 0.05, 30 sessions per side). They follow the role and release filters.
 
 **Map version in force:** `feature_context.releases` counts each release with the map version saved last before the release's first event (`map_version`), so pushing a new map does not rewrite earlier releases. A release older than every stored version is counted with the oldest (`before_first_map`).
 

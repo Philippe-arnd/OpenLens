@@ -212,3 +212,53 @@ async fn each_release_keeps_the_map_version_it_shipped_with() {
     assert!(v1_now.uses > v1.uses);
     assert!(ctx.relations.iter().any(|r| r.then == "checkout"));
 }
+
+/// Closed days rolled up with the map in force give the relations and the
+/// per-feature numbers of their events (#483), even once those events are
+/// gone; a rollup made with another map version is not read.
+#[tokio::test]
+async fn rolled_up_days_give_the_numbers_of_their_events() {
+    use openlens_storage::rollup;
+    let (d, q) = seeded();
+    let m = parse(MAP).map.unwrap();
+    let f = Filters::default();
+    let live = openlens_engine::map_health(&q, "p", &m, &f).await.unwrap();
+    let features = openlens_engine::rollups::day_features(Some((&m, 1)));
+    let days = rollup::missing(d.path(), "p", Utc::now()).unwrap();
+    assert!(!days.is_empty(), "v1 is on a closed day");
+    for day in &days {
+        let label = day.format("%Y-%m-%d").to_string();
+        let b = q.rollup_day("p", &label, None, &features).await.unwrap();
+        assert!(rollup::write(d.path(), "p", *day, rollup::generation(), &b).unwrap());
+        // Only the rollup is left of that day.
+        let events = d.path().join(format!("events/project=p/date={label}"));
+        std::fs::remove_dir_all(events).unwrap();
+    }
+    let q = QueryEngine::new(d.path(), Limits::default());
+    let rolled = openlens_engine::map_health_in(&q, "p", &m, Some(1), &f)
+        .await
+        .unwrap();
+    let numbers = |h: &openlens_engine::MapHealth| -> Vec<(String, i64, i64, i64)> {
+        h.features
+            .iter()
+            .map(|x| (x.key.clone(), x.uses, x.users, x.success_users))
+            .collect()
+    };
+    assert_eq!(numbers(&rolled), numbers(&live));
+    assert!(!live.relations.is_empty());
+    assert_eq!(rolled.relations, live.relations);
+    let alone = openlens_engine::feature_relations(&q, "p", &m, Some(1), &f)
+        .await
+        .unwrap();
+    assert_eq!(alone, live.relations);
+    // Rolled with version 1, read for version 2: the events, now gone.
+    let other = openlens_engine::feature_relations(&q, "p", &m, Some(2), &f)
+        .await
+        .unwrap();
+    let together = |r: &[openlens_engine::Relation]| {
+        r.iter()
+            .find(|x| x.first == "cart" && x.then == "checkout")
+            .map_or(0, |x| x.together)
+    };
+    assert!(together(&other) < together(&live.relations));
+}

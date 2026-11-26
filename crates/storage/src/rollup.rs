@@ -138,6 +138,31 @@ pub fn session_day_schema() -> SchemaRef {
     ]))
 }
 
+/// `session_feature_day` (#483, D-054): one row per session, person,
+/// environment, release, role and feature of the UTC day, for the
+/// relations between features. The feature is resolved as in `person_day`
+/// (the map in force when the day was rolled up, `map_version`); events
+/// without a feature or without a session have no row. A session crossing
+/// midnight has rows on both days, re-assembled by `session_id` and
+/// `feature` with `min(first_ts)`, `max(last_ts)` and the sums of
+/// `events` and `successes` (task events as in `person_day`, counted for
+/// the feature they resolve to).
+pub fn session_feature_day_schema() -> SchemaRef {
+    Arc::new(Schema::new(vec![
+        Field::new("session_id", DataType::Utf8, true),
+        Field::new("person", DataType::Utf8, true),
+        Field::new("environment", DataType::Utf8, true),
+        Field::new("release", DataType::Utf8, true),
+        Field::new("role", DataType::Utf8, true),
+        Field::new("feature", DataType::Utf8, true),
+        Field::new("first_ts", ts(), true),
+        Field::new("last_ts", ts(), true),
+        Field::new("events", DataType::Int64, true),
+        Field::new("successes", DataType::Int64, true),
+        Field::new("map_version", DataType::Int64, true),
+    ]))
+}
+
 /// The dimensions every page rollup is split by.
 fn page_dims() -> Vec<Field> {
     vec![
@@ -192,14 +217,20 @@ pub const TOP_LABELS: usize = 20;
 
 /// The tables with a row per person: erasing someone removes their rows
 /// from them (D-026).
-pub const PERSON_TABLES: [&str; 3] = ["person_q", "person_day", "session_day"];
+pub const PERSON_TABLES: [&str; 4] = [
+    "person_q",
+    "person_day",
+    "session_day",
+    "session_feature_day",
+];
 
 /// The rollup tables: name and schema.
-pub fn tables() -> [(&'static str, SchemaRef); 7] {
+pub fn tables() -> [(&'static str, SchemaRef); 8] {
     [
         ("person_q", person_schema()),
         ("person_day", person_day_schema()),
         ("session_day", session_day_schema()),
+        ("session_feature_day", session_feature_day_schema()),
         ("metric_q", metric_schema()),
         ("click_q", click_schema()),
         ("label_q", label_schema()),
