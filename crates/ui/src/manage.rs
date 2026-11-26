@@ -325,6 +325,45 @@ pub fn replays(
     rate: &openlens_engine::ReplayRate,
 ) -> Markup {
     let min_minutes = view.min_active_secs / 60;
+    let cols = [
+        Col::Shown("Started"),
+        Col::Shown("User"),
+        Col::Num("Active time"),
+        Col::Num("Size"),
+        Col::Num("Comments"),
+        Col::Hidden("Play"),
+    ];
+    // (UTC start as `local_time` reads it, the recording).
+    let rows: Vec<(String, &openlens_replay::Summary)> = list
+        .iter()
+        .map(|r| (r.started.format("%Y-%m-%d %H:%M:%S").to_string(), r))
+        .collect();
+    let row = |(_, r): &(String, &openlens_replay::Summary), time: &str| {
+        let secs = (r.updated - r.started).num_seconds().max(0) as f64;
+        html! {
+            tr {
+                td.when.muted { (time) }
+                td { a.mono href={ "/p/" (p.id) "/replays?u=" (url_enc(&r.distinct_id)) } title="Only this user's recordings" { (r.distinct_id) } }
+                td.num { @match r.active_secs {
+                    Some(a) if (a as f64) + 60.0 < secs => { (duration(a as f64)) " active" br; span.muted.small { "open " (duration(secs)) } }
+                    Some(a) => { (duration(a.max(1) as f64)) }
+                    None => { (duration(secs)) }
+                } }
+                td.num.muted { (compact((r.bytes / 1024) as i64)) " kB" }
+                td.num { @match comments.iter().find(|(s, _)| *s == r.session_id) {
+                    Some((_, n)) => { (n) span.sr-only { " comments" } },
+                    None => span.muted { "—" },
+                } }
+                td { a.btn.sm href={ "/p/" (p.id) "/replays/" (r.session_id) } { (icon("play")) "Play" } }
+            }
+        }
+    };
+    // Day groups only when the rows are in time order.
+    let body = if view.by_active {
+        html! { @for x in &rows { (row(x, &local_time(&x.0, tz, false))) } }
+    } else {
+        crate::tables::day_rows(&rows, |x| x.0.as_str(), tz, cols.len(), row)
+    };
     layout(
         "Replays",
         Some(p),
@@ -334,51 +373,50 @@ pub fn replays(
                     h1 { "Replays" }
                     p.muted {
                         "Recorded sessions, " (if view.by_active { "most active first" } else { "most recent first" }) ". Inputs are always masked."
-                        @if let Some(w) = who { " Only " span.mono { (w) } ". " a href={ "/p/" (p.id) "/replays" } { "Show everyone" } }
                     }
                     p.muted { (rate_reason(rate)) }
                 }
             }
-            form.filters method="get" action={ "/p/" (p.id) "/replays" } aria-label="Sort and filter" {
+            form.card.refine method="get" action={ "/p/" (p.id) "/replays" } aria-label="Sort and filter" {
                 @if let Some(w) = who { input type="hidden" name="u" value=(w); }
-                label { "Sort "
+                label { "Sort"
                     select name="sort" {
                         option value="recent" selected[!view.by_active] { "Most recent first" }
                         option value="active" selected[view.by_active] { "Most active first" }
                     }
                 }
-                label { "More than "
+                label { "More than (min active)"
                     input type="number" name="active" min="0" max="1440" step="1" value=[(min_minutes > 0).then_some(min_minutes)] placeholder="0";
-                    " min active"
                 }
                 button type="submit" { "Show" }
             }
-            @if list.is_empty() && min_minutes > 0 {
-                section.card { p { "No recording has more than " (min_minutes) " min of active time." } }
-            } @else if list.is_empty() {
-                section.card { p { (icon("play")) " No recordings yet. The SDK records sessions once a page has loaded; they show up here within a few seconds." } }
-            } @else {
-                section.card.wide {
-                    table.plain {
-                        thead { tr { th { "Started (" (tz_label(tz)) ")" } th { "User" } (th_num("Active time")) th.num { "Size" } th.num { "Comments" } th { span.sr-only { "Play" } } } }
-                        tbody { @for r in list {
-                            @let started = tz.parse::<chrono_tz::Tz>().map_or_else(|_| r.started.format("%Y-%m-%d %H:%M").to_string(), |z| r.started.with_timezone(&z).format("%Y-%m-%d %H:%M").to_string());
-                            @let secs = (r.updated - r.started).num_seconds().max(0) as f64;
-                            tr {
-                                td.mono { (started) }
-                                td.mono { a href={ "/p/" (p.id) "/replays?u=" (r.distinct_id) } { (r.distinct_id) } }
-                                td.num { @match r.active_secs {
-                                    Some(a) if (a as f64) + 60.0 < secs => { (duration(a as f64)) " active" br; span.muted.small { "open " (duration(secs)) } }
-                                    Some(a) => { (duration(a.max(1) as f64)) }
-                                    None => { (duration(secs)) }
-                                } }
-                                td.num.muted { (compact((r.bytes / 1024) as i64)) " kB" }
-                                td.num { @match comments.iter().find(|(s, _)| *s == r.session_id) { Some((_, n)) => { "💬 " (n) }, None => span.muted { "—" } } }
-                                td { a.button href={ "/p/" (p.id) "/replays/" (r.session_id) } { (icon("play")) "Play" } }
-                            }
-                        } }
+            @if let Some(w) = who {
+                p.active-filters { "Only " strong { (w) } a href={ "/p/" (p.id) "/replays" } aria-label="Show everyone" { "Show everyone ×" } }
+            }
+            @if list.is_empty() {
+                section.card.empty aria-labelledby="rep-empty-h" {
+                    (crate::tables::empty_art())
+                    div {
+                        @if min_minutes > 0 {
+                            h2 #rep-empty-h { "No recording has more than " (min_minutes) " min of active time" }
+                            p { "Lower the active time to see shorter sessions." }
+                            div.actions { a.button href={ "/p/" (p.id) "/replays" } { "Show every recording" } }
+                        } @else {
+                            h2 #rep-empty-h { "No recordings yet" }
+                            p { "The SDK records sessions once a page has loaded; they show up here within a few seconds." }
+                            div.actions { a.button href={ "/p/" (p.id) "/settings/install" } { "Check the install" } }
+                        }
                     }
                 }
+            } @else {
+                (crate::tables::TableCard {
+                    label: "Recorded sessions",
+                    head: html! {},
+                    cols: &cols,
+                    body,
+                    foot: crate::tables::pager(&format!("{} recordings · times in {}", list.len(), tz_label(tz)), &[]),
+                }
+                .render())
             }
         },
     )

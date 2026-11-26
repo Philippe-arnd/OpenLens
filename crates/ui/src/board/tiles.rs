@@ -8,7 +8,7 @@
 use crate::*;
 
 /// How a number moved.
-pub(super) struct Delta {
+pub(crate) struct Delta {
     /// `good`, `bad` or `flat`.
     pub(super) tone: &'static str,
     /// `up`, `down` or `right` (flat).
@@ -25,7 +25,7 @@ fn signed(d: f64, decimals: usize) -> String {
 /// `now` against `before`. `points`: shares compared in percentage
 /// points, else the relative change. `higher_good`: up is better. None
 /// when there is nothing to compare with.
-pub(super) fn delta(now: f64, before: f64, higher_good: bool, points: bool) -> Option<Delta> {
+pub(crate) fn delta(now: f64, before: f64, higher_good: bool, points: bool) -> Option<Delta> {
     if !now.is_finite() || !before.is_finite() {
         return None;
     }
@@ -57,7 +57,7 @@ pub(super) fn delta(now: f64, before: f64, higher_good: bool, points: bool) -> O
 
 /// A delta: icon, signed change, and the verdict in words for screen
 /// readers (the colour says it to the eye).
-pub(super) fn delta_mark(d: &Delta) -> Markup {
+pub(crate) fn delta_mark(d: &Delta) -> Markup {
     let word = match d.tone {
         "good" => "better",
         "bad" => "worse",

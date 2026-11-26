@@ -284,23 +284,19 @@ fn day_title(d: &openlens_engine::commands::uptime::Day) -> String {
 
 /// The Uptime page.
 pub fn uptime(p: &ProjectInfo<'_>, v: &UptimeView<'_>) -> Markup {
-    let (cls, word) = match v.state {
-        "up" => ("good", "Up"),
-        "down" => ("bad", "Down"),
-        "maintenance" => ("warn", "Under maintenance"),
-        "off" => ("muted", "Not checked"),
-        _ => ("muted", "Waiting for the first check"),
-    };
     layout(
         "Uptime",
         Some(p),
         html! {
             div.heading { div {
                 h1 { "Uptime" }
-                p { span class={ "status big " (cls) } { (word) } @if let Some(s) = &v.since { " since " (s) } }
+                (crate::live_screens::uptime_status(v.state, v.since.as_deref()))
+                @if let Some(u) = &v.url {
+                    p.muted.small { "Checking " span.mono { (u) } " every minute. Down after two failed checks in a row (no answer, or HTTP 5xx)." }
+                }
             } }
             @if v.url.is_none() {
-                section.card.wide { p { "Set the app address in " a href={ "/p/" (p.id) "/settings" } { "Settings" } " and OpenLens checks it every minute. Without it, only the traffic tells (after four weeks of history)." } }
+                (crate::live_screens::app_address_step(p.id))
             } @else {
                 // no_detail (#409): this page is the uptime detail already.
                 section.tiles aria-label="Availability" {
@@ -308,7 +304,6 @@ pub fn uptime(p: &ProjectInfo<'_>, v: &UptimeView<'_>) -> Markup {
                     (tile("sky", "clock", "Last 7 days", &v.avail.1.map_or_else(|| "—".into(), |a| format!("{:.2}%", a * 100.0)), &v.left_out.1.as_ref().map_or_else(|| "available".into(), |m| format!("available · {m} of planned maintenance not counted"))))
                     (tile("violet", "bolt", "Response time", &v.ms.0.map_or_else(|| "—".into(), |m| format!("{m} ms")), &v.ms.1.map_or_else(|| "p50, last 24 hours".into(), |m| format!("p50 · p95 {m} ms"))))
                 }
-                p.muted.small { "Checking " span.mono { (v.url.as_deref().unwrap_or("")) } " every minute. Down after two failed checks in a row (no answer, or HTTP 5xx)." }
             }
             @if !v.days.is_empty() {
                 section.card.wide {
@@ -325,43 +320,12 @@ pub fn uptime(p: &ProjectInfo<'_>, v: &UptimeView<'_>) -> Markup {
             @if let Some(a) = &v.availability { (a) }
             (crate::maintenance::maintenance_card(p.id, &v.maintenance))
             @if let Some(n) = &v.notices { (n) }
-            section.card.wide {
-                h2.coral { (icon("alert")) "Incidents and alerts" }
-                @if v.incidents.is_empty() { p.muted { @if v.paged { "No older incident." } @else { "None." } } }
-                @else {
-                    div.table-scroll { table.plain {
-                        thead { tr { th { "What" } th { "Started" } th { "Ended" } (th_num("Length")) th { "Cause" } } }
-                        tbody { @for (rule, start, end, mins, cause) in &v.incidents {
-                            tr {
-                                td { span class={ "status " (if end.is_none() { "bad" } else { "muted" }) } { (match rule.as_str() {
-                                    "traffic" => "traffic stopped",
-                                    "down" => "down",
-                                    r if r.starts_with("budget_") || (r.starts_with("env:") && r.contains(":budget_")) => "error budget",
-                                    r if r.starts_with("error:") => "new error",
-                                    r if r.starts_with("env:") => "environment check",
-                                    _ => "regression",
-                                }) } }
-                                td.small { (start) }
-                                td.small { @match end { Some(e) => (e), None => strong { "ongoing" } } }
-                                td.num { (mins) " min" }
-                                td.small { (cause) }
-                            }
-                        } }
-                    } }
-                }
-                @if v.older.is_some() || v.paged {
-                    p.small {
-                        @if v.paged { a href={ "/p/" (p.id) "/uptime" } { "Newest incidents" } }
-                        @if v.paged && v.older.is_some() { " · " }
-                        @if let Some(b) = v.older { a href={ "/p/" (p.id) "/uptime?before=" (b) } { "Older incidents" } }
-                    }
-                }
-            }
+            (crate::live_screens::incidents_table(p.id, &v.incidents, v.older, v.paged))
             @if !v.last.is_empty() {
                 section.card.wide {
                     h2 { (icon("clock")) "Latest checks" }
                     ul.plain-list.small { @for (t, ok, status, ms, err) in v.last.iter().take(15) {
-                        li { span class={ "status " (if *ok { "good" } else { "bad" }) } { (if *ok { "ok" } else { "failed" }) } " " (t)
+                        li { @if *ok { span.tag.tone-good { (icon("task")) "ok" } } @else { span.tag.tone-bad { (icon("alert")) "failed" } } " " (t)
                             @if let Some(s) = status { " · HTTP " (s) } @if let Some(m) = ms { " · " (m) " ms" } @if let Some(e) = err { " · " span.muted { (e) } } }
                     } }
                 }
