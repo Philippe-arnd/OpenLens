@@ -85,7 +85,11 @@ fn click_svg(map: &openlens_engine::ClickMap, rage_only: bool) -> Markup {
     let weight = |c: (i64, i64, i64, i64)| if rage_only { c.3 } else { c.2 };
     let max = cells.iter().map(|c| weight(*c)).max().unwrap_or(1).max(1) as f64;
     let cw = vw as f64 / cols as f64;
-    let what = if rage_only { "Rage clicks" } else { "Click density" };
+    let what = if rage_only {
+        "Rage clicks"
+    } else {
+        "Click density"
+    };
     html! {
         svg.heatmap viewBox={ "0 0 " (vw) " " (height) } role="img" aria-label={ (what) " on " (map.path) } {
             rect.page x="0" y="0" width=(vw) height=(height) {}
