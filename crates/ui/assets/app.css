@@ -1389,3 +1389,57 @@
   .flow-table .scroll { overflow-x: auto; }
   .flow-table table { width: 100%; }
 }
+
+/* People screens (#550) */
+@layer components {
+  .people .notice { margin: 0; }
+  .people-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 16px; align-items: start; }
+  .people .section-head h2 .icon { margin-right: 6px; }
+
+  /* Breakdowns: the share as a bar cell, the count after it. */
+  table.share-bars { width: 100%; }
+  table.share-bars th { max-width: 14em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  table.share-bars td.bar { width: 60%; }
+  .table-card td.bar { min-width: 160px; }
+
+  /* Acquisition: what to group by, and which touch, as underlined tabs. */
+  .people-tabs { display: flex; flex-wrap: wrap; align-items: end; gap: 4px 28px; border-bottom: 1px solid var(--line); }
+  .people-tabs nav.tabs { display: flex; gap: 2px; margin: 0; overflow-x: auto; scrollbar-width: none; }
+  .people-tabs nav.tabs a { display: inline-flex; align-items: center; min-height: 40px; padding: 0 12px; margin-bottom: -1px;
+    border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--muted);
+    font-weight: 500; white-space: nowrap; text-decoration: none; }
+  .people-tabs nav.tabs a:hover { color: var(--ink); }
+  .people-tabs nav.tabs a[aria-current="page"] { background: transparent; color: var(--ink); border-bottom-color: var(--ink); }
+
+  /* Goals: the value now, the progress bar (SVG rects), the forms. */
+  .goal .section-head { align-items: center; }
+  .goal-now { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+  .goal-now .kpi-value { font-size: 26px; }
+  .goal-now strong { color: var(--ink); font-weight: 550; }
+  .goal-progress { display: flex; flex-direction: column; gap: 6px; }
+  .goal .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .goal .actions form { margin: 0; }
+  .goal-choices { display: flex; flex-direction: column; gap: 8px; }
+  .goal-choice { border: 1px solid var(--line); border-radius: var(--r-s); background: var(--surface); }
+  .goal-choice[open] { border-color: color-mix(in oklab, var(--accent) 35%, var(--line)); }
+  .goal-choice summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-height: 44px; padding: 10px 14px; cursor: pointer; }
+  .goal-choice form { display: flex; flex-direction: column; gap: 16px; padding: 4px 14px 14px; }
+
+  /* Churn: the at-risk exports and the win-back form. */
+  .people .table-card .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .people .table-card form.inline { margin: 0; }
+
+  /* Each ⓘ anchors its own popover (ids: the CSP forbids style=). */
+  #kpi-churn-rate-btn { anchor-name: --kpi-churn-rate; }
+  #kpi-churn-rate { position-anchor: --kpi-churn-rate; }
+  #kpi-net-change-btn { anchor-name: --kpi-net-change; }
+  #kpi-net-change { position-anchor: --kpi-net-change; }
+  #kpi-at-risk-now-btn { anchor-name: --kpi-at-risk-now; }
+  #kpi-at-risk-now { position-anchor: --kpi-at-risk-now; }
+  #kpi-median-lifetime-btn { anchor-name: --kpi-median-lifetime; }
+  #kpi-median-lifetime { position-anchor: --kpi-median-lifetime; }
+  #kpi-reached-value-btn { anchor-name: --kpi-reached-value; }
+  #kpi-reached-value { position-anchor: --kpi-reached-value; }
+  #kpi-came-back-btn { anchor-name: --kpi-came-back; }
+  #kpi-came-back { position-anchor: --kpi-came-back; }
+}
