@@ -199,16 +199,7 @@ pub(super) async fn export(
 
 /// One day of a project's events as NDJSON (`date` is YYYY-MM-DD).
 pub(crate) async fn export_day(state: &AppState, project: &str, date: &str) -> Response {
-    let d = date.as_bytes();
-    let valid = d.len() == 10
-        && d.iter().enumerate().all(|(i, c)| {
-            if i == 4 || i == 7 {
-                *c == b'-'
-            } else {
-                c.is_ascii_digit()
-            }
-        });
-    if !valid {
+    if !openlens_engine::reads::is_day(date) {
         return err(StatusCode::BAD_REQUEST, "date must be YYYY-MM-DD");
     }
     let engine = openlens_query::QueryEngine::new(
@@ -219,12 +210,7 @@ pub(crate) async fn export_day(state: &AppState, project: &str, date: &str) -> R
             ..openlens_query::Limits::default()
         },
     );
-    let sql = format!(
-        "SELECT uuid, event, distinct_id, session_id, CAST(timestamp AS VARCHAR) AS timestamp, url, path, feature, \
-         role, account, plan, environment, release, properties FROM events WHERE date = '{}' ORDER BY timestamp",
-        date
-    );
-    match engine.sql(project, &sql).await {
+    match openlens_engine::reads::day_events(&engine, project, date).await {
         Ok(res) => {
             let mut body = String::new();
             for row in &res.rows {

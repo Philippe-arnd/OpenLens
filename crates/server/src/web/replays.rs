@@ -204,19 +204,10 @@ pub(super) async fn replay_timeline(
     if !openlens_replay::valid_id(&session) || project(&state, id.clone()).await.is_none() {
         return StatusCode::NOT_FOUND.into_response();
     }
-    let sql = "SELECT event, CAST(date_part('epoch', timestamp) * 1000 AS BIGINT) AS ms, feature, path, \
-         regexp_match(properties, '\"\\$message\":\"([^\"]{0,120})')[1] AS message, \
-         properties LIKE '%\"$rage\":true%' AS rage \
-         FROM events WHERE session_id = $session \
-         AND event NOT IN ('$scroll', '$vital', '$identify') ORDER BY timestamp LIMIT 1000";
-    let mut params = openlens_sqlgen::Params::new();
-    if params.set("session", &session).is_err() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-    match state.query.with_params(&params).sql(&id, sql).await {
-        Ok(r) => (
+    match openlens_engine::reads::session_markers(&state.query, &id, &session).await {
+        Ok(rows) => (
             [(header::CACHE_CONTROL, "no-store")],
-            Json(json!({ "events": r.rows })),
+            Json(json!({ "events": rows })),
         )
             .into_response(),
         Err(_) => StatusCode::NOT_FOUND.into_response(),
