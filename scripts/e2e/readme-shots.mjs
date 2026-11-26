@@ -22,16 +22,16 @@ const PHONE = devices["iPhone 13"];
 // name, path ("/p/default" prefix for project views), theme, ready marker,
 // device. The marker is the content the picture is about, not the frame.
 const VIEWS = [
-  ["board-light", "/p/default", "light", "main .tiles", DESK],
-  ["board-dark", "/p/default", "dark", "main .tiles", DESK],
-  ["board-phone", "/p/default", "light", "main .tiles", PHONE],
+  ["board-light", "/p/default", "light", "main .key-numbers", DESK],
+  ["board-dark", "/p/default", "dark", "main .key-numbers", DESK],
+  ["board-phone", "/p/default", "light", "main .key-numbers", PHONE],
   ["errors-light", "/p/default/errors", "light", "main table", DESK],
   ["pages-light", "/p/default/pages", "light", "main table", DESK],
   ["events-light", "/p/default/events", "light", "main table", DESK],
   ["features-light", "/p/default/features", "light", "main table", DESK],
   ["settings-light", "/p/default/settings", "light", "main form", DESK],
   ["ai-light", "/settings/ai", "light", "main form", DESK],
-  ["login-light", "/login", "light", "main section.login", DESK, { signedOut: true }],
+  ["login-light", "/login", "light", "main section.auth-card", DESK, { signedOut: true }],
 ];
 
 const browser = await chromium.launch();
