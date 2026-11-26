@@ -25,6 +25,9 @@ permissions:
   contents: read
   packages: write
   issues: write
+  # Keyless signing and provenance of the published image (#349).
+  id-token: write
+  attestations: write
 
 concurrency:
   group: image-${{ github.ref }}
@@ -85,7 +88,8 @@ jobs:
             type=ref,event=tag
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-      - name: publish (reuses the cached layers)
+      - name: publish (reuses the cached layers), with an SBOM attached to the image (#349)
+        id: push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
@@ -94,6 +98,21 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           build-args: GEOIP_MONTH=${{ env.GEOIP_MONTH }}
+          sbom: true
+      # The digest is signed, not the tags: one signature covers edge,
+      # latest, the minor channel and the version (#349). See
+      # docs/deploy/README.md#verify-what-you-run for `cosign verify`.
+      - uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
+      - name: sign the image (cosign keyless)
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign sign --yes "ghcr.io/philippe-arnd/openlens@${DIGEST}"
+      - name: build provenance of the image
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/philippe-arnd/openlens
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
       # Automatic deploy of the maintainer's own instance after a stable
       # release (#198). Skipped when the secrets are absent (forks, others).
       - name: deploy to Coolify (stable releases only)
