@@ -19,6 +19,7 @@ use crate::{Board, Filters};
 
 pub mod alerts;
 pub mod deploys;
+pub mod explore;
 pub mod goals;
 pub mod releases;
 pub mod tickets;
@@ -93,6 +94,19 @@ pub const REGISTRY: &[Spec] = &[
     spec::<tickets::SetTarget>(),
     spec::<deploys::RotateHook>(),
     spec::<deploys::Record>(),
+    // Explore (#507).
+    spec::<explore::GetPerson>(),
+    spec::<explore::Breakdown>(),
+    spec::<explore::Sql>(),
+    spec::<explore::GetAcquisition>(),
+    spec::<explore::Forms>(),
+    spec::<explore::Churn>(),
+    spec::<explore::FlagAudiences>(),
+    spec::<explore::MakeAudience>(),
+    spec::<explore::Vitals>(),
+    spec::<explore::GetAudience>(),
+    spec::<explore::Flows>(),
+    spec::<explore::GetLive>(),
 ];
 
 /// A 12-character id from `s` (the first bytes of its SHA-256, in hex).
@@ -177,6 +191,8 @@ pub trait Host: Sync {
     /// Store the GitHub token every project shares, sealed: why it could
     /// not be sealed.
     fn set_github_token(&self, token: &str) -> Result<(), String>;
+    /// The data directory (where session recordings are kept).
+    fn data_dir(&self) -> &std::path::Path;
 }
 
 /// Something that happened in a project, on the timeline.
