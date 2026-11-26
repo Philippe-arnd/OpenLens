@@ -12,7 +12,9 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+pub mod facts;
 pub mod vital;
+pub use facts::{Facts, facts};
 pub use vital::{Vital, vital};
 
 /// Limits applied to every incoming batch. They are deliberately generous for

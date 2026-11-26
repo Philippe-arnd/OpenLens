@@ -17,6 +17,7 @@
 
 mod compaction;
 mod pending;
+pub mod relabel;
 mod segments;
 mod typed;
 pub use pending::Pending;

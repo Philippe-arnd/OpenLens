@@ -51,9 +51,7 @@ pub async fn error_groups(
     let w = f.clause(30)?;
     let base = format!(
         "WITH e AS (SELECT distinct_id, session_id, timestamp, role, release, coalesce(feature, path) AS place, \
-           regexp_match(properties, '\"\\$message\":\"((?:[^\"\\\\]|\\\\.)*)\"')[1] AS msg, \
-           regexp_match(properties, '\"\\$source\":\"([^\"]*)\"')[1] AS source, \
-           regexp_match(properties, '\"\\$stack\":\"((?:[^\"\\\\]|\\\\.)*)\"')[1] AS stack \
+           error_message AS msg, error_source AS source, error_stack AS stack \
            FROM {src} WHERE {w} AND event = '$error'), \
          g AS (SELECT *, concat( \
              regexp_replace(regexp_replace(coalesce(msg, '(no message)'), '0x[0-9a-fA-F]+|[0-9a-fA-F-]{{12,}}|[0-9]+', 'N', 'g'), \

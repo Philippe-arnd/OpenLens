@@ -33,7 +33,7 @@ A crate depends only on crates in strictly lower layers. `cargo xtask layers` en
 
 ## Data model
 
-- **Event**: `uuid`, `event` (name), `timestamp`, `received_at`, `distinct_id`, `session_id`. Promoted columns: `url`, `path`, `feature`, `role` (raw), `account`, `plan`, `environment`, `release`. Everything else stays in `properties` (JSON); `$vital` facts are also written as typed `vital_*` columns (D-037). The `project` and `date` columns come from the partition directories.
+- **Event**: `uuid`, `event` (name), `timestamp`, `received_at`, `distinct_id`, `session_id`. Promoted columns: `url`, `path`, `feature`, `role` (raw), `account`, `plan`, `environment`, `release`. Everything else stays in `properties` (JSON); `$vital` facts are also written as typed `vital_*` columns (D-037), and error, acquisition and friction facts as `error_*`, `acq_*`, `vital_rating` and `click_rage` (D-039). The `project` and `date` columns come from the partition directories.
 - **Person**: `distinct_id` → properties, including `role`, `account` and `plan`, stored in SQLite and joined at query time. Person properties are also copied onto each event at capture time, so role breakdowns need no join.
 - **Feature map**: pushed from the app repo (`openlens.features.yaml`) and stored, versioned, in SQLite. Features and canonical roles are resolved at query time, so editing the map re-labels history without rewriting any files.
 
