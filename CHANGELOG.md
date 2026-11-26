@@ -34,6 +34,10 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 - **Password sign-in slows down instead of locking** (#428): after 3 failures in 15 minutes, each try for that email waits 1 s, 2 s, 4 s… up to 30 s, one at a time, so nobody can lock someone else out. One client address gets at most 30 failures per 15 minutes. Wrong current passwords on *My profile* count the same and are audited. The token holder can no longer create their account on an existing member's email.
 - **Journal is the third M2 reference app** (#18): the docs and the roadmap describe it as wired outside this repo, with its `verify` result recorded by hand on #18 rather than replayed in CI.
 
+### Fixed
+
+- **A cached board page is served from the cache as a whole** (#480): the revenue block of the board (and of the Revenue page) queried 30 days of event properties again on every load, so with a feature map that declares success events a board loaded twice took as long the second time as the first. The revenue is now computed with the board and cached with it, and follows new data the same way.
+
 ## [0.5.0] - 2026-11-24
 
 ### Added

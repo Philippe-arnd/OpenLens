@@ -425,12 +425,13 @@ async fn board_page(
         name: &p.name,
         key: &p.api_key,
     };
-    let (board, revenue) = tokio::join!(
-        crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
-        openlens_engine::revenue(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f)
-    );
-    let revenue = revenue.ok().flatten();
-    let mut board = board;
+    let (mut board, revenue) =
+        match crate::boards::with_revenue(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v)))
+            .await
+        {
+            Ok((b, r)) => (Ok(b), r.ok().flatten()),
+            Err(e) => (Err(e), None),
+        };
     if let Ok(b) = board.as_mut() {
         b.objectives_at_risk = crate::goals::snapshot(&state, &p.id).0;
         if admin {

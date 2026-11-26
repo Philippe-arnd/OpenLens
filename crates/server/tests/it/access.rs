@@ -54,6 +54,59 @@ async fn the_board_is_computed_once_and_follows_new_data() {
     );
 }
 
+/// A board page loaded twice with no new data is answered from the cache
+/// as a whole (#480): the revenue on it used to be queried again on every
+/// load, which made a cached page as slow as a cold one.
+#[tokio::test]
+async fn a_cached_board_page_runs_no_query_again() {
+    let h = harness();
+    let owner = login_cookie(&h).await;
+    h.state
+        .meta
+        .save_feature_map(
+            "default",
+            "features:\n  - key: checkout\n    name: Checkout\n    success: order_paid\n    entry: { routes: ['/checkout'] }\n",
+        )
+        .unwrap();
+    let paid = |who: &str| {
+        serde_json::json!({"key": h.key, "batch": [
+            {"event": "order_paid", "distinct_id": who, "properties": {"revenue": 10, "currency": "EUR"}}
+        ]})
+        .to_string()
+        .into_bytes()
+    };
+    let (status, _) = post(&h, "/capture", paid("u1"), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let first = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
+    assert!(first.contains("10.00 EUR"), "one order of 10");
+    let computed = h.state.boards.computed();
+
+    // Rows written behind the cache's back (no generation bump): a page
+    // that queries nothing again cannot see them.
+    let (status, _) = post(&h, "/capture", paid("u2"), false).await;
+    assert_eq!(status, StatusCode::OK);
+    h.state.writer.lock().unwrap().flush().unwrap();
+    let second = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
+    assert_eq!(h.state.boards.computed(), computed, "the board is cached");
+    assert!(
+        second.contains("10.00 EUR") && !second.contains("20.00 EUR"),
+        "the revenue comes from the cache too"
+    );
+
+    // New data: board and revenue follow it together.
+    h.state.boards.bump("default");
+    let _stale = get(&h, "/p/default", Some(&owner), false).await;
+    for _ in 0..100 {
+        if h.state.boards.computed() > computed {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let after = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
+    assert!(after.contains("20.00 EUR"), "the revenue follows new data");
+}
+
 /// Who may reach a route (#294). The table must list every route of the
 /// router: [`every_route_is_in_the_access_table`] fails otherwise.
 #[derive(Clone, Copy, PartialEq, Debug)]
