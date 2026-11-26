@@ -111,11 +111,27 @@ impl Meta {
     /// True when a table changed (a new person or alias, an earlier first
     /// visit, a person newly marked internal).
     pub fn record_identities(&self, project: &str, rows: &[Identified]) -> Result<bool> {
-        if rows.is_empty() {
+        self.record_identify(project, &[], rows)
+    }
+
+    /// The `$identify` events of one captured batch in a single write
+    /// transaction (#510): the people and their traits (D-009, `seen`) and
+    /// the identity tables (`rows`). True when an identity table changed.
+    /// Nothing is written when both are empty.
+    pub fn record_identify(
+        &self,
+        project: &str,
+        seen: &[crate::Seen<'_>],
+        rows: &[Identified],
+    ) -> Result<bool> {
+        if seen.is_empty() && rows.is_empty() {
             return Ok(false);
         }
         self.with(|c| {
             let tx = c.unchecked_transaction()?;
+            for s in seen {
+                crate::projects::identify_in(&tx, project, s)?;
+            }
             let mut changed = false;
             for row in rows {
                 changed |= record_one(&tx, project, row)?;
