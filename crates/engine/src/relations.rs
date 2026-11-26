@@ -3,6 +3,10 @@
 //! one comes first, and whether using the first raises the success of the
 //! second. They honour the board filters, so a role or a release gives
 //! the relations of that role or release.
+//!
+//! They are computed from [`Counts`]: sessions per feature and per pair of
+//! features, which SQL adds up over the session rollup and the events
+//! (`mapdays`, #483), or which [`counts`] takes from loaded sessions.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -16,7 +20,7 @@ pub const MIN_TOGETHER: i64 = 20;
 /// Relations kept (the most sessions together first).
 const MAX_RELATIONS: usize = 50;
 /// Features of one session considered (the first used).
-const MAX_PER_SESSION: usize = 20;
+pub const MAX_PER_SESSION: usize = 20;
 
 /// Two features seen in the same sessions.
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
@@ -46,73 +50,147 @@ pub struct Relation {
     pub leads_to_value: bool,
 }
 
-/// Infer the relations between the map's features from `sessions`.
+/// The sessions of two features `x` < `y` (key order) used together.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Pair {
+    /// Sessions that used both.
+    pub both: i64,
+    /// Of them, sessions where `x` was first used before `y`, or at the
+    /// same time.
+    pub x_first: i64,
+    /// Of them, sessions where `y` was first used before `x`, or at the
+    /// same time.
+    pub y_first: i64,
+    /// Of `x_first`, sessions where `y` succeeded.
+    pub y_ok_after: i64,
+    /// Of `y_first`, sessions where `x` succeeded.
+    pub x_ok_after: i64,
+    /// Of `both`, sessions where `x` succeeded.
+    pub x_ok: i64,
+    /// Of `both`, sessions where `y` succeeded.
+    pub y_ok: i64,
+}
+
+/// What the relations are inferred from: of each session, its first
+/// [`MAX_PER_SESSION`] declared features, when each was first used and
+/// whether it succeeded.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Counts {
+    /// Sessions that used a feature.
+    pub sessions: i64,
+    /// Declared feature → (sessions that used it, of them sessions where
+    /// it succeeded).
+    pub features: BTreeMap<String, (i64, i64)>,
+    /// `(x, y)` in key order → their shared sessions.
+    pub pairs: BTreeMap<(String, String), Pair>,
+}
+
+/// The [`Counts`] of loaded `sessions`: a feature succeeded in a session
+/// when its success event fired there.
 #[must_use]
-pub fn infer(m: &FeatureMap, sessions: &Sessions) -> Vec<Relation> {
+pub fn counts(m: &FeatureMap, sessions: &Sessions) -> Counts {
     let success: HashMap<&str, &str> = m
         .features
         .iter()
         .filter_map(|f| Some((f.key.as_str(), f.success.as_deref()?)))
         .collect();
     let declared: HashSet<&str> = m.features.iter().map(|f| f.key.as_str()).collect();
-    let total = sessions.len() as f64;
-    let mut alone: HashMap<&str, i64> = HashMap::new();
-    // (x, y) in key order → (sessions with both, of them `x` first).
-    let mut pairs: BTreeMap<(&str, &str), (i64, i64)> = BTreeMap::new();
+    let mut c = Counts {
+        sessions: sessions.len() as i64,
+        ..Counts::default()
+    };
     for s in sessions.values() {
-        let mut used: Vec<(&str, f64)> = s
+        let mut used: Vec<(&str, f64, i64)> = s
             .features
             .iter()
             .filter(|(k, _)| declared.contains(k.as_str()))
-            .map(|(k, v)| (k.as_str(), v.first))
+            .map(|(k, v)| {
+                let ok = success
+                    .get(k.as_str())
+                    .is_some_and(|e| s.successes.contains(*e));
+                (k.as_str(), v.first, i64::from(ok))
+            })
             .collect();
         used.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(b.0)));
         used.truncate(MAX_PER_SESSION);
-        for (k, _) in &used {
-            *alone.entry(k).or_default() += 1;
+        for (k, _, ok) in &used {
+            let e = c.features.entry((*k).to_owned()).or_default();
+            e.0 += 1;
+            e.1 += ok;
         }
-        // `used` is in time order: `a` comes before `b`.
-        for (i, (a, _)) in used.iter().enumerate() {
-            for (b, _) in &used[i + 1..] {
-                let (key, a_is_x) = if a < b {
-                    ((*a, *b), true)
-                } else {
-                    ((*b, *a), false)
-                };
-                let e = pairs.entry(key).or_default();
-                e.0 += 1;
-                e.1 += i64::from(a_is_x);
+        for (i, a) in used.iter().enumerate() {
+            for b in &used[i + 1..] {
+                let (x, y) = if a.0 < b.0 { (a, b) } else { (b, a) };
+                let p = c
+                    .pairs
+                    .entry((x.0.to_owned(), y.0.to_owned()))
+                    .or_default();
+                let (xf, yf) = (i64::from(x.1 <= y.1), i64::from(y.1 <= x.1));
+                p.both += 1;
+                p.x_first += xf;
+                p.y_first += yf;
+                p.y_ok_after += xf * y.2;
+                p.x_ok_after += yf * x.2;
+                p.x_ok += x.2;
+                p.y_ok += y.2;
             }
         }
     }
-    let mut out: Vec<Relation> = pairs
-        .into_iter()
-        .filter(|(_, (both, _))| *both >= MIN_TOGETHER)
-        .map(|((x, y), (both, x_first))| {
-            let (nx, ny) = (
-                alone.get(x).copied().unwrap_or(0),
-                alone.get(y).copied().unwrap_or(0),
-            );
-            // Orient: `first` is the one that comes first in most shared sessions.
-            let (first, then, nf, nt, first_n) = if x_first * 2 >= both {
-                (x, y, nx, ny, x_first)
-            } else {
-                (y, x, ny, nx, both - x_first)
-            };
-            Relation {
-                first: first.to_owned(),
-                then: then.to_owned(),
+    c
+}
+
+/// Infer the relations between the map's features from `sessions`.
+#[must_use]
+pub fn infer(m: &FeatureMap, sessions: &Sessions) -> Vec<Relation> {
+    from_counts(m, &counts(m, sessions))
+}
+
+/// Infer the relations between the map's features from `c`.
+#[must_use]
+pub fn from_counts(m: &FeatureMap, c: &Counts) -> Vec<Relation> {
+    let success: HashSet<&str> = m
+        .features
+        .iter()
+        .filter(|f| f.success.is_some())
+        .map(|f| f.key.as_str())
+        .collect();
+    let of = |k: &str| c.features.get(k).copied().unwrap_or((0, 0));
+    let total = c.sessions as f64;
+    let mut out: Vec<Relation> = c
+        .pairs
+        .iter()
+        .filter(|(_, p)| p.both >= MIN_TOGETHER)
+        .map(|((x, y), p)| {
+            let ((nx, x_ok), (ny, y_ok)) = (of(x.as_str()), of(y.as_str()));
+            // Orient: `first` is the one that comes first in most shared
+            // sessions. Then `then`'s success after `first`, and without it.
+            let (first, then, nf, nt, first_n, after, after_ok, without, without_ok) =
+                if p.x_first * 2 >= p.both {
+                    let w = (ny - p.both, y_ok - p.y_ok);
+                    (x, y, nx, ny, p.x_first, p.x_first, p.y_ok_after, w.0, w.1)
+                } else {
+                    let w = (nx - p.both, x_ok - p.x_ok);
+                    let first_n = p.both - p.x_first;
+                    (y, x, ny, nx, first_n, p.y_first, p.x_ok_after, w.0, w.1)
+                };
+            let mut r = Relation {
+                first: first.clone(),
+                then: then.clone(),
                 sessions_first: nf,
                 sessions_then: nt,
-                together: both,
+                together: p.both,
                 lift: if nx > 0 && ny > 0 {
-                    both as f64 * total / (nx as f64 * ny as f64)
+                    p.both as f64 * total / (nx as f64 * ny as f64)
                 } else {
                     0.0
                 },
-                first_share: first_n as f64 / both as f64,
+                first_share: first_n as f64 / p.both as f64,
                 ..Relation::default()
+            };
+            if success.contains(then.as_str()) {
+                value(&mut r, (after, after_ok), (without, without_ok));
             }
+            r
         })
         .collect();
     out.sort_by(|a, b| {
@@ -122,41 +200,19 @@ pub fn infer(m: &FeatureMap, sessions: &Sessions) -> Vec<Relation> {
             .then(a.then.cmp(&b.then))
     });
     out.truncate(MAX_RELATIONS);
-    for r in &mut out {
-        if let Some(ev) = success.get(r.then.as_str()) {
-            value(r, sessions, ev);
-        }
-    }
     out
 }
 
-/// Leads-to-value of `r`: the success of `then` (event `ev`) in sessions
-/// where `first` came before it, against sessions without `first`.
-fn value(r: &mut Relation, sessions: &Sessions, ev: &str) {
-    let (mut after, mut after_ok, mut without, mut without_ok) = (0i64, 0i64, 0i64, 0i64);
-    for s in sessions.values() {
-        let Some(t) = s.features.get(&r.then) else {
-            continue;
-        };
-        let ok = i64::from(s.successes.contains(ev));
-        match s.features.get(&r.first) {
-            Some(f) if f.first <= t.first => {
-                after += 1;
-                after_ok += ok;
-            }
-            Some(_) => {}
-            None => {
-                without += 1;
-                without_ok += ok;
-            }
-        }
-    }
-    let rate = |ok: i64, n: i64| (n > 0).then(|| ok as f64 / n as f64);
-    r.success_after = rate(after_ok, after);
-    r.success_without = rate(without_ok, without);
+/// Leads-to-value of `r`: the success of `then` in the sessions where
+/// `first` came before it (`after`: sessions, successes), against the
+/// sessions that used it without `first` (`without`).
+fn value(r: &mut Relation, after: (i64, i64), without: (i64, i64)) {
+    let rate = |(n, ok): (i64, i64)| (n > 0).then(|| ok as f64 / n as f64);
+    r.success_after = rate(after);
+    r.success_without = rate(without);
     if let (Some(a), Some(w)) = (r.success_after, r.success_without) {
         r.leads_to_value = a > w
-            && crate::stats::two_proportions(a, after, w, without)
+            && crate::stats::two_proportions(a, after.0, w, without.0)
                 .is_some_and(|p| p < crate::stats::ALPHA);
     }
 }

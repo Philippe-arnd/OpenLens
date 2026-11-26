@@ -113,6 +113,25 @@ fn session_day_sql(day: &str, f: &DayFeatures) -> Result<String, QueryError> {
     ))
 }
 
+/// `session_feature_day` of one UTC day (#483): per session, person,
+/// environment, release, role and feature, from the `events` view (people
+/// already merged), events with a feature and a session only.
+fn session_feature_day_sql(day: &str, f: &DayFeatures) -> Result<String, QueryError> {
+    let (task, version) = (task_sql(f)?, version_sql(f));
+    Ok(format!(
+        "SELECT session_id, person, environment, release, role, feature, \
+         min(timestamp) AS first_ts, max(timestamp) AS last_ts, count(*) AS events, \
+         sum(CASE WHEN {task} THEN 1 ELSE 0 END) AS successes, \
+         CAST({version} AS BIGINT) AS map_version \
+         FROM (SELECT session_id, distinct_id AS person, environment, release, role, \
+               {feature} AS feature, event, timestamp \
+               FROM events WHERE date = '{day}' AND session_id IS NOT NULL) e \
+         WHERE feature IS NOT NULL \
+         GROUP BY 1, 2, 3, 4, 5, 6",
+        feature = f.feature
+    ))
+}
+
 /// `metric_q` of one UTC day.
 fn metric_sql(day: &str) -> String {
     format!(
@@ -201,8 +220,8 @@ impl QueryEngine {
     /// The rollup tables named in `wanted` (all of them when it is
     /// `None`) of `project` for the UTC `day` (`YYYY-MM-DD`), as
     /// `(name, batch)` pairs in the schemas of `openlens_storage::rollup`.
-    /// `features` resolves the features of `person_day` and the tasks of
-    /// `person_day` and `session_day`.
+    /// `features` resolves the features of `person_day` and
+    /// `session_feature_day` and the tasks of those and `session_day`.
     pub async fn rollup_day(
         &self,
         project: &str,
@@ -246,6 +265,7 @@ impl QueryEngine {
                 "person_q" => person_sql(day),
                 "person_day" => person_day_sql(day, features)?,
                 "session_day" => session_day_sql(day, features)?,
+                "session_feature_day" => session_feature_day_sql(day, features)?,
                 "metric_q" => metric_sql(day),
                 "click_q" => click_sql(day),
                 "label_q" => label_sql(day),

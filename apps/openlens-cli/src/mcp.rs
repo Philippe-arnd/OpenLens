@@ -173,6 +173,11 @@ impl Tools for OpenLensTools {
                 input_schema: json!({"type":"object","properties":with(json!({"key":{"type":"string"}})),"required":["key"]}),
             },
             ToolSpec {
+                name: "feature_relations",
+                description: "Which features are used together, from every session of the last 30 days: per pair, the sessions using both, the lift (how many times more often than chance), which one usually comes first, and whether using the first raises the success of the second (leads to value, significant at p < 0.05). Pass `feature` to keep the pairs it is part of.",
+                input_schema: json!({"type":"object","properties":with(json!({"feature":{"type":"string","description":"A feature key (optional)"}}))}),
+            },
+            ToolSpec {
                 name: "suggest_map_changes",
                 description: "Changes to make to openlens.features.yaml, ranked by impact, each with its evidence and a YAML patch. Nothing is applied: edit the file, then feature_map_push.",
                 input_schema: json!({"type":"object","properties":with(json!({"limit":{"type":"integer","minimum":1,"maximum":50}}))}),
@@ -397,6 +402,22 @@ impl Tools for OpenLensTools {
                     None,
                 )?;
                 ok_or(st, v)
+            }
+            "feature_relations" => {
+                let feature = s(args, "feature");
+                if let Some(k) = feature.as_deref().filter(|k| !openlens_featuremap::valid_key(k)) {
+                    return Err(format!("`{k}` is not a feature key"));
+                }
+                let (st, v) = c.call(
+                    "GET",
+                    &format!("/api/projects/{}/feature-map/relations", project(args)),
+                    None,
+                )?;
+                let mut v = ok_or(st, v)?;
+                if let (Some(k), Some(list)) = (feature, v["relations"].as_array_mut()) {
+                    list.retain(|r| r["first"] == k.as_str() || r["then"] == k.as_str());
+                }
+                Ok(v)
             }
             "goals" => {
                 let (st, v) = c.call(

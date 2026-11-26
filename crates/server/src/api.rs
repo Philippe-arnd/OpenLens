@@ -52,6 +52,10 @@ pub(crate) fn routes() -> Router<AppState> {
             get(crate::features::api_health),
         )
         .route(
+            "/api/projects/{project}/feature-map/relations",
+            get(crate::features::api_relations),
+        )
+        .route(
             "/api/projects/{project}/feature-map/versions",
             get(crate::features::api_versions),
         )
