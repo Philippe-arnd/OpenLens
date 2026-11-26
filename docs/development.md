@@ -26,6 +26,16 @@ cargo xtask bench http://127.0.0.1:PORT KEY   # ingestion load test, see docs/be
   - every dashboard page in Chromium, light and dark, under the real CSP, which fails on any console error;
   - the reference apps in `examples/`, which must reach a green `verify`.
 - The screenshots are in the `dashboard-screens` artifact: `gh run download <run-id> -n dashboard-screens`.
+
+### Source checks in `cargo xtask ci`
+Besides fmt, clippy, tests, layers and cargo-deny, the gate runs checks that read the source; each one also runs alone:
+- `cargo xtask env-docs`: every `OPENLENS_*` variable the server reads is documented in `docs/deploy/README.md`.
+- `cargo xtask file-length`: no Rust file above 1,000 lines.
+- `cargo xtask sql-guard`: quotes in SQL are escaped by `openlens-sqlgen` only.
+- `cargo xtask server-sql` (D-058): no SQL in `crates/server/src`. A string literal that reads like a query, in any case (`select … from`, `insert into`, `update <name> set`, `delete from`, `with <name> as (`), fails it with its file and line; prose such as "Select a project from the list" does not. Comments and `#[cfg(test)]` code are not checked. Move the query into the engine (`crates/engine`, as a command when it is an action someone takes, else a plain function, often in `reads.rs`) and call it from the server. Files still being moved are listed in `ALLOWED` in `xtask/src/server_sql.rs`; an entry with no SQL left fails the check, so remove it in the same change.
+
+### MCP parity
+Every engine command (`openlens_engine::commands::REGISTRY`) must be reachable from MCP (rule 10). The test in `apps/openlens-cli/src/mcp_parity.rs` (`cargo test -p openlens-cli mcp_parity`, D-058) compares the registry with the tools `openlens-cli mcp` lists, through three lists in that file: `TOOL_OF` maps each command to the tool that runs it (names differ, and one tool may run several commands), `PENDING` lists commands with no tool yet, and `NOT_COMMANDS` lists tools whose logic is not a command yet (`sql` is the raw SQL escape hatch). A new command fails the test until it gets a tool or a `PENDING` entry, a new tool until it is mapped or listed, and an entry that names nothing fails too. Adding a tool for a pending command means moving it from `PENDING` to `TOOL_OF`.
 - **Image** (`release.yml`): Docker build, compose, smoke test, then publish to GHCR. It runs nightly, on tags, on demand, or when packaging changes.
 
 ## Coverage and mutants
