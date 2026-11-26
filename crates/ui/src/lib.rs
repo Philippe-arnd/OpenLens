@@ -28,6 +28,7 @@ mod goals;
 mod goto;
 mod icons;
 mod live;
+mod live_screens;
 mod maintenance;
 mod manage;
 mod people;

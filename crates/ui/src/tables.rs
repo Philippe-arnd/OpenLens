@@ -84,7 +84,7 @@ pub(crate) fn day_and_time(ts: &str, tz: &str) -> (String, String) {
 }
 
 /// A day as the group rows print it ("26 Nov 2026").
-fn day_label(day: &str) -> String {
+pub(crate) fn day_label(day: &str) -> String {
     chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d")
         .map_or_else(|_| day.to_owned(), |d| d.format("%-d %b %Y").to_string())
 }
