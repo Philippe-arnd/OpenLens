@@ -1,4 +1,4 @@
-//! The planned maintenance card of the Uptime page (#563, D-075): the
+//! The planned maintenance card of the Uptime page (#563, D-076): the
 //! windows planned, running and recently ended, and for admins the form
 //! that schedules one and the buttons that extend, end or cancel it.
 

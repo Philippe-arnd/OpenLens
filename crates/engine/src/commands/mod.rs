@@ -18,6 +18,7 @@ use serde::de::DeserializeOwned;
 use crate::{Board, Filters};
 
 pub mod alerts;
+pub mod announcements;
 pub mod ask;
 pub mod board;
 pub mod delivery;
@@ -138,6 +139,14 @@ pub const REGISTRY: &[Spec] = &[
     spec::<maintenance::Extend>(),
     spec::<maintenance::EndNow>(),
     spec::<maintenance::Cancel>(),
+    // Status announcements and incident updates (#562).
+    spec::<announcements::List>(),
+    spec::<announcements::Create>(),
+    spec::<announcements::Update>(),
+    spec::<announcements::AddUpdate>(),
+    spec::<announcements::Close>(),
+    spec::<announcements::Delete>(),
+    spec::<announcements::SetSend>(),
 ];
 
 /// A 12-character id from `s` (the first bytes of its SHA-256, in hex).

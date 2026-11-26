@@ -1,4 +1,4 @@
-//! Planned maintenance windows (#563, D-075): the forms of the Uptime
+//! Planned maintenance windows (#563, D-076): the forms of the Uptime
 //! page and the API routes, both over the engine's `maintenance.*`
 //! commands. Every change is written to the audit log.
 

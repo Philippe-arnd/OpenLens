@@ -60,6 +60,14 @@ const TOOL_OF: &[(&str, &str)] = &[
     ("maintenance.extend", "maintenance_set"),
     ("maintenance.end_now", "maintenance_set"),
     ("maintenance.cancel", "maintenance_set"),
+    // Status announcements (#562).
+    ("announcements.list", "announcements"),
+    ("announcements.create", "announce"),
+    ("announcements.add_update", "announcement_update"),
+    ("announcements.update", "announcement_edit"),
+    ("announcements.close", "announcement_close"),
+    ("announcements.delete", "announcement_delete"),
+    ("announcements.send", "announcement_send"),
 ];
 
 /// Commands deliberately without an MCP tool, each with its reason.

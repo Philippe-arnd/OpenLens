@@ -1,4 +1,4 @@
-//! `openlens-cli maintenance` (#563, D-075): list, schedule, extend, end
+//! `openlens-cli maintenance` (#563, D-076): list, schedule, extend, end
 //! or cancel planned maintenance windows, so a CI step can open one right
 //! before a deploy and end it after.
 

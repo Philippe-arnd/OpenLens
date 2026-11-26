@@ -1,4 +1,4 @@
-//! Planned maintenance as commands (#563, D-075): list a project's
+//! Planned maintenance as commands (#563, D-076): list a project's
 //! windows, schedule one (optionally announced once on the alert
 //! channels), extend it, end it now or cancel it before it starts. The
 //! Uptime page, the API, the CLI and MCP run them; the adapters write the

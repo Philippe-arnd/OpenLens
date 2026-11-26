@@ -1,4 +1,4 @@
-//! Planned maintenance windows (#563, D-075): one-off periods, declared
+//! Planned maintenance windows (#563, D-076): one-off periods, declared
 //! ahead, when a project's components (production or a named environment)
 //! are expected to be down. Incidents still open during them but are not
 //! announced, and their time is left out of availability.

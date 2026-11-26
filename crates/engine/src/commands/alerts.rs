@@ -236,7 +236,7 @@ pub struct Uptime {
     /// The address the probe asks for, when the probe is on.
     pub url: Option<String>,
     /// Share of successful checks over the last day and week, the checks
-    /// during planned maintenance of production left out (#563, D-075).
+    /// during planned maintenance of production left out (#563, D-076).
     pub avail: (Option<f64>, Option<f64>),
     /// Seconds of planned maintenance of production left out of the
     /// availability of the last day and week.
@@ -275,7 +275,7 @@ impl Command for GetUptime {
             .filter(|_| settings.down)
             .map(|o| format!("{o}{}", settings.health_path));
         let all = meta.checks(&p.id, now - 7 * 86400).unwrap_or_default();
-        // Planned maintenance is not counted (#563, D-075).
+        // Planned maintenance is not counted (#563, D-076).
         let windows = meta
             .maintenance_windows(
                 &p.id,
@@ -516,7 +516,7 @@ pub async fn flush_queue<H: Host>(host: &H, project: &str, s: &Settings) {
 
 /// Open the rule's incident when `failing`, close it when not; announce
 /// it once it has lasted `wait` seconds, and announce its end if it was.
-/// During a planned maintenance window of its component (#563, D-075)
+/// During a planned maintenance window of its component (#563, D-076)
 /// the incident opens but is neither announced nor reminded; still
 /// failing when the window ends, it is announced from then.
 pub async fn track<H: Host>(

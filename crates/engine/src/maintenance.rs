@@ -1,4 +1,4 @@
-//! Planned maintenance windows (#563, D-075): what a window covers, and
+//! Planned maintenance windows (#563, D-076): what a window covers, and
 //! the two questions the rest of OpenLens asks of them, "is this
 //! component under maintenance at `t`?" and "how many seconds of
 //! `[from, to)` were planned maintenance for it?". Alerts (no
