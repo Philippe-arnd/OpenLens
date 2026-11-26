@@ -1,4 +1,4 @@
-//! Audience, flows, live, uptime, acquisition, churn and revenue.
+//! Audience, flows, uptime, acquisition, churn and revenue.
 //!
 //! Moved out of `lib.rs` as is (#307).
 
@@ -218,63 +218,6 @@ pub fn flows(
                             } }
                         }
                     }
-                }
-            }
-        },
-    )
-}
-
-/// Right now (#228): who is using the app, refreshed every 10 seconds by
-/// the browser (a `Refresh` header: no script).
-pub fn live(p: &ProjectInfo<'_>, f: &Filters, l: &openlens_engine::Live) -> Markup {
-    let list = |title: &str, glyph: &str, rows: &[(String, i64)]| {
-        html! {
-            section.card {
-                h2.violet { (icon(glyph)) (title) }
-                @if rows.is_empty() { p.muted.small { "Nothing in the last 30 minutes." } }
-                @else { table.plain { tbody { @for (v, n) in rows {
-                    tr { th scope="row" { span.mono { (v) } } td.num { (compact(*n)) } }
-                } } } }
-            }
-        }
-    };
-    layout(
-        "Live",
-        Some(p),
-        html! {
-            div.heading { div {
-                h1 { "Live" }
-                p.muted { "Last 30 minutes in " strong { (f.environment) } ". Refreshes every 10 seconds; events show up within the flush delay (a few seconds)." }
-            } }
-            section.tiles aria-label="Right now" {
-                // Each opens its detail with the filters kept (#409).
-                (tile_to(&detail_url(p.id, "/events", f), "violet", "users", "Active now", &compact(l.users_5m), "users, last 5 minutes"))
-                (tile_to(&detail_url(p.id, "/events", f), "sky", "clock", "Last 30 minutes", &compact(l.users_30m), "users"))
-                (tile_to(&detail_url(p.id, "/errors", f), "coral", "alert", "Errors", &compact(l.errors_30m), "last 30 minutes"))
-            }
-            div.grid {
-                (list("Releases", "release", &l.releases))
-                (list("Roles", "users", &l.roles))
-                (list("Features", "star", &l.features))
-                (list("Pages", "route", &l.pages))
-            }
-            section.card.wide {
-                h2.mint { (icon("events")) "Latest events" }
-                @if l.events.is_empty() { p.muted { "Quiet." } }
-                @else {
-                    div.table-scroll { table.plain.events {
-                        thead { tr { th { "When (" (tz_label(&f.tz)) ")" } th { "Event" } th { "User" } th { "Page" } th { "Release" } } }
-                        tbody { @for r in &l.events {
-                            @let fam = openlens_engine::family(&r.event);
-                            tr {
-                                td.muted.mono { (local_time(&r.timestamp, &f.tz, true)) }
-                                td { span class={ "chip fam " (fam) } { (icon(family_icon(fam))) span.sr-only { (family_label(fam)) ": " } (r.event) } }
-                                td.mono { a href={ "/p/" (p.id) "/people/" (url_enc(&r.distinct_id)) } { (r.distinct_id) } }
-                                td.mono { (r.path.as_deref().unwrap_or("—")) }
-                                td { (r.release.as_deref().unwrap_or("—")) }
-                            }
-                        } }
-                    } }
                 }
             }
         },
@@ -771,7 +714,17 @@ pub fn revenue(
                 p.muted { "Amounts carried by success events (" code { "revenue" } " or " code { "value" } ", with an optional " code { "currency" } "), last 30 days, " strong { (f.environment) } "." }
             } }
             @match r {
-                None => section.card.wide { p { "No success event carries an amount yet. Send one with the event, for example " code { "openlens.track(\"order_paid\", { revenue: 49, currency: \"EUR\" })" } ", and declare it as a feature's success event." } },
+                // One explained empty state (#544): which event, with the snippet.
+                None => section.card.empty aria-labelledby="no-revenue" {
+                    (crate::tables::empty_art())
+                    div {
+                        h2 id="no-revenue" { "No payment recorded yet" }
+                        p { "Revenue comes from a feature's success event that carries an amount in " code { "revenue" } " (or " code { "value" } "), with an optional " code { "currency" } ". Send it from the app when the payment succeeds:" }
+                        pre.copy { code { "openlens.track(\"order_paid\", { revenue: 49, currency: \"EUR\" });" } }
+                        p { "Then declare " code { "order_paid" } " as that feature's success event in the feature map." }
+                        div.actions { a.button href={ "/p/" (p.id) "/features" } { "Open the feature map" } }
+                    }
+                },
                 Some(r) => {
                     // no_detail (#409): the breakdowns below are the detail.
                     section.tiles aria-label="Totals" {
@@ -790,4 +743,25 @@ pub fn revenue(
             }
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Without payments, Revenue explains which event to send, with the
+    /// snippet as a code block, in one empty state.
+    #[test]
+    fn revenue_without_payments_shows_the_snippet() {
+        let p = ProjectInfo {
+            id: "d",
+            name: "D",
+            key: "k",
+        };
+        let html = render(revenue(&p, &Board::default(), &Filters::default(), None));
+        assert_eq!(html.matches("class=\"card empty\"").count(), 1);
+        let block = &html[html.find("<pre").unwrap_or(0)..];
+        assert!(block.starts_with("<pre") && block.contains("<code>openlens.track("));
+        assert!(!html.contains("style=") && !html.contains("<script"));
+    }
 }
