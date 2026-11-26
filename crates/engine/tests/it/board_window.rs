@@ -54,12 +54,21 @@ fn release_window() -> Filters {
 
 #[tokio::test]
 async fn the_window_starts_at_the_current_release_and_compares_the_same_length_before() {
-    // v1 for weeks, then v2 three days ago, which now has all the traffic.
+    // v1 for weeks, then v2 about three days ago, which now has all the
+    // traffic. Every event is at noon UTC, counted from yesterday's noon,
+    // so none sits near a day boundary whatever the hour the test runs at
+    // (it was flaky when events were whole days before `now`).
+    let now = Utc::now();
+    let noon = (now.date_naive() - Duration::days(1))
+        .and_hms_opt(12, 0, 0)
+        .unwrap()
+        .and_utc();
+    let h = (now - noon).num_hours();
     let (_d, q) = store(&[
-        (Some("v1"), 0..4, 20 * 24),
-        (Some("v1"), 0..2, 5 * 24),
-        (Some("v2"), 0..4, 3 * 24),
-        (Some("v2"), 0..4, 24),
+        (Some("v1"), 0..4, h + 19 * 24),
+        (Some("v1"), 0..2, h + 4 * 24),
+        (Some("v2"), 0..4, h + 2 * 24),
+        (Some("v2"), 0..4, h),
     ]);
     let b = board(&q, "p", &release_window(), None).await.unwrap();
     let w = b.window.as_ref().unwrap();
