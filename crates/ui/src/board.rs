@@ -4,14 +4,29 @@
 
 use super::*;
 
-/// The board page before its content (#301): the layout and a loading
-/// line, sent while a cold board is computed. The content follows it in
-/// the same `<main>`, and the line hides itself then (`app.css`).
-pub fn board_shell(p: &ProjectInfo<'_>) -> Markup {
+/// The board page before its content (#301): the layout and a waiting
+/// panel, sent while a cold board is computed. `wait`: the seconds the
+/// board took to compute last time, when known (D-073). The content
+/// follows the panel in the same `<main>`, and the panel hides itself then
+/// (`.board-waiting:not(:last-child)` in `app.css`; no script).
+pub fn board_shell(p: &ProjectInfo<'_>, wait: Option<u64>) -> Markup {
+    let wait = match wait {
+        Some(s) => format!("This takes about {s} s."),
+        None => "This takes a few seconds.".to_owned(),
+    };
     layout(
         "Focus board",
         Some(p),
-        html! { p.page-loading role="status" { span.spinner aria-hidden="true" {} "Computing the board…" } },
+        html! {
+            div.board-waiting role="status" aria-live="polite" {
+                span.spinner aria-hidden="true" {}
+                div {
+                    strong { "Computing the board…" }
+                    span.muted { (wait) }
+                    span.waiting-bar aria-hidden="true" { span {} }
+                }
+            }
+        },
     )
 }
 
@@ -653,6 +668,32 @@ pub(crate) fn window_picker(project: &str, b: &Board, f: &Filters) -> Markup {
 mod tests {
     use super::*;
     use openlens_engine::{BoardWindow, Period};
+
+    #[test]
+    fn the_waiting_panel_says_the_wait_and_hides_when_the_board_follows() {
+        let p = ProjectInfo {
+            id: "p1",
+            name: "P",
+            key: "k",
+        };
+        let known = board_shell(&p, Some(4)).into_string();
+        assert!(known.contains("Computing the board…"), "{known}");
+        assert!(known.contains("about 4 s"), "{known}");
+        assert!(
+            known.contains(r#"class="board-waiting" role="status" aria-live="polite""#),
+            "{known}"
+        );
+        let unknown = board_shell(&p, None).into_string();
+        assert!(unknown.contains("a few seconds"), "{unknown}");
+        // The panel is the last thing in `<main>`: the board streamed after
+        // it makes it no longer the last child, which hides it.
+        let cut = known.rfind("</main>").unwrap();
+        assert!(known[..cut].trim_end().ends_with("</div></div>"), "{known}");
+        assert!(crate::CSS.contains(".board-waiting:not(:last-child) { display: none; }"));
+        assert!(crate::CSS.contains(
+            "@media (prefers-reduced-motion: reduce) { .board-waiting .spinner, .board-waiting .waiting-bar span { animation: none; } }"
+        ));
+    }
 
     #[test]
     fn the_period_picker_keeps_the_window_and_the_filters() {
