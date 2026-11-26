@@ -60,6 +60,16 @@
       "groupName": "github actions"
     },
     {
+      "description": "The SLSA generator's reusable workflows verify the ref they are called at: keep them on a release tag, never a digest (#473).",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchPackageNames": [
+        "slsa-framework/slsa-github-generator"
+      ],
+      "pinDigests": false
+    },
+    {
       "description": "DataFusion, Arrow and Parquet move together: one PR, one CI run.",
       "groupName": "datafusion and arrow",
       "matchPackageNames": [
