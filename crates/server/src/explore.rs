@@ -354,23 +354,24 @@ pub(crate) async fn revenue(
     };
     let f = q.filters(&auth::tz_for(&state, &headers, &p.timezone));
     let map = crate::load_map(&state, &p.id).await;
-    let (b, r) = tokio::join!(
-        crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
-        openlens_engine::revenue(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f)
-    );
+    let found =
+        crate::boards::with_revenue(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))).await;
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
         name: &p.name,
         key: &p.api_key,
     };
-    match (b, r) {
-        (Ok(b), Ok(r)) => html_page(
+    let found = found
+        .map_err(|e| e.to_string())
+        .and_then(|(b, r)| Ok((b, r?)));
+    match found {
+        Ok((b, r)) => html_page(
             StatusCode::OK,
             openlens_ui::revenue(&info, &b, &f, r.as_ref()),
         ),
-        (Err(e), _) | (_, Err(e)) => html_page(
+        Err(e) => html_page(
             StatusCode::BAD_REQUEST,
-            openlens_ui::message("Can't show that", &e.to_string()),
+            openlens_ui::message("Can't show that", &e),
         ),
     }
 }
