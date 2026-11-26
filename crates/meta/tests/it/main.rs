@@ -480,3 +480,50 @@ fn a_deploy_hook_secret_is_kept_hashed_and_deploys_stay_bounded() {
     assert!(m.deploys("default", 0).unwrap().is_empty());
     assert_eq!(m.deploy_hook_project(&second).unwrap(), None);
 }
+
+/// #510: a write transaction that meets the write lock held waits for it
+/// (`BEGIN IMMEDIATE` calls the busy handler) instead of failing at once
+/// with "database is locked", which capture answered with a 503.
+#[test]
+fn a_write_transaction_waits_for_the_lock_instead_of_failing() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("meta.db");
+    let meta = Meta::open(&path).unwrap();
+    let other = rusqlite::Connection::open(&path).unwrap();
+    other.execute_batch("BEGIN IMMEDIATE").unwrap();
+    std::thread::scope(|s| {
+        s.spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            other.execute_batch("COMMIT").unwrap();
+        });
+        let row = ("bob".to_owned(), Some("anon-1".to_owned()), 1, false);
+        assert!(meta.record_identities("p", &[row]).unwrap());
+    });
+}
+
+/// #510: a batch's people and identity rows go in one write, with the
+/// same effect as one `identify` each.
+#[test]
+fn a_batch_of_identifies_is_recorded_in_one_write() {
+    let m = Meta::in_memory().unwrap();
+    let at = Utc::now();
+    let seen = |id: &'static str, role: &'static str| openlens_meta::Seen {
+        distinct_id: id,
+        role: Some(role),
+        account: None,
+        plan: Some("pro"),
+        at,
+    };
+    let rows = [("ann".to_owned(), Some("anon-9".to_owned()), 1, false)];
+    let changed = m
+        .record_identify("p", &[seen("ann", "admin"), seen("ann", "member")], &rows)
+        .unwrap();
+    assert!(changed);
+    let ann = m.person("p", "ann").unwrap().unwrap();
+    assert_eq!(ann.role.as_deref(), Some("member"));
+    assert_eq!(ann.plan.as_deref(), Some("pro"));
+    assert_eq!(m.role_history("p", "ann").unwrap().len(), 2);
+    assert_eq!(m.aliases_of("p", "ann").unwrap(), vec!["anon-9".to_owned()]);
+    // Nothing to record: no write, nothing changed.
+    assert!(!m.record_identify("p", &[], &[]).unwrap());
+}

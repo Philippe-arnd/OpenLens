@@ -133,23 +133,21 @@ pub(super) async fn import(
     let pid = p.id.clone();
     let n_persons = persons.len();
     let stored = tokio::task::spawn_blocking(move || -> Result<(), String> {
-        crate::identity::record(&st, &pid, &events)?;
-        for (id, role, account, plan, created) in persons {
-            let at = created
-                .as_deref()
-                .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
-                .map_or(now, |t| t.with_timezone(&chrono::Utc));
-            st.meta
-                .identify(
-                    &pid,
-                    &id,
-                    role.as_deref(),
-                    account.as_deref(),
-                    plan.as_deref(),
-                    at,
-                )
-                .map_err(|e| e.to_string())?;
-        }
+        // The imported people and the identity of the events: one write (#510).
+        let seen: Vec<openlens_meta::Seen<'_>> = persons
+            .iter()
+            .map(|(id, role, account, plan, created)| openlens_meta::Seen {
+                distinct_id: id,
+                role: role.as_deref(),
+                account: account.as_deref(),
+                plan: plan.as_deref(),
+                at: created
+                    .as_deref()
+                    .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                    .map_or(now, |t| t.with_timezone(&chrono::Utc)),
+            })
+            .collect();
+        crate::identity::record(&st, &pid, &events, &seen)?;
         let mut w = st
             .writer
             .lock()
