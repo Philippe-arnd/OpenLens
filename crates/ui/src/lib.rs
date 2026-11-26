@@ -16,6 +16,7 @@ mod board_job;
 mod components;
 mod cost;
 mod delivery;
+mod detail;
 mod entry;
 mod environments;
 mod events;
@@ -27,8 +28,10 @@ mod goals;
 mod goto;
 mod icons;
 mod live;
+mod live_screens;
 mod maintenance;
 mod manage;
+mod people;
 mod profile;
 mod project_settings;
 mod releases;
@@ -49,6 +52,7 @@ pub use board::*;
 pub use board_job::{JobView, board_job};
 pub use components::*;
 pub use cost::board_confirm;
+pub use detail::Confirm;
 pub use entry::{login, login_continue, message, message_html, welcome};
 pub use events::events;
 pub use explore::*;
@@ -62,6 +66,7 @@ pub use live::live;
 pub use maintenance::{MaintenanceRow, MaintenanceView, maintenance_card};
 pub use manage::*;
 use openlens_engine::{Board, EventRow, Filters};
+pub use people::*;
 pub use profile::*;
 pub use project_settings::*;
 pub use releases::*;
@@ -393,6 +398,9 @@ mod tests {
 }
 
 #[cfg(test)]
+mod behaviour_tests;
+
+#[cfg(test)]
 mod diff_tests {
     #[test]
     fn line_diff_keeps_common_lines() {
@@ -402,3 +410,6 @@ mod diff_tests {
         assert!(super::line_diff("", "").is_empty());
     }
 }
+
+#[cfg(test)]
+mod motion_tests;

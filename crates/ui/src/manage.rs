@@ -5,8 +5,25 @@
 use super::*;
 use crate::tables::Col;
 
-/// Feature flags: switch on/off and change the rollout. Creating flags is
-/// done by agents (API/CLI/MCP) with the code that uses them.
+/// A flag's rollout as a bar and its share (#551): the bar's width is an
+/// SVG attribute (the CSP forbids `style`), 100 % fills the track.
+fn rollout_bar(rollout: u8) -> Markup {
+    let w = f64::from(rollout.min(100)).max(1.5);
+    html! {
+        div.barcell {
+            svg viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true" focusable="false" {
+                rect.bg width="100" height="6" rx="3" {}
+                rect.fg width=(format!("{w:.1}")) height="6" rx="3" {}
+            }
+            span.num { (rollout) " %" }
+        }
+    }
+}
+
+/// Feature flags (#551): a table with an on/off tag and the rollout as a
+/// bar, each row keeping its two forms (the rollout, the switch).
+/// Creating flags is done by agents (API/CLI/MCP) with the code that uses
+/// them, or from the editor.
 pub fn flags(p: &ProjectInfo<'_>, flags: &[openlens_flags::Flag]) -> Markup {
     layout(
         "Flags",
@@ -20,46 +37,63 @@ pub fn flags(p: &ProjectInfo<'_>, flags: &[openlens_flags::Flag]) -> Markup {
                 a.button href={ "/p/" (p.id) "/flags-edit" } { (icon("plus")) "New flag" }
             }
             @if flags.is_empty() {
-                section.card { p { "No flags yet. Your agent creates them together with the code that checks them: "
-                    code { "openlens-cli flags set new-editor --rollout 10" } "." } }
+                section.card.empty aria-labelledby="no-flags" {
+                    (crate::tables::empty_art())
+                    div {
+                        h2 #no-flags { "No flags yet" }
+                        p { "Your agent creates them together with the code that checks them, for example:" }
+                        pre.snippet { code { "openlens-cli flags set new-editor --rollout 10" } }
+                        div.actions { a.btn.primary href={ "/p/" (p.id) "/flags-edit" } { (icon("plus")) "New flag" } }
+                    }
+                }
             } @else {
-                section.card.wide {
-                    table.plain {
-                        thead { tr { th { "Flag" } th { "Who" } th { "Rollout" } th { "On" } th { span.sr-only { "Actions" } } } }
-                        tbody { @for f in flags {
-                            tr {
-                                th scope="row" { a href={ "/p/" (p.id) "/flags-edit?key=" (f.key) } title="Edit" { code { (f.key) } } @if !f.description.is_empty() { br; span.muted.small { (f.description) } } }
-                                td.small { @if f.roles.is_empty() { "every role" } @else { (f.roles.join(", ")) }
-                                    @if !f.accounts.is_empty() { br; span.muted { "+ " (f.accounts.len()) " accounts" } }
-                                    @for r in &f.rules { br; code { (r) } } }
-                                td { form.inline method="post" action={ "/p/" (p.id) "/flags/" (f.key) } {
+                (crate::tables::TableCard {
+                    label: "Flags",
+                    head: html! {},
+                    cols: &[
+                        Col::Shown("Flag"), Col::Shown("Who"), Col::Shown("Rollout"),
+                        Col::Shown("State"), Col::Hidden("Actions"),
+                    ],
+                    body: html! { @for f in flags {
+                        tr {
+                            th scope="row" { a href={ "/p/" (p.id) "/flags-edit?key=" (f.key) } title="Edit" { code { (f.key) } } @if !f.description.is_empty() { br; span.muted.small { (f.description) } } }
+                            td.small { @if f.roles.is_empty() { "every role" } @else { (f.roles.join(", ")) }
+                                @if !f.accounts.is_empty() { br; span.muted { "+ " (f.accounts.len()) " accounts" } }
+                                @for r in &f.rules { br; code { (r) } } }
+                            td.rollout {
+                                (rollout_bar(f.rollout))
+                                form.inline method="post" action={ "/p/" (p.id) "/flags/" (f.key) } {
                                     @if f.enabled { input type="hidden" name="enabled" value="on"; }
                                     input type="number" name="rollout" min="0" max="100" value=(f.rollout) aria-label={ "Rollout percentage of " (f.key) };
                                     " % " button.ghost type="submit" { "Save" }
-                                } }
-                                td { span class=(if f.enabled { "status good" } else { "status muted" }) {
-                                    span aria-hidden="true" { (if f.enabled { "●" } else { "○" }) } " " (if f.enabled { "on" } else { "off" }) } }
-                                td { form.inline method="post" action={ "/p/" (p.id) "/flags/" (f.key) } {
-                                    @if !f.enabled { input type="hidden" name="enabled" value="on"; }
-                                    input type="hidden" name="rollout" value=(f.rollout);
-                                    button type="submit" { (if f.enabled { "Switch off" } else { "Switch on" }) }
-                                } }
+                                }
                             }
-                        } }
-                    }
+                            td { @if f.enabled { span.tag.tone-good { (icon("task")) "on" } } @else { span.tag { (icon("ban")) "off" } } }
+                            td { form.inline method="post" action={ "/p/" (p.id) "/flags/" (f.key) } {
+                                @if !f.enabled { input type="hidden" name="enabled" value="on"; }
+                                input type="hidden" name="rollout" value=(f.rollout);
+                                button type="submit" { (if f.enabled { "Switch off" } else { "Switch on" }) }
+                            } }
+                        }
+                    } },
+                    foot: html! { div.pager { span { (flags.len()) " flags · the rollout is the share of eligible users who get the flag" } } },
                 }
+                .render())
             }
         },
     )
 }
 
-/// Create or edit a flag (#220). `flag` is None for a new one.
+/// Create or edit a flag (#220). `flag` is None for a new one. Delete
+/// sits in the danger zone; `confirm` opens its dialog (#545).
 pub fn flag_edit(
     p: &ProjectInfo<'_>,
     flag: Option<&openlens_flags::Flag>,
     error: Option<&str>,
     readout: &[openlens_engine::VariantRow],
+    confirm: Option<Confirm>,
 ) -> Markup {
+    use crate::detail::{confirm_dialog, confirm_href, danger_item, danger_zone, typed_form};
     let new = flag.is_none_or(|f| f.key.is_empty());
     let f = flag.cloned().unwrap_or(openlens_flags::Flag {
         key: String::new(),
@@ -127,17 +161,35 @@ pub fn flag_edit(
                 }
             }
             @if !new {
-                section.card.wide.danger {
-                    h2.coral { (icon("alert")) "Delete the flag" }
-                    p { "The code then gets " code { "false" } " for it. Its past cohort stays in the data." }
-                    form.inline method="post" action={ "/p/" (p.id) "/flags/" (f.key) "/delete" } {
-                        label { "Type " code { (f.key) } " to confirm " input type="text" name="confirm" required autocomplete="off"; }
-                        button.danger type="submit" { "Delete" }
-                    }
+                @let page = format!("/p/{}/flags-edit?key={}", p.id, url_enc(&f.key));
+                (danger_zone("flag-danger", "Danger zone", danger_item("Delete the flag",
+                    html! { "The code then gets " code { "false" } " for it. Its past cohort stays in the data." },
+                    html! { a.btn.danger-btn href=(confirm_href(&page, Confirm::Delete)) { "Delete…" } })))
+                @if confirm == Some(Confirm::Delete) {
+                    (confirm_dialog(&format!("Delete the flag {}?", f.key),
+                        html! { "The code then gets " code { "false" } " for it. Its past cohort stays in the data." },
+                        typed_form(&format!("/p/{}/flags/{}/delete", p.id, f.key), &f.key, "Delete", &page)))
                 }
             }
         },
     )
+}
+
+/// The answer types of a survey: (form value, label).
+pub(crate) const SURVEY_KINDS: [(&str, &str); 4] = [
+    ("rating", "Rating 1–5"),
+    ("yes_no", "Yes / no"),
+    ("choice", "One choice"),
+    ("text", "Free text"),
+];
+
+/// The answer type checked in the editor: the stored one, or a rating for
+/// a value the form does not offer, so exactly one option is checked.
+fn survey_kind(kind: &str) -> &'static str {
+    SURVEY_KINDS
+        .iter()
+        .find(|(k, _)| *k == kind)
+        .map_or("rating", |(k, _)| k)
 }
 
 /// Create or edit a micro-survey (#220).
@@ -166,26 +218,34 @@ pub fn survey_edit(
                 p.muted { a href={ "/p/" (p.id) "/surveys" } { "← Surveys" } " · one question, right after a moment of value, once per user" }
             } }
             @if let Some(e) = error { p.alert role="alert" { (e) } }
-            section.card.wide {
-                form.settings method="post" action={ "/p/" (p.id) "/surveys-edit" } {
-                    input type="hidden" name="original" value=(if new { "" } else { survey.map_or("", |x| x.key.as_str()) });
-                    label { "Key " input type="text" name="key" value=(s.key) required maxlength="64" pattern="[a-z0-9_-]+" placeholder="writing-usefulness"; }
-                    label.wide { "Question " input type="text" name="question" value=(s.question) required maxlength="200" placeholder="How useful was writing today?"; }
-                    label { "Answer "
-                        select name="kind" {
-                            @for (k, l) in [("rating", "Rating 1–5"), ("yes_no", "Yes / no"), ("choice", "One choice"), ("text", "Free text")] {
-                                option value=(k) selected[s.kind == k] { (l) }
+            // The form card (#551): the answer type is a segmented control,
+            // radio inputs carrying the select's name and values.
+            form.card.wide.form-card method="post" action={ "/p/" (p.id) "/surveys-edit" } aria-labelledby="survey-h" {
+                input type="hidden" name="original" value=(if new { "" } else { survey.map_or("", |x| x.key.as_str()) });
+                div.section-head { h2 #survey-h { (icon("idea")) "Question" } }
+                div.form-grid {
+                    label.field { "Key" input type="text" name="key" value=(s.key) required maxlength="64" pattern="[a-z0-9_-]+" placeholder="writing-usefulness"; small { "Lowercase letters, digits, - and _." } }
+                    label.field.wide { "Question" input type="text" name="question" value=(s.question) required maxlength="200" placeholder="How useful was writing today?"; }
+                    fieldset.field.wide {
+                        legend { "Answer" }
+                        div.seg {
+                            @for (k, l) in SURVEY_KINDS {
+                                label { input type="radio" name="kind" value=(k) checked[survey_kind(&s.kind) == k]; (l) }
                             }
                         }
                     }
-                    label { "Choices " input type="text" name="choices" value=(s.choices.join(", ")) placeholder="for One choice: 2 to 6"; }
-                    label { "After the event " input type="text" name="trigger" value=(s.trigger) required maxlength="100" placeholder="entry_saved"; }
-                    label { "Ask % of users " input type="number" name="sample" min="0" max="100" value=(s.sample); }
-                    label { "Only roles " input type="text" name="roles" value=(s.roles.join(", ")) placeholder="every role"; }
-                    label.check { input type="checkbox" name="enabled" checked[s.enabled]; " On" }
-                    button type="submit" { (if new { "Create" } else { "Save" }) }
+                    label.field { "Choices" input type="text" name="choices" value=(s.choices.join(", ")) placeholder="for One choice: 2 to 6"; small { "One choice only: 2 to 6, comma-separated." } }
+                    label.field { "After the event" input type="text" name="trigger" value=(s.trigger) required maxlength="100" placeholder="entry_saved"; small { "Asked right after this event, once per user." } }
+                    label.field { "Ask % of users" input type="number" name="sample" min="0" max="100" value=(s.sample); }
+                    label.field { "Only roles" input type="text" name="roles" value=(s.roles.join(", ")) placeholder="every role"; small { "Comma-separated. Empty: every role." } }
                 }
-                p.muted.small { "Answers are " code { "$survey" } " events: " a href={ "/p/" (p.id) "/events?event=%24survey" } { "see them in Events" } ", export them from Settings." }
+                label.switch {
+                    input type="checkbox" role="switch" name="enabled" checked[s.enabled];
+                    span { b { "On" } small { "Off: nobody is asked." } }
+                }
+                (crate::project_settings::form_foot(if new { "Create" } else { "Save" }, html! {
+                    "Answers are " code { "$survey" } " events: " a href={ "/p/" (p.id) "/events?event=%24survey" } { "see them in Events" } ", export them from Settings."
+                }))
             }
             @if !new {
                 section.card.wide.danger {
@@ -201,44 +261,80 @@ pub fn survey_edit(
     )
 }
 
-/// Per-page hotspots: scroll depth, most clicked elements, rage clicks.
+/// The heatmap of one page.
+pub(crate) fn heatmap_href(pid: &str, path: &str) -> String {
+    format!("/p/{pid}/heatmap?path={}", url_enc(path))
+}
+
+/// Per-page hotspots (#548: one table): views as a bar, scroll depth, the
+/// most clicked element, rage clicks, the Web Vitals measured on the page
+/// (`vitals`: the vitals report, whose worst pages carry a p75 per page)
+/// and a link to the page's heatmap.
 pub fn pages(
     p: &ProjectInfo<'_>,
     b: &Board,
     list: &[openlens_engine::PageStats],
+    vitals: &[openlens_engine::VitalReport],
     f: &Filters,
 ) -> Markup {
+    let max = list.iter().map(|x| x.views).max().unwrap_or(1).max(1) as f64;
+    let page_vitals = |path: &str| -> Vec<&openlens_engine::PageVital> {
+        vitals
+            .iter()
+            .flat_map(|r| r.worst_pages.iter())
+            .filter(|v| v.path == path)
+            .collect()
+    };
     layout_in(
         "Pages",
         Some(p),
         context_bar(p.id, b, f, "/pages", false),
         html! {
-            div.heading { div { h1 { "Pages" } p.muted { "How far people scroll, what they click, where they get frustrated. Last 30 days." } } }
-            @if list.is_empty() { section.card { p.muted { "No page views yet." } } }
-            div.grid {
-                @for pg in list {
-                    section.card {
-                        h2.sky { (icon("layers")) span.mono { (pg.path) } }
-                        p.small { a href={ "/p/" (p.id) "/heatmap?path=" (url_enc(&pg.path)) } { (icon("spark")) " Click heatmap" } }
-                        p.small.muted { (compact(pg.views)) " views · " (compact(pg.users)) " users" }
-                        @if pg.median_scroll >= 0.0 {
-                            table.bars { tbody {
-                                tr { th scope="row" { "Reach half the page" } td.meter { (meter(pg.reach_half)) } td.num { (pct(pg.reach_half)) } }
-                                tr { th scope="row" { "Reach the end" } td.meter { (meter(pg.reach_end)) } td.num { (pct(pg.reach_end)) } }
+            div.heading { div { h1 { "Pages" } p.muted { "How far people scroll, what they click, where they get frustrated. Last 30 days; Web Vitals: p75 over 7 days, on the slowest pages." } } }
+            @if list.is_empty() {
+                section.card { p.muted { "No page views yet." } }
+            } @else {
+                (crate::tables::TableCard {
+                    label: "Pages",
+                    head: html! {},
+                    cols: &[
+                        Col::Shown("Page"), Col::Shown("Views"), Col::Num("Users"), Col::Num("Reach half"),
+                        Col::Num("Reach the end"), Col::Shown("Most clicked"), Col::Num("Rage clicks"),
+                        Col::Shown("Web Vitals"), Col::Hidden("Heatmap"),
+                    ],
+                    body: html! { @for pg in list {
+                        @let rage: i64 = pg.hotspots.iter().map(|h| h.rage).sum();
+                        tr {
+                            (crate::tables::path_cell(Some(&pg.path)))
+                            td.views { (crate::board::bar_with(pg.views as f64 / max, &compact(pg.views))) }
+                            td.num { (compact(pg.users)) }
+                            @if pg.median_scroll >= 0.0 {
+                                td.num { (pct(pg.reach_half)) }
+                                td.num { (pct(pg.reach_end)) }
+                            } @else {
+                                td.num.muted { "—" }
+                                td.num.muted { "—" }
+                            }
+                            td { @match pg.hotspots.first() {
+                                Some(h) => { (h.label) " " span.muted { "(" (compact(h.clicks)) ")" } },
+                                None => span.muted { "—" },
                             } }
-                        }
-                        @if !pg.hotspots.is_empty() {
-                            h3.small { "Most clicked" }
-                            table.plain { tbody { @for h in &pg.hotspots {
-                                tr {
-                                    th scope="row" { (h.label) }
-                                    td.num { (compact(h.clicks)) }
-                                    td.num { @if h.rage > 0 { span.status.bad { (icon("alert")) (compact(h.rage)) " rage" } } }
+                            td.num { @if rage > 0 { span.status.bad { (icon("alert")) (compact(rage)) } } @else { span.muted { "0" } } }
+                            td.vitals { @let vs = page_vitals(&pg.path);
+                                @if vs.is_empty() { span.muted { "—" } }
+                                @for v in vs {
+                                    span class={ "vital " (match v.rating { "good" => "good", "poor" => "bad", _ => "warn" }) } title={ (v.samples) " measurements" } {
+                                        (v.name) " " (openlens_engine::vitals::show(&v.name, v.p75))
+                                    }
+                                    " "
                                 }
-                            } } }
+                            }
+                            td { a.button.sm href=(heatmap_href(p.id, &pg.path)) { (icon("spark")) "Heatmap" } }
                         }
-                    }
+                    } },
+                    foot: html! {},
                 }
+                .render())
             }
         },
     )
@@ -325,6 +421,45 @@ pub fn replays(
     rate: &openlens_engine::ReplayRate,
 ) -> Markup {
     let min_minutes = view.min_active_secs / 60;
+    let cols = [
+        Col::Shown("Started"),
+        Col::Shown("User"),
+        Col::Num("Active time"),
+        Col::Num("Size"),
+        Col::Num("Comments"),
+        Col::Hidden("Play"),
+    ];
+    // (UTC start as `local_time` reads it, the recording).
+    let rows: Vec<(String, &openlens_replay::Summary)> = list
+        .iter()
+        .map(|r| (r.started.format("%Y-%m-%d %H:%M:%S").to_string(), r))
+        .collect();
+    let row = |(_, r): &(String, &openlens_replay::Summary), time: &str| {
+        let secs = (r.updated - r.started).num_seconds().max(0) as f64;
+        html! {
+            tr {
+                td.when.muted { (time) }
+                td { a.mono href={ "/p/" (p.id) "/replays?u=" (url_enc(&r.distinct_id)) } title="Only this user's recordings" { (r.distinct_id) } }
+                td.num { @match r.active_secs {
+                    Some(a) if (a as f64) + 60.0 < secs => { (duration(a as f64)) " active" br; span.muted.small { "open " (duration(secs)) } }
+                    Some(a) => { (duration(a.max(1) as f64)) }
+                    None => { (duration(secs)) }
+                } }
+                td.num.muted { (compact((r.bytes / 1024) as i64)) " kB" }
+                td.num { @match comments.iter().find(|(s, _)| *s == r.session_id) {
+                    Some((_, n)) => { (n) span.sr-only { " comments" } },
+                    None => span.muted { "—" },
+                } }
+                td { a.btn.sm href={ "/p/" (p.id) "/replays/" (r.session_id) } { (icon("play")) "Play" } }
+            }
+        }
+    };
+    // Day groups only when the rows are in time order.
+    let body = if view.by_active {
+        html! { @for x in &rows { (row(x, &local_time(&x.0, tz, false))) } }
+    } else {
+        crate::tables::day_rows(&rows, |x| x.0.as_str(), tz, cols.len(), row)
+    };
     layout(
         "Replays",
         Some(p),
@@ -334,51 +469,50 @@ pub fn replays(
                     h1 { "Replays" }
                     p.muted {
                         "Recorded sessions, " (if view.by_active { "most active first" } else { "most recent first" }) ". Inputs are always masked."
-                        @if let Some(w) = who { " Only " span.mono { (w) } ". " a href={ "/p/" (p.id) "/replays" } { "Show everyone" } }
                     }
                     p.muted { (rate_reason(rate)) }
                 }
             }
-            form.filters method="get" action={ "/p/" (p.id) "/replays" } aria-label="Sort and filter" {
+            form.card.refine method="get" action={ "/p/" (p.id) "/replays" } aria-label="Sort and filter" {
                 @if let Some(w) = who { input type="hidden" name="u" value=(w); }
-                label { "Sort "
+                label { "Sort"
                     select name="sort" {
                         option value="recent" selected[!view.by_active] { "Most recent first" }
                         option value="active" selected[view.by_active] { "Most active first" }
                     }
                 }
-                label { "More than "
+                label { "More than (min active)"
                     input type="number" name="active" min="0" max="1440" step="1" value=[(min_minutes > 0).then_some(min_minutes)] placeholder="0";
-                    " min active"
                 }
                 button type="submit" { "Show" }
             }
-            @if list.is_empty() && min_minutes > 0 {
-                section.card { p { "No recording has more than " (min_minutes) " min of active time." } }
-            } @else if list.is_empty() {
-                section.card { p { (icon("play")) " No recordings yet. The SDK records sessions once a page has loaded; they show up here within a few seconds." } }
-            } @else {
-                section.card.wide {
-                    table.plain {
-                        thead { tr { th { "Started (" (tz_label(tz)) ")" } th { "User" } (th_num("Active time")) th.num { "Size" } th.num { "Comments" } th { span.sr-only { "Play" } } } }
-                        tbody { @for r in list {
-                            @let started = tz.parse::<chrono_tz::Tz>().map_or_else(|_| r.started.format("%Y-%m-%d %H:%M").to_string(), |z| r.started.with_timezone(&z).format("%Y-%m-%d %H:%M").to_string());
-                            @let secs = (r.updated - r.started).num_seconds().max(0) as f64;
-                            tr {
-                                td.mono { (started) }
-                                td.mono { a href={ "/p/" (p.id) "/replays?u=" (r.distinct_id) } { (r.distinct_id) } }
-                                td.num { @match r.active_secs {
-                                    Some(a) if (a as f64) + 60.0 < secs => { (duration(a as f64)) " active" br; span.muted.small { "open " (duration(secs)) } }
-                                    Some(a) => { (duration(a.max(1) as f64)) }
-                                    None => { (duration(secs)) }
-                                } }
-                                td.num.muted { (compact((r.bytes / 1024) as i64)) " kB" }
-                                td.num { @match comments.iter().find(|(s, _)| *s == r.session_id) { Some((_, n)) => { "💬 " (n) }, None => span.muted { "—" } } }
-                                td { a.button href={ "/p/" (p.id) "/replays/" (r.session_id) } { (icon("play")) "Play" } }
-                            }
-                        } }
+            @if let Some(w) = who {
+                p.active-filters { "Only " strong { (w) } a href={ "/p/" (p.id) "/replays" } aria-label="Show everyone" { "Show everyone ×" } }
+            }
+            @if list.is_empty() {
+                section.card.empty aria-labelledby="rep-empty-h" {
+                    (crate::tables::empty_art())
+                    div {
+                        @if min_minutes > 0 {
+                            h2 #rep-empty-h { "No recording has more than " (min_minutes) " min of active time" }
+                            p { "Lower the active time to see shorter sessions." }
+                            div.actions { a.button href={ "/p/" (p.id) "/replays" } { "Show every recording" } }
+                        } @else {
+                            h2 #rep-empty-h { "No recordings yet" }
+                            p { "The SDK records sessions once a page has loaded; they show up here within a few seconds." }
+                            div.actions { a.button href={ "/p/" (p.id) "/settings/install" } { "Check the install" } }
+                        }
                     }
                 }
+            } @else {
+                (crate::tables::TableCard {
+                    label: "Recorded sessions",
+                    head: html! {},
+                    cols: &cols,
+                    body,
+                    foot: crate::tables::pager(&format!("{} recordings · times in {}", list.len(), tz_label(tz)), &[]),
+                }
+                .render())
             }
         },
     )

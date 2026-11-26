@@ -3,7 +3,7 @@
    scheme: html[data-theme] from the Appearance cookie, or the system when
    the attribute is absent. Tints mix in oklab (oklch swings the hue). */
 
-@layer tokens, base, layout, components, utilities;
+@layer tokens, base, layout, components, motion, utilities;
 
 @layer tokens {
   :root {
@@ -390,9 +390,6 @@
   .status.warn { color: var(--warn); }
 
   /* Explorer (#222) */
-  nav.tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 12px; }
-  nav.tabs a { padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); font-size: 13px; }
-  nav.tabs a[aria-current="page"] { background: var(--violet); border-color: var(--violet); color: var(--surface); }
   ul.plain-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; }
   .sql-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; align-items: start; }
   .sql-layout .schema summary { cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 6px; }
@@ -1162,4 +1159,363 @@
     .card.lead { padding: 18px; }
     .page-head h1 { font-size: var(--step-3); }
   }
+}
+
+/* Motion (#552): CSS only, and only for people who have not asked for less
+   motion. Opacity, translate, scale and colours; never layout, except the
+   height of an opening disclosure. 120 ms for feedback, 180–320 ms for what
+   appears, 420 ms for arrival, 600–900 ms for data drawing in. Only the
+   incident dot and the live dot move on their own, and only while they
+   have something to report. The reduce rule in `utilities` still wins. */
+@layer motion {
+  @media (prefers-reduced-motion: no-preference) {
+    :root { --ease-out: cubic-bezier(.2, .8, .2, 1); --ease-spring: cubic-bezier(.3, 1.4, .5, 1); interpolate-size: allow-keywords; }
+
+    /* Page to page: the sidebar and the top bar stay still, the content fades and rises. */
+    @view-transition { navigation: auto; }
+    .side { view-transition-name: side; }
+    .topbar { view-transition-name: topbar; }
+    ::view-transition-old(root) { animation: 140ms var(--ease-out) both vt-out; }
+    ::view-transition-new(root) { animation: 240ms var(--ease-out) both vt-in; }
+    @keyframes vt-out { to { opacity: 0; } }
+    @keyframes vt-in { from { opacity: 0; translate: 0 6px; } }
+
+    /* Control feedback */
+    button, .btn, .chip, .side-nav a, .side .switch, .section-tabs a, .me-menu a, .seg label, .row {
+      transition: background-color 120ms, border-color 120ms, color 120ms, box-shadow 160ms, opacity 120ms,
+                  transform 150ms var(--ease-out), scale 120ms var(--ease-out);
+    }
+    :is(button, .btn):active { scale: .97; }
+    tbody td { transition: background-color 120ms; }
+    .chart .b, .spark .bar { transition: fill 120ms; }
+    a.stretch .details { transition: opacity 150ms; }
+    .blob { animation: none; }
+
+    /* Linked cards lift a little */
+    a.card, .card:has(a.stretch) { transition: translate 200ms var(--ease-out), box-shadow 200ms var(--ease-out), border-color 200ms; }
+    a.card:hover, .card:has(a.stretch):hover { translate: 0 -2px; box-shadow: var(--shadow), 0 6px 18px -8px color-mix(in oklab, var(--ink) 18%, transparent); }
+
+    /* Content arrives in order: the page, the board's parts, the focus grid, the numbers */
+    main > *, .board > *, .focus-grid > *, .kpis > * { animation: rise 420ms var(--ease-out) both; }
+    :is(main, .board) > :nth-child(2) { animation-delay: 40ms; }
+    :is(main, .board) > :nth-child(3) { animation-delay: 80ms; }
+    :is(main, .board) > :nth-child(4) { animation-delay: 120ms; }
+    :is(main, .board) > :nth-child(n+5) { animation-delay: 160ms; }
+    .focus-grid > :nth-child(2) { animation-delay: 90ms; }
+    .kpis > :nth-child(2) { animation-delay: 40ms; } .kpis > :nth-child(3) { animation-delay: 80ms; }
+    .kpis > :nth-child(4) { animation-delay: 120ms; } .kpis > :nth-child(n+5) { animation-delay: 160ms; }
+    @keyframes rise { from { opacity: 0; translate: 0 8px; } }
+
+    /* Data draws in: bars grow from their baseline, fills extend, the line draws */
+    .chart .b, .spark .bar { transform-box: fill-box; transform-origin: bottom; animation: grow-y 600ms var(--ease-out) both; }
+    :is(.chart .b, .spark .bar):nth-child(2) { animation-delay: 20ms; } :is(.chart .b, .spark .bar):nth-child(3) { animation-delay: 40ms; }
+    :is(.chart .b, .spark .bar):nth-child(4) { animation-delay: 60ms; } :is(.chart .b, .spark .bar):nth-child(5) { animation-delay: 80ms; }
+    :is(.chart .b, .spark .bar):nth-child(6) { animation-delay: 100ms; } :is(.chart .b, .spark .bar):nth-child(7) { animation-delay: 120ms; }
+    :is(.chart .b, .spark .bar):nth-child(8) { animation-delay: 140ms; } :is(.chart .b, .spark .bar):nth-child(9) { animation-delay: 160ms; }
+    :is(.chart .b, .spark .bar):nth-child(10) { animation-delay: 180ms; } :is(.chart .b, .spark .bar):nth-child(11) { animation-delay: 200ms; }
+    :is(.chart .b, .spark .bar):nth-child(12) { animation-delay: 220ms; } :is(.chart .b, .spark .bar):nth-child(13) { animation-delay: 240ms; }
+    :is(.chart .b, .spark .bar):nth-child(n+14) { animation-delay: 260ms; }
+    @keyframes grow-y { from { scale: 1 0; } }
+
+    .barcell .fg, .compare .fg, .fill rect, svg.progress .bar, svg.budget-meter .fill, .signal .meter .done {
+      transform-box: fill-box; transform-origin: left; animation: grow-x 700ms 200ms var(--ease-out) both;
+    }
+    @keyframes grow-x { from { scale: 0 1; } }
+
+    .kpi .spark polyline { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 900ms 250ms var(--ease-out) forwards; }
+    @keyframes draw { to { stroke-dashoffset: 0; } }
+
+    .heat .hc { animation: fade 500ms var(--ease-out) both; }
+    .heat tbody tr:nth-child(2) .hc { animation-delay: 60ms; } .heat tbody tr:nth-child(3) .hc { animation-delay: 120ms; }
+    .heat tbody tr:nth-child(4) .hc { animation-delay: 180ms; } .heat tbody tr:nth-child(5) .hc { animation-delay: 240ms; }
+    .heat tbody tr:nth-child(n+6) .hc { animation-delay: 300ms; }
+    @keyframes fade { from { opacity: 0; } }
+
+    /* Emphasis: the alerting number rings twice, its arrow nudges once */
+    .kpi.is-alert { animation: alert-ring 1.6s 600ms var(--ease-out) 2; }
+    @keyframes alert-ring {
+      0% { box-shadow: var(--shadow), 0 0 0 0 color-mix(in oklab, var(--bad) 35%, transparent); }
+      100% { box-shadow: var(--shadow), 0 0 0 10px color-mix(in oklab, var(--bad) 0%, transparent); }
+    }
+    .kpi .delta .icon { animation: nudge 500ms 650ms var(--ease-spring) both; }
+    @keyframes nudge { from { opacity: 0; translate: 0 3px; } }
+
+    /* Popovers (the context chips, the KPI definitions, the user menu) fade and scale in and out */
+    [popover] {
+      transition: opacity 180ms var(--ease-out), scale 220ms var(--ease-spring), translate 220ms var(--ease-out),
+                  display 220ms allow-discrete, overlay 220ms allow-discrete;
+    }
+    [popover]:not(:popover-open) { opacity: 0; scale: .96; translate: 0 -4px; }
+    @starting-style {
+      [popover]:popover-open { opacity: 0; scale: .96; translate: 0 -4px; }
+    }
+    .context .chip + .pop, .kpi-pop { transform-origin: top left; }
+    .me-menu[popover] { transform-origin: bottom left; }
+
+    /* Disclosures open smoothly (browsers without ::details-content just snap) */
+    :is(.disclose, .steps details)::details-content {
+      block-size: 0; overflow: clip;
+      transition: block-size 320ms var(--ease-out), content-visibility 320ms allow-discrete;
+    }
+    :is(.disclose, .steps details)[open]::details-content { block-size: auto; }
+    .disclose summary > .icon:last-child { transition: rotate 240ms var(--ease-spring); }
+
+    /* The top bar gains its shadow over the first 64 px of scroll */
+    @supports (animation-timeline: scroll()) {
+      .topbar { animation: bar-shadow linear both; animation-timeline: scroll(root); animation-range: 0 64px; }
+      @keyframes bar-shadow { to { box-shadow: 0 6px 16px -10px color-mix(in oklab, var(--ink) 25%, transparent); } }
+    }
+
+    /* Signals: the incident dot and the live dot breathe; the rest stays still */
+    .signal.bad .dot { --pulse: var(--bad); animation: breathe 2.4s ease-in-out infinite; }
+    .live-dot:not(.off) { --pulse: var(--good); animation: breathe 2.4s ease-in-out infinite; }
+    @keyframes breathe { 50% { box-shadow: 0 0 0 6px color-mix(in oklab, var(--pulse) 0%, transparent); } }
+
+    /* Setup: a done step's tick pops once */
+    .steps .step.done .state .icon { animation: pop-in 360ms 300ms var(--ease-spring) both; }
+    @keyframes pop-in { from { opacity: 0; scale: .6; } }
+
+    /* The ?confirm= dialog (#545) arrives open with the page: the scrim
+       fades in, the dialog rises and settles. */
+    .scrim { animation: fade 200ms var(--ease-out) both; }
+    .scrim > dialog.dialog { animation: dialog-in 260ms var(--ease-spring) both; }
+    @keyframes dialog-in { from { opacity: 0; scale: .96; translate: 0 -4px; } }
+  }
+}
+
+/* Detail pages and danger zones (#545) */
+@layer components {
+  /* Entity header (Person, Feature page): monogram, title, facts, actions. */
+  .entity { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 20px; margin: 6px 0 20px; }
+  .entity .avatar.lg { width: 56px; height: 56px; border-radius: 16px; font-size: 18px; font-weight: 600;
+    background: color-mix(in oklab, var(--accent) var(--tint), var(--surface)); color: var(--accent); }
+  .entity-main { flex: 1; min-width: min(240px, 100%); display: flex; flex-direction: column; gap: 8px; }
+  .entity h1 { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+    font-size: var(--step-4); font-weight: 600; letter-spacing: -0.03em; line-height: 1.1; overflow-wrap: anywhere; }
+  .entity h1 .mono { letter-spacing: -0.02em; }
+  .entity h1 .tag { font-size: 12.5px; font-weight: 500; letter-spacing: 0; }
+  .entity p { margin: 0; }
+  .entity dl.facts { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 0; font-size: 14px; }
+  .entity .facts div { display: flex; flex-direction: column; gap: 2px; }
+  .entity .facts dt { font-size: 12px; color: var(--muted); }
+  .entity .facts dd { margin: 0; font-weight: 550; font-variant-numeric: tabular-nums; }
+  .entity .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .entity ~ .kpis, .entity ~ .kpis + * { margin-top: 16px; }
+
+  /* Mini cards: the summary blocks of a detail page. */
+  .card.mini { padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
+  .card.mini h2 { margin: 0; display: flex; align-items: center; gap: 8px; font-size: var(--step-1); font-weight: 600; }
+  .card.mini h2 .icon { color: var(--muted); }
+  .card.mini h2 .tag { margin-left: auto; }
+  .card.mini ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+  .card.mini p, .card.mini table { margin: 0; font-size: 13px; }
+  .card.mini > a { font-size: 13px; font-weight: 500; }
+  .empty-line { color: var(--muted); font-size: 13px; }
+
+  /* Danger zone: always the last card of its page. */
+  .card.danger { margin-top: 24px; border-color: color-mix(in oklab, var(--bad) 30%, var(--line)); }
+  .card.danger > h2 { margin: 0 0 4px; display: flex; align-items: center; gap: 8px; font-size: var(--step-2); font-weight: 600; }
+  .card.danger > h2 .icon { color: var(--bad); }
+  .card.danger .item { gap: 12px 24px; padding: 16px 0 4px; }
+  .card.danger .item + .item { margin-top: 12px; }
+  .card.danger .item b { font-weight: 600; }
+  .card.danger .item p { margin: 2px 0 0; max-width: 70ch; color: var(--muted); font-size: 13px; }
+  .btn.danger-btn:hover { border-color: var(--bad); }
+  .btn.danger-solid { background: var(--bad); border-color: var(--bad); color: oklch(99% 0 0); }
+  .btn.danger-solid:hover { background: color-mix(in oklab, var(--bad) 85%, var(--ink)); border-color: transparent; }
+
+  /* Confirmation without script: `?confirm=` renders an open dialog. */
+  .scrim { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 24px; overflow-y: auto;
+    background: color-mix(in oklab, oklch(15% 0.02 285) 45%, transparent); backdrop-filter: blur(2px); }
+  .scrim > dialog.dialog { position: static; inset: auto; margin: 0; max-width: none; max-height: none; width: min(460px, 100%);
+    display: flex; flex-direction: column; gap: 16px; padding: 24px; border: 1px solid var(--line); border-radius: var(--r-l);
+    background: var(--surface); color: var(--ink);
+    box-shadow: 0 24px 60px -20px color-mix(in oklab, oklch(15% 0.02 285) 45%, transparent); }
+  .dialog h2 { margin: 0; font-size: var(--step-2); font-weight: 600; }
+  .dialog p { margin: 0; color: var(--ink-2); }
+  .dialog form { display: flex; flex-direction: column; gap: 16px; margin: 0; }
+  .dialog .field input { width: 100%; }
+  .dialog .actions { justify-content: flex-end; }
+}
+
+/* Behaviour screens (#548) */
+@layer components {
+  /* In-page tabs (Breakdown dimensions, Heatmap modes, Feature flow views):
+     the v2 underline tabs, plain links with aria-current. */
+  nav.tabs { display: flex; flex-wrap: nowrap; gap: 2px; overflow-x: auto; scrollbar-width: none;
+    margin: 0 0 16px; border-bottom: 1px solid var(--line); }
+  nav.tabs a { display: inline-flex; align-items: center; min-height: 40px; padding: 0 12px; margin-bottom: -1px;
+    border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none;
+    color: var(--muted); font-size: var(--step-0); font-weight: 500; white-space: nowrap; text-decoration: none; }
+  nav.tabs a:hover { color: var(--ink); }
+  nav.tabs a[aria-current="page"] { background: none; color: var(--ink); border-bottom-color: var(--ink); }
+
+  /* Bar cells in the Breakdown, Pages and Forms tables. */
+  .table-card td.users, .table-card td.views, .table-card td.funnel { min-width: 180px; }
+  .table-card td.funnel .fg { fill: color-mix(in oklab, var(--accent) 80%, var(--surface)); }
+
+  /* Pages: Web Vitals as small rated pills. */
+  .table-card td.vitals { min-width: 150px; }
+  .vital { display: inline-block; padding: 3px 7px; margin: 1px 0; border-radius: var(--r-pill); white-space: nowrap;
+    font: 500 12px/1.2 ui-monospace, SFMono-Regular, monospace; color: var(--ink-2);
+    background: color-mix(in oklab, currentColor 10%, transparent); }
+  .vital.good { color: var(--good); } .vital.warn { color: var(--warn); } .vital.bad { color: var(--bad); }
+
+  /* Forms: the summary line under each form's title. */
+  .table-card .table-head .form-sum { flex-basis: 100%; margin: 0; font-size: 13.5px; color: var(--ink-2); }
+
+  /* Heatmap: ranked bars (most clicked elements) and scroll depth. */
+  ol.ranked-bars { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  ol.ranked-bars li { display: grid; grid-template-columns: 2.2em minmax(0, 1fr) minmax(140px, 1.2fr); align-items: center; gap: 10px; font-size: 13.5px; }
+  ol.ranked-bars li:not(:has(.rank)) { grid-template-columns: minmax(0, 1fr) minmax(140px, 1.2fr); }
+  ol.ranked-bars .rank { font: 600 12px/1 ui-monospace, SFMono-Regular, monospace; color: var(--muted); }
+  ol.ranked-bars .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  ol.ranked-bars .barcell { min-width: 0; }
+  .no-replay { display: flex; align-items: center; gap: 6px; margin: 0 0 12px; }
+
+  /* Feature flow: steps in accent tints, darker as the session goes on;
+     success in --good, leaving in --bad. */
+  svg.sankey .node.s0 { fill: color-mix(in oklab, var(--accent) 45%, var(--surface)); }
+  svg.sankey .node.s1 { fill: color-mix(in oklab, var(--accent) 60%, var(--surface)); }
+  svg.sankey .node.s2 { fill: color-mix(in oklab, var(--accent) 74%, var(--surface)); }
+  svg.sankey .node.s3 { fill: color-mix(in oklab, var(--accent) 87%, var(--surface)); }
+  svg.sankey .node.s4 { fill: var(--accent); }
+  svg.sankey .node.ok { fill: var(--good); }
+  svg.sankey .node.exit { fill: var(--bad); }
+  svg.sankey .ribbon { fill: color-mix(in oklab, var(--accent) 20%, transparent); }
+  svg.sankey .ribbon:hover { fill: color-mix(in oklab, var(--accent) 42%, transparent); }
+  .flow-key { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 10px 0 0; }
+  .flow-key .key::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 2px;
+    vertical-align: -1px; background: color-mix(in oklab, var(--accent) 60%, var(--surface)); }
+  .flow-key .key.ok::before { background: var(--good); }
+  .flow-key .key.exit::before { background: var(--bad); }
+  .flow-table .scroll { overflow-x: auto; }
+  .flow-table table { width: 100%; }
+}
+
+/* People screens (#550) */
+@layer components {
+  .people .notice { margin: 0; }
+  .people-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 16px; align-items: start; }
+  .people .section-head h2 .icon { margin-right: 6px; }
+
+  /* Breakdowns: the share as a bar cell, the count after it. */
+  table.share-bars { width: 100%; }
+  table.share-bars th { max-width: 14em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  table.share-bars td.bar { width: 60%; }
+  .table-card td.bar { min-width: 160px; }
+
+  /* Acquisition: what to group by, and which touch, as underlined tabs. */
+  .people-tabs { display: flex; flex-wrap: wrap; align-items: end; gap: 4px 28px; border-bottom: 1px solid var(--line); }
+  /* The underline tabs come from the Behaviour block; here they sit on the row's own line. */
+  .people-tabs nav.tabs { margin: 0; border-bottom: 0; }
+
+  /* Goals: the value now, the progress bar (SVG rects), the forms. */
+  .goal .section-head { align-items: center; }
+  .goal-now { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+  .goal-now .kpi-value { font-size: 26px; }
+  .goal-now strong { color: var(--ink); font-weight: 550; }
+  .goal-progress { display: flex; flex-direction: column; gap: 6px; }
+  .goal .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .goal .actions form { margin: 0; }
+  .goal-choices { display: flex; flex-direction: column; gap: 8px; }
+  .goal-choice { border: 1px solid var(--line); border-radius: var(--r-s); background: var(--surface); }
+  .goal-choice[open] { border-color: color-mix(in oklab, var(--accent) 35%, var(--line)); }
+  .goal-choice summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-height: 44px; padding: 10px 14px; cursor: pointer; }
+  .goal-choice form { display: flex; flex-direction: column; gap: 16px; padding: 4px 14px 14px; }
+
+  /* Churn: the at-risk exports and the win-back form. */
+  .people .table-card .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .people .table-card form.inline { margin: 0; }
+
+  /* Each ⓘ anchors its own popover (ids: the CSP forbids style=). */
+  #kpi-churn-rate-btn { anchor-name: --kpi-churn-rate; }
+  #kpi-churn-rate { position-anchor: --kpi-churn-rate; }
+  #kpi-net-change-btn { anchor-name: --kpi-net-change; }
+  #kpi-net-change { position-anchor: --kpi-net-change; }
+  #kpi-at-risk-now-btn { anchor-name: --kpi-at-risk-now; }
+  #kpi-at-risk-now { position-anchor: --kpi-at-risk-now; }
+  #kpi-median-lifetime-btn { anchor-name: --kpi-median-lifetime; }
+  #kpi-median-lifetime { position-anchor: --kpi-median-lifetime; }
+  #kpi-reached-value-btn { anchor-name: --kpi-reached-value; }
+  #kpi-reached-value { position-anchor: --kpi-reached-value; }
+  #kpi-came-back-btn { anchor-name: --kpi-came-back; }
+  #kpi-came-back { position-anchor: --kpi-came-back; }
+}
+
+/* Quality and Live screens (#549) */
+@layer components {
+  /* Uptime: one big status line, the word next to a coloured dot. */
+  .state-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 8px 0 4px;
+    font-size: var(--step-3); font-weight: 600; letter-spacing: -.02em; color: var(--tone, var(--muted)); }
+  .state-line.good { --tone: var(--good); } .state-line.bad { --tone: var(--bad); } .state-line.warn { --tone: var(--warn); }
+  .state-line .state-dot { flex: none; width: 12px; height: 12px; border-radius: 50%; background: var(--tone, var(--muted));
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--tone, var(--muted)) 18%, transparent); }
+  .state-line .since { font-size: var(--step-0); font-weight: 400; letter-spacing: 0; color: var(--muted); }
+  .card.setup { margin: 0 0 16px; }
+
+  /* Tables of these screens: tags and small buttons in cells. */
+  .table-card td .tag { white-space: nowrap; }
+  .table-card .btn.sm { min-height: 30px; padding: 0 10px; font-size: var(--step--1); }
+  .table-card td .delta { font-size: 12.5px; }
+  .table-card ul.reasons { list-style: none; margin: 6px 0 0; padding: 0; color: var(--muted); font-size: 12px; max-width: 44ch; }
+  .table-card ul.reasons li + li { margin-top: 2px; }
+  .table-card form.inline { margin: 0; }
+  .plain-list .tag { min-height: 20px; padding: 0 7px; font-size: 11.5px; }
+
+  /* Ask: each answer a card, the question a form card. */
+  .card.answer-card { display: flex; flex-direction: column; gap: 12px; margin: 0 0 16px; padding: 20px 22px; }
+  .answer-card .q { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+  .answer-card .q h2 { margin: 0; font-size: var(--step-1); font-weight: 600; }
+  .answer-card .answer > :first-child { margin-top: 0; }
+  .answer-card .answer > :last-child { margin-bottom: 0; }
+  .answer-card .pending { padding: 12px 14px; border: 1px solid color-mix(in oklab, var(--warn) 35%, var(--line)); border-radius: var(--r-s);
+    background: color-mix(in oklab, var(--warn) 6%, var(--surface)); }
+  .answer-card .pending p { margin: 0 0 8px; }
+  .answer-foot { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px;
+    padding-top: 10px; border-top: 1px solid var(--line-2); }
+  .card.form-card.ask-form { margin: 0 0 16px; }
+  .ask-form textarea { width: 100%; box-sizing: border-box; min-height: 84px; padding: 8px 10px; border-radius: var(--r-s);
+    background: var(--bg); font: inherit; font-size: 14px; resize: vertical; }
+  .card.ask-more { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 12px 22px; margin: 0 0 16px; }
+  .card.ask-more form { margin: 0; }
+}
+
+/* Product and instance screens (#551) */
+@layer components {
+  /* Feature map: the health score as a lead card, its findings ranked. */
+  .map-health { container-type: inline-size; margin: 0 0 16px; }
+  .map-health .score { display: flex; align-items: baseline; gap: 6px; margin: 0; }
+  .map-health .score strong { font-size: var(--step-4); font-weight: 600; line-height: 1; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+  .map-health .score small { color: var(--muted); font-size: var(--step-0); }
+  .findings details.fix { margin-top: 8px; }
+  .findings details.fix > summary { cursor: pointer; display: inline-flex; align-items: center; min-height: 24px; font-size: 13px; font-weight: 500; color: var(--ink-2); }
+  .findings details.fix pre.diff { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+  /* Table cards: a search form or a status in the head. */
+  .table-card .table-head form.inline { margin: 0; }
+  .table-card td.rollout { min-width: 180px; }
+  .table-card td.rollout form.inline { margin: 6px 0 0; }
+  .table-card td.path { font-size: 12px; }
+
+  /* Surveys: the state and the answer type as tags over the results. */
+  .card.survey .section-head h2 { margin: 0; }
+  .card.survey .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 8px 0; font-size: 13px; color: var(--muted); }
+
+  /* Weekly digest: the board's parts, without links. */
+  .digest .kpis .card.kpi { min-height: 112px; }
+  .digest .card.pad h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: var(--step-2); }
+
+  /* Forms: monospace text areas, ticked lists, the actions under a card. */
+  .form-grid .field textarea { width: 100%; box-sizing: border-box; min-height: 120px; }
+  .form-grid .field textarea.mono { font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, monospace; font-size: 12.5px; line-height: 1.5; }
+  .form-grid fieldset.field label.check { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; margin-right: 14px; font-weight: 400; }
+  form.form-foot { margin: 0; }
+  .backup-actions { margin: 0 0 16px; }
+  .card.about .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .card.about .section-head h2 { margin: 0; }
+
+  /* Message pages (not found, not available): one empty-state card. */
+  .card.empty.message { max-width: 760px; margin: 48px auto; }
+  .card.empty.message h1 { margin: 0; font-size: var(--step-2); }
 }

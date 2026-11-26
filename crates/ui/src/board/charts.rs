@@ -96,7 +96,13 @@ pub(super) fn active_users(pid: &str, f: &Filters, b: &Board, marks: &[Mark]) ->
 }
 
 /// A share as a bar and its number (the bar's width is an SVG attribute).
-pub(super) fn barcell(frac: f64) -> Markup {
+pub(crate) fn barcell(frac: f64) -> Markup {
+    bar_with(frac, &pct(frac))
+}
+
+/// A bar filled to `frac` (0..1) followed by `text` (a count, a share):
+/// the width is an SVG attribute, as the CSP forbids inline styles.
+pub(crate) fn bar_with(frac: f64, text: &str) -> Markup {
     let w = (frac.clamp(0.0, 1.0) * 100.0).max(1.5);
     html! {
         div.barcell {
@@ -104,7 +110,7 @@ pub(super) fn barcell(frac: f64) -> Markup {
                 rect.bg width="100" height="6" rx="3" {}
                 rect.fg width=(format!("{w:.1}")) height="6" rx="3" {}
             }
-            span.num { (pct(frac)) }
+            span.num { (text) }
         }
     }
 }

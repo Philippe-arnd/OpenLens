@@ -135,22 +135,37 @@ pub fn welcome(sso: bool, error: Option<&str>) -> Markup {
     )
 }
 
-/// Generic message page (errors, not found).
+/// The generic empty-state card of a message page (#551): the drawing,
+/// the title, the reason, and what follows it.
+fn message_card(title: &str, body: Markup, after: Markup) -> Markup {
+    html! {
+        section.card.empty.message aria-labelledby="message-h" {
+            (crate::tables::empty_art())
+            div {
+                h1 #message-h { (title) }
+                p { (body) }
+                (after)
+            }
+        }
+    }
+}
+
+/// Generic message page (errors, not found, not available).
 pub fn message(title: &str, text: &str) -> Markup {
     layout(
         title,
         None,
-        html! { section.login { h1 { (title) } p { (text) } p { a href="/" { "Back to the board" } } } },
+        message_card(
+            title,
+            html! { (text) },
+            html! { div.actions { a.btn href="/" { "Back to the board" } } },
+        ),
     )
 }
 
 /// [`message`] with markup (a link back, for instance).
 pub fn message_html(title: &str, body: Markup) -> Markup {
-    layout(
-        title,
-        None,
-        html! { section.login { h1 { (title) } p { (body) } } },
-    )
+    layout(title, None, message_card(title, body, html! {}))
 }
 
 #[cfg(test)]
