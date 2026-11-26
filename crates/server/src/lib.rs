@@ -54,6 +54,7 @@ mod serve;
 mod settings;
 mod share;
 mod slo;
+mod status_page;
 mod storage;
 mod surveys;
 mod tickets;
@@ -167,6 +168,7 @@ pub fn router(state: AppState) -> Router {
         .merge(maintenance::routes())
         .merge(announcements::routes())
         .merge(slo::routes())
+        .merge(status_page::routes())
         .layer(axum::middleware::from_fn(csrf::layer))
         .layer(axum::middleware::from_fn(trusted_headers_layer))
         // Pages, the API and Ask (a few model rounds) get two minutes.

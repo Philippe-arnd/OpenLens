@@ -286,6 +286,13 @@ pub(super) enum Command {
         #[command(subcommand)]
         action: AnnounceCmd,
     },
+    /// The public status page (#561): show or change its settings (on or
+    /// off, the address, the components and their public names), or read
+    /// the page as anyone sees it.
+    StatusPage {
+        #[command(subcommand)]
+        action: crate::status_page::StatusPageCmd,
+    },
     /// Is the app up? (`up`, `down`, `maintenance`, `unknown`, `off`, with
     /// open incidents and maintenance windows.) Exits non-zero when down:
     /// handy right after a deploy.

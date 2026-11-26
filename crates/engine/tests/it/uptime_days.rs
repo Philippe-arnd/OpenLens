@@ -60,8 +60,6 @@ fn days_before_the_first_check_are_not_green_and_down_time_colours_a_day() {
     let t0 = midnight();
     // Two days of checks; a 2-hour incident on the second.
     probe(&m, "production", t0, t0 + DAY, 0..0);
-    // The hourly job closes each day just after it ends.
-    close_days(&m, "p", at(t0 + DAY + 300));
     let (s, e) = (t0 + DAY + 3600, t0 + DAY + 3 * 3600);
     probe(&m, "production", t0 + DAY, t0 + 2 * DAY, s..e);
     let id = m.start_incident("p", "down", s, "HTTP 503").unwrap();

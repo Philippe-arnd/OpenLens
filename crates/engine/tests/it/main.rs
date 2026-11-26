@@ -21,6 +21,7 @@ mod map_lookups;
 mod map_shape;
 mod releases;
 mod slo;
+mod status_page;
 mod stored_totals;
 mod typed_facts;
 mod uptime_days;

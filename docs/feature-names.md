@@ -32,3 +32,5 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Go to… | The sidebar field that opens a section, a feature or a person by typing its name |
 | Availability | On Uptime: time up over time measured per window (24 hours to 365 days, this and last month), time with no check shown as not measured and planned maintenance left out |
 | Availability target | One per environment over a rolling 30 days; with it, the error budget (downtime it allows), what is spent and left, and the burn rate |
+| Status page | The public, read-only page of a project at `/status/<slug>`: its state, components, 90 daily bars, announcements and planned maintenance |
+| Component | A line of the status page: production or a monitored environment, under a public name |

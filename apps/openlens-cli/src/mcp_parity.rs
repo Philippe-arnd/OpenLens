@@ -71,6 +71,10 @@ const TOOL_OF: &[(&str, &str)] = &[
     ("announcements.close", "announcement_close"),
     ("announcements.delete", "announcement_delete"),
     ("announcements.send", "announcement_send"),
+    // The public status page (#561).
+    ("status_page.get", "status_page"),
+    ("status_page.set", "status_page_set"),
+    ("status_page.public", "status_page"),
 ];
 
 /// Commands deliberately without an MCP tool, each with its reason.

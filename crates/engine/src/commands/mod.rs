@@ -29,6 +29,7 @@ pub mod goals;
 pub mod goto;
 pub mod maintenance;
 pub mod releases;
+pub mod status_page;
 pub mod tickets;
 pub mod uptime;
 
@@ -37,6 +38,9 @@ pub mod uptime;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Access {
+    /// Anyone, without signing in: the command returns only what its
+    /// owner chose to publish (the public status page, #561, D-079).
+    Public,
     /// Anyone signed in who may see the project (any role).
     Read,
     /// An admin who may see the project, or the bearer token
@@ -153,6 +157,10 @@ pub const REGISTRY: &[Spec] = &[
     spec::<announcements::SetSend>(),
     // The sidebar's Go to… field (#541).
     spec::<goto::Lookup>(),
+    // The public status page (#561).
+    spec::<status_page::Get>(),
+    spec::<status_page::Set>(),
+    spec::<status_page::GetPublic>(),
 ];
 
 /// A 12-character id from `s` (the first bytes of its SHA-256, in hex).

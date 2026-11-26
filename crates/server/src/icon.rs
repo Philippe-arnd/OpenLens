@@ -59,6 +59,16 @@ fn image(mime: &'static str, body: Vec<u8>) -> Response {
     r
 }
 
+/// The project's stored favicon, else its initial; never fetches (the
+/// public status page's icon, #561).
+pub(crate) fn stored(state: &AppState, id: &str, name: &str) -> Response {
+    let bytes = std::fs::read(path(state, id)).ok();
+    match bytes.as_deref().and_then(|b| sniff(b).map(|m| (m, b))) {
+        Some((mime, b)) => image(mime, b.to_vec()),
+        None => image("image/svg+xml", initial_svg(name).into_bytes()),
+    }
+}
+
 fn path(state: &AppState, id: &str) -> std::path::PathBuf {
     state.data_dir.join("icons").join(format!("{id}.img"))
 }
