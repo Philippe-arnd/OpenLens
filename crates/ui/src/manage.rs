@@ -201,44 +201,80 @@ pub fn survey_edit(
     )
 }
 
-/// Per-page hotspots: scroll depth, most clicked elements, rage clicks.
+/// The heatmap of one page.
+pub(crate) fn heatmap_href(pid: &str, path: &str) -> String {
+    format!("/p/{pid}/heatmap?path={}", url_enc(path))
+}
+
+/// Per-page hotspots (#548: one table): views as a bar, scroll depth, the
+/// most clicked element, rage clicks, the Web Vitals measured on the page
+/// (`vitals`: the vitals report, whose worst pages carry a p75 per page)
+/// and a link to the page's heatmap.
 pub fn pages(
     p: &ProjectInfo<'_>,
     b: &Board,
     list: &[openlens_engine::PageStats],
+    vitals: &[openlens_engine::VitalReport],
     f: &Filters,
 ) -> Markup {
+    let max = list.iter().map(|x| x.views).max().unwrap_or(1).max(1) as f64;
+    let page_vitals = |path: &str| -> Vec<&openlens_engine::PageVital> {
+        vitals
+            .iter()
+            .flat_map(|r| r.worst_pages.iter())
+            .filter(|v| v.path == path)
+            .collect()
+    };
     layout_in(
         "Pages",
         Some(p),
         context_bar(p.id, b, f, "/pages", false),
         html! {
-            div.heading { div { h1 { "Pages" } p.muted { "How far people scroll, what they click, where they get frustrated. Last 30 days." } } }
-            @if list.is_empty() { section.card { p.muted { "No page views yet." } } }
-            div.grid {
-                @for pg in list {
-                    section.card {
-                        h2.sky { (icon("layers")) span.mono { (pg.path) } }
-                        p.small { a href={ "/p/" (p.id) "/heatmap?path=" (url_enc(&pg.path)) } { (icon("spark")) " Click heatmap" } }
-                        p.small.muted { (compact(pg.views)) " views · " (compact(pg.users)) " users" }
-                        @if pg.median_scroll >= 0.0 {
-                            table.bars { tbody {
-                                tr { th scope="row" { "Reach half the page" } td.meter { (meter(pg.reach_half)) } td.num { (pct(pg.reach_half)) } }
-                                tr { th scope="row" { "Reach the end" } td.meter { (meter(pg.reach_end)) } td.num { (pct(pg.reach_end)) } }
+            div.heading { div { h1 { "Pages" } p.muted { "How far people scroll, what they click, where they get frustrated. Last 30 days; Web Vitals: p75 over 7 days, on the slowest pages." } } }
+            @if list.is_empty() {
+                section.card { p.muted { "No page views yet." } }
+            } @else {
+                (crate::tables::TableCard {
+                    label: "Pages",
+                    head: html! {},
+                    cols: &[
+                        Col::Shown("Page"), Col::Shown("Views"), Col::Num("Users"), Col::Num("Reach half"),
+                        Col::Num("Reach the end"), Col::Shown("Most clicked"), Col::Num("Rage clicks"),
+                        Col::Shown("Web Vitals"), Col::Hidden("Heatmap"),
+                    ],
+                    body: html! { @for pg in list {
+                        @let rage: i64 = pg.hotspots.iter().map(|h| h.rage).sum();
+                        tr {
+                            (crate::tables::path_cell(Some(&pg.path)))
+                            td.views { (crate::board::bar_with(pg.views as f64 / max, &compact(pg.views))) }
+                            td.num { (compact(pg.users)) }
+                            @if pg.median_scroll >= 0.0 {
+                                td.num { (pct(pg.reach_half)) }
+                                td.num { (pct(pg.reach_end)) }
+                            } @else {
+                                td.num.muted { "—" }
+                                td.num.muted { "—" }
+                            }
+                            td { @match pg.hotspots.first() {
+                                Some(h) => { (h.label) " " span.muted { "(" (compact(h.clicks)) ")" } },
+                                None => span.muted { "—" },
                             } }
-                        }
-                        @if !pg.hotspots.is_empty() {
-                            h3.small { "Most clicked" }
-                            table.plain { tbody { @for h in &pg.hotspots {
-                                tr {
-                                    th scope="row" { (h.label) }
-                                    td.num { (compact(h.clicks)) }
-                                    td.num { @if h.rage > 0 { span.status.bad { (icon("alert")) (compact(h.rage)) " rage" } } }
+                            td.num { @if rage > 0 { span.status.bad { (icon("alert")) (compact(rage)) } } @else { span.muted { "0" } } }
+                            td.vitals { @let vs = page_vitals(&pg.path);
+                                @if vs.is_empty() { span.muted { "—" } }
+                                @for v in vs {
+                                    span class={ "vital " (match v.rating { "good" => "good", "poor" => "bad", _ => "warn" }) } title={ (v.samples) " measurements" } {
+                                        (v.name) " " (openlens_engine::vitals::show(&v.name, v.p75))
+                                    }
+                                    " "
                                 }
-                            } } }
+                            }
+                            td { a.button.sm href=(heatmap_href(p.id, &pg.path)) { (icon("spark")) "Heatmap" } }
                         }
-                    }
+                    } },
+                    foot: html! {},
                 }
+                .render())
             }
         },
     )

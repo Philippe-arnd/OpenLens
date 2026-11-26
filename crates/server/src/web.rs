@@ -681,10 +681,13 @@ async fn pages_page(
         name: &p.name,
         key: &p.api_key,
     };
-    let (b, list) = tokio::join!(
+    let (b, list, vitals) = tokio::join!(
         openlens_engine::filter_options(&state.query, &p.id, &f, map.as_ref().map(|(m, _)| m)),
-        openlens_engine::pages(&state.query, &p.id, &src, &f)
+        openlens_engine::pages(&state.query, &p.id, &src, &f),
+        openlens_engine::vitals(&state.query, &p.id, &f, map.as_ref().map(|(m, _)| m))
     );
+    // The vitals are a column: without them the page still shows the rest.
+    let vitals = vitals.unwrap_or_default();
     match (b, list) {
         (Ok(mut b), Ok(l)) => {
             b.environments = crate::environments::visible(
@@ -693,7 +696,7 @@ async fn pages_page(
                 std::mem::take(&mut b.environments),
                 &f.environment,
             );
-            html(StatusCode::OK, openlens_ui::pages(&info, &b, &l, &f))
+            html(StatusCode::OK, openlens_ui::pages(&info, &b, &l, &vitals, &f))
         }
         (Err(e), _) | (_, Err(e)) => html(
             StatusCode::BAD_REQUEST,
