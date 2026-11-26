@@ -130,7 +130,14 @@ jobs:
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
           helm package "$CHART" --version "${GITHUB_REF_NAME#v}" --app-version "$GITHUB_REF_NAME"
-          helm push "openlens-${GITHUB_REF_NAME#v}.tgz" oci://ghcr.io/philippe-arnd/charts
+          # GHCR sometimes answers "failed to perform Tag on destination: …
+          # not found" right after the blobs upload (2 of 6 tags on
+          # 2026-11-26); pushing the same version again is harmless.
+          for i in 1 2 3 4; do
+            helm push "openlens-${GITHUB_REF_NAME#v}.tgz" oci://ghcr.io/philippe-arnd/charts && exit 0
+            echo "::warning::helm push failed (try $i), retrying"; sleep $((i * 15))
+          done
+          exit 1
       - name: open an issue when main breaks
         if: failure() && github.ref == 'refs/heads/main'
         env:
