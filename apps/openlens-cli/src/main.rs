@@ -5,6 +5,9 @@
 //! admin token come from `--server`/`--token` or `OPENLENS_SERVER` /
 //! `OPENLENS_TOKEN` (no config file, D-014).
 
+mod agent_kit;
+#[cfg(test)]
+mod agent_kit_tests;
 mod convert;
 mod lint;
 mod mcp;
@@ -183,6 +186,19 @@ impl Client {
     }
 
     pub(crate) fn sql(&self, project: &str, query: &str) -> Result<Vec<Value>, String> {
+        Api::sql(self, project, query)
+    }
+}
+
+/// The calls the agent kit makes (#524): the HTTP client, or a fake in
+/// tests, so the verify checklist and the MCP tools are tested without a
+/// server.
+pub(crate) trait Api {
+    /// One API call: its status and JSON body.
+    fn call(&self, method: &str, path: &str, body: Option<Body>) -> Result<(u16, Value), String>;
+
+    /// Read-only SQL on a project: its rows.
+    fn sql(&self, project: &str, query: &str) -> Result<Vec<Value>, String> {
         let (status, v) = self.call(
             "POST",
             &format!("/api/projects/{project}/sql"),
@@ -192,6 +208,12 @@ impl Client {
             return Err(format!("sql failed: {}", api_error(status, &v)));
         }
         Ok(v["rows"].as_array().cloned().unwrap_or_default())
+    }
+}
+
+impl Api for Client {
+    fn call(&self, method: &str, path: &str, body: Option<Body>) -> Result<(u16, Value), String> {
+        Client::call(self, method, path, body)
     }
 }
 
@@ -246,7 +268,11 @@ fn run(cli: Cli) -> Result<bool, String> {
             if let Some(tz) = timezone {
                 body["timezone"] = json!(tz);
             }
-            let (status, v) = client()?.call("POST", "/api/projects", Some(Body::Json(body)))?;
+            let c = client()?;
+            let (status, mut v) = c.call("POST", "/api/projects", Some(Body::Json(body)))?;
+            if status == 201 {
+                v["keep_it_running"] = agent_kit::keep_it_running(&c, &v);
+            }
             out(&v);
             Ok(status == 201)
         }
@@ -773,7 +799,7 @@ fn run(cli: Cli) -> Result<bool, String> {
             Ok(status == 200)
         }
         Command::Rules => {
-            println!("{}", RULES_SNIPPET);
+            println!("{}", RULES_SNIPPET.trim_end());
             Ok(true)
         }
         Command::LoginLink {
@@ -857,7 +883,11 @@ mod http_tests {
             .map(|p| template(&format!("/api{p}")))
             .collect();
         let mut checked = 0;
-        for src in [include_str!("main.rs"), include_str!("mcp.rs")] {
+        for src in [
+            include_str!("main.rs"),
+            include_str!("mcp.rs"),
+            include_str!("agent_kit.rs"),
+        ] {
             for lit in src
                 .split('"')
                 .filter(|l| l.starts_with("/api/") && !l.ends_with('/'))
