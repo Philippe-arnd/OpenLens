@@ -30,70 +30,13 @@ pub(crate) struct People<'a> {
 }
 
 impl People<'_> {
-    /// The closed days `person_day` can give for `project` over the last
-    /// 90 days: rolled up (D-025) with the map version `version` (none on
-    /// both sides without a map). A day rolled with another map, or not
-    /// rolled up, is absent and is read from its events (#489).
-    pub(crate) async fn rolled_days(
-        q: &QueryEngine,
-        project: &str,
-        version: Option<i64>,
-        now: DateTime<Utc>,
-    ) -> Result<Vec<NaiveDate>> {
-        let last = openlens_query::last_closed(now);
-        let since = (now - Duration::days(90)).date_naive();
-        let sql = format!(
-            "SELECT date, count(*) AS n, count(map_version) AS versioned, \
-             min(map_version) AS lo, max(map_version) AS hi FROM person_day \
-             WHERE date > '{since}' AND date <= '{last}' GROUP BY date"
-        );
-        let mut days: Vec<NaiveDate> = q
-            .sql(project, &sql)
-            .await?
-            .rows
-            .iter()
-            .filter(|r| match version {
-                None => int(r, "versioned") == 0,
-                Some(v) => {
-                    int(r, "versioned") == int(r, "n") && int(r, "lo") == v && int(r, "hi") == v
-                }
-            })
-            .filter_map(|r| {
-                let d = NaiveDate::parse_from_str(&text(r, "date")?, "%Y-%m-%d").ok()?;
-                (d > since && d <= last).then_some(d)
-            })
-            .collect();
-        days.sort_unstable();
-        Ok(days)
-    }
-
-    /// The rolled-up days entirely inside a window of `days` days.
-    fn inside(&self, days: i64) -> Vec<NaiveDate> {
-        let cutoff = (self.now - Duration::days(days)).date_naive();
-        self.rolled
-            .iter()
-            .copied()
-            .filter(|d| *d > cutoff)
-            .collect()
-    }
-
     /// A table of people rows for the filters `f` over the last `days`
     /// days: `distinct_id`, `environment`, `release`, `role` (canonical),
     /// `feature`, `events`, `last_ts` (the last event of the row) and
     /// `day` (the UTC day). A person active since a time inside the window
     /// is one with a row whose `last_ts` is at or after it.
     pub(crate) fn rows(&self, f: &Filters, days: i64) -> Result<String> {
-        let inside = self.inside(days);
-        let list = inside
-            .iter()
-            .map(|d| format!("'{}'", d.format("%Y-%m-%d")))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let skip = if inside.is_empty() {
-            String::new()
-        } else {
-            format!(" AND date NOT IN ({list})")
-        };
+        let (skip, rolled) = split(&self.rolled, self.now, days, f, &self.role);
         let events = format!(
             "SELECT distinct_id, environment, release, role, feature, count(*) AS events, \
              max(timestamp) AS last_ts, date AS day FROM {src} WHERE {w}{skip} \
@@ -101,26 +44,88 @@ impl People<'_> {
             src = self.src,
             w = f.clause_at(days, self.now)?,
         );
-        if inside.is_empty() {
+        let Some(w) = rolled else {
             return Ok(format!("({events}) AS people"));
-        }
+        };
         let role = &self.role;
-        // The same filters as `Filters::clause`, on the rollup's columns.
-        let mut w = format!("date IN ({list}) AND environment = $env");
-        if f.role.is_some() {
-            w.push_str(&format!(" AND {role} = $role"));
-        }
-        if f.release.is_some() {
-            w.push_str(" AND release = $release");
-        }
-        if !f.internal {
-            w.push_str(" AND NOT is_internal(person)");
-        }
         Ok(format!(
             "({events} UNION ALL SELECT person AS distinct_id, environment, release, \
              {role} AS role, feature, events, last_ts, date AS day FROM person_day WHERE {w}) AS people"
         ))
     }
+}
+
+/// The closed days a per-day rollup `table` (`person_day`, `session_day`)
+/// can give for `project` over the last 90 days: rolled up (D-025) with
+/// the map version `version` (none on both sides without a map). A day
+/// rolled with another map, or not rolled up, is absent and is read from
+/// its events (#489).
+pub(crate) async fn rolled_days(
+    q: &QueryEngine,
+    project: &str,
+    table: &'static str,
+    version: Option<i64>,
+    now: DateTime<Utc>,
+) -> Result<Vec<NaiveDate>> {
+    let last = openlens_query::last_closed(now);
+    let since = (now - Duration::days(90)).date_naive();
+    let sql = format!(
+        "SELECT date, count(*) AS n, count(map_version) AS versioned, \
+         min(map_version) AS lo, max(map_version) AS hi FROM {table} \
+         WHERE date > '{since}' AND date <= '{last}' GROUP BY date"
+    );
+    let mut days: Vec<NaiveDate> = q
+        .sql(project, &sql)
+        .await?
+        .rows
+        .iter()
+        .filter(|r| match version {
+            None => int(r, "versioned") == 0,
+            Some(v) => int(r, "versioned") == int(r, "n") && int(r, "lo") == v && int(r, "hi") == v,
+        })
+        .filter_map(|r| {
+            let d = NaiveDate::parse_from_str(&text(r, "date")?, "%Y-%m-%d").ok()?;
+            (d > since && d <= last).then_some(d)
+        })
+        .collect();
+    days.sort_unstable();
+    Ok(days)
+}
+
+/// How a window of `days` days at `now`, with the filters `f`, splits
+/// between the `rolled` days and the events: the condition that keeps the
+/// events off the rolled days entirely inside the window (empty when there
+/// is none), and the rollup's WHERE clause for those days (none when no
+/// day qualifies). `role` maps the rollup's raw role to the canonical one.
+pub(crate) fn split(
+    rolled: &[NaiveDate],
+    now: DateTime<Utc>,
+    days: i64,
+    f: &Filters,
+    role: &str,
+) -> (String, Option<String>) {
+    let cutoff = (now - Duration::days(days)).date_naive();
+    let list = rolled
+        .iter()
+        .filter(|d| **d > cutoff)
+        .map(|d| format!("'{}'", d.format("%Y-%m-%d")))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if list.is_empty() {
+        return (String::new(), None);
+    }
+    // The same filters as `Filters::clause`, on the rollup's columns.
+    let mut w = format!("date IN ({list}) AND environment = $env");
+    if f.role.is_some() {
+        w.push_str(&format!(" AND {role} = $role"));
+    }
+    if f.release.is_some() {
+        w.push_str(" AND release = $release");
+    }
+    if !f.internal {
+        w.push_str(" AND NOT is_internal(person)");
+    }
+    (format!(" AND date NOT IN ({list})"), Some(w))
 }
 
 /// Whether every day from `from` to `to` starts and ends on a UTC
