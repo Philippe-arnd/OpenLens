@@ -311,6 +311,25 @@ pub(super) enum Command {
         #[arg(long)]
         env: Option<String>,
     },
+    /// Availability over 24 hours, 7, 30, 90 and 365 days, this month and
+    /// the last (#560): time not measured and planned maintenance left
+    /// out, incidents, p95; and the error budget when a target is set.
+    /// With --target (a share, 0.999 for 99.9%) or --clear, sets or
+    /// removes the environment's target over a rolling 30 days.
+    Availability {
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+        /// Environment (default: production).
+        #[arg(long)]
+        env: Option<String>,
+        /// Set the target: a share from 0.5 to 0.99999.
+        #[arg(long, conflicts_with = "clear")]
+        target: Option<f64>,
+        /// Remove the target.
+        #[arg(long)]
+        clear: bool,
+    },
     /// Every incident, newest first, page by page: pass the `next` it
     /// prints as --before for the next page.
     Incidents {

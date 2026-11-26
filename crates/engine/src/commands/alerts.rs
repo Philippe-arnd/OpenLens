@@ -40,6 +40,12 @@ pub struct Settings {
     pub cert: bool,
     /// Alert on a spike of failing requests and errors across users (#266).
     pub failing: bool,
+    /// Alert when an environment with an availability target has spent
+    /// its 30-day error budget (#560).
+    pub budget_spent: bool,
+    /// Alert when, at the last day's rate, the error budget left is gone
+    /// within two days (#560).
+    pub budget_burn: bool,
     /// Quiet hours in the project's time zone (`[start, end)`, hours 0–23):
     /// non-urgent alerts raised then wait until they end. *Down* and an
     /// expired certificate are never held.
@@ -63,6 +69,8 @@ impl Default for Settings {
             regressions: true,
             cert: true,
             failing: true,
+            budget_spent: true,
+            budget_burn: true,
             quiet: None,
             health_path: "/".into(),
             email: true,
@@ -433,8 +441,17 @@ fn label(rule: &str) -> &'static str {
         "cert" => "has a certificate about to expire",
         "cert_expired" => "has an expired certificate",
         "failing" => "has many failing requests",
+        "budget_spent" => "has spent its error budget",
+        "budget_burn" => "is burning its error budget fast",
         _ => "has a problem",
     }
+}
+
+/// An error budget rule (#560): announced once, never reminded.
+fn budget(rule: &str) -> bool {
+    split_incident_rule(rule)
+        .map_or(rule, |(_, c)| c)
+        .starts_with("budget_")
 }
 
 /// Urgent rules are never held by quiet hours.
@@ -597,6 +614,7 @@ pub async fn track_at<H: Host>(host: &H, project: &str, name: &str, seen: &Seen<
                 notify(host, project, &title, &body, rule, false).await;
             } else if notified
                 && !rule.starts_with("insight:")
+                && !budget(rule)
                 && m.incident_last_notified(id)
                     .ok()
                     .flatten()
@@ -619,7 +637,11 @@ pub async fn track_at<H: Host>(host: &H, project: &str, name: &str, seen: &Seen<
             let _ = m.end_incident(id, now);
             if notified {
                 let mins = (now - started).max(0) / 60;
-                let title = format!("✅ {name} is back");
+                let title = if budget(rule) {
+                    format!("✅ {name}: error budget back on track")
+                } else {
+                    format!("✅ {name} is back")
+                };
                 let body = format!("The incident lasted {mins} min ({}).", label(rule));
                 notify(host, project, &title, &body, rule, true).await;
             }

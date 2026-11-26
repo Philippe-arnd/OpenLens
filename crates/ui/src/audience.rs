@@ -316,6 +316,8 @@ pub struct UptimeView<'a> {
     pub days_avail: Option<f64>,
     /// The announcements section (#562), from [`notices`].
     pub notices: Option<Markup>,
+    /// The availability card (#560), from [`availability_card`].
+    pub availability: Option<Markup>,
 }
 
 /// A day bar's tooltip: the day, its availability and incidents.
@@ -377,6 +379,7 @@ pub fn uptime(p: &ProjectInfo<'_>, v: &UptimeView<'_>) -> Markup {
                     }
                 }
             }
+            @if let Some(a) = &v.availability { (a) }
             (crate::maintenance::maintenance_card(p.id, &v.maintenance))
             @if let Some(n) = &v.notices { (n) }
             section.card.wide {
@@ -390,6 +393,7 @@ pub fn uptime(p: &ProjectInfo<'_>, v: &UptimeView<'_>) -> Markup {
                                 td { span class={ "status " (if end.is_none() { "bad" } else { "muted" }) } { (match rule.as_str() {
                                     "traffic" => "traffic stopped",
                                     "down" => "down",
+                                    r if r.starts_with("budget_") || (r.starts_with("env:") && r.contains(":budget_")) => "error budget",
                                     r if r.starts_with("error:") => "new error",
                                     r if r.starts_with("env:") => "environment check",
                                     _ => "regression",

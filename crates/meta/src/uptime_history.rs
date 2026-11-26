@@ -27,6 +27,8 @@ pub const MARGIN_SECS: i64 = 3600;
 pub const PROBE_SECS: i64 = 60;
 /// The environment of production's checks.
 pub const PRODUCTION: &str = "production";
+/// Most *down* incidents [`Meta::down_spans`] answers.
+pub const MAX_SPANS: i64 = 10_000;
 /// Longest environment name stored with a check.
 const MAX_ENV: usize = 64;
 
@@ -442,6 +444,35 @@ impl Meta {
                 )?;
             }
             Ok(d)
+        })
+    }
+
+    /// The *down* incidents of `env` that overlap `[from, to)` (Unix
+    /// seconds): `(start, end)`, the end `None` while open; oldest first,
+    /// at most [`MAX_SPANS`] (#560).
+    ///
+    /// # Errors
+    /// The store.
+    pub fn down_spans(
+        &self,
+        project: &str,
+        env: &str,
+        from: i64,
+        to: i64,
+    ) -> Result<Vec<(i64, Option<i64>)>> {
+        let rule = down_rule(env);
+        self.read(|c| {
+            let mut st = c.prepare(
+                "SELECT started_at, ended_at FROM incidents WHERE project = ?1 AND rule = ?2 \
+                 AND started_at < ?3 AND (ended_at IS NULL OR ended_at > ?4) \
+                 ORDER BY started_at LIMIT ?5",
+            )?;
+            let rows = st
+                .query_map(params![project, rule, to, from, MAX_SPANS], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
         })
     }
 

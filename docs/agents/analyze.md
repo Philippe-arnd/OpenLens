@@ -30,7 +30,8 @@ Start from the summaries and drill down only where something stands out. Every t
 | Where do people give up on a form? | `forms`: starts, submits, the field they stop at | the abandoned session's replay |
 | How do sessions move between features? | `flows { from?, to? }` | `feature_context { key }` |
 | Who uses the app, on what? Who is on it now? | `audience` (devices, browsers, OS, countries, languages, screens), `live` (last 5 and 30 minutes) | `kpi_report` with `by` |
-| Is the app up? Will alerts reach us? | `status` around a deploy; `alerts`: uptime, incidents, settings; `uptime_days` for 90 days or a month by day (an SLO), `incidents` for every incident, page by page | `alert_set { …, test: true }` |
+| Is the app up? Will alerts reach us? | `status` around a deploy; `alerts`: uptime, incidents, settings; `availability` for the SLA windows and the error budget, `uptime_days` for 90 days or a month by day, `incidents` for every incident, page by page | `alert_set { …, test: true }` |
+| Promise an availability (SLO) | `availability_target { target: 0.999 }`, then `availability`: budget spent and left, burn rate; alerts when spent or burning fast | `alert_set { budget_spent, budget_burn }` |
 | A deploy or migration will take the app down | `maintenance_set { action: schedule, minutes, text }` right before, `{ action: end, id }` after: no alert during it, not counted against availability | `maintenance` |
 | Anything else | `sql` (read-only DataFusion on `events`) | prune with `date >= 'YYYY-MM-DD'` |
 | Deep, offline analysis | `openlens-cli export --from --to --out events.jsonl` (raw events, day by day) | your own tools |

@@ -188,7 +188,7 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "GET",
         "/api/projects/{project}/status",
         "read",
-        "Up, down, under maintenance, unknown or off; open incidents and maintenance windows running or within 7 days.",
+        "Up, down, under maintenance, unknown or off; open incidents and maintenance windows running or within 7 days; production's `availability` (as `uptime/report`).",
     ),
     (
         "GET",
@@ -339,6 +339,18 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "/api/projects/{project}/incidents",
         "read",
         "Every incident, newest first, page by page (`uptime.incidents`): `limit` (1 to 100, default 50) and `before` (the previous page's `next`).",
+    ),
+    (
+        "GET",
+        "/api/projects/{project}/uptime/report",
+        "read",
+        "Availability (`uptime.report`) of `env` (default production) over 24h, 7d, 30d, 90d, this month, last month (in the project's zone) and 365d: time up over time measured, seconds not measured (no check: neither up nor down) and of planned maintenance left out, incidents, p95; and `slo` when a target is set: target, 30-day availability, error budget, spent and left (seconds), burn rate over the last hour and day.",
+    ),
+    (
+        "PUT",
+        "/api/projects/{project}/uptime/target",
+        "write",
+        "Set the availability target of an `environment` (default production) over a rolling 30 days (`uptime.set_target`): `target` a share from 0.5 to 0.99999 (0.999 for 99.9%), or null to remove it.",
     ),
     (
         "GET",

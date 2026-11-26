@@ -50,6 +50,7 @@ pub mod releases;
 pub mod replay_rate;
 mod revenue;
 pub mod rollups;
+pub mod slo;
 pub mod stats;
 mod tasks;
 mod unavailable;

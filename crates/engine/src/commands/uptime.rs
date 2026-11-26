@@ -267,6 +267,85 @@ impl Command for GetDays {
     }
 }
 
+/// The input of `uptime.report`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReportInput {
+    /// Project id.
+    pub project: String,
+    /// Environment; default `production`.
+    #[serde(default)]
+    pub environment: Option<String>,
+}
+
+/// `uptime.report` (#560, D-078): availability over 24 hours, 7, 30, 90
+/// and 365 days, this calendar month and the last (in the project's
+/// zone), with the time not measured, the planned maintenance left out,
+/// incidents and p95; and the SLO (target, error budget spent and left,
+/// burn rates) when the environment has a target.
+pub struct GetReport;
+
+impl Command for GetReport {
+    const NAME: &'static str = "uptime.report";
+    const ACCESS: Access = Access::Read;
+    type Input = ReportInput;
+    type Output = crate::slo::Report;
+
+    async fn run<H: Host>(
+        host: &H,
+        _: &Caller,
+        input: ReportInput,
+    ) -> Result<crate::slo::Report, Error> {
+        let p = host.project(&input.project).await.ok_or(Error::NotFound)?;
+        let env = input.environment.as_deref().unwrap_or(PRODUCTION);
+        crate::slo::report(host.meta(), &p.id, env, &p.timezone, Utc::now())
+    }
+}
+
+/// The input of `uptime.set_target`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TargetInput {
+    /// Project id.
+    pub project: String,
+    /// Environment; default `production`.
+    #[serde(default)]
+    pub environment: Option<String>,
+    /// The availability target over a rolling 30 days, a share from 0.5
+    /// to 0.99999 (0.999 for 99.9 %); `None` removes it.
+    #[serde(default)]
+    pub target: Option<f64>,
+}
+
+/// What `uptime.set_target` stored.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Target {
+    /// Environment.
+    pub environment: String,
+    /// The target now, `None` when removed.
+    pub target: Option<f64>,
+}
+
+/// `uptime.set_target` (#560, D-078): set or remove an environment's
+/// availability target. The adapters write the audit entry.
+pub struct SetTarget;
+
+impl Command for SetTarget {
+    const NAME: &'static str = "uptime.set_target";
+    const ACCESS: Access = Access::Write;
+    type Input = TargetInput;
+    type Output = Target;
+
+    async fn run<H: Host>(host: &H, _: &Caller, input: TargetInput) -> Result<Target, Error> {
+        let p = host.project(&input.project).await.ok_or(Error::NotFound)?;
+        let env = input.environment.as_deref().unwrap_or(PRODUCTION);
+        valid_env(env)?;
+        crate::slo::set_target(host.meta(), &p.id, env, input.target)?;
+        Ok(Target {
+            environment: env.to_owned(),
+            target: input.target,
+        })
+    }
+}
+
 /// An incident of the paged list.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PagedIncident {

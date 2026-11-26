@@ -75,6 +75,8 @@ const ALERT_FIELDS: &[&str] = &[
     "regressions",
     "cert",
     "failing",
+    "budget_spent",
+    "budget_burn",
     "quiet",
     "health_path",
     "email",
@@ -141,6 +143,19 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
             }))}),
         },
         ToolSpec {
+            name: "availability",
+            description: "Availability of an environment (env, default production) over 24h, 7d, 30d, 90d, this month, last month (project's zone) and 365d: time up over time measured, seconds not measured (no check: neither up nor down), seconds of planned maintenance left out, incidents, p95 ms; and slo when a target is set: target, 30-day availability, error budget, spent and left (seconds), burn rate over the last hour and day (1 = the budget lasts 30 days). The figures of an SLA or a monthly report.",
+            input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"}}))}),
+        },
+        ToolSpec {
+            name: "availability_target",
+            description: "Set or remove an environment's availability target over a rolling 30 days: target a share from 0.5 to 0.99999 (0.999 for 99.9%), or null to remove it; env defaults to production. Alerts go out when its error budget is spent or burning fast.",
+            input_schema: json!({"type":"object","properties":with(json!({
+                "env":{"type":"string"},
+                "target":{"type":["number","null"],"minimum":0.5,"maximum":0.99999}
+            })),"required":["target"]}),
+        },
+        ToolSpec {
             name: "incidents",
             description: "Every incident of the project (kept as long as the project), newest first, page by page: limit (1-100, default 50) and before (the previous page's next). Each has its id, rule (down, traffic, failing, cert, insight:…, error:…, env:<env>:down…), start, end (null while open), minutes and cause.",
             input_schema: json!({"type":"object","properties":with(json!({
@@ -150,7 +165,7 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "alert_set",
-            description: "Change alert settings: only the fields given change. down (probe the app address every minute), down_wait (minutes before announcing), traffic (traffic stopped), regressions (regressions and new error groups), cert (certificate expiring), failing (spike of failing requests), quiet ([start, end) hours in the project's zone, or null), health_path, email, webhook (Slack, Discord or JSON URL), ntfy (topic or URL). With test true, then sends a test message on every channel and says which failed.",
+            description: "Change alert settings: only the fields given change. down (probe the app address every minute), down_wait (minutes before announcing), traffic (traffic stopped), regressions (regressions and new error groups), cert (certificate expiring), failing (spike of failing requests), budget_spent and budget_burn (an availability target's error budget spent, or gone within 2 days at the last day's rate), quiet ([start, end) hours in the project's zone, or null), health_path, email, webhook (Slack, Discord or JSON URL), ntfy (topic or URL). With test true, then sends a test message on every channel and says which failed.",
             input_schema: json!({"type":"object","properties":with(json!({
                 "down":{"type":"boolean"},
                 "down_wait":{"type":"integer","minimum":0},
@@ -158,6 +173,8 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
                 "regressions":{"type":"boolean"},
                 "cert":{"type":"boolean"},
                 "failing":{"type":"boolean"},
+                "budget_spent":{"type":"boolean"},
+                "budget_burn":{"type":"boolean"},
                 "quiet":{"type":["array","null"],"items":{"type":"integer","minimum":0,"maximum":23},"minItems":2,"maxItems":2},
                 "health_path":{"type":"string"},
                 "email":{"type":"boolean"},
@@ -302,6 +319,17 @@ pub(crate) fn call(c: &Client, name: &str, args: &Value) -> Option<Result<Value,
         "status" => get(c, &at(args, "/status")),
         "alerts" => alerts(c, args),
         "uptime_days" => get(c, &query(args, "/uptime/days", &["from", "to", "env"])),
+        "availability" => get(c, &query(args, "/uptime/report", &["env"])),
+        "availability_target" if args.get("target").is_none() => {
+            Err("target is required: a share such as 0.999, or null to remove it".into())
+        }
+        "availability_target" => {
+            let body = json!({
+                "environment": s(args, "env"),
+                "target": args.get("target").and_then(Value::as_f64),
+            });
+            send(c, "PUT", &at(args, "/uptime/target"), Some(body))
+        }
         "incidents" => {
             let mut q: Vec<String> = Vec::new();
             for k in ["before", "limit"] {

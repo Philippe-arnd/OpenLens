@@ -14,7 +14,7 @@ use openlens_meta::{Meta, Project};
 use openlens_query::{Limits, QueryEngine};
 
 /// A host that keeps the alerts it is asked to send.
-struct TestHost {
+pub(crate) struct TestHost {
     dir: tempfile::TempDir,
     meta: Meta,
     query: QueryEngine,
@@ -22,7 +22,7 @@ struct TestHost {
 }
 
 impl TestHost {
-    fn new() -> (Self, Project) {
+    pub(crate) fn new() -> (Self, Project) {
         let dir = tempfile::tempdir().unwrap();
         let meta = Meta::in_memory().unwrap();
         let p = meta.create_project("shop", None).unwrap();
@@ -36,7 +36,7 @@ impl TestHost {
         (host, p)
     }
 
-    fn sent(&self) -> Vec<(String, String)> {
+    pub(crate) fn sent(&self) -> Vec<(String, String)> {
         self.sent.lock().unwrap().clone()
     }
 }
