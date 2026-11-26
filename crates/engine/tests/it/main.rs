@@ -11,6 +11,7 @@ use openlens_query::{Limits, QueryEngine};
 use openlens_storage::{FlushPolicy, Writer};
 
 mod board_people;
+mod board_window;
 mod commands;
 mod map_lookups;
 mod map_shape;
