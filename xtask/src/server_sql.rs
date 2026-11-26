@@ -7,10 +7,10 @@
 
 use std::path::Path;
 
-/// Server files that still hold SQL while their move to the engine is
-/// under way. Remove when #507/#508 land: an entry with no SQL left fails
-/// the check, so the list cannot go stale.
-const ALLOWED: &[&str] = &["crates/server/src/ask.rs", "crates/server/src/explore.rs"];
+/// Server files allowed to hold SQL. Empty since #507/#508 moved Ask and
+/// explore to the engine; an entry with no SQL left fails the check, so the
+/// list cannot go stale.
+const ALLOWED: &[&str] = &[];
 
 /// Words a sentence puts after "select" ("select a project from the
 /// list"); a query never does.
