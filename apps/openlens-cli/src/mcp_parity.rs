@@ -92,6 +92,12 @@ const NOT_COMMANDS: &[&str] = &[
     "surveys",
     "survey_set",
     "login_link",
+    // The agent kit (#524, D-069): map health's findings as entries, one
+    // entry pushed through the feature-map route, flags judged from the
+    // flags route and SQL.
+    "suggested_features",
+    "set_feature",
+    "stale_flags",
 ];
 
 #[test]
