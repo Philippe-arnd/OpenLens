@@ -1,0 +1,92 @@
+#!/bin/sh
+# openlens-nomad-update JOBFILE CHANNEL [nomad job run options]: move the
+# OpenLens job to the image behind a channel tag, and record it when Nomad
+# rolls it back. Guide: docs/deploy/nomad.md#updates. Run it from cron.
+#
+# - CHANNEL is `latest` or a minor such as `0.6` (patches only); never edge.
+# - Nomad does not look at a tag again by itself: this script asks GHCR for
+#   the digest behind the tag and runs the job with `-var image=...@digest`.
+#   The same digest is no change, so nothing restarts.
+# - With cosign installed, the image signature is checked first
+#   (docs/deploy/README.md#verify-what-you-run); without it, the script says
+#   so and goes on.
+# - The job's update block stops the old allocation first, waits for the
+#   health check (the first start of a new version copies the data before it
+#   listens) and reverts to the last healthy version on failure. A reverted
+#   digest is remembered next to JOBFILE (.openlens-failed-digests), so later
+#   runs wait for the next image.
+set -eu
+
+JOB=openlens
+REPO=philippe-arnd/openlens
+IDENTITY='^https://github.com/Philippe-arnd/OpenLens/\.github/workflows/release\.yml@refs/(heads/main|tags/v.*)$'
+WAIT=2100
+
+log() { printf 'openlens-nomad-update: %s\n' "$*" >&2; }
+die() { log "$*"; exit 1; }
+
+[ $# -ge 2 ] || die "usage: openlens-nomad-update <job file> latest|X.Y [nomad job run options]"
+jobfile=$1
+channel=$2
+shift 2
+[ -f "$jobfile" ] || die "no job file $jobfile"
+printf '%s\n' "$channel" | grep -Eqx 'latest|[0-9]+\.[0-9]+' \
+  || die "the channel is latest or a minor such as 0.6 (never edge)"
+for tool in curl jq nomad; do
+  command -v "$tool" > /dev/null 2>&1 || die "$tool is missing"
+done
+failed="$(dirname "$jobfile")/.openlens-failed-digests"
+
+# The digest behind the channel tag, from GHCR's registry API (anonymous).
+token=$(curl -fsS --retry 3 "https://ghcr.io/token?scope=repository:$REPO:pull" | jq -r .token) \
+  || die "cannot reach ghcr.io"
+digest=$(curl -fsSI --retry 3 -H "Authorization: Bearer $token" \
+  -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+  "https://ghcr.io/v2/$REPO/manifests/$channel" \
+  | tr -d '\r' | awk -F': ' 'tolower($1) == "docker-content-digest" { print $2 }')
+case "$digest" in
+  sha256:*) ;;
+  *) die "no image for channel $channel" ;;
+esac
+image="ghcr.io/$REPO@$digest"
+
+running=$(nomad job inspect "$JOB" 2> /dev/null | jq -r '(.Job // .) | .TaskGroups[0].Tasks[0].Config.image' || true)
+if [ "$running" = "$image" ]; then
+  log "$JOB is up to date ($channel is $digest)"
+  exit 0
+fi
+if grep -qxF "$digest" "$failed" 2> /dev/null; then
+  log "$digest failed here before; waiting for the next image (remove it from $failed to retry)"
+  exit 0
+fi
+
+if command -v cosign > /dev/null 2>&1; then
+  cosign verify "$image" --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    --certificate-identity-regexp "$IDENTITY" > /dev/null \
+    || die "the signature of $image does not verify; staying on the current image"
+else
+  log "cosign is not installed: the image signature is not checked"
+fi
+
+log "running $JOB on $image (channel $channel)"
+nomad job run -detach -var "image=$image" "$@" "$jobfile" > /dev/null
+
+# Wait for the deployment: successful, or failed and reverted by Nomad.
+waited=0
+while :; do
+  status=$(nomad job deployments -latest -json "$JOB" \
+    | jq -r 'if type == "array" then .[0].Status else .Status end')
+  case "$status" in
+    successful)
+      log "updated to $digest"
+      exit 0
+      ;;
+    failed | cancelled)
+      echo "$digest" >> "$failed"
+      die "the deployment of $digest $status; Nomad reverted to the last healthy version (nomad job status $JOB)"
+      ;;
+  esac
+  waited=$((waited + 10))
+  [ "$waited" -lt "$WAIT" ] || die "the deployment of $digest is still $status after $WAIT s (nomad job status $JOB)"
+  sleep 10
+done

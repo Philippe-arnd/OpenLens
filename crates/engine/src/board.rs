@@ -175,11 +175,19 @@ async fn board_with(
     let ident = identified(any_person(q, project).await?);
     // The people blocks read `person_day` for the closed days rolled up
     // with the map in force, the events for the rest (#492, D-040).
+    // The sessions block and the releases table do the same with
+    // `session_day` (#498, D-047).
     let now = chrono::Utc::now();
+    let version = map.map(|(_, v)| v);
+    let (rolled_people, rolled_sessions) = futures::try_join!(
+        board_people::rolled_days(q, project, "person_day", version, now),
+        board_people::rolled_days(q, project, "session_day", version, now),
+    )?;
+    let role = map.map_or_else(|| "role".to_owned(), |(m, _)| lookups(m).0);
     let people = board_people::People {
         src: &src,
-        role: map.map_or_else(|| "role".to_owned(), |(m, _)| lookups(m).0),
-        rolled: board_people::People::rolled_days(q, project, map.map(|(_, v)| v), now).await?,
+        role: role.clone(),
+        rolled: rolled_people,
         now,
     };
     let any_role = Filters {
@@ -205,11 +213,6 @@ async fn board_with(
     // Days are the project's days (D-017).
     let day = f.day()?;
     let w7 = f.clause(7)?;
-    let all_releases = Filters {
-        release: None,
-        ..f.clone()
-    }
-    .clause(90)?;
 
     // Completed tasks are success events when the map declares them;
     // without a map, every feature use counts.
@@ -239,19 +242,14 @@ async fn board_with(
     let known_sql = format!("SELECT count(DISTINCT distinct_id) AS n FROM {p90} WHERE {ident}");
     let anonymous_sql =
         format!("SELECT count(DISTINCT distinct_id) AS n FROM {p30} WHERE NOT {ident}");
-    let sessions_sql = format!(
-        "SELECT count(*) AS sessions, \
-         avg(CASE WHEN n > 1 THEN secs END) AS avg_secs, \
-         avg(CASE WHEN n <= 1 THEN 1.0 ELSE 0.0 END) AS bounce_rate, \
-         avg(CASE WHEN errors > 0 THEN 1.0 ELSE 0.0 END) AS error_rate, \
-         sum(tasks) AS tasks, count(DISTINCT concat(uid, '|', day)) AS user_days \
-         FROM (SELECT session_id, min(distinct_id) AS uid, min({day}) AS day, \
-               sum(CASE WHEN {INTERACTION} THEN 1 ELSE 0 END) AS n, \
-               date_part('epoch', max(timestamp)) - date_part('epoch', min(timestamp)) AS secs, \
-               sum(CASE WHEN event = '$error' THEN 1 ELSE 0 END) AS errors, \
-               sum(CASE WHEN {task} THEN 1 ELSE 0 END) AS tasks \
-               FROM {src} WHERE {w7} AND session_id IS NOT NULL GROUP BY session_id) s"
-    );
+    let sessions = board_sessions::SessionRows {
+        src: &src,
+        role,
+        task: &task,
+        rolled: rolled_sessions,
+        now,
+    };
+    let sessions_sql = sessions.sessions_sql(f)?;
     let dau_sql = if utc_days(14) {
         format!(
             "SELECT day AS date, count(DISTINCT distinct_id) AS n FROM {} WHERE {ident} GROUP BY 1 ORDER BY 1",
@@ -284,21 +282,7 @@ async fn board_with(
         "SELECT role, feature, count(DISTINCT distinct_id) AS users FROM {p30_roles} \
          WHERE role IS NOT NULL AND feature IS NOT NULL GROUP BY role, feature"
     );
-    let releases_sql = format!(
-        "SELECT release, CAST(min(first) AS VARCHAR) AS first_seen, count(DISTINCT uid) AS users, \
-         count(*) AS sessions, avg(CASE WHEN n > 1 THEN secs END) AS avg_secs, \
-         avg(CASE WHEN n <= 1 THEN 1.0 ELSE 0.0 END) AS bounce_rate, \
-         avg(CASE WHEN errors > 0 THEN 1.0 ELSE 0.0 END) AS error_rate, \
-         avg(CAST(tasks AS DOUBLE)) AS tasks_per_session \
-         FROM (SELECT release, session_id, min(distinct_id) AS uid, min(timestamp) AS first, \
-               sum(CASE WHEN {INTERACTION} THEN 1 ELSE 0 END) AS n, \
-               date_part('epoch', max(timestamp)) - date_part('epoch', min(timestamp)) AS secs, \
-               sum(CASE WHEN event = '$error' THEN 1 ELSE 0 END) AS errors, \
-               sum(CASE WHEN {task} THEN 1 ELSE 0 END) AS tasks \
-               FROM {src} WHERE {all_releases} AND release IS NOT NULL AND session_id IS NOT NULL \
-               GROUP BY release, session_id) s \
-         GROUP BY release ORDER BY min(first) DESC LIMIT 5"
-    );
+    let releases_sql = sessions.releases_sql(f)?;
     // Neither depends on who did what: they come from the segments, which
     // are read once (#447), not from a query.
 

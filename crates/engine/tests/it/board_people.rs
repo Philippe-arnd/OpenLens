@@ -1,7 +1,9 @@
 //! The board's people blocks read `person_day` for closed days and the
-//! events for the rest (#492, D-040): the numbers are the same as from the
-//! events alone, and a day rolled with another feature map is read from
-//! its events.
+//! events for the rest (#492, D-040), and its sessions block and releases
+//! table read `session_day` the same way (#498, D-047): the numbers are
+//! the same as from the events alone, a session crossing midnight from a
+//! rolled day into an open one is still one session, and a day rolled with
+//! another feature map is read from its events.
 
 use chrono::{Duration, Utc};
 use openlens_engine::{Board, Filters, board, rollups::day_features};
@@ -84,6 +86,37 @@ fn seed() -> tempfile::TempDir {
             }
         }
     }
+    // A session over the midnight after the last closed day: a page view
+    // before it, then a page view and an error after it. Each half alone
+    // would be a bounce; together the session is not.
+    let midnight = (rollup::last_closed(now) + Duration::days(1))
+        .and_time(chrono::NaiveTime::MIN)
+        .and_utc();
+    for (n, (event, minutes)) in [("$pageview", -10), ("$pageview", 10), ("$error", 20)]
+        .into_iter()
+        .enumerate()
+    {
+        let ts = midnight + Duration::minutes(minutes);
+        evs.push(Event {
+            uuid: format!("cross-{n}"),
+            project: "p".into(),
+            event: event.into(),
+            distinct_id: "m1".into(),
+            session_id: Some("cross".into()),
+            timestamp: ts,
+            received_at: ts,
+            url: None,
+            path: Some("/search".into()),
+            feature: None,
+            role: Some("member".into()),
+            account: None,
+            plan: None,
+            environment: "production".into(),
+            release: Some("v1".into()),
+            flags: None,
+            properties: "{}".into(),
+        });
+    }
     for who in ["a1", "a2", "m1", "m2", "m3", "g1"] {
         let ts = now - Duration::minutes(30);
         evs.push(Event {
@@ -126,8 +159,42 @@ async fn roll_up(root: &std::path::Path, version: i64) -> Vec<chrono::NaiveDate>
     days
 }
 
-/// The people blocks of a board, in a stable order.
+/// The people blocks, the sessions block and the releases table of a
+/// board, in a stable order.
 fn people(b: &Board) -> String {
+    format!("{}\n{}", people_only(b), sessions(b))
+}
+
+/// The sessions block and the releases table of a board (averages
+/// rounded: the order of a parallel sum may change their last bits).
+fn sessions(b: &Board) -> String {
+    let s = &b.sessions;
+    let sessions = format!(
+        "sessions {} {:.3} {:.6} {:.6} {:.6}",
+        s.count, s.avg_secs, s.bounce_rate, s.error_rate, s.tasks_per_user_day
+    );
+    let releases: Vec<String> = b
+        .releases
+        .iter()
+        .map(|r| {
+            format!(
+                "{} {} {} {} {:.6} {:.3} {:.6} {:.6}",
+                r.release,
+                r.first_seen,
+                r.users,
+                r.sessions,
+                r.error_rate,
+                r.avg_secs,
+                r.bounce_rate,
+                r.tasks_per_session
+            )
+        })
+        .collect();
+    format!("{sessions}\nreleases {releases:?}")
+}
+
+/// The people blocks of a board, in a stable order.
+fn people_only(b: &Board) -> String {
     let mut features: Vec<_> = b
         .features
         .iter()
@@ -173,11 +240,21 @@ async fn boards_with(root: &std::path::Path, version: i64, all: bool) -> Vec<Str
             environment: "staging".into(),
             ..Filters::default()
         },
+        // Sessions count user-days on the project's days, which are not the
+        // rollup's UTC days here (the crossing session starts on Paris's
+        // next day). Only sessions and releases are compared: the daily
+        // series and features of such a zone stay on the events (D-040),
+        // so a day without its events shows there.
+        Filters {
+            tz: "Europe/Paris".into(),
+            ..Filters::default()
+        },
     ];
     let n = if all { filters.len() } else { 1 };
     for f in filters.into_iter().take(n) {
+        let utc = f.tz == "UTC";
         let b = board(&q, "p", &f, Some((&m, version))).await.unwrap();
-        out.push(people(&b));
+        out.push(if utc { people(&b) } else { sessions(&b) });
     }
     out
 }
@@ -201,15 +278,24 @@ async fn uses(root: &std::path::Path, version: i64) -> i64 {
 }
 
 #[tokio::test]
-async fn people_blocks_read_closed_days_from_person_day_with_the_same_numbers() {
+async fn board_blocks_read_closed_days_from_the_rollups_with_the_same_numbers() {
     let dir = seed();
     let root = dir.path();
     let events_only = boards(root, 1).await;
     assert!(events_only[0].contains("staff"), "{}", events_only[0]);
+    assert!(
+        events_only[0].contains("releases [\"v"),
+        "{}",
+        events_only[0]
+    );
     let rolled = roll_up(root, 1).await;
     assert_eq!(boards(root, 1).await, events_only);
-    // Read from the rollup: a closed day without its events counts the same.
+    // Read from the rollup: a closed day without its events counts the
+    // same, including the last one, where the crossing session starts.
     drop_events(root, rolled[rolled.len() - 5]);
+    if let Some(last) = rolled.last() {
+        drop_events(root, *last);
+    }
     assert_eq!(boards(root, 1).await, events_only);
 }
 

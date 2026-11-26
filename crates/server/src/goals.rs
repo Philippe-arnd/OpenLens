@@ -26,7 +26,7 @@ pub(crate) async fn hourly(state: &AppState, p: &openlens_meta::Project, alert: 
     };
     if alert {
         for c in cmd::guard_checks(&ev) {
-            Box::pin(crate::alerts::track(
+            Box::pin(openlens_engine::commands::alerts::track(
                 state, &p.id, &p.name, &c.rule, c.breached, &c.text, 0,
             ))
             .await;

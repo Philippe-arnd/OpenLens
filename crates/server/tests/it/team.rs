@@ -479,7 +479,11 @@ async fn capture_is_rate_limited_per_client_behind_a_proxy() {
                 Request::post("/capture")
                     .header("content-type", "text/plain")
                     .header("x-forwarded-for", "203.0.113.9")
-                    .body(Body::from(batch(&h.key)))
+                    // The limit applies before the body is read: a body the
+                    // server rejects at once keeps each request fast, so the
+                    // bucket (50/s) cannot refill faster than the test sends
+                    // on a slow disk.
+                    .body(Body::from("not a batch"))
                     .unwrap(),
             )
             .await

@@ -15,6 +15,7 @@ use serde_json::{Map, Value};
 mod acquisition;
 mod board;
 mod board_people;
+mod board_sessions;
 pub mod churn;
 pub mod commands;
 mod digest;
@@ -34,6 +35,7 @@ pub mod mapshape;
 mod pages;
 mod people;
 pub mod relations;
+pub mod releases;
 pub mod replay_rate;
 mod revenue;
 pub mod rollups;
@@ -492,10 +494,10 @@ pub(crate) async fn any_person(q: &QueryEngine, project: &str) -> Result<bool> {
     Ok(rows.first().map_or(0, |r| int(r, "n")) > 0)
 }
 
-/// Events a person does on purpose. A session with one of them at most is a
-/// bounce; `$scroll`, `$vital`, `$identify` or `$error` alone are not activity.
-pub(crate) const INTERACTION: &str =
-    "(event IN ('$pageview', '$click', '$submit', '$feature', '$survey') OR event NOT LIKE '$%')";
+/// Events a person does on purpose: the rule `session_day` is rolled up
+/// with, so the board's sessions read from the events and from the rollup
+/// agree on bounces (D-041, D-047).
+pub(crate) use openlens_query::INTERACTION;
 
 /// The typed columns of a `$vital` (#449), written at ingestion.
 const VITAL_COLUMNS: &str = "vital_name, vital_value, vital_device, vital_el, vital_kind, \

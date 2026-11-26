@@ -37,6 +37,7 @@ mod oidc;
 mod openapi;
 mod password;
 mod privacy;
+mod releases;
 mod replay;
 mod reword;
 mod s3;
@@ -151,6 +152,7 @@ pub fn router(state: AppState) -> Router {
         .merge(surveys::routes())
         .merge(replay::routes())
         .merge(web::routes())
+        .merge(releases::routes())
         .layer(axum::middleware::from_fn(csrf::layer))
         .layer(axum::middleware::from_fn(trusted_headers_layer))
         // Pages, the API and Ask (a few model rounds) get two minutes.

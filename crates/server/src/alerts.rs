@@ -1,151 +1,18 @@
-//! Is the app down? (#256) An optional probe of the app address (Settings)
-//! every minute, *traffic stopped* learned from the last four weeks, and
-//! incidents that open and close with one message each, by email, webhook
-//! (Slack- and Discord-compatible) or ntfy. Rules are on by default and
-//! each can be switched off or tuned per project (minimum config).
+//! Is the app down? (#256) The transports and the schedule of alerts:
+//! the probe of the app address every minute, the certificate check, and
+//! sending one message by email, webhook (Slack- and Discord-compatible)
+//! or ntfy. The logic (settings, incidents, quiet hours, the checks behind
+//! *traffic stopped*, *failing requests* and regressions) is the engine's
+//! `alerts` commands and pass (#499).
 //!
 //! A non-production environment with a monitor (#410, Settings →
 //! Environments) gets its own probe and certificate check, as incidents
 //! `env:<env>:down|cert|cert_expired`, announced only at the `notify`
 //! level; at `log` they are recorded on Uptime and never sent.
 
-use serde::{Deserialize, Serialize};
+use openlens_engine::commands::alerts::{self as cmd, Settings};
 
 use crate::AppState;
-
-/// One project's alert settings (`project:<id>:alerts`).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default)]
-pub(crate) struct Settings {
-    /// Probe the app address every minute and alert when it is down.
-    pub down: bool,
-    /// Minutes an incident lasts before it is announced.
-    pub down_wait: u32,
-    /// Alert when the traffic stops for much longer than usual.
-    pub traffic: bool,
-    /// Alert on regressions the board finds (a release or flag with more
-    /// errors, pages turning slow) and on new error groups (#227).
-    pub regressions: bool,
-    /// Warn when the app's TLS certificate expires within 14 days (#266).
-    pub cert: bool,
-    /// Alert on a spike of failing requests and errors across users (#266).
-    pub failing: bool,
-    /// Quiet hours in the project's time zone (`[start, end)`, hours 0–23):
-    /// non-urgent alerts raised then wait until they end. *Down* and an
-    /// expired certificate are never held.
-    pub quiet: Option<(u8, u8)>,
-    /// Path the probe asks for (default `/`).
-    pub health_path: String,
-    /// Email the alerts (when SMTP is set).
-    pub email: bool,
-    /// Slack-, Discord- or generic JSON webhook URL.
-    pub webhook: String,
-    /// ntfy topic (`my-topic`, on ntfy.sh) or full topic URL.
-    pub ntfy: String,
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            down: true,
-            down_wait: 2,
-            traffic: true,
-            regressions: true,
-            cert: true,
-            failing: true,
-            quiet: None,
-            health_path: "/".into(),
-            email: true,
-            webhook: String::new(),
-            ntfy: String::new(),
-        }
-    }
-}
-
-impl Settings {
-    pub(crate) fn load(meta: &openlens_meta::Meta, project: &str) -> Self {
-        meta.project_setting(project, "alerts")
-            .ok()
-            .flatten()
-            .and_then(|j| serde_json::from_str(&j).ok())
-            .unwrap_or_default()
-    }
-
-    pub(crate) fn validate(&self) -> Result<(), String> {
-        if !(1..=60).contains(&self.down_wait) {
-            return Err("wait 1 to 60 minutes".into());
-        }
-        if !self.health_path.starts_with('/')
-            || self.health_path.len() > 200
-            || self.health_path.contains(['\n', ' ', '#'])
-        {
-            return Err("the health path starts with / (for example /healthz)".into());
-        }
-        if self.quiet.is_some_and(|(a, b)| a > 23 || b > 23 || a == b) {
-            return Err("quiet hours: two different hours, 0 to 23".into());
-        }
-        if !self.webhook.is_empty() && !self.webhook.starts_with("https://") {
-            return Err("the webhook URL starts with https://".into());
-        }
-        if !self.ntfy.is_empty()
-            && !self.ntfy.starts_with("https://")
-            && !self
-                .ntfy
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-        {
-            return Err("ntfy: a topic name, or an https:// topic URL".into());
-        }
-        Ok(())
-    }
-}
-
-/// The app's state for the status chip and the API.
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct Status {
-    /// `up`, `down`, `unknown` (no probe yet) or `off` (no address).
-    pub state: &'static str,
-    /// Since when (Unix seconds), when known.
-    pub since: Option<i64>,
-    /// Open incidents: (rule, started_at, cause).
-    pub open: Vec<(String, i64, String)>,
-}
-
-pub(crate) fn status(state: &AppState, project: &str) -> Status {
-    let m = &state.meta;
-    let now = chrono::Utc::now().timestamp();
-    let open: Vec<(String, i64, String)> = m
-        .incidents(project, now)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|i| i.2.is_none())
-        .map(|i| (i.0, i.1, i.3))
-        .collect();
-    let has_url = m
-        .project_setting(project, "app_url")
-        .ok()
-        .flatten()
-        .is_some();
-    let last = m.checks(project, now - 600).unwrap_or_default();
-    let st = if open.iter().any(|o| o.0 == "down" || o.0 == "traffic") {
-        "down"
-    } else if !has_url && last.is_empty() {
-        "off"
-    } else if last.is_empty() {
-        "unknown"
-    } else {
-        "up"
-    };
-    Status {
-        state: st,
-        since: open
-            .iter()
-            .find(|o| o.0 == "down" || o.0 == "traffic")
-            .or(open.first())
-            .map(|o| o.1),
-        open,
-    }
-}
 
 /// One probe: `(ok, status, ms, error)`. Up = any answer below 500.
 fn probe(url: &str) -> (bool, Option<u16>, Option<i64>, Option<String>) {
@@ -166,119 +33,9 @@ fn probe(url: &str) -> (bool, Option<u16>, Option<i64>, Option<String>) {
     }
 }
 
-fn label(rule: &str) -> &'static str {
-    if let Some((_, check)) = openlens_engine::environments::split_incident_rule(rule) {
-        return label(check);
-    }
-    match rule {
-        "down" => "is down",
-        "traffic" => "gets no traffic",
-        r if r.starts_with("insight:") => "has a regression",
-        r if r.starts_with("guardrail:") => "has a goal guardrail breached",
-        "cert" => "has a certificate about to expire",
-        "cert_expired" => "has an expired certificate",
-        "failing" => "has many failing requests",
-        _ => "has a problem",
-    }
-}
-
-/// Urgent rules are never held by quiet hours.
-fn urgent(rule: &str) -> bool {
-    let rule = openlens_engine::environments::split_incident_rule(rule).map_or(rule, |(_, c)| c);
-    rule == "down" || rule == "cert_expired" || rule == "test"
-}
-
-/// Is an incident of this rule announced? Production's always are; a
-/// monitored environment's only at the `notify` level (#410).
-fn announced(state: &AppState, project: &str, rule: &str) -> bool {
-    use openlens_engine::environments::{NOTIFY, split_incident_rule};
-    split_incident_rule(rule).is_none_or(|(env, _)| {
-        crate::environments::current(state, project)
-            .rules
-            .level(env)
-            == NOTIFY
-    })
-}
-
-/// Is it within the project's quiet hours now?
-fn quiet_now(state: &AppState, project: &str, s: &Settings) -> bool {
-    use chrono::Timelike;
-    let Some((a, b)) = s.quiet else { return false };
-    let tz = state
-        .meta
-        .project(project)
-        .ok()
-        .flatten()
-        .and_then(|p| p.timezone.parse::<chrono_tz::Tz>().ok())
-        .unwrap_or(chrono_tz::UTC);
-    let h = u8::try_from(chrono::Utc::now().with_timezone(&tz).hour()).unwrap_or(0);
-    if a < b {
-        (a..b).contains(&h)
-    } else {
-        h >= a || h < b
-    }
-}
-
-/// Send one message, unless it is non-urgent and quiet hours hold it
-/// (then it waits in the project's queue and goes out when they end).
-pub(crate) async fn notify(
-    state: &AppState,
-    project: &str,
-    title: &str,
-    body: &str,
-    rule: &str,
-    resolved: bool,
-) {
-    let s = Settings::load(&state.meta, project);
-    if !urgent(rule) && quiet_now(state, project, &s) {
-        let mut q: Vec<(String, String, String, bool)> = state
-            .meta
-            .project_setting(project, "alert_queue")
-            .ok()
-            .flatten()
-            .and_then(|j| serde_json::from_str(&j).ok())
-            .unwrap_or_default();
-        if q.len() < 100 {
-            q.push((title.to_owned(), body.to_owned(), rule.to_owned(), resolved));
-        }
-        if let Ok(j) = serde_json::to_string(&q) {
-            let _ = state.meta.set_project_setting(project, "alert_queue", &j);
-        }
-        return;
-    }
-    deliver(state, project, title, body, rule, resolved).await;
-}
-
-/// Send what quiet hours held, once they are over.
-async fn flush_queue(state: &AppState, project: &str, s: &Settings) {
-    if quiet_now(state, project, s) {
-        return;
-    }
-    let Some(j) = state
-        .meta
-        .project_setting(project, "alert_queue")
-        .ok()
-        .flatten()
-    else {
-        return;
-    };
-    let _ = state.meta.set_project_setting(project, "alert_queue", "");
-    let q: Vec<(String, String, String, bool)> = serde_json::from_str(&j).unwrap_or_default();
-    for (t, b, r, res) in q {
-        deliver(
-            state,
-            project,
-            &format!("{t} (held by quiet hours)"),
-            &b,
-            &r,
-            res,
-        )
-        .await;
-    }
-}
-
 /// Send one message on every channel the project set (and email to the
 /// alert list when SMTP is set). Returns what was tried and how it went.
+/// The engine's alerts send through it (`Host::send_alert`).
 pub(crate) async fn deliver(
     state: &AppState,
     project: &str,
@@ -286,7 +43,7 @@ pub(crate) async fn deliver(
     body: &str,
     rule: &str,
     resolved: bool,
-) -> Vec<(String, Result<(), String>)> {
+) -> Vec<cmd::Delivery> {
     let s = Settings::load(&state.meta, project);
     let mut out = Vec::new();
     if s.email
@@ -360,77 +117,12 @@ pub(crate) async fn deliver(
             tracing::warn!(project, channel = %ch, %e, "alert not delivered");
         }
     }
-    out
-}
-
-/// Open the rule's incident when `failing`, close it when not; announce
-/// it once it has lasted `wait` seconds, and announce its end if it was.
-pub(crate) async fn track(
-    state: &AppState,
-    project: &str,
-    name: &str,
-    rule: &str,
-    failing: bool,
-    cause: &str,
-    wait: i64,
-) {
-    let m = &state.meta;
-    let now = chrono::Utc::now().timestamp();
-    let open = m.open_incident(project, rule).ok().flatten();
-    let env_name;
-    let name = match openlens_engine::environments::split_incident_rule(rule) {
-        Some((env, _)) => {
-            env_name = format!("{name} ({env})");
-            env_name.as_str()
-        }
-        None => name,
-    };
-    // At the `log` level an incident is recorded, never announced.
-    let announce = announced(state, project, rule);
-    match (open, failing) {
-        (None, true) => {
-            let _ = m.start_incident(project, rule, now, cause);
-        }
-        (Some(_), true) if !announce => {}
-        (Some((id, started, notified)), true) => {
-            let since = chrono::DateTime::from_timestamp(started, 0)
-                .map_or_else(String::new, |t| t.format("%Y-%m-%d %H:%M").to_string());
-            if !notified && now - started >= wait {
-                let _ = m.incident_notified(id, now);
-                let title = format!("🔴 {name} {}", label(rule));
-                let body = format!("Since {since} UTC: {cause}\nSee Uptime in OpenLens.");
-                notify(state, project, &title, &body, rule, false).await;
-            } else if notified
-                && !rule.starts_with("insight:")
-                && m.incident_last_notified(id)
-                    .ok()
-                    .flatten()
-                    .is_some_and(|t| now - t >= 3600)
-            {
-                // Still going: a reminder at most every hour.
-                let _ = m.incident_notified(id, now);
-                let mins = (now - started).max(0) / 60;
-                let title = format!(
-                    "🔴 {name} still {} ({mins} min)",
-                    label(rule)
-                        .trim_start_matches("is ")
-                        .trim_start_matches("has ")
-                );
-                let body = format!("Since {since} UTC: {cause}");
-                notify(state, project, &title, &body, rule, false).await;
-            }
-        }
-        (Some((id, started, notified)), false) => {
-            let _ = m.end_incident(id, now);
-            if notified {
-                let mins = (now - started).max(0) / 60;
-                let title = format!("✅ {name} is back");
-                let body = format!("The incident lasted {mins} min ({}).", label(rule));
-                notify(state, project, &title, &body, rule, true).await;
-            }
-        }
-        (None, false) => {}
-    }
+    out.into_iter()
+        .map(|(channel, r)| cmd::Delivery {
+            channel,
+            error: r.err(),
+        })
+        .collect()
 }
 
 /// Every minute (background loop): probe each project with an address,
@@ -448,16 +140,10 @@ pub(crate) async fn tick(state: &AppState, minute: u64) {
             let (ok, code, ms, err) = tokio::task::spawn_blocking(move || probe(&url))
                 .await
                 .unwrap_or((false, None, None, Some("probe crashed".into())));
-            let now = chrono::Utc::now().timestamp();
-            let _ = state
-                .meta
-                .record_check(&p.id, now, ok, code, ms, err.as_deref());
-            // Down after two failed checks in a row; up after one success.
-            let recent = state.meta.checks(&p.id, now - 150).unwrap_or_default();
-            let failing = recent.len() >= 2 && recent.iter().rev().take(2).all(|c| !c.1);
+            let failing = cmd::record_probe(&state.meta, &p.id, ok, code, ms, err.as_deref());
             let cause = err.unwrap_or_else(|| "the probe failed".into());
             if failing || ok {
-                track(
+                cmd::track(
                     state,
                     &p.id,
                     &p.name,
@@ -471,7 +157,7 @@ pub(crate) async fn tick(state: &AppState, minute: u64) {
         }
         Box::pin(environments(state, &p, &s, minute)).await;
         if s.regressions && minute % 60 == 1 {
-            Box::pin(regressions(state, &p)).await;
+            Box::pin(cmd::regressions(state, &p)).await;
         }
         if minute % 60 == 3 {
             Box::pin(crate::goals::hourly(state, &p, s.regressions)).await;
@@ -486,43 +172,30 @@ pub(crate) async fn tick(state: &AppState, minute: u64) {
         {
             let o = origin.clone();
             if let Ok(Ok(at)) = tokio::task::spawn_blocking(move || crate::tls::expiry(&o)).await {
-                let days = (at - chrono::Utc::now().timestamp()) / 86400;
-                let when = chrono::DateTime::from_timestamp(at, 0)
-                    .map_or_else(String::new, |t| t.format("%Y-%m-%d").to_string());
-                track(
-                    state,
-                    &p.id,
-                    &p.name,
-                    "cert",
-                    (0..=14).contains(&days),
-                    &format!("{origin}: the certificate expires on {when} ({days} days)"),
-                    0,
-                )
-                .await;
-                track(
-                    state,
-                    &p.id,
-                    &p.name,
-                    "cert_expired",
-                    days < 0,
-                    &format!("{origin}: the certificate expired on {when}"),
-                    0,
-                )
-                .await;
+                for (rule, failing, cause) in cmd::cert_checks(None, &origin, at) {
+                    cmd::track(state, &p.id, &p.name, &rule, failing, &cause, 0).await;
+                }
             }
         }
         if s.failing
             && minute.is_multiple_of(5)
-            && let Some((failing, cause)) = Box::pin(failing_spike(state, &p.id)).await
+            && let Some((failing, cause)) = Box::pin(cmd::failing_spike(&state.query, &p.id)).await
         {
-            Box::pin(track(state, &p.id, &p.name, "failing", failing, &cause, 0)).await;
+            Box::pin(cmd::track(
+                state, &p.id, &p.name, "failing", failing, &cause, 0,
+            ))
+            .await;
         }
-        Box::pin(flush_queue(state, &p.id, &s)).await;
+        Box::pin(cmd::flush_queue(state, &p.id, &s)).await;
         if s.traffic
             && minute.is_multiple_of(5)
-            && let Some((stopped, cause)) = Box::pin(traffic_stopped(state, &p.id)).await
+            && let Some((stopped, cause)) =
+                Box::pin(cmd::traffic_stopped(&state.query, &p.id)).await
         {
-            Box::pin(track(state, &p.id, &p.name, "traffic", stopped, &cause, 0)).await;
+            Box::pin(cmd::track(
+                state, &p.id, &p.name, "traffic", stopped, &cause, 0,
+            ))
+            .await;
         }
     }
 }
@@ -546,15 +219,11 @@ async fn environments(state: &AppState, p: &openlens_meta::Project, s: &Settings
                 .unwrap_or((false, None, None, Some("probe crashed".into())));
             let key = format!("{}|{}", p.id, m.env);
             let mut last = state.caches.env_checks.get(&key).unwrap_or_default();
-            last.push(ok);
-            if last.len() > 2 {
-                last.remove(0);
-            }
-            state.caches.env_checks.insert(key, last.clone());
-            let failing = last.len() == 2 && last.iter().all(|ok| !ok);
+            let failing = cmd::push_env_check(&mut last, ok);
+            state.caches.env_checks.insert(key, last);
             if failing || ok {
                 let cause = err.unwrap_or_else(|| "the probe failed".into());
-                track(
+                cmd::track(
                     state,
                     &p.id,
                     &p.name,
@@ -569,261 +238,10 @@ async fn environments(state: &AppState, p: &openlens_meta::Project, s: &Settings
         if s.cert && minute % 60 == 2 && m.url.starts_with("https://") {
             let o = m.url.clone();
             if let Ok(Ok(at)) = tokio::task::spawn_blocking(move || crate::tls::expiry(&o)).await {
-                let days = (at - chrono::Utc::now().timestamp()) / 86400;
-                let when = chrono::DateTime::from_timestamp(at, 0)
-                    .map_or_else(String::new, |t| t.format("%Y-%m-%d").to_string());
-                for (check, failing, cause) in [
-                    (
-                        "cert",
-                        (0..=14).contains(&days),
-                        format!("{}: the certificate expires on {when} ({days} days)", m.url),
-                    ),
-                    (
-                        "cert_expired",
-                        days < 0,
-                        format!("{}: the certificate expired on {when}", m.url),
-                    ),
-                ] {
-                    let rule = incident_rule(&m.env, check);
-                    Box::pin(track(state, &p.id, &p.name, &rule, failing, &cause, 0)).await;
+                for (rule, failing, cause) in cmd::cert_checks(Some(&m.env), &m.url, at) {
+                    Box::pin(cmd::track(state, &p.id, &p.name, &rule, failing, &cause, 0)).await;
                 }
             }
         }
-    }
-}
-
-/// Insight kinds that are alerts: something got worse.
-const REGRESSIONS: [&str; 3] = ["release_regression", "flag_regression", "slow_pages"];
-
-/// Hourly (#227): the board's regression cards become incidents (one
-/// message when one appears, one when it is gone), and a new error group
-/// hitting at least two users in the last hour is announced once.
-async fn regressions(state: &AppState, p: &openlens_meta::Project) {
-    let map = crate::load_map(state, &p.id).await;
-    let f = openlens_engine::Filters {
-        tz: p.timezone.clone(),
-        ..openlens_engine::Filters::default()
-    };
-    let Ok(board) =
-        crate::boards::board(state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))).await
-    else {
-        return;
-    };
-    if board.total_events == 0 {
-        return;
-    }
-    let now_cards: Vec<&openlens_engine::Insight> = board
-        .insights
-        .iter()
-        .filter(|i| REGRESSIONS.contains(&i.kind))
-        .collect();
-    for c in &now_cards {
-        let rule = format!("insight:{}:{}", c.kind, c.subject);
-        track(
-            state,
-            &p.id,
-            &p.name,
-            &rule,
-            true,
-            &format!("{} — {}. {}", c.title, c.evidence, c.next_step),
-            0,
-        )
-        .await;
-    }
-    // Cards that went away close their incident.
-    let since = chrono::Utc::now().timestamp() - 90 * 86400;
-    for (rule, _, end, cause, _) in state.meta.incidents(&p.id, since).unwrap_or_default() {
-        if end.is_none()
-            && rule.starts_with("insight:")
-            && !now_cards
-                .iter()
-                .any(|c| rule == format!("insight:{}:{}", c.kind, c.subject))
-        {
-            Box::pin(track(state, &p.id, &p.name, &rule, false, &cause, 0)).await;
-        }
-    }
-    // New error groups: first seen in the last hour, two users or more.
-    let src = openlens_engine::source(map.as_ref().map(|(m, _)| m));
-    let Ok(groups) = openlens_engine::error_groups(&state.query, &p.id, &src, &f).await else {
-        return;
-    };
-    let hour_ago = (chrono::Utc::now() - chrono::Duration::hours(1))
-        .format("%Y-%m-%d %H:%M:%S")
-        .to_string();
-    for g in groups
-        .iter()
-        .filter(|g| g.users >= 2 && g.first_seen.replace('T', " ") >= hour_ago)
-    {
-        let rule = format!("error:{}", crate::short_hash(&g.fingerprint));
-        if state
-            .meta
-            .open_incident(&p.id, &rule)
-            .ok()
-            .flatten()
-            .is_some()
-            || state
-                .meta
-                .incidents(&p.id, 0)
-                .unwrap_or_default()
-                .iter()
-                .any(|i| i.0 == rule)
-        {
-            continue;
-        }
-        let now = chrono::Utc::now().timestamp();
-        let cause = format!(
-            "{} — {} users, {} times{}",
-            g.sample,
-            g.users,
-            g.count,
-            g.last_release
-                .as_deref()
-                .map(|r| format!(", release {r}"))
-                .unwrap_or_default()
-        );
-        if let Ok(id) = state.meta.start_incident(&p.id, &rule, now, &cause) {
-            let _ = state.meta.incident_notified(id, now);
-            let _ = state.meta.end_incident(id, now);
-            notify(
-                state,
-                &p.id,
-                &format!("🟠 {}: a new error", p.name),
-                &format!("{cause}\nSee Errors in OpenLens."),
-                &rule,
-                false,
-            )
-            .await;
-        }
-    }
-}
-
-/// Many users hitting failing requests or errors in the last 15 minutes,
-/// against the same quarter-hour of the same weekday over four weeks.
-async fn failing_spike(state: &AppState, project: &str) -> Option<(bool, String)> {
-    use chrono::{Datelike, Timelike};
-    let now = chrono::Utc::now();
-    let since = (now - chrono::Duration::days(29)).format("%Y-%m-%d");
-    let today = now.format("%Y-%m-%d");
-    let (h, dow) = (now.hour(), now.weekday().num_days_from_sunday());
-    let sql = format!(
-        "SELECT count(DISTINCT CASE WHEN timestamp >= now() - INTERVAL '15 minutes' THEN distinct_id END) AS now_users, \
-         count(DISTINCT CASE WHEN date < '{today}' AND date_part('hour', timestamp) = {h} AND date_part('dow', timestamp) = {dow} \
-               THEN concat(distinct_id, '|', date) END) AS base \
-         FROM raw_events WHERE date >= '{since}' AND environment = 'production' AND event IN ('$request_failed', '$error')"
-    );
-    let r = state.query.sql(project, &sql).await.ok()?;
-    let row = r.rows.first()?;
-    let now_users = row
-        .get("now_users")
-        .and_then(serde_json::Value::as_i64)
-        .unwrap_or(0);
-    // Users per hour on that weekday, over four weeks → per quarter-hour.
-    let base = row
-        .get("base")
-        .and_then(serde_json::Value::as_i64)
-        .unwrap_or(0) as f64
-        / 16.0;
-    let spike = now_users >= 5 && now_users as f64 >= 3.0 * base + 1.0;
-    Some((
-        spike,
-        format!(
-            "{now_users} users hit failing requests or errors in 15 minutes (usually about {base:.1})"
-        ),
-    ))
-}
-
-/// Has the traffic stopped for much longer than usual at this hour and
-/// weekday? None when there is not enough history (4 weeks, 12 events an
-/// hour at this time) to know.
-async fn traffic_stopped(state: &AppState, project: &str) -> Option<(bool, String)> {
-    use chrono::{Datelike, Timelike};
-    let now = chrono::Utc::now();
-    let since = (now - chrono::Duration::days(29)).format("%Y-%m-%d");
-    let today = now.format("%Y-%m-%d");
-    let (h, dow) = (now.hour(), now.weekday().num_days_from_sunday());
-    let sql = format!(
-        "SELECT min(date) AS first, \
-         count(CASE WHEN date < '{today}' AND date_part('hour', timestamp) = {h} AND date_part('dow', timestamp) = {dow} THEN 1 END) AS same, \
-         CAST(max(timestamp) AS VARCHAR) AS last \
-         FROM raw_events WHERE date >= '{since}' AND environment <> 'bot'"
-    );
-    let r = state.query.sql(project, &sql).await.ok()?;
-    let row = r.rows.first()?;
-    let first = row.get("first")?.as_str()?.to_owned();
-    if first
-        > (now - chrono::Duration::days(27))
-            .format("%Y-%m-%d")
-            .to_string()
-    {
-        return None;
-    }
-    let per_hour = row
-        .get("same")
-        .and_then(serde_json::Value::as_i64)
-        .unwrap_or(0) as f64
-        / 4.0;
-    if per_hour < 12.0 {
-        return None;
-    }
-    let window = (5.0 * 60.0 / per_hour).clamp(3.0, 120.0);
-    let last = row.get("last")?.as_str()?;
-    let last = chrono::NaiveDateTime::parse_from_str(
-        &last.replace('T', " ")[..19.min(last.len())],
-        "%Y-%m-%d %H:%M:%S",
-    )
-    .ok()?;
-    let idle = (now.naive_utc() - last).num_seconds() as f64 / 60.0;
-    Some((
-        idle > window,
-        format!("no event for {idle:.0} min; usually about {per_hour:.0} an hour at this time"),
-    ))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Settings;
-
-    #[test]
-    fn settings_have_defaults_and_are_checked() {
-        let s = Settings::default();
-        assert!(s.down && s.traffic && s.email && s.validate().is_ok());
-        assert!(
-            Settings {
-                webhook: "http://x".into(),
-                ..s.clone()
-            }
-            .validate()
-            .is_err()
-        );
-        assert!(
-            Settings {
-                ntfy: "my topic".into(),
-                ..s.clone()
-            }
-            .validate()
-            .is_err()
-        );
-        assert!(
-            Settings {
-                ntfy: "ops-alerts".into(),
-                ..s.clone()
-            }
-            .validate()
-            .is_ok()
-        );
-        assert!(
-            Settings {
-                health_path: "healthz".into(),
-                ..s.clone()
-            }
-            .validate()
-            .is_err()
-        );
-        assert!(Settings { down_wait: 0, ..s }.validate().is_err());
-        let partial: Settings = serde_json::from_str(r#"{"traffic": false}"#).unwrap_or_default();
-        assert!(
-            !partial.traffic && partial.down,
-            "missing fields take the defaults"
-        );
     }
 }

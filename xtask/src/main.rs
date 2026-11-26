@@ -9,7 +9,8 @@
 //!   static, read-only site crawled from the real server (#304).
 //! - `cargo xtask bench <url> <key>`: ingestion load test (docs/benchmarks.md).
 //! - `cargo xtask bench-gen <data-dir> [--events N] [--users N] [--profile realistic]`: a large
-//!   synthetic app (63 M events over 90 days by default) for scale runs (#321).
+//!   synthetic app (63 M events over 90 days by default) for scale runs (#321),
+//!   its closed days rolled up unless `--no-rollups` (D-046).
 //! - `cargo xtask crash [--secs N] [--kills N] [--seed N]`: SIGKILL the real
 //!   server while it ingests, and check no acknowledged event is lost or
 //!   stored twice (#331).
