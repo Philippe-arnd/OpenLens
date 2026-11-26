@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 use rand::Rng;
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 /// Metadata errors.
 #[derive(Debug, thiserror::Error)]
@@ -67,6 +67,7 @@ mod config;
 mod forget;
 mod identity;
 pub use identity::{Identified, IdentityTables, PersonIdentity};
+pub use projects::Seen;
 /// Deploys reported by the deploy hook, and its secret (#504).
 pub mod deploys;
 /// Read-only connections next to the writer (#344).
@@ -590,7 +591,13 @@ pub fn slug(name: &str) -> String {
 impl Meta {
     /// Open (or create) the store at `path`.
     pub fn open(path: &Path) -> Result<Self> {
-        let conn = Connection::open(path)?;
+        let mut conn = Connection::open(path)?;
+        // Write transactions take the write lock when they begin (#510): a
+        // deferred one that read first and then has to wait for the lock
+        // fails at once with "database is locked" (SQLite does not call the
+        // busy handler for a transaction that already reads), while
+        // `BEGIN IMMEDIATE` waits for it like any single statement does.
+        conn.set_transaction_behavior(TransactionBehavior::Immediate);
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
         conn.execute_batch(SCHEMA)?;
         migrate(&conn)?;
@@ -626,7 +633,8 @@ impl Meta {
 
     /// In-memory store, for tests.
     pub fn in_memory() -> Result<Self> {
-        let conn = Connection::open_in_memory()?;
+        let mut conn = Connection::open_in_memory()?;
+        conn.set_transaction_behavior(TransactionBehavior::Immediate);
         conn.execute_batch(SCHEMA)?;
         migrate(&conn)?;
         Ok(Self {
