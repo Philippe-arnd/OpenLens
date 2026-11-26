@@ -1,7 +1,8 @@
 # Product page on GitHub Pages (site/), rebuilt for every stable release so
 # the version, the highlights and the install tag follow it. Also on changes
 # to the page itself, by hand, and every morning after the nightly CI, so the
-# agent wiring badge (#305) follows the latest reference-app run.
+# agent wiring badge (#305) and the read-only demo under /demo/ (#304)
+# follow main.
 name: Pages
 
 on:
@@ -55,6 +56,17 @@ jobs:
           else
             echo "no reference numbers yet: the badge keeps its last value"
           fi
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: pages-demo
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: read-only demo under /demo/ (#304), crawled from the real server on synthetic data
+        run: |
+          cargo build -p openlens
+          cargo run -q -p xtask -- demo-site _site/demo
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: _site
