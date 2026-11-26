@@ -212,7 +212,7 @@ pub fn pages(
         Some(p),
         html! {
             div.heading { div { h1 { "Pages" } p.muted { "How far people scroll, what they click, where they get frustrated. Last 30 days." } } }
-            (filter_bar(p.id, b, f, "/pages"))
+            (context_bar(p.id, b, f, "/pages", false))
             @if list.is_empty() { section.card { p.muted { "No page views yet." } } }
             div.grid {
                 @for pg in list {
@@ -264,7 +264,7 @@ pub fn errors(
             div.heading {
                 div { h1 { "Errors" } p.muted { "Uncaught errors grouped by cause, most users first, last 30 days." } }
             }
-            (filter_bar(p.id, b, f, "/errors"))
+            (context_bar(p.id, b, f, "/errors", false))
             @if groups.is_empty() {
                 section.card { p { (icon("task")) " No errors in the last 30 days. Nice." } }
             } @else {
