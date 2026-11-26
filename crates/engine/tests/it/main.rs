@@ -408,8 +408,8 @@ async fn no_insights_without_enough_users() {
     assert!(b.readiness.judged_users < b.readiness.needed);
 }
 
-#[tokio::test]
-async fn journeys_show_the_common_path_into_a_success() {
+/// Six users who go home, search, then write an entry.
+fn journey_dataset() -> (tempfile::TempDir, QueryEngine) {
     let dir = tempfile::tempdir().unwrap();
     let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
     let mut evs = Vec::new();
@@ -441,6 +441,12 @@ async fn journeys_show_the_common_path_into_a_success() {
     w.append(&evs).unwrap();
     w.flush().unwrap();
     let q = QueryEngine::new(dir.path(), Limits::default());
+    (dir, q)
+}
+
+#[tokio::test]
+async fn journeys_show_the_common_path_into_a_success() {
+    let (_d, q) = journey_dataset();
     let map = parse("features:\n  - key: write\n    name: Write\n    success: entry_saved\n    entry: { routes: ['/entries/new'] }\n").map.unwrap();
     let b = board(&q, "p", &Filters::default(), Some((&map, 1)))
         .await
@@ -456,6 +462,29 @@ async fn journeys_show_the_common_path_into_a_success() {
     );
     assert_eq!(j.users, 6);
     assert!((j.share - 1.0).abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn features_sharing_a_success_event_list_each_path_once() {
+    let (_d, q) = journey_dataset();
+    let map = parse(
+        "features:\n  - key: write\n    name: Write\n    success: entry_saved\n    entry: { routes: ['/entries/new'] }\n  - key: draft\n    name: Draft\n    success: entry_saved\n    entry: { routes: ['/drafts'] }\n",
+    )
+    .map
+    .unwrap();
+    let b = board(&q, "p", &Filters::default(), Some((&map, 1)))
+        .await
+        .unwrap();
+    assert!(!b.journeys.is_empty());
+    let mut keys: Vec<_> = b.journeys.iter().map(|j| (&j.success, &j.path)).collect();
+    keys.sort();
+    keys.dedup();
+    assert_eq!(keys.len(), b.journeys.len(), "{:?}", b.journeys);
+    assert!(
+        b.journeys
+            .iter()
+            .all(|j| j.feature.contains("write") && j.feature.contains("draft"))
+    );
 }
 
 #[tokio::test]
