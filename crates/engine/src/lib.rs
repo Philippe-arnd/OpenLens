@@ -26,6 +26,7 @@ mod insights;
 pub mod maphealth;
 mod pages;
 mod people;
+pub mod replay_rate;
 mod revenue;
 pub mod stats;
 mod tasks;
@@ -45,6 +46,7 @@ pub use pages::{
     sessions_on_path, survey_results,
 };
 pub use people::*;
+pub use replay_rate::{ReplayRate, replay_rate};
 pub use revenue::{Money, Revenue, revenue};
 pub use tasks::{RetentionRow, TaskTime};
 pub use variants::*;

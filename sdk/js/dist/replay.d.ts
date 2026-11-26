@@ -17,6 +17,13 @@ export interface Bridge {
     /** Input after a pause is activity: the core SDK refreshes the session
      * (a new one after its 30-minute gap) before the recorder resumes (#404). */
     touch?: () => void;
+    /** Is the current session recorded (#327)? `undefined` while the rate
+     * is not known yet. A core SDK without it records every session. */
+    sampled?: () => boolean | undefined;
+    /** Set by the recorder: the core SDK calls it after a trigger (error,
+     * rage click) or a consent change, so the buffer goes out (or is
+     * emptied) at once. */
+    wake?: () => void;
 }
 declare global {
     interface Window {

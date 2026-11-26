@@ -12,6 +12,13 @@
  * `idle` event (the gap length) and a fresh full snapshot; after the
  * session gap the core SDK starts a new session, so a new replay.
  *
+ * Sampling (#327, D-035): a session the core SDK did not draw for
+ * recording keeps only a rolling buffer in memory (a full snapshot every
+ * 60 s, the last one or two minutes kept), sent when an error or a rage
+ * click happens; the session is recorded from then on. Nothing buffered
+ * leaves the page without such a trigger, and withdrawing consent empties
+ * the buffer.
+ *
  * Privacy defaults: every input value and every text is masked, except
  * text inside `data-openlens-unmask` (and not inside `data-openlens-mask`)
  * that the app marks as safe to show; elements with
@@ -22,6 +29,7 @@ import { record } from "rrweb";
 // No input for IDLE_MS pauses the recorder; the player and the server's
 // active time use the same delay.
 import { IDLE_MS } from "./gaps";
+import { type Item, chunks, size, trim } from "./sampling";
 
 export interface Bridge {
   host: string;
@@ -39,6 +47,13 @@ export interface Bridge {
   /** Input after a pause is activity: the core SDK refreshes the session
    * (a new one after its 30-minute gap) before the recorder resumes (#404). */
   touch?: () => void;
+  /** Is the current session recorded (#327)? `undefined` while the rate
+   * is not known yet. A core SDK without it records every session. */
+  sampled?: () => boolean | undefined;
+  /** Set by the recorder: the core SDK calls it after a trigger (error,
+   * rage click) or a consent change, so the buffer goes out (or is
+   * emptied) at once. */
+  wake?: () => void;
 }
 
 declare global {
@@ -53,12 +68,23 @@ const MAX_EVENTS = 300;
  * then fits the browsers' ~64 KB unload budget (#433). */
 const MAX_CHARS = 30_000;
 /** What counts as input. */
+/** A session left out takes a full snapshot this often while buffering. */
+const CHECKOUT_MS = 60_000;
+/** Most characters the rolling buffer holds (about 1 MB of events). */
+const BUFFER_CHARS = 1_000_000;
 const INPUTS = ["mousemove", "mousedown", "pointerdown", "keydown", "wheel", "scroll", "touchstart"];
 
 function start(b: Bridge): void {
-  let buf: unknown[] = [];
+  let buf: Item[] = [];
   let chars = 0;
   let sid = b.ids().sid;
+  const sampled = () => !b.sampled || b.sampled() === true;
+  // Recording live, or buffering until a trigger (#327).
+  let live = sampled();
+  const clear = () => {
+    buf = [];
+    chars = 0;
+  };
   const url = `${b.host.replace(/\/$/, "")}/r?key=${encodeURIComponent(b.key)}`;
 
   // Chunk numbers are shared by the tabs of one session, so retries and
@@ -102,23 +128,46 @@ function start(b: Bridge): void {
 
   const flush = (unloading = false) => {
     const { sid: cur, uid } = b.ids();
-    const events = buf;
-    buf = [];
-    chars = 0;
-    send(events, sid, uid, unloading);
+    // Buffering, nothing is sent; a buffer of an earlier session is dropped.
+    if (live || cur !== sid) {
+      const events = buf;
+      clear();
+      if (live) for (const c of chunks(events, MAX_EVENTS, MAX_CHARS)) send(c, sid, uid, unloading);
+    }
     if (cur !== sid) {
       // A new session started: its recording needs its own full snapshot
-      // (taken by the recorder itself when it resumes, if it is paused).
+      // (taken by the recorder itself when it resumes, if it is paused),
+      // and its own draw.
       sid = cur;
+      live = sampled();
       if (stop) record.takeFullSnapshot(true);
     }
   };
 
   const keep = (e: unknown) => {
-    buf.push(e);
-    chars += JSON.stringify(e).length;
-    if (buf.length >= MAX_EVENTS || chars >= MAX_CHARS) flush();
+    if (!b.allowed()) return clear();
+    const n = JSON.stringify(e).length;
+    buf.push({ e, n });
+    chars += n;
+    if (live) {
+      if (buf.length >= MAX_EVENTS || chars >= MAX_CHARS) flush();
+    } else if ((e as { type?: unknown }).type === 2) {
+      // A full snapshot: keep from the one before it.
+      buf = trim(buf, BUFFER_CHARS);
+      chars = size(buf);
+    }
   };
+
+  // A trigger, the rate arriving, another tab's trigger, or consent
+  // withdrawn: send the buffer and go live, or empty it.
+  const wake = () => {
+    if (!b.allowed()) return clear();
+    if (!live && sampled()) {
+      live = true;
+      flush();
+    }
+  };
+  b.wake = wake;
 
   const rec = () =>
     record({
@@ -170,10 +219,21 @@ function start(b: Bridge): void {
 
   if (document.visibilityState !== "hidden") stop = rec();
   setInterval(() => {
+    wake();
     if (!stop) return;
     if (Date.now() - lastInput >= IDLE_MS) pause(false);
     else flush();
+    if (!live && chars > BUFFER_CHARS) {
+      // Over the cap even from the latest snapshot: start again from a new one.
+      clear();
+      record.takeFullSnapshot(true);
+    }
   }, FLUSH_MS);
+  // The checkouts of a buffering session (rrweb's checkoutEveryNms, but
+  // only until the session goes live).
+  setInterval(() => {
+    if (!live && stop) record.takeFullSnapshot(true);
+  }, CHECKOUT_MS);
   addEventListener("visibilitychange", () => (document.visibilityState === "hidden" ? pause(true) : resume()));
   addEventListener("pagehide", () => flush(true));
 }

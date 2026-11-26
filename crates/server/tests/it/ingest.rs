@@ -97,3 +97,75 @@ async fn sdk_is_served_as_cacheable_javascript() {
         .unwrap();
     assert!(body.len() > 10_000);
 }
+
+/// `replay_rate` from `/flags` (#327).
+async fn replay_rate(h: &Harness) -> f64 {
+    let r = get(
+        h,
+        &format!("/flags?key={}&distinct_id=u1", h.key),
+        None,
+        false,
+    )
+    .await;
+    assert_eq!(r.status(), StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_str(&body_text(r).await).unwrap();
+    v["replay_rate"].as_f64().unwrap()
+}
+
+#[tokio::test]
+async fn the_replay_rate_follows_yesterdays_active_users() {
+    // No data yet: every session is recorded.
+    let empty = harness();
+    let everything = replay_rate(&empty).await;
+
+    let h = harness();
+    let yesterday = (chrono::Utc::now() - chrono::Duration::days(1)).to_rfc3339();
+    let today = chrono::Utc::now().to_rfc3339();
+    let ev = |who: String, ts: &str, env: &str| {
+        serde_json::json!({"event": "$pageview", "distinct_id": who, "timestamp": ts,
+            "properties": {"$pathname": "/", "$environment": env}})
+    };
+    let active = 400;
+    let mut batch: Vec<_> = (0..active)
+        .map(|i| ev(format!("u{i}"), &yesterday, "production"))
+        .collect();
+    // Twice: a person counts once.
+    batch.push(ev("u0".into(), &yesterday, "production"));
+    // Today and staging are not yesterday's production users.
+    batch.extend((0..300).map(|i| ev(format!("t{i}"), &today, "production")));
+    batch.extend((0..300).map(|i| ev(format!("s{i}"), &yesterday, "staging")));
+    for part in batch.chunks(500) {
+        let (status, _) = post(
+            &h,
+            "/capture",
+            serde_json::json!({ "key": h.key, "batch": part })
+                .to_string()
+                .into_bytes(),
+            false,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    openlens_server::flush_now(&h.state).unwrap();
+    let rate = replay_rate(&h).await;
+    assert!(rate < everything, "{rate} < {everything}");
+    // About the daily budget of recordings out of yesterday's users.
+    let budget = openlens_engine::replay_rate::DAILY_BUDGET as f64;
+    assert!((rate * f64::from(active) - budget).abs() < 1.0, "{rate}");
+
+    // The replay page says why.
+    let owner = login_cookie(&h).await;
+    let page = body_text(get(&h, "/p/default/replays", Some(&owner), false).await).await;
+    assert!(
+        page.contains(&format!("yesterday&#39;s {active} active users"))
+            || page.contains(&format!("yesterday's {active} active users")),
+        "the reason is shown"
+    );
+    assert!(page.contains("error or a rage click"));
+    // Agents read the same through the API.
+    let api: serde_json::Value = serde_json::from_str(
+        &body_text(get(&h, "/api/projects/default/replays", None, true).await).await,
+    )
+    .unwrap();
+    assert_eq!(api["replay_rate"]["rate"].as_f64(), Some(rate), "{api}");
+}
