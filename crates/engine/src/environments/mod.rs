@@ -21,18 +21,31 @@
 //!   environment selector;
 //! - monitors: a checked address and an alert level for a non-production
 //!   environment (production keeps the project's app address and every
-//!   alert).
+//!   alert);
+//! - a host allow-list (#485, `allow`): events of other hosts are
+//!   dropped, once a listed host has proven itself.
 
 use openlens_event::{
     DEFAULT_ENVIRONMENT, UNKNOWN_ENVIRONMENT, host_of, normalize_environment, sdk_guess,
 };
-use openlens_query::QueryEngine;
 use serde::{Deserialize, Serialize};
 
-use crate::{Result, int, text};
+mod allow;
+mod list;
+mod relabel;
+
+pub use allow::{
+    ACTIVE_DAYS, AllowPreview, AllowReport, AllowState, AllowStatus, HostCount, MAX_ALLOWED,
+    PREVIEW_HOURS, allow_report, allow_status, allows, check_allowed, preview_allowed_hosts,
+    set_allowed_hosts,
+};
+pub use list::{Environments, HostRow, environments, seed_rules};
+pub use relabel::{
+    MAX_RELABEL_DAYS, RELABEL_DAYS, RelabelMove, Relabelled, check_relabel, covers, relabel_target,
+};
 
 /// The environment of events from bots, set at ingestion (never by a rule).
-const BOT_ENVIRONMENT: &str = "bot";
+pub(crate) const BOT_ENVIRONMENT: &str = "bot";
 
 /// Rules a project holds at most.
 pub const MAX_RULES: usize = 200;
@@ -44,8 +57,6 @@ pub const MAX_ENV: usize = 64;
 pub const IGNORE: &str = "ignore";
 /// Days of events the environment list and the upgrade seed read.
 pub const WINDOW_DAYS: i64 = 30;
-/// Hosts the environment list returns at most.
-const MAX_HOSTS: usize = 500;
 /// Aliases a project holds at most.
 pub const MAX_ALIASES: usize = 50;
 /// Hidden environments a project holds at most.
@@ -115,6 +126,9 @@ pub struct Rules {
     /// Monitored non-production environments.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub monitors: Vec<Monitor>,
+    /// The host allow-list (#485): empty is off.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow: Vec<String>,
 }
 
 /// A host pattern as stored: lowercase, an exact host or `*.suffix`.
@@ -226,6 +240,8 @@ impl Rules {
                 && check_level(&m.level).is_ok_and(|l| l == m.level)
         });
         r.monitors.truncate(MAX_MONITORS);
+        let stored = std::mem::take(&mut r.allow);
+        r.allow = check_allowed(&stored).unwrap_or_default();
         r
     }
 
@@ -472,7 +488,7 @@ pub fn resolve(rules: &Rules, seeded: bool, url: Option<&str>, received: &str) -
 }
 
 /// The project's aliases applied to what the host gave.
-fn with_alias(rules: &Rules, by_host: Resolution, received: &str) -> Resolution {
+pub(crate) fn with_alias(rules: &Rules, by_host: Resolution, received: &str) -> Resolution {
     if rules.aliases.is_empty() {
         return by_host;
     }
@@ -488,7 +504,7 @@ fn with_alias(rules: &Rules, by_host: Resolution, received: &str) -> Resolution 
     }
 }
 
-fn by_host(rules: &Rules, seeded: bool, host: &str, received: &str) -> Resolution {
+pub(crate) fn by_host(rules: &Rules, seeded: bool, host: &str, received: &str) -> Resolution {
     let pattern = openlens_event::detected_environment(host);
     // What an SDK detects for this host: a pattern's environment or, for a
     // host no pattern matches, `production` (older SDKs) or `unknown`.
@@ -512,221 +528,6 @@ fn by_host(rules: &Rules, seeded: bool, host: &str, received: &str) -> Resolutio
         None if !seeded => keep_or(DEFAULT_ENVIRONMENT),
         None => keep_or(UNKNOWN_ENVIRONMENT),
     }
-}
-
-/// Days a re-labelling reaches back by default (#484).
-pub const RELABEL_DAYS: i64 = 30;
-/// Days a re-labelling reaches back at most: the rewrite reads every file
-/// of those days, so it stays bounded.
-pub const MAX_RELABEL_DAYS: i64 = 90;
-
-/// The host pattern (exact or `*.suffix`, as rules take it) and the days
-/// of a re-labelling, checked: 1 to [`MAX_RELABEL_DAYS`], default
-/// [`RELABEL_DAYS`].
-pub fn check_relabel(
-    host: &str,
-    days: Option<i64>,
-) -> std::result::Result<(String, i64), &'static str> {
-    let pattern = check_pattern(host)?;
-    let days = days.unwrap_or(RELABEL_DAYS);
-    if !(1..=MAX_RELABEL_DAYS).contains(&days) {
-        return Err("days must be between 1 and 90");
-    }
-    Ok((pattern, days))
-}
-
-/// Whether `host` is `pattern`, or under it when it is `*.suffix`.
-#[must_use]
-pub fn covers(pattern: &str, host: &str) -> bool {
-    match pattern.strip_prefix("*.") {
-        Some(suffix) => host
-            .strip_suffix(suffix)
-            .is_some_and(|under| under.ends_with('.')),
-        None => host == pattern,
-    }
-}
-
-/// Where a past event of `host`, stored as `stored`, goes when re-labelled
-/// (engine command `relabel_environment`, #484): the environment a newly
-/// detected event of that host gets from the current rules and aliases.
-/// `None` when it stays: already there, a bot, or a host the rules now
-/// `ignore` (re-labelling never deletes events). What the app set itself
-/// is not told apart once stored, so it moves too; the dry run shows each
-/// move first.
-#[must_use]
-pub fn relabel_target(rules: &Rules, seeded: bool, host: &str, stored: &str) -> Option<String> {
-    if stored == BOT_ENVIRONMENT {
-        return None;
-    }
-    let guess = sdk_guess(host);
-    let to = match with_alias(rules, by_host(rules, seeded, host, guess), guess) {
-        Resolution::Keep => guess.to_owned(),
-        Resolution::Set(name) => name,
-        Resolution::Drop => return None,
-    };
-    (to != stored).then_some(to)
-}
-
-/// One move of a re-labelling: how many events go from one environment
-/// to another.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct RelabelMove {
-    /// The environment they are stored under.
-    pub from: String,
-    /// The environment the rules give now.
-    pub to: String,
-    /// Events.
-    pub events: usize,
-}
-
-/// What a re-labelling moved, or would move on a dry run.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Relabelled {
-    /// The host pattern.
-    pub host: String,
-    /// Days read, today (UTC) included.
-    pub days: i64,
-    /// Nothing was written.
-    pub dry_run: bool,
-    /// Events moved (or that would move).
-    pub events: usize,
-    /// Per (stored environment, new environment), most events first.
-    pub moves: Vec<RelabelMove>,
-}
-
-impl Relabelled {
-    /// The result of a re-labelling from its moves.
-    #[must_use]
-    pub fn new(
-        host: String,
-        days: i64,
-        dry_run: bool,
-        moves: impl IntoIterator<Item = ((String, String), usize)>,
-    ) -> Self {
-        let mut moves: Vec<RelabelMove> = moves
-            .into_iter()
-            .map(|((from, to), events)| RelabelMove { from, to, events })
-            .collect();
-        moves.sort_by_key(|m| std::cmp::Reverse(m.events));
-        Self {
-            host,
-            days,
-            dry_run,
-            events: moves.iter().map(|m| m.events).sum(),
-            moves,
-        }
-    }
-}
-
-/// One host seen under one environment.
-#[derive(Debug, Clone, Serialize)]
-pub struct HostRow {
-    /// Environment the events were stored under.
-    pub environment: String,
-    /// Host, or empty for events with no page address (server SDKs).
-    pub host: String,
-    /// Events in the window.
-    pub events: i64,
-    /// Last event (UTC).
-    pub last_seen: String,
-    /// The rule that applies to this host now, if any.
-    pub rule: Option<String>,
-}
-
-/// The environments of a project: hosts per environment, rules, and the
-/// hosts no rule classifies yet.
-#[derive(Debug, Clone, Serialize)]
-pub struct Environments {
-    /// Days read.
-    pub days: i64,
-    /// Hosts per environment, most events first.
-    pub hosts: Vec<HostRow>,
-    /// The project's rules.
-    pub rules: Vec<Rule>,
-    /// Hosts stored as `unknown` in the window and still without a rule.
-    pub unclassified: Vec<String>,
-    /// The project's aliases.
-    pub aliases: Vec<Alias>,
-    /// Environments left out of the selector.
-    pub hidden: Vec<String>,
-    /// Monitored non-production environments.
-    pub monitors: Vec<Monitor>,
-}
-
-/// The SQL of a page address's host, as [`host_of`] reads it (IPv6
-/// literals aside).
-const HOST_SQL: &str = "lower(split_part(split_part(split_part(url, '/', 3), '?', 1), ':', 1))";
-
-/// The environments of `project` over the last [`WINDOW_DAYS`] days
-/// (engine command `environments`).
-pub async fn environments(q: &QueryEngine, project: &str, rules: &Rules) -> Result<Environments> {
-    let since = (chrono::Utc::now() - chrono::Duration::days(WINDOW_DAYS))
-        .format("%Y-%m-%d")
-        .to_string();
-    let sql = format!(
-        "SELECT environment, COALESCE({HOST_SQL}, '') AS host, COUNT(*) AS events, \
-         CAST(MAX(timestamp) AS VARCHAR) AS last_seen FROM events \
-         WHERE date >= '{since}' GROUP BY 1, 2 ORDER BY events DESC LIMIT {MAX_HOSTS}"
-    );
-    let r = q.sql(project, &sql).await?;
-    let hosts: Vec<HostRow> = r
-        .rows
-        .iter()
-        .map(|row| {
-            let host = text(row, "host").unwrap_or_default();
-            HostRow {
-                environment: text(row, "environment").unwrap_or_default(),
-                rule: rules.lookup(&host).map(str::to_owned),
-                events: int(row, "events"),
-                last_seen: text(row, "last_seen").unwrap_or_default(),
-                host,
-            }
-        })
-        .collect();
-    let mut unclassified: Vec<String> = hosts
-        .iter()
-        .filter(|h| h.environment == UNKNOWN_ENVIRONMENT && h.rule.is_none() && !h.host.is_empty())
-        .map(|h| h.host.clone())
-        .collect();
-    unclassified.dedup();
-    Ok(Environments {
-        days: WINDOW_DAYS,
-        hosts,
-        rules: rules.rules.clone(),
-        unclassified,
-        aliases: rules.aliases.clone(),
-        hidden: rules.hidden.clone(),
-        monitors: rules.monitors.clone(),
-    })
-}
-
-/// The upgrade seed (D-034): a `production` rule for every host that sent
-/// production events in the last [`WINDOW_DAYS`] days and that no rule or
-/// hostname pattern classifies, most events first, within [`MAX_RULES`].
-pub async fn seed_rules(q: &QueryEngine, project: &str, rules: &Rules) -> Result<Rules> {
-    let since = (chrono::Utc::now() - chrono::Duration::days(WINDOW_DAYS))
-        .format("%Y-%m-%d")
-        .to_string();
-    let sql = format!(
-        "SELECT {HOST_SQL} AS host, COUNT(*) AS events FROM events \
-         WHERE date >= '{since}' AND environment = 'production' AND url IS NOT NULL \
-         GROUP BY 1 ORDER BY events DESC LIMIT {MAX_RULES}"
-    );
-    let r = q.sql(project, &sql).await?;
-    let mut out = rules.clone();
-    for row in &r.rows {
-        let Some(host) = text(row, "host") else {
-            continue;
-        };
-        if out.lookup(&host).is_some() || openlens_event::detected_environment(&host).is_some() {
-            continue;
-        }
-        if set_environment_rule(&mut out, &host, DEFAULT_ENVIRONMENT).is_err() {
-            // Full, or not a host name: the rest stays unclassified.
-            continue;
-        }
-    }
-    Ok(out)
 }
 
 #[cfg(test)]
@@ -903,50 +704,6 @@ mod tests {
         // `*.example.com` covers sub-domains, not the domain or look-alikes.
         assert_eq!(r.lookup("example.com"), None);
         assert_eq!(r.lookup("badexample.com"), None);
-    }
-
-    #[test]
-    fn relabelling_gives_what_a_new_event_of_the_host_would_get() {
-        let mut r = rules(&[
-            ("kanban-test.example.com", "qa"),
-            ("*.preview.example.com", "preview"),
-        ]);
-        let h = "kanban-test.example.com";
-        // An older rule had made it staging: the current rule wins.
-        assert_eq!(
-            relabel_target(&r, true, h, "staging").as_deref(),
-            Some("qa")
-        );
-        assert_eq!(relabel_target(&r, true, h, "qa"), None, "already there");
-        assert_eq!(relabel_target(&r, true, h, "bot"), None, "bots stay bots");
-        // A host with no rule and no pattern: unknown once seeded.
-        assert_eq!(
-            relabel_target(&r, true, "other.example.com", "production").as_deref(),
-            Some("unknown")
-        );
-        assert_eq!(
-            relabel_target(&r, false, "other.example.com", "production"),
-            None
-        );
-        // Aliases apply on top, and `ignore` never deletes.
-        assert!(set_environment_alias(&mut r, "qa", "staging").is_ok());
-        assert_eq!(
-            relabel_target(&r, true, h, "qa").as_deref(),
-            Some("staging")
-        );
-        assert!(set_environment_rule(&mut r, h, "ignore").is_ok());
-        assert_eq!(relabel_target(&r, true, h, "qa"), None);
-
-        assert!(covers("*.preview.example.com", "pr-1.preview.example.com"));
-        assert!(!covers("*.preview.example.com", "preview.example.com"));
-        assert!(!covers("*.example.com", "badexample.com"));
-        assert!(covers("app.example.com", "app.example.com"));
-        assert!(check_relabel("app.example.com", Some(91)).is_err());
-        assert!(check_relabel("app.example.com", Some(0)).is_err());
-        assert_eq!(
-            check_relabel(" App.Example.com ", None),
-            Ok(("app.example.com".into(), 30))
-        );
     }
 
     #[test]

@@ -35,6 +35,9 @@ pub(crate) struct Notice {
     relabel: Option<String>,
     #[serde(default)]
     days: Option<String>,
+    /// *Environments*: the allow-list a preview counts (#485).
+    #[serde(default)]
+    allow: Option<String>,
 }
 
 /// The days of a re-labelling form: empty is the default, anything not a
@@ -124,7 +127,7 @@ pub(crate) async fn environments_page(
 /// (the default: set a host's rule, or remove it when `remove` is sent),
 /// `remove`, `alias`, `unalias`, `hide`, `show`, `monitor`, `unmonitor`, or
 /// `relabel` (re-label a host's past events, after the dry run of the
-/// page's preview, #484).
+/// page's preview, #484), or `allow` (save the host allow-list, #485).
 #[derive(Debug, Deserialize)]
 pub(crate) struct EnvironmentForm {
     #[serde(default)]
@@ -145,6 +148,8 @@ pub(crate) struct EnvironmentForm {
     level: String,
     #[serde(default)]
     days: String,
+    #[serde(default)]
+    hosts: String,
 }
 
 impl EnvironmentForm {
@@ -244,6 +249,16 @@ pub(crate) async fn environments(
             Err(_) => oops("The events could not be re-labelled."),
         };
     }
+    if f.action == "allow" {
+        let hosts = crate::allowlist::split_hosts(&f.hosts);
+        return match crate::allowlist::preview_and_save(&state, &id, &hosts, true).await {
+            Ok((p, _)) => {
+                crate::allowlist::audit(&state, &headers, &id, &p);
+                Redirect::to(&format!("/p/{id}/settings/environments?done=allow")).into_response()
+            }
+            Err((_, msg)) => oops(&msg),
+        };
+    }
     let Some((change, detail)) = f.change() else {
         return oops("Unknown action.");
     };
@@ -341,22 +356,30 @@ async fn page_at(
         Some("relabelled") => Some(
             "Past events re-labelled. Boards follow at once; closed days are rolled up again within minutes.",
         ),
+        Some("allow") => Some("Allowed hosts saved."),
         Some("test") => Some("Test alert sent: check every channel."),
         Some("test-none") => {
             Some("No channel is set: add an email (SMTP), a webhook or an ntfy topic.")
         }
         _ => None,
     };
-    let environments = if tab == openlens_ui::SettingsTab::Environments {
+    let env_tab = tab == openlens_ui::SettingsTab::Environments;
+    let (environments, allow) = if env_tab {
         let pe = crate::environments::current(&state, &p.id);
         if !pe.seeded {
             crate::environments::spawn_seed(&state, &p.id);
         }
-        openlens_engine::environments::environments(&state.query, &p.id, &pe.rules)
-            .await
-            .ok()
+        let e = openlens_engine::environments::environments(&state.query, &p.id, &pe.rules);
+        let allow = crate::allowlist::report(&state, &p.id, &pe.rules.allow);
+        (e.await.ok(), Some(allow))
     } else {
-        None
+        (None, None)
+    };
+    let allow_preview = match nq.allow.as_deref() {
+        Some(hosts) if viewer.admin && env_tab => {
+            crate::allowlist::tab_preview(&state, &p.id, Some(hosts)).await
+        }
+        _ => None,
     };
     // The dry run of a re-labelling (#484), for admins: the page shows the
     // moves, then a confirm button posts the rewrite.
@@ -407,6 +430,8 @@ async fn page_at(
                 releases: &releases,
                 environments,
                 relabel,
+                allow,
+                allow_preview,
                 setup: setup_steps(
                     &state,
                     &p.id,

@@ -5,7 +5,8 @@
 
 use super::*;
 use openlens_engine::environments::{
-    Environments, LOG, MAX_RELABEL_DAYS, NOTIFY, RELABEL_DAYS, Relabelled,
+    ACTIVE_DAYS, AllowPreview, AllowReport, AllowStatus, Environments, LOG, MAX_ALLOWED,
+    MAX_RELABEL_DAYS, NOTIFY, RELABEL_DAYS, Relabelled,
 };
 
 /// A small form posting one action to the tab's handler.
@@ -41,6 +42,8 @@ pub(crate) fn tab(
     admin: bool,
     e: &Environments,
     relabel: Option<&Result<Relabelled, String>>,
+    allow: Option<&AllowReport>,
+    allow_preview: Option<&Result<AllowPreview, String>>,
 ) -> Markup {
     let mut seen: Vec<&str> = Vec::new();
     for h in &e.hosts {
@@ -99,6 +102,7 @@ pub(crate) fn tab(
             }
         }
         @if admin { (relabel_card(base, e, relabel)) }
+        @if let Some(a) = allow { (allow_card(base, admin, a, allow_preview)) }
         section.card.wide #env-aliases {
             h2.sky { (icon("route")) "Aliases and visibility" }
             p.small { "An alias stores an environment the app sends under another name (" code { "live-eu" } " → " code { "production" } "), on top of the usual ones (" code { "prod" } ", " code { "stage" } ", " code { "dev" } "); " code { "ignore" } " drops its events. A hidden environment keeps its events and stays readable by name (" code { "?env=" } "), but leaves the environment selector. Production is never aliased or hidden." }
@@ -167,7 +171,7 @@ pub(crate) fn tab(
                     } }
                 } }
             }
-            p.muted.small { "Agents: " code { "openlens-cli env list" } ", " code { "env rule <host> <env>" } ", " code { "env relabel <host> --dry-run" } ", " code { "env alias <from> <to>" } ", " code { "env hide <env>" } ", " code { "env monitor <env> <url> --level notify" } ", or the MCP tool " code { "environments" } "." }
+            p.muted.small { "Agents: " code { "openlens-cli env list" } ", " code { "env rule <host> <env>" } ", " code { "env relabel <host> --dry-run" } ", " code { "env alias <from> <to>" } ", " code { "env hide <env>" } ", " code { "env monitor <env> <url> --level notify" } ", " code { "env allow <hosts…>" } ", or the MCP tool " code { "environments" } "." }
         }
     }
 }
@@ -215,6 +219,94 @@ fn relabel_card(
                 }
                 None => {}
             }
+        }
+    }
+}
+
+/// *Allowed hosts* (#485): the list, whether it drops anything now, what
+/// it dropped, and for admins a preview of a new list over the last 24
+/// hours before it is saved.
+fn allow_card(
+    base: &str,
+    admin: bool,
+    a: &AllowReport,
+    preview: Option<&Result<AllowPreview, String>>,
+) -> Markup {
+    let draft = match preview {
+        Some(Ok(p)) => p.hosts.join(" "),
+        _ => a.hosts.join(" "),
+    };
+    html! {
+        section.card.wide #env-allow {
+            h2.sun { (icon("shield")) "Allowed hosts" }
+            p.small { "When set, events whose page address is on another host are dropped at ingestion, so a copied snippet or a scraper cannot write into this project. Events without a page address (server SDKs) always pass. The list only drops events while one of its hosts has sent events in the last " (ACTIVE_DAYS) " days: until then it is pending and drops nothing, so a typo never locks out the app. A list is saved after a preview of what it would have dropped over the last 24 hours. At most " (MAX_ALLOWED) " hosts; " code { "*.example.com" } " covers the sub-domains." }
+            @match a.status {
+                AllowStatus::Off => { p.muted.small { "Off: every host is accepted." } }
+                AllowStatus::Pending => {
+                    p.notice role="status" { "Pending: no host on the list has sent events in the last " (ACTIVE_DAYS) " days, so nothing is dropped. Check the list for a typo." }
+                }
+                AllowStatus::Active => {
+                    p.small { "Active: events of other hosts are dropped." @if let Some(t) = &a.last_listed { " A listed host last sent events at " (t) "." } }
+                }
+            }
+            @if !a.hosts.is_empty() {
+                p { @for (i, h) in a.hosts.iter().enumerate() { @if i > 0 { ", " } span.mono { (h) } } }
+            }
+            @if !a.dropped.is_empty() || a.dropped_other > 0 {
+                h3 { "Dropped since " (a.dropped_since) }
+                div.table-scroll { table.plain {
+                    thead { tr { th { "Host" } (crate::glossary::th_num("Events")) } }
+                    tbody {
+                        @for d in &a.dropped { tr { td.mono { (d.host) } td.num { (d.events) } } }
+                        @if a.dropped_other > 0 { tr { td.muted { "other hosts" } td.num { (a.dropped_other) } } }
+                    }
+                } }
+            } @else if a.status == AllowStatus::Active {
+                p.muted.small { "Nothing dropped since " (a.dropped_since) "." }
+            }
+            @if admin {
+                form.settings method="get" action={ (base) "/environments" } {
+                    label { "Hosts " input type="text" name="allow" maxlength="4000" value=(draft) placeholder="app.example.com *.example.com"; }
+                    button.ghost type="submit" { "Preview" }
+                }
+                @match preview {
+                    Some(Err(msg)) => { p.alert role="alert" { (msg) } }
+                    Some(Ok(p)) => { (allow_preview_block(base, p)) }
+                    None => {}
+                }
+                @if !a.hosts.is_empty() {
+                    (action_form(base, "allow", &[("hosts", "")], "Turn off"))
+                }
+            }
+        }
+    }
+}
+
+/// The preview of a new list, and the button that saves it.
+fn allow_preview_block(base: &str, p: &AllowPreview) -> Markup {
+    let hosts = p.hosts.join(" ");
+    html! {
+        @if p.hosts.is_empty() {
+            p.notice role="status" { "An empty list turns the allow-list off: every host is accepted." }
+        } @else {
+            p.notice role="status" {
+                "Over the last " (p.hours) " hours, this list keeps " (p.kept_events) " event(s) and would have dropped " (p.dropped_events) " from " (p.dropped.len()) " other host(s). "
+                @match p.status {
+                    AllowStatus::Active => { "A listed host sent events recently: the list takes effect once saved." }
+                    _ => { strong { "No host on this list sent events in the last " (ACTIVE_DAYS) " days" } ": it stays pending and drops nothing until one does." }
+                }
+            }
+            @if !p.dropped.is_empty() {
+                div.table-scroll { table.plain {
+                    thead { tr { th { "Host outside the list" } (crate::glossary::th_num("Events")) } }
+                    tbody { @for d in &p.dropped { tr { td.mono { (d.host) } td.num { (d.events) } } } }
+                } }
+            }
+        }
+        form.inline method="post" action={ (base) "/environments" } {
+            input type="hidden" name="action" value="allow";
+            input type="hidden" name="hosts" value=(hosts);
+            button type="submit" { @if p.hosts.is_empty() { "Turn off" } @else { "Save the list" } }
         }
     }
 }

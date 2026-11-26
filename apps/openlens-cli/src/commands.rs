@@ -59,6 +59,21 @@ pub(super) enum EnvCmd {
         #[arg(long, default_value = "default")]
         project: String,
     },
+    /// Accept events only from these hosts (exact or `*.suffix`; none
+    /// turns it off). Shows what the list would have dropped over the last
+    /// 24 hours; `--confirm` saves it. It drops nothing until a listed host
+    /// has sent events in the last 7 days, and never drops events without
+    /// a page address.
+    Allow {
+        /// Exact hosts or `*.suffix`, at most 50.
+        hosts: Vec<String>,
+        /// Save the list (without it, only the preview is shown).
+        #[arg(long)]
+        confirm: bool,
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+    },
     /// Remove the rule for a host.
     Unrule {
         /// The host of the rule.
