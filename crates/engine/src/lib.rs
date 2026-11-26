@@ -17,6 +17,7 @@ mod board;
 mod board_people;
 mod board_range;
 mod board_sessions;
+mod board_success;
 mod board_window;
 pub mod churn;
 pub mod commands;
