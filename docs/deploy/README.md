@@ -25,6 +25,7 @@ The image `ghcr.io/philippe-arnd/openlens` is public. Binaries for `x86_64` and 
 | --- | --- |
 | `:latest` | the newest stable release |
 | `:0.2` | patches of one minor version: fixes, no behaviour change (recommended for hands-off updates) |
+| `:0` | every release of one major version: before 1.0 the same as `:latest`; from 1.0 on, `:1` follows 1.x without breaking changes |
 | `:vX.Y.Z` | one release, never moves |
 | `:edge` | `main`, for testing only |
 
