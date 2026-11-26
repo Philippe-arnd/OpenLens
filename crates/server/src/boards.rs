@@ -18,7 +18,10 @@
 //!   is not capped; only a background rollup pass waits for them, and
 //!   they for it ([`BoardCache::exclusive`]);
 //! - a date range entirely before today keeps its period blocks past new
-//!   data, until a day it read is written ([`crate::closed_days`], #516).
+//!   data, until a day it read is written ([`crate::closed_days`], #516);
+//! - a board that failed is not kept, and the failure is logged (D-071):
+//!   an intermittent failure (a query out of memory beside the others)
+//!   looked like a cache that never served the second request.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -307,10 +310,15 @@ async fn compute(
         let blocks = openlens_engine::PeriodBlocks::of(b);
         cache.inner.closed.put(key.clone(), days, since, blocks);
     }
+    // A board that failed is not kept: the next page computes it again.
+    // Said in the log, since the page alone shows it (D-071).
+    let board = board.inspect_err(|err| {
+        tracing::warn!(project, %err, "board not computed; not cached");
+    })?;
     let entry = Entry {
         generation,
         at: Instant::now(),
-        board: Arc::new(board?),
+        board: Arc::new(board),
         revenue: Arc::new(revenue),
     };
     cache.inner.computed.fetch_add(1, Ordering::Relaxed);
