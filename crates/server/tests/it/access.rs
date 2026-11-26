@@ -687,15 +687,20 @@ async fn a_cold_board_streams_its_shell_first_and_a_warm_one_does_not() {
     assert_eq!(status, StatusCode::OK);
     openlens_server::flush_now(&h.state).unwrap();
     let owner = login_cookie(&h).await;
-    // Cold: the shell with its loading line, then the board in the same page.
+    // Cold, never computed: the shell with its waiting panel (D-073), then
+    // the board in the same page.
     let cold = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
-    let loading = cold.find("page-loading").unwrap();
+    let loading = cold.find("board-waiting").unwrap();
     let kpis = cold.find("Daily active users").unwrap();
-    assert!(loading < kpis, "the loading line comes before the board");
+    assert!(loading < kpis, "the waiting panel comes before the board");
+    assert!(cold.contains("Computing the board…") && cold.contains("a few seconds"));
+    assert!(cold.contains(r#"aria-live="polite""#));
+    assert_eq!(cold.matches("<main>").count(), 1, "one page");
     assert!(cold.trim_end().ends_with("</html>"));
-    // Warm: the cached board, with no loading line.
+    // Warm: the cached board, with no waiting panel.
     let warm = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
-    assert!(warm.contains("Daily active users") && !warm.contains("page-loading"));
+    assert!(warm.contains("Daily active users") && !warm.contains("board-waiting"));
+    assert!(!warm.contains("Computing the board"));
 }
 
 /// Admin pages take the typed extractors (#339): the bearer token is the
