@@ -500,6 +500,18 @@ fn run(cli: Cli) -> Result<bool, String> {
                         json!({ "environment_rule": { "host": host, "env": env } }),
                     )),
                 )?,
+                EnvCmd::Relabel {
+                    host,
+                    days,
+                    dry_run,
+                    project,
+                } => c.call(
+                    "POST",
+                    &format!("/api/projects/{project}/environments"),
+                    Some(Body::Json(
+                        json!({ "host": host, "days": days, "dry_run": dry_run }),
+                    )),
+                )?,
                 EnvCmd::Unrule { host, project } => c.call(
                     "PATCH",
                     &format!("/api/projects/{project}"),

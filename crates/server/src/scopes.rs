@@ -77,9 +77,16 @@ pub(crate) fn required(method: &Method, path: &str) -> Scope {
     let project_itself = path
         .strip_prefix("/api/projects/")
         .is_some_and(|rest| !rest.contains('/'));
+    // Re-labelling rewrites stored events, like changing the rules (#484).
+    let relabel = *method == Method::POST
+        && path
+            .strip_prefix("/api/projects/")
+            .and_then(|rest| rest.split_once('/'))
+            .is_some_and(|(_, tail)| tail == "environments");
     if admin_area
         || (path == "/api/projects" && *method != Method::GET)
         || (project_itself && *method != Method::GET)
+        || relabel
     {
         return Scope::Admin;
     }
@@ -183,5 +190,13 @@ mod tests {
         assert_eq!(required(&Method::POST, "/api/login-links"), Scope::Admin);
         assert_eq!(required(&Method::GET, "/api/tokens"), Scope::Admin);
         assert_eq!(required(&Method::GET, "/api/projects"), Scope::Read);
+        assert_eq!(
+            required(&Method::GET, "/api/projects/a/environments"),
+            Scope::Read
+        );
+        assert_eq!(
+            required(&Method::POST, "/api/projects/a/environments"),
+            Scope::Admin
+        );
     }
 }

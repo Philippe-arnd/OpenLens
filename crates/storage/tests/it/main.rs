@@ -9,6 +9,7 @@ use openlens_event::Event;
 use openlens_storage::{FlushPolicy, Writer, clean_urls, compact, count_rows, valid_project};
 
 mod compaction;
+mod relabel;
 
 fn ev(project: &str, ts: chrono::DateTime<Utc>) -> Event {
     Event {

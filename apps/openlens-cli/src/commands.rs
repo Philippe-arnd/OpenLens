@@ -43,6 +43,22 @@ pub(super) enum EnvCmd {
         #[arg(long, default_value = "default")]
         project: String,
     },
+    /// Move a host's past events (exact or `*.suffix`) to the environment
+    /// the rules give now, after a rule changed. `--dry-run` only counts
+    /// the moves per old and new environment.
+    Relabel {
+        /// Exact host or `*.suffix`.
+        host: String,
+        /// Days back, today included (1 to 90).
+        #[arg(long, default_value_t = 30)]
+        days: i64,
+        /// Count what would move, write nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+    },
     /// Remove the rule for a host.
     Unrule {
         /// The host of the rule.

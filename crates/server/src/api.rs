@@ -25,7 +25,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/api/projects/{project}/sql", post(sql))
         .route(
             "/api/projects/{project}/environments",
-            get(crate::environments::api_list),
+            get(crate::environments::api_list).post(crate::environments::api_relabel),
         )
         .route("/api/projects/{project}/board", get(board))
         .route("/api/projects/{project}/errors", get(errors))

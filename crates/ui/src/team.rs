@@ -564,6 +564,8 @@ pub struct SettingsView<'a> {
     pub releases: &'a [String],
     /// Hosts and rules, read only for the *Environments* tab (#410).
     pub environments: Option<openlens_engine::environments::Environments>,
+    /// The dry run of a re-labelling, or why it was refused (#484).
+    pub relabel: Option<Result<openlens_engine::environments::Relabelled, String>>,
 }
 
 /// A project's alert settings as the page shows them (#256).
@@ -742,7 +744,7 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
             }
             @if tab == SettingsTab::Environments {
             @if let Some(e) = &v.environments {
-                (crate::environments::tab(&base, v.admin, e))
+                (crate::environments::tab(&base, v.admin, e, v.relabel.as_ref()))
             } @else {
                 section.card { p.muted { "The environments could not be read just now." } }
             }

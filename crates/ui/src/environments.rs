@@ -4,7 +4,9 @@
 //! which runs the engine commands the API runs.
 
 use super::*;
-use openlens_engine::environments::{Environments, LOG, NOTIFY};
+use openlens_engine::environments::{
+    Environments, LOG, MAX_RELABEL_DAYS, NOTIFY, RELABEL_DAYS, Relabelled,
+};
 
 /// A small form posting one action to the tab's handler.
 fn action_form(base: &str, action: &str, fields: &[(&str, &str)], label: &str) -> Markup {
@@ -34,7 +36,12 @@ fn env_names(id: &str, e: &Environments, ignore: bool) -> Markup {
 }
 
 /// The tab's content.
-pub(crate) fn tab(base: &str, admin: bool, e: &Environments) -> Markup {
+pub(crate) fn tab(
+    base: &str,
+    admin: bool,
+    e: &Environments,
+    relabel: Option<&Result<Relabelled, String>>,
+) -> Markup {
     let mut seen: Vec<&str> = Vec::new();
     for h in &e.hosts {
         if !seen.contains(&h.environment.as_str()) {
@@ -91,6 +98,7 @@ pub(crate) fn tab(base: &str, admin: bool, e: &Environments) -> Markup {
                 } }
             }
         }
+        @if admin { (relabel_card(base, e, relabel)) }
         section.card.wide #env-aliases {
             h2.sky { (icon("route")) "Aliases and visibility" }
             p.small { "An alias stores an environment the app sends under another name (" code { "live-eu" } " → " code { "production" } "), on top of the usual ones (" code { "prod" } ", " code { "stage" } ", " code { "dev" } "); " code { "ignore" } " drops its events. A hidden environment keeps its events and stays readable by name (" code { "?env=" } "), but leaves the environment selector. Production is never aliased or hidden." }
@@ -159,7 +167,54 @@ pub(crate) fn tab(base: &str, admin: bool, e: &Environments) -> Markup {
                     } }
                 } }
             }
-            p.muted.small { "Agents: " code { "openlens-cli env list" } ", " code { "env rule <host> <env>" } ", " code { "env alias <from> <to>" } ", " code { "env hide <env>" } ", " code { "env monitor <env> <url> --level notify" } ", or the MCP tool " code { "environments" } "." }
+            p.muted.small { "Agents: " code { "openlens-cli env list" } ", " code { "env rule <host> <env>" } ", " code { "env relabel <host> --dry-run" } ", " code { "env alias <from> <to>" } ", " code { "env hide <env>" } ", " code { "env monitor <env> <url> --level notify" } ", or the MCP tool " code { "environments" } "." }
+        }
+    }
+}
+
+/// *Re-label past events* (#484): a dry run first (a plain GET of the
+/// page), then a confirm button that posts the rewrite.
+fn relabel_card(
+    base: &str,
+    e: &Environments,
+    relabel: Option<&Result<Relabelled, String>>,
+) -> Markup {
+    let (host, days) = match relabel {
+        Some(Ok(r)) => (r.host.clone(), r.days),
+        _ => (String::new(), RELABEL_DAYS),
+    };
+    html! {
+        section.card.wide #env-relabel {
+            h2.violet { (icon("route")) "Re-label past events" }
+            p.small { "Rules apply to new events. After changing a host's rule, move that host's events of the last days (at most " (MAX_RELABEL_DAYS) ") to the environment the rules give now. Bots stay bots, and a host the rules ignore keeps its events. What the app set itself moves too: check the preview first." }
+            form.settings method="get" action={ (base) "/environments" } {
+                label { "Host " input type="text" name="relabel" required maxlength="253" value=(host) placeholder="app.example.com or *.example.com" list="env-rule-hosts"; }
+                datalist id="env-rule-hosts" { @for r in &e.rules { option value=(r.host) {} } }
+                label { "Days " input type="number" name="days" min="1" max=(MAX_RELABEL_DAYS) value=(days); }
+                button.ghost type="submit" { "Preview" }
+            }
+            @match relabel {
+                Some(Err(msg)) => { p.alert role="alert" { (msg) } }
+                Some(Ok(r)) if r.events == 0 => {
+                    p.notice role="status" { "Nothing to move: the events of " span.mono { (r.host) } " over the last " (r.days) " days already have the environment the rules give." }
+                }
+                Some(Ok(r)) => {
+                    p.notice role="status" { (r.events) " event(s) of " span.mono { (r.host) } " over the last " (r.days) " days would move:" }
+                    div.table-scroll { table.plain {
+                        thead { tr { th { "Stored as" } th { "Moves to" } (crate::glossary::th_num("Events")) } }
+                        tbody { @for m in &r.moves {
+                            tr { td { (m.from) } td { (m.to) } td.num { (m.events) } }
+                        } }
+                    } }
+                    form.inline method="post" action={ (base) "/environments" } {
+                        input type="hidden" name="action" value="relabel";
+                        input type="hidden" name="host" value=(r.host);
+                        input type="hidden" name="days" value=(r.days);
+                        button type="submit" { "Re-label " (r.events) " event(s)" }
+                    }
+                }
+                None => {}
+            }
         }
     }
 }

@@ -298,6 +298,20 @@ pub fn drop_project(root: &Path, project: &str) -> Result<()> {
     Ok(())
 }
 
+/// Delete one day's rollup, because its events were rewritten (#484):
+/// the next pass computes it again from them. The caller holds the
+/// maintenance lock.
+pub(crate) fn forget_day(root: &Path, project: &str, day: NaiveDate) -> Result<()> {
+    let dir = day_dir(root, project, day)?;
+    if dir.is_dir() {
+        fs::remove_dir_all(&dir)?;
+        if let Some(parent) = dir.parent() {
+            sync_dir(parent)?;
+        }
+    }
+    Ok(())
+}
+
 /// Remove `ids` from the project's rollups. A day that still has its
 /// events is deleted, to be rolled up again from them; an older day keeps
 /// its rollup without those people's rows in [`PERSON_TABLES`]. Returns
