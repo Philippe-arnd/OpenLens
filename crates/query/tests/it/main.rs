@@ -8,6 +8,8 @@ use openlens_event::Event;
 use openlens_query::{Limits, QueryEngine};
 use openlens_storage::{FlushPolicy, Writer};
 
+mod person_day;
+
 fn ev(project: &str, role: &str, days_ago: i64) -> Event {
     let ts = Utc::now() - Duration::days(days_ago);
     Event {
@@ -484,7 +486,10 @@ async fn rollups_match_raw_queries_in_every_zone() {
 
     let days = ["2026-03-01", "2026-03-02"];
     for day in days {
-        let batches = q.rollup_day("a", day).await.unwrap();
+        let batches = q
+            .rollup_day("a", day, None, &Default::default())
+            .await
+            .unwrap();
         let named: Vec<(&str, _)> = batches.iter().map(|(n, b)| (*n, b.clone())).collect();
         let d = NaiveDate::parse_from_str(day, "%Y-%m-%d").unwrap();
         let g = openlens_storage::rollup::generation();
@@ -616,7 +621,10 @@ async fn page_rollups_match_the_raw_clicks_and_scrolls() {
     w.append(&evs).unwrap();
     w.flush().unwrap();
     let q = QueryEngine::new(dir.path(), Limits::default());
-    let batches = q.rollup_day("a", "2026-03-01").await.unwrap();
+    let batches = q
+        .rollup_day("a", "2026-03-01", None, &Default::default())
+        .await
+        .unwrap();
     let d = NaiveDate::parse_from_str("2026-03-01", "%Y-%m-%d").unwrap();
     let g = openlens_storage::rollup::generation();
     assert!(openlens_storage::rollup::write(dir.path(), "a", d, g, &batches).unwrap());
