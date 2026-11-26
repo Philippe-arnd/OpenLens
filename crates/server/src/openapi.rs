@@ -180,6 +180,12 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
     ),
     (
         "GET",
+        "/api/projects/{project}/releases",
+        "read",
+        "Releases per environment over 90 days (`env` for one): state (rolling out, live, superseded, rolled back) from the share of daily users, first and last seen, users and time in staging.",
+    ),
+    (
+        "GET",
         "/api/projects/{project}/timeline",
         "read",
         "Releases, map changes and notes.",

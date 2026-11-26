@@ -14,6 +14,7 @@ mod board_people;
 mod commands;
 mod map_lookups;
 mod map_shape;
+mod releases;
 mod stored_totals;
 mod typed_facts;
 mod vitals;

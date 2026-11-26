@@ -34,6 +34,7 @@ pub mod mapshape;
 mod pages;
 mod people;
 pub mod relations;
+pub mod releases;
 pub mod replay_rate;
 mod revenue;
 pub mod rollups;
