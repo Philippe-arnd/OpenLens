@@ -173,7 +173,7 @@ pub(crate) fn key_for(route: &str) -> String {
 pub struct Usage {
     /// (feature resolved or None, current period, events, users).
     pub by_feature: Vec<(Option<String>, bool, i64, i64)>,
-    /// (success event, current period, users).
+    /// (feature, current period, users who reached its success event).
     pub success: Vec<(String, bool, i64)>,
     /// Pages and clicks, last 30 days: (path, events, feature resolved).
     pub paths: Vec<(String, i64, bool)>,
@@ -183,6 +183,8 @@ pub struct Usage {
     pub pairs: Vec<(String, String)>,
     /// What each session did with the features (#283).
     pub sessions: crate::mapsessions::Sessions,
+    /// The relations' counts (#483); `None`: taken from `sessions`.
+    pub relations: Option<crate::relations::Counts>,
     /// The newest release's routes (#283).
     pub drift: crate::drift::Observed,
 }
@@ -243,15 +245,14 @@ pub fn assess(m: &FeatureMap, u: &Usage) -> MapHealth {
             r.prev_users += users;
         }
     }
-    for (ev, cur, users) in &u.success {
-        for (i, f) in m.features.iter().enumerate() {
-            if f.success.as_deref() == Some(ev.as_str()) {
-                if *cur {
-                    rows[i].success_users += users;
-                } else {
-                    rows[i].prev_success_users += users;
-                }
-            }
+    for (feat, cur, users) in &u.success {
+        let Some(r) = pos.get(feat.as_str()).map(|i| &mut rows[*i]) else {
+            continue;
+        };
+        if *cur {
+            r.success_users += users;
+        } else {
+            r.prev_success_users += users;
         }
     }
     let any_data = u.by_feature.iter().any(|(_, cur, n, _)| *cur && *n > 0);
@@ -345,7 +346,10 @@ pub fn assess(m: &FeatureMap, u: &Usage) -> MapHealth {
     // A new route is reported as drift, the more specific finding.
     unmapped.retain(|r, _| !drift.iter().any(|(d, _)| d == r));
     findings.extend(drift.into_iter().map(|(_, f)| f));
-    out.relations = crate::relations::infer(m, &u.sessions);
+    out.relations = match &u.relations {
+        Some(c) => crate::relations::from_counts(m, c),
+        None => crate::relations::infer(m, &u.sessions),
+    };
     findings.extend(crate::mapshape::findings(m, &u.sessions, &out.relations));
     let mut unmapped: Vec<(String, i64)> = unmapped.into_iter().collect();
     unmapped.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
@@ -515,35 +519,41 @@ pub fn assess(m: &FeatureMap, u: &Usage) -> MapHealth {
     out
 }
 
-/// Measure the map on the last 60 days and assess it.
+/// Measure the map on the last 60 days and assess it, every day from the
+/// events (see [`map_health_in`] to read the rollups).
 pub async fn map_health(
     q: &QueryEngine,
     project: &str,
     m: &FeatureMap,
     f: &Filters,
 ) -> Result<MapHealth> {
+    map_health_in(q, project, m, None, f).await
+}
+
+/// [`map_health`] for the map version `version`: the closed days rolled
+/// up with it are read from the rollups (#483, D-054).
+pub async fn map_health_in(
+    q: &QueryEngine,
+    project: &str,
+    m: &FeatureMap,
+    version: Option<i64>,
+    f: &Filters,
+) -> Result<MapHealth> {
     let q = &q.with_params(&f.params()?);
+    let days = crate::mapdays::MapDays::load(q, project, version).await?;
+    measure(q, project, m, &days, f).await
+}
+
+/// Measure and assess, with `q` already bound to the filters' values.
+async fn measure(
+    q: &QueryEngine,
+    project: &str,
+    m: &FeatureMap,
+    days: &crate::mapdays::MapDays,
+    f: &Filters,
+) -> Result<MapHealth> {
     let src = source(Some(m));
-    let w60 = f.clause(60)?;
     let w30 = f.clause(30)?;
-    let cur = "timestamp >= now() - INTERVAL '30 days'";
-    let by_feature = format!(
-        "SELECT feature, {cur} AS cur, count(*) AS n, count(DISTINCT distinct_id) AS u \
-         FROM {src} WHERE {w60} GROUP BY feature, {cur}"
-    );
-    let successes: Vec<String> = m
-        .features
-        .iter()
-        .filter_map(|x| x.success.clone())
-        .filter_map(|s| crate::lit(&s).ok())
-        .collect();
-    let success = (!successes.is_empty()).then(|| {
-        format!(
-            "SELECT event, {cur} AS cur, count(DISTINCT distinct_id) AS u FROM {src} \
-             WHERE {w60} AND event IN ({}) GROUP BY event, {cur}",
-            successes.join(", ")
-        )
-    });
     let paths = format!(
         "SELECT path, feature IS NOT NULL AS mapped, count(*) AS n FROM {src} \
          WHERE {w30} AND event IN ('$pageview', '$click') AND path IS NOT NULL \
@@ -571,26 +581,13 @@ pub async fn map_health(
         .filter(|x| with_area || laddered.contains(x.key.as_str()))
         .filter_map(|x| crate::lit(&x.key).ok())
         .collect();
-    let pairs = (!pair_keys.is_empty()).then(|| {
-        format!(
-            "SELECT DISTINCT distinct_id, feature FROM {src} WHERE {w30} AND feature IN ({}) LIMIT 200000",
-            pair_keys.join(", ")
-        )
-    });
-    let (a, b, c) = futures::join!(
-        q.sql(project, &by_feature),
-        q.sql(project, &paths),
-        q.sql(project, &tagged)
-    );
     let mut u = Usage::default();
-    for r in &a?.rows {
-        let c = r
-            .get("cur")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
-        u.by_feature
-            .push((text(r, "feature"), c, int(r, "n"), int(r, "u")));
-    }
+    let (b, c, people) = futures::join!(
+        q.sql(project, &paths),
+        q.sql(project, &tagged),
+        days.usage(q, project, m, f, &pair_keys, &mut u)
+    );
+    people?;
     for r in &b?.rows {
         if let Some(p) = text(r, "path") {
             let mapped = r
@@ -605,29 +602,12 @@ pub async fn map_health(
             u.tagged.push((k, int(r, "n")));
         }
     }
-    if let Some(sql) = success {
-        for r in &q.sql(project, &sql).await?.rows {
-            if let Some(e) = text(r, "event") {
-                let c = r
-                    .get("cur")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false);
-                u.success.push((e, c, int(r, "u")));
-            }
-        }
-    }
-    if let Some(sql) = pairs {
-        for r in &q.sql(project, &sql).await?.rows {
-            if let (Some(d), Some(k)) = (text(r, "distinct_id"), text(r, "feature")) {
-                u.pairs.push((d, k));
-            }
-        }
-    }
-    let (s, d) = futures::join!(
+    let (s, d, rel) = futures::join!(
         crate::mapsessions::load(q, project, m, f),
-        crate::drift::load(q, project, m, f)
+        crate::drift::load(q, project, m, f),
+        days.relations(q, project, m, f)
     );
-    (u.sessions, u.drift) = (s?, d?);
+    (u.sessions, u.drift, u.relations) = (s?, d?, Some(rel?));
     Ok(assess(m, &u))
 }
 
@@ -718,7 +698,15 @@ pub async fn feature_context(
         return Ok(None);
     };
     let def = m.features.iter().find(|x| x.key == key).cloned();
-    let health = map_health(q, project, m, f).await?;
+    // The map's stored version, when `m` is one: its rolled-up days are
+    // read from the rollups (#483, D-054).
+    let version = history
+        .iter()
+        .filter(|h| h.map == *m)
+        .map(|h| h.version)
+        .max();
+    let days = crate::mapdays::MapDays::load(q, project, version).await?;
+    let health = measure(q, project, m, &days, f).await?;
     let src = source(Some(m));
     let w30 = f.clause(30)?;
     let k = crate::lit(&key)?;
@@ -726,12 +714,7 @@ pub async fn feature_context(
         .as_ref()
         .and_then(|d| d.success.as_deref())
         .and_then(|s| crate::lit(s).ok());
-    let roles = format!(
-        "SELECT coalesce(role, '(anonymous)') AS role, count(DISTINCT distinct_id) AS u, \
-         count(DISTINCT CASE WHEN event = {} THEN distinct_id END) AS s \
-         FROM {src} WHERE {w30} AND feature = {k} GROUP BY 1 ORDER BY u DESC LIMIT 20",
-        succ.as_deref().unwrap_or("NULL")
-    );
+    let roles = days.roles_sql(m, f, &key, succ.is_some())?;
     let pages = format!(
         "SELECT path, count(*) AS n FROM {src} WHERE {w30} AND feature = {k} AND path IS NOT NULL \
          GROUP BY path ORDER BY n DESC LIMIT 10"
@@ -886,7 +869,7 @@ mod tests {
             (Some("old".into()), false, 12, 3),
             (None, true, 200, 20),
         ];
-        u.success = vec![("doc_read".into(), true, 40), ("shared".into(), true, 10)];
+        u.success = vec![("docs".into(), true, 40), ("share".into(), true, 10)];
         u.paths = vec![
             ("/docs/1".into(), 400, true),
             ("/docs/1/edit".into(), 250, true),
@@ -956,7 +939,7 @@ mod tests {
         .unwrap();
         let mut u = Usage::default();
         u.by_feature = vec![(Some("a".into()), true, 100, 30)];
-        u.success = vec![("done".into(), true, 12)];
+        u.success = vec![("a".into(), true, 12)];
         u.paths = vec![("/a".into(), 100, true)];
         let h = assess(&m, &u);
         assert_eq!(h.score, 100, "{:?}", h.findings);

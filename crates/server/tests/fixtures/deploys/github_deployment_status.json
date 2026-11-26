@@ -1,0 +1,29 @@
+{
+  "action": "created",
+  "deployment_status": {
+    "id": 1,
+    "state": "success",
+    "environment": "staging",
+    "description": "Deployed",
+    "created_at": "2025-11-24T16:00:00Z",
+    "updated_at": "2025-11-24T16:00:05Z"
+  },
+  "deployment": {
+    "id": 1,
+    "sha": "c0ffee0123456789c0ffee0123456789c0ffee01",
+    "ref": "main",
+    "task": "deploy",
+    "environment": "staging",
+    "created_at": "2025-11-24T15:59:00Z",
+    "updated_at": "2025-11-24T16:00:05Z"
+  },
+  "repository": {
+    "id": 1,
+    "name": "app",
+    "full_name": "example/app"
+  },
+  "sender": {
+    "login": "example-bot",
+    "type": "Bot"
+  }
+}

@@ -173,6 +173,11 @@ impl Tools for OpenLensTools {
                 input_schema: json!({"type":"object","properties":with(json!({"key":{"type":"string"}})),"required":["key"]}),
             },
             ToolSpec {
+                name: "feature_relations",
+                description: "Which features are used together, from every session of the last 30 days: per pair, the sessions using both, the lift (how many times more often than chance), which one usually comes first, and whether using the first raises the success of the second (leads to value, significant at p < 0.05). Pass `feature` to keep the pairs it is part of.",
+                input_schema: json!({"type":"object","properties":with(json!({"feature":{"type":"string","description":"A feature key (optional)"}}))}),
+            },
+            ToolSpec {
                 name: "suggest_map_changes",
                 description: "Changes to make to openlens.features.yaml, ranked by impact, each with its evidence and a YAML patch. Nothing is applied: edit the file, then feature_map_push.",
                 input_schema: json!({"type":"object","properties":with(json!({"limit":{"type":"integer","minimum":1,"maximum":50}}))}),
@@ -196,8 +201,13 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "releases",
-                description: "The app's releases per environment over 90 days: state (rolling out, live at 95 % or more of the latest day's users, superseded by a newer release, rolled back when an older release took the majority back), share of the latest day, first and last seen, users, events, and for production the time in staging (from the same name or build fingerprint first seen in staging). Optional env for one environment.",
+                description: "The app's releases per environment over 90 days: state (rolling out, live at 95 % or more of the latest day's users, superseded by a newer release, rolled back when an older release took the majority back), share of the latest day, first and last seen, users, events, and for production the time in staging (from the same name or build fingerprint first seen in staging). With the deploy hook: each release's deploy time and last deploy status, the deploys recorded, and releases with no traffic whose deploy failed ('failed'), was rolled back, or is under way ('deploying'). Optional env for one environment.",
                 input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"}}))}),
+            },
+            ToolSpec {
+                name: "deploy_hook",
+                description: "Make or rotate the app's deploy hook URL (/hooks/deploy/SECRET), shown in this result only: the previous URL stops working at once. Paste it in the platform's deploy notifications (Coolify, Vercel, Netlify, Render, GitHub deployment_status, Argo CD, Flux), or post {status: started|succeeded|failed|rolled_back, release?, commit?, environment?, at?} to it from a deploy step; add ?env=NAME when the platform does not say the environment. Deploys then show in `releases`.",
+                input_schema: json!({"type":"object","properties":proj}),
             },
             ToolSpec {
                 name: "create_ticket",
@@ -398,6 +408,25 @@ impl Tools for OpenLensTools {
                 )?;
                 ok_or(st, v)
             }
+            "feature_relations" => {
+                let feature = s(args, "feature");
+                if let Some(k) = feature
+                    .as_deref()
+                    .filter(|k| !openlens_featuremap::valid_key(k))
+                {
+                    return Err(format!("`{k}` is not a feature key"));
+                }
+                let (st, v) = c.call(
+                    "GET",
+                    &format!("/api/projects/{}/feature-map/relations", project(args)),
+                    None,
+                )?;
+                let mut v = ok_or(st, v)?;
+                if let (Some(k), Some(list)) = (feature, v["relations"].as_array_mut()) {
+                    list.retain(|r| r["first"] == k.as_str() || r["then"] == k.as_str());
+                }
+                Ok(v)
+            }
             "goals" => {
                 let (st, v) = c.call(
                     "GET",
@@ -445,6 +474,14 @@ impl Tools for OpenLensTools {
                     "POST",
                     &format!("/api/projects/{}/tickets", project(args)),
                     Some(Body::Json(body)),
+                )?;
+                ok_or(st, v)
+            }
+            "deploy_hook" => {
+                let (st, v) = c.call(
+                    "POST",
+                    &format!("/api/projects/{}/deploy-hook", project(args)),
+                    None,
                 )?;
                 ok_or(st, v)
             }

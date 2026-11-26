@@ -1,0 +1,29 @@
+{
+  "id": "evt_example2",
+  "type": "deployment.error",
+  "createdAt": 1764000600000,
+  "payload": {
+    "team": {
+      "id": null
+    },
+    "user": {
+      "id": "user_example"
+    },
+    "deployment": {
+      "id": "dpl_example2",
+      "meta": {
+        "githubCommitSha": "1234567890abcdef1234567890abcdef12345678"
+      },
+      "url": "example-app-def456.vercel.app",
+      "name": "example-app"
+    },
+    "target": null,
+    "project": {
+      "id": "prj_example"
+    },
+    "plan": "hobby",
+    "regions": [
+      "iad1"
+    ]
+  }
+}

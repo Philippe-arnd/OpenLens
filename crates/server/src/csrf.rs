@@ -7,8 +7,9 @@
 //! browser that does not send Fetch Metadata, when its `Origin` is this
 //! server. A request with neither header does not come from a browser
 //! form and cannot carry a victim's cookie across sites, so it is let
-//! through. Ingestion (`/capture`, `/e`, `/r`) and the bearer API
-//! (`/api/…`) are cross-site by design and not checked here.
+//! through. Ingestion (`/capture`, `/e`, `/r`), the deploy hook
+//! (`/hooks/…`) and the bearer API (`/api/…`) are cross-site by design
+//! and not checked here.
 
 use axum::extract::Request;
 use axum::http::{Method, StatusCode};
@@ -17,7 +18,9 @@ use axum::response::Response;
 
 /// Paths that take cross-site requests on purpose.
 fn exempt(path: &str) -> bool {
-    matches!(path, "/capture" | "/e" | "/r") || path.starts_with("/api/")
+    matches!(path, "/capture" | "/e" | "/r")
+        || path.starts_with("/api/")
+        || path.starts_with("/hooks/")
 }
 
 /// Whether a state-changing request may proceed.

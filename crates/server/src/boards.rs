@@ -1,8 +1,8 @@
 //! The board, computed once per data generation and shared (#291).
 //!
-//! Computing a board reads up to 90 days of events and runs about twenty
-//! queries: seconds, and hundreds of MB at a few million events. Every page
-//! that shows part of it used to compute it again. Here:
+//! Computing a board runs about twenty queries over up to 90 days of
+//! rollups and events: seconds at a few million events. Every page that
+//! shows part of it used to compute it again. Here:
 //!
 //! - a result (the board and the revenue shown on it, #480) is kept per
 //!   (project, filters, map version) and reused until
@@ -13,7 +13,10 @@
 //!   one recomputation runs in the background, so a captured event shows on
 //!   the board within about 20 s (10 s flush + [`STALE`]);
 //! - concurrent requests for the same key wait for the same computation;
-//! - at most [`PARALLEL`] boards are computed at once, whatever the keys.
+//! - boards of different keys are computed side by side: none holds a
+//!   copy of its events in memory any more (#502, D-051), so their number
+//!   is not capped; only a background rollup pass waits for them, and
+//!   they for it ([`BoardCache::exclusive`]).
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -31,8 +34,6 @@ const STALE: Duration = Duration::from_secs(10);
 const MAX_AGE: Duration = Duration::from_secs(300);
 /// Results kept, all projects and filters together.
 const CAPACITY: usize = 64;
-/// Boards computed at the same time.
-const PARALLEL: usize = 2;
 
 type Key = (String, String, i64);
 
@@ -64,7 +65,9 @@ struct Inner {
     flights: Mutex<HashMap<Key, Arc<tokio::sync::Mutex<()>>>>,
     /// Keys refreshed in the background right now.
     refreshing: Mutex<std::collections::HashSet<Key>>,
-    permits: tokio::sync::Semaphore,
+    /// Read by every board being computed, written by a rollup pass
+    /// ([`BoardCache::exclusive`]).
+    quiet: tokio::sync::RwLock<()>,
 }
 
 impl Default for BoardCache {
@@ -76,7 +79,7 @@ impl Default for BoardCache {
                 entries: Mutex::new(HashMap::new()),
                 flights: Mutex::new(HashMap::new()),
                 refreshing: Mutex::new(std::collections::HashSet::new()),
-                permits: tokio::sync::Semaphore::new(PARALLEL),
+                quiet: tokio::sync::RwLock::new(()),
             }),
         }
     }
@@ -121,15 +124,14 @@ impl BoardCache {
         self.len() == 0
     }
 
-    /// Wait until no board is being computed, and hold every compute slot
-    /// until the returned permit drops. Background rollups run under it,
-    /// so a rollup pass and a board never split the query memory pool
-    /// between them (#444). The semaphore is fair: boards asked for after
-    /// this call wait for the permit to drop, and this call is never
+    /// Wait until no board is being computed, and keep boards from
+    /// starting until the returned guard drops. Background rollups run
+    /// under it, so a rollup pass and a board never split the query memory
+    /// pool between them (#444). The lock is fair: boards asked for after
+    /// this call wait for the guard to drop, and this call is never
     /// starved by a stream of boards.
-    pub async fn exclusive(&self) -> Option<tokio::sync::SemaphorePermit<'_>> {
-        let all = u32::try_from(PARALLEL).unwrap_or(u32::MAX);
-        self.inner.permits.acquire_many(all).await.ok()
+    pub async fn exclusive(&self) -> tokio::sync::RwLockWriteGuard<'_, ()> {
+        self.inner.quiet.write().await
     }
 
     /// How many boards were actually computed since the start.
@@ -269,15 +271,9 @@ async fn compute(
     key: Key,
 ) -> openlens_engine::Result<Entry> {
     let cache = &state.boards;
-    let _permit = cache.inner.permits.acquire().await.ok();
+    let _quiet = cache.inner.quiet.read().await;
     let (board, revenue) = tokio::join!(
-        Box::pin(openlens_engine::board_shared(
-            &state.query,
-            project,
-            f,
-            map,
-            generation,
-        )),
+        Box::pin(openlens_engine::board(&state.query, project, f, map)),
         openlens_engine::revenue(&state.query, project, map.map(|(m, _)| m), f)
     );
     let revenue = revenue.map_err(|err| {

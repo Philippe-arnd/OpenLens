@@ -1,0 +1,33 @@
+{
+  "id": "evt_example1",
+  "type": "deployment.succeeded",
+  "createdAt": 1764000000000,
+  "payload": {
+    "team": {
+      "id": null
+    },
+    "user": {
+      "id": "user_example"
+    },
+    "deployment": {
+      "id": "dpl_example1",
+      "meta": {
+        "githubCommitSha": "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432"
+      },
+      "url": "example-app-abc123.vercel.app",
+      "name": "example-app"
+    },
+    "links": {
+      "deployment": "https://vercel.com/example/example-app/dpl_example1",
+      "project": "https://vercel.com/example/example-app"
+    },
+    "target": "production",
+    "project": {
+      "id": "prj_example"
+    },
+    "plan": "hobby",
+    "regions": [
+      "iad1"
+    ]
+  }
+}

@@ -18,6 +18,7 @@ mod board_people;
 mod board_sessions;
 pub mod churn;
 pub mod commands;
+pub mod deploys;
 mod digest;
 mod drift;
 pub mod environments;
@@ -29,6 +30,7 @@ pub mod forms;
 pub mod goals;
 pub mod inforce;
 mod insights;
+mod mapdays;
 pub mod maphealth;
 pub mod mapsessions;
 pub mod mapshape;
@@ -45,7 +47,7 @@ mod variants;
 pub mod vital_parts;
 pub mod vitals;
 pub use acquisition::{AcquisitionRow, Touch, acquisition};
-pub use board::{board, board_shared, filter_options};
+pub use board::{board, filter_options};
 pub use churn::{AtRisk, ChurnReport, churn};
 pub use digest::{Delta, Digest, digest, digest_markdown};
 pub use errors::{ErrorGroup, error_groups};
@@ -54,7 +56,8 @@ pub use explore::*;
 pub use flows::{Flow, FlowLink, FlowQuery, flows};
 pub use inforce::MapAt;
 pub use insights::{CohortStats, FlagCohort, Funnel, FunnelStep, Insight, Journey, Readiness};
-pub use maphealth::{FeatureContext, MapHealth, feature_context, map_health};
+pub use mapdays::feature_relations;
+pub use maphealth::{FeatureContext, MapHealth, feature_context, map_health, map_health_in};
 pub use pages::{
     ClickMap, Hotspot, MAP_COLUMNS, MAP_ROW, PageStats, SurveyResults, click_map, pages,
     sessions_on_path, survey_results,

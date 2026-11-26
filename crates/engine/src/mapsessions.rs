@@ -1,6 +1,7 @@
 //! What each session did with the features of the map, last 30 days
-//! (#283): the input of the inferred relations and of the split, merge
-//! and step order suggestions. One bounded read, like `flows.rs`.
+//! (#283): the input of the split, merge and step order suggestions (the
+//! relations are added up in SQL, `mapdays`, #483). One bounded read, like
+//! `flows.rs`.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
