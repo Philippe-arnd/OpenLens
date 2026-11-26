@@ -595,7 +595,7 @@ pub(crate) async fn nav_layer(
     } else {
         None
     };
-    let r = NAV_PROJECT.scope(nav, next.run(req)).await;
+    let r = crate::icon::with_dir(&state, NAV_PROJECT.scope(nav, next.run(req))).await;
     match visited {
         Some(id)
             if r.status().is_success()
@@ -604,6 +604,7 @@ pub(crate) async fn nav_layer(
                     .and_then(|v| v.to_str().ok())
                     .is_some_and(|v| v.starts_with("text/html")) =>
         {
+            crate::icon::fetch_if_missing(&state, &id);
             with_cookie(
                 r,
                 &format!("ol_last={id}; Path=/; SameSite=Lax; HttpOnly; Max-Age=31536000"),
