@@ -17,6 +17,7 @@ use serde::de::DeserializeOwned;
 
 use crate::{Board, Filters};
 
+pub mod alerts;
 pub mod goals;
 
 /// Who may run a command, in the terms of the server's access policy
@@ -77,7 +78,19 @@ pub const REGISTRY: &[Spec] = &[
     spec::<goals::Delete>(),
     spec::<goals::SetObjective>(),
     spec::<goals::DeleteObjective>(),
+    spec::<alerts::GetStatus>(),
+    spec::<alerts::GetUptime>(),
+    spec::<alerts::GetSettings>(),
+    spec::<alerts::SetSettings>(),
+    spec::<alerts::Test>(),
 ];
+
+/// A 12-character id from `s` (the first bytes of its SHA-256, in hex).
+pub(crate) fn short_hash(s: &str) -> String {
+    use sha2::Digest;
+    let h = hex::encode(sha2::Sha256::digest(s.as_bytes()));
+    h.get(..12).unwrap_or(&h).to_owned()
+}
 
 /// Who runs a command, beyond the access level the adapter checked.
 #[derive(Debug, Clone, Default)]
@@ -125,6 +138,19 @@ pub trait Host: Sync {
     /// What happened in the project over the last `days` (releases first
     /// seen, changes, alerts, notes).
     fn changes(&self, project: &str, releases: &[(String, String)], days: i64) -> Vec<Change>;
+    /// The alert level of one of the project's environments (`notify` or
+    /// `log`, #410), from the rules the host keeps.
+    fn alert_level(&self, project: &str, env: &str) -> String;
+    /// Send one alert message on every channel the project set (email,
+    /// webhook, ntfy), now: what was tried and how it went.
+    fn send_alert(
+        &self,
+        project: &str,
+        title: &str,
+        body: &str,
+        rule: &str,
+        resolved: bool,
+    ) -> impl Future<Output = Vec<alerts::Delivery>> + Send;
 }
 
 /// Something that happened in a project, on the timeline.

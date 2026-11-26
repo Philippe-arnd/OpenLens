@@ -437,7 +437,7 @@ async fn board_page(
         if admin {
             b.setup = crate::settings::setup_left(&state, &p.id);
         }
-        let st = crate::alerts::status(&state, &p.id);
+        let st = openlens_engine::commands::alerts::status(&state.meta, &p.id);
         if st.state == "down" {
             b.app_down = st.open.first().map(|(rule, since, _)| {
                 let when = chrono::DateTime::from_timestamp(*since, 0)
