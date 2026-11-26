@@ -36,6 +36,7 @@ mod internal;
 mod rebatch;
 mod retry;
 mod rollup;
+pub use openlens_storage::rollup::last_closed;
 pub use rollup::DayFeatures;
 mod typed;
 pub use aggregate::MIN_USERS;

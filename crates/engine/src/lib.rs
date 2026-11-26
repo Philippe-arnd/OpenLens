@@ -14,6 +14,7 @@ use serde_json::{Map, Value};
 
 mod acquisition;
 mod board;
+mod board_people;
 pub mod churn;
 mod digest;
 mod drift;
@@ -167,9 +168,12 @@ impl Filters {
     }
 
     fn clause(&self, days: i64) -> Result<String> {
-        let since = (Utc::now() - Duration::days(days))
-            .format("%Y-%m-%d")
-            .to_string();
+        self.clause_at(days, Utc::now())
+    }
+
+    /// [`Filters::clause`], with the window's first day taken at `now`.
+    fn clause_at(&self, days: i64, now: chrono::DateTime<Utc>) -> Result<String> {
+        let since = (now - Duration::days(days)).format("%Y-%m-%d").to_string();
         // The values are placeholders, filled from `params()` (#310): the
         // engine runs every query of a function on `q.with_params`.
         let mut w = format!(
