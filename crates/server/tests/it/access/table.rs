@@ -169,6 +169,7 @@ pub(super) const ROUTES: &[(&str, &str, Access)] = &[
     ("GET", "/l/{token}", Public),
     ("POST", "/l/{token}", Public),
     ("GET", "/p/{project}", Read),
+    ("GET", "/p/{project}/go", Read),
     // A long board in the background (#515): any role may run one, and
     // only its starter sees it.
     ("POST", "/p/{project}/board/jobs", Shared),
