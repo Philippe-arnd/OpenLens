@@ -153,7 +153,7 @@ jobs:
           cat "$DIR/compose.yaml"
           grep -q "image: $LOCAL" "$DIR/compose.yaml"
           docker compose -f "$DIR/compose.yaml" up -d --wait --wait-timeout 120
-          curl -fsS localhost:8686/healthz
+          curl -fsS --max-time 5 localhost:8686/healthz
       - name: nothing new, nothing done
         run: deploy/docker/openlens-compose-update "$DIR"
       - name: a new image in the channel is pulled and runs
@@ -166,7 +166,7 @@ jobs:
           deploy/docker/openlens-compose-update "$DIR"
           running=$(docker inspect -f '{{.Image}}' "$(docker compose -f "$DIR/compose.yaml" ps -q openlens)")
           [ "$running" = "$new" ] || { echo "::error::still on $running, expected $new"; exit 1; }
-          curl -fsS localhost:8686/healthz
+          curl -fsS --max-time 5 localhost:8686/healthz
       - name: a crashing image is rolled back and remembered
         run: |
           good=$(docker image inspect -f '{{.Id}}' "$LOCAL")
@@ -180,7 +180,7 @@ jobs:
           if deploy/docker/openlens-compose-update "$DIR"; then echo "::error::a crashing image must fail the update"; exit 1; fi
           running=$(docker inspect -f '{{.Image}}' "$(docker compose -f "$DIR/compose.yaml" ps -q openlens)")
           [ "$running" = "$good" ] || { echo "::error::not rolled back: $running"; exit 1; }
-          curl -fsS localhost:8686/healthz
+          curl -fsS --max-time 5 localhost:8686/healthz
           grep -qxF "$bad" "$DIR/.openlens-failed-images"
           # The next run waits for another image instead of trying it again.
           deploy/docker/openlens-compose-update "$DIR"
@@ -209,8 +209,8 @@ jobs:
           sed -E "s#image: ghcr.io/philippe-arnd/openlens:.*#image: $LOCAL#" deploy/swarm/openlens.yaml > "$RUNNER_TEMP/stack.yaml"
           grep -q "image: $LOCAL" "$RUNNER_TEMP/stack.yaml"
           docker stack deploy -c "$RUNNER_TEMP/stack.yaml" openlens
-          for _ in $(seq 1 90); do curl -fsS localhost:8686/healthz && break; sleep 2; done
-          curl -fsS localhost:8686/healthz
+          for _ in $(seq 1 90); do curl -fsS --max-time 5 localhost:8686/healthz && break; sleep 2; done
+          curl -fsS --max-time 5 localhost:8686/healthz
       - name: the cron line of docs/deploy/swarm.md brings a new image
         run: |
           before=$(docker service inspect "$SVC" -f '{{.Spec.TaskTemplate.ContainerSpec.Image}}')
@@ -221,8 +221,8 @@ jobs:
           echo "$before -> $after"
           [ "$before" != "$after" ]
           [ "$(docker service inspect "$SVC" -f '{{.UpdateStatus.State}}')" = completed ]
-          for _ in $(seq 1 60); do curl -fsS localhost:8686/healthz && break; sleep 2; done
-          curl -fsS localhost:8686/healthz
+          for _ in $(seq 1 60); do curl -fsS --max-time 5 localhost:8686/healthz && break; sleep 2; done
+          curl -fsS --max-time 5 localhost:8686/healthz
           echo "$after" > "$RUNNER_TEMP/good"
       - name: a crashing image is rolled back by Swarm
         run: |
@@ -237,9 +237,9 @@ jobs:
           echo "update state: $state"
           [ "$state" = rollback_completed ]
           [ "$(docker service inspect "$SVC" -f '{{.Spec.TaskTemplate.ContainerSpec.Image}}')" = "$(cat "$RUNNER_TEMP/good")" ]
-          for _ in $(seq 1 60); do curl -fsS localhost:8686/healthz && break; sleep 2; done
-          curl -fsS localhost:8686/healthz
-      - if: failure()
+          for _ in $(seq 1 60); do curl -fsS --max-time 5 localhost:8686/healthz && break; sleep 2; done
+          curl -fsS --max-time 5 localhost:8686/healthz
+      - if: failure() || cancelled()
         run: |
           docker service ps --no-trunc "$SVC" || true
           docker service logs --tail 100 "$SVC" || true
