@@ -21,7 +21,8 @@
 //!   data, until a day it read is written ([`crate::closed_days`], #516);
 //! - a board that failed is not kept, and the failure is logged (D-071):
 //!   an intermittent failure (a query out of memory beside the others)
-//!   looked like a cache that never served the second request.
+//!   looked like a cache that never served the second request. A board
+//!   that failed for memory is first computed once more, alone (D-074).
 //! - the default board page of each project (production, release window,
 //!   no role or release) is computed ahead in the background
 //!   ([`prewarm`], D-072): after startup, and after new data while its
@@ -442,6 +443,26 @@ async fn compute(
         tracing::warn!(project, %err, "revenue not computed");
         err.to_string()
     });
+    // A query that still ran out of memory (alone, or again after the
+    // others, D-071) fails the board: it is computed once more, alone,
+    // once every other board is done and before any new one starts
+    // (D-074).
+    let board = match board {
+        Err(err) if out_of_memory(&err) => {
+            tracing::info!(project, %err, "board ran out of memory; computing it again alone");
+            drop(_quiet);
+            let _alone = cache.exclusive().await;
+            Box::pin(openlens_engine::board_reusing(
+                &state.query,
+                project,
+                f,
+                map,
+                kept.as_deref(),
+            ))
+            .await
+        }
+        other => other,
+    };
     if kept.is_none()
         && let (Some(days), Ok(b)) = (closed, &board)
     {
@@ -472,6 +493,19 @@ async fn compute(
     );
     cache.put(key, entry.clone());
     Ok(entry)
+}
+
+/// Whether a board failed because a query needed more memory than the
+/// pool gave it (D-074).
+fn out_of_memory(err: &openlens_engine::EngineError) -> bool {
+    match err {
+        openlens_engine::EngineError::Query(openlens_query::QueryError::TooBig) => true,
+        // Should `friendly` have missed it, DataFusion's own words.
+        openlens_engine::EngineError::Query(
+            openlens_query::QueryError::Rejected(m) | openlens_query::QueryError::Storage(m),
+        ) => m.contains("Resources exhausted"),
+        _ => false,
+    }
 }
 
 /// Recompute a stale result in the background, once per key at a time.
@@ -571,6 +605,22 @@ mod tests {
         // Its compute time is kept, for the next cold page (D-073).
         let r = super::ready(&state, &p.id, &f, None);
         assert!(r.hit && r.estimate.is_some(), "{r:?}");
+    }
+
+    /// D-074: only a board out of memory is computed again, alone.
+    #[test]
+    fn only_a_board_out_of_memory_is_computed_again() {
+        use openlens_engine::EngineError;
+        use openlens_query::QueryError;
+        assert!(super::out_of_memory(&EngineError::Query(QueryError::TooBig)));
+        assert!(super::out_of_memory(&EngineError::Query(
+            QueryError::Rejected("Resources exhausted: Failed to allocate".into())
+        )));
+        assert!(!super::out_of_memory(&EngineError::Query(
+            QueryError::Rejected("syntax error".into())
+        )));
+        assert!(!super::out_of_memory(&EngineError::Query(QueryError::Busy)));
+        assert!(!super::out_of_memory(&EngineError::InvalidFilter("role")));
     }
 
     #[test]
