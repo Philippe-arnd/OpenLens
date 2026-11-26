@@ -68,7 +68,7 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "GET",
         "/api/projects/{project}/board",
         "read",
-        "The Focus board as JSON.",
+        "The Focus board as JSON: its period blocks since the current release, against the same length before (`window=fixed`: the fixed 7-, 14- and 30-day windows).",
     ),
     (
         "GET",

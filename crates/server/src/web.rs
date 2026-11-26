@@ -366,7 +366,12 @@ async fn board(
             openlens_ui::message("Not found", "No such project."),
         );
     };
-    let f = q.filters(&auth::tz_for(&state, &headers, &p.timezone));
+    // The board page reads its period blocks since the current release
+    // (D-055).
+    let f = openlens_engine::Filters {
+        window: openlens_engine::Window::Release,
+        ..q.filters(&auth::tz_for(&state, &headers, &p.timezone))
+    };
     let map = crate::load_map(&state, &p.id).await;
     let host = crate::public_url(&headers);
     let admin = auth::viewer(&state, &headers).is_some_and(|v| v.admin);
@@ -462,7 +467,13 @@ async fn board_page(
                 .collect()
         })
         .unwrap_or_default();
-    let marks = crate::timeline::collect(&state, &p.id, &releases, 14);
+    // The marks cover the active-users chart: the window's days (D-055).
+    let days = board
+        .as_ref()
+        .ok()
+        .and_then(|b| b.window.as_ref())
+        .map_or(14, |w| w.days);
+    let marks = crate::timeline::collect(&state, &p.id, &releases, days);
     match board {
         Ok(b) => html(
             StatusCode::OK,
@@ -841,29 +852,13 @@ async fn projects_page(
             openlens_ui::message("Oops", "The metadata store is unavailable."),
         );
     };
-    let since = (chrono::Utc::now() - chrono::Duration::days(7)).format("%Y-%m-%d");
-    let sql = format!(
-        "SELECT count(*) AS n, CAST(max(timestamp) AS VARCHAR) AS last FROM events WHERE date >= '{since}'"
-    );
     let mut list = Vec::new();
     for p in ps.into_iter().filter(|p| viewer.can_see(&p.id)) {
-        let row = state
-            .query
-            .sql(&p.id, &sql)
-            .await
-            .ok()
-            .and_then(|r| r.rows.into_iter().next());
+        let (recent_events, last_event) =
+            openlens_engine::reads::recent_activity(&state.query, &p.id).await;
         list.push(openlens_ui::ProjectSummary {
-            recent_events: row
-                .as_ref()
-                .and_then(|r| r.get("n"))
-                .and_then(serde_json::Value::as_i64)
-                .unwrap_or(0),
-            last_event: row
-                .as_ref()
-                .and_then(|r| r.get("last"))
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned),
+            recent_events,
+            last_event,
             id: p.id,
             name: p.name,
             timezone: p.timezone,

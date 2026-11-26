@@ -28,6 +28,26 @@ pub struct MapAt {
     pub map: FeatureMap,
 }
 
+/// The stored versions of a project's map (the newest 50) with when each
+/// was saved, for the numbers counted with the version in force (#283).
+/// Versions that cannot be read or parsed are left out.
+#[must_use]
+pub fn history(meta: &openlens_meta::Meta, project: &str) -> Vec<MapAt> {
+    meta.feature_map_versions(project)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|v| {
+            let saved = DateTime::parse_from_rfc3339(&v.created_at).ok()?;
+            let yaml = meta.feature_map_version(project, v.version).ok()??;
+            Some(MapAt {
+                version: v.version,
+                saved: saved.with_timezone(&Utc),
+                map: openlens_featuremap::parse(&yaml).map?,
+            })
+        })
+        .collect()
+}
+
 /// One release's use of a feature.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct FeatureRelease {
