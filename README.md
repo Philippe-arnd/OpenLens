@@ -45,8 +45,8 @@ On the first login, the product manager sees KPIs **by role and by release**, an
 </p>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/img/board-dark.png?v=4cdda391b1">
-  <img alt="The OpenLens Focus board: ranked insight cards, KPIs, feature pulse, roles × features, retention cohorts and release comparison" src="docs/img/board-light.png?v=3dff8b6b1f">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/board-dark.png?v=2842999cbd">
+  <img alt="The OpenLens Focus board: ranked insight cards, KPIs, feature pulse, roles × features, retention cohorts and release comparison" src="docs/img/board-light.png?v=9bc6a4194d">
 </picture>
 
 ## 🎯 What the board answers
