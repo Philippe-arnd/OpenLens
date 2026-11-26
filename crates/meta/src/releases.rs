@@ -15,7 +15,41 @@ pub const MAX_BUILDS: i64 = 500;
 /// fingerprint keep no release (bounds the writes a public key can cause).
 pub const MAX_NEW_BUILDS_PER_DAY: i64 = 50;
 
+/// A build fingerprint as recorded: where it was seen and its name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReleaseBuild {
+    /// Environment it was seen in.
+    pub environment: String,
+    /// The fingerprint.
+    pub build: String,
+    /// Its release name (automatic or explicit).
+    pub name: String,
+    /// When it was first seen (Unix seconds).
+    pub first_seen: i64,
+}
+
 impl Meta {
+    /// Every fingerprint of `project` (at most [`MAX_BUILDS`]), oldest
+    /// first: what ties a release in one environment to the same build in
+    /// another (#500).
+    pub fn release_builds(&self, project: &str) -> Result<Vec<ReleaseBuild>> {
+        self.read(|c| {
+            let mut st = c.prepare(
+                "SELECT environment, build, name, first_seen FROM release_builds \
+                 WHERE project = ?1 ORDER BY first_seen, rowid LIMIT ?2",
+            )?;
+            let rows = st.query_map(params![project, MAX_BUILDS], |r| {
+                Ok(ReleaseBuild {
+                    environment: r.get(0)?,
+                    build: r.get(1)?,
+                    name: r.get(2)?,
+                    first_seen: r.get(3)?,
+                })
+            })?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+    }
+
     /// The release name of a build fingerprint, if it was seen.
     pub fn build_release(
         &self,

@@ -195,6 +195,11 @@ impl Tools for OpenLensTools {
                 })),"required":["kpi","target"]}),
             },
             ToolSpec {
+                name: "releases",
+                description: "The app's releases per environment over 90 days: state (rolling out, live at 95 % or more of the latest day's users, superseded by a newer release, rolled back when an older release took the majority back), share of the latest day, first and last seen, users, events, and for production the time in staging (from the same name or build fingerprint first seen in staging). Optional env for one environment.",
+                input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"}}))}),
+            },
+            ToolSpec {
                 name: "create_ticket",
                 description: "Turn a finding into a ticket for the app's backlog: kind insight (subject '<card kind>:<card subject>'), error (subject = the error group fingerprint), goal (subject = goal id) or map (subject '<finding kind>:<feature>'). Returns the prefilled Markdown (problem, evidence, hypothesis, success metric, acceptance criteria); with to='github', opens the GitHub issue, or updates the one already open for that finding. OpenLens then measures the metric 14 days after the release that ships it and comments on the issue.",
                 input_schema: json!({"type":"object","properties":with(json!({"kind":{"type":"string","enum":["insight","error","goal","map"]},"subject":{"type":"string"},"to":{"type":"string","enum":["markdown","github"]}})),"required":["kind","subject"]}),
@@ -399,6 +404,24 @@ impl Tools for OpenLensTools {
                     &format!("/api/projects/{}/goals", project(args)),
                     None,
                 )?;
+                ok_or(st, v)
+            }
+            "releases" => {
+                let mut path = format!("/api/projects/{}/releases", project(args));
+                if let Some(e) = s(args, "env") {
+                    let enc: String = e
+                        .bytes()
+                        .map(|b| {
+                            if b.is_ascii_alphanumeric() || b"-_.".contains(&b) {
+                                (b as char).to_string()
+                            } else {
+                                format!("%{b:02X}")
+                            }
+                        })
+                        .collect();
+                    path.push_str(&format!("?env={enc}"));
+                }
+                let (st, v) = c.call("GET", &path, None)?;
                 ok_or(st, v)
             }
             "set_goal" => {
