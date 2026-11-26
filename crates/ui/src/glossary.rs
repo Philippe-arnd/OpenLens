@@ -107,6 +107,18 @@ pub(crate) const KPI: &[(&str, &str)] = &[
 /// on a literal one left plain, except the counts in [`NOT_METRIC`].
 pub(crate) const COLUMNS: &[(&str, &str)] = &[
     (
+        "Rage clicks",
+        "Clicks in a burst: three fast clicks on the same element, a sign that it did not respond as expected.",
+    ),
+    (
+        "Reach half",
+        "Share of the page's visits that scrolled at least half way down.",
+    ),
+    (
+        "Reach the end",
+        "Share of the page's visits that scrolled to the end (90% of the page or more).",
+    ),
+    (
         "Users",
         "Distinct people in this row, over the page's window. Robots and, unless ticked, the team are left out.",
     ),
@@ -402,6 +414,16 @@ mod tests {
             include_str!("features.rs"),
             include_str!("explore.rs"),
             include_str!("feature_page.rs"),
+            include_str!("people/mod.rs"),
+            include_str!("people/churn.rs"),
+            include_str!("tables.rs"),
+            include_str!("live.rs"),
+            include_str!("live_screens.rs"),
+            include_str!("detail.rs"),
+            include_str!("releases.rs"),
+            include_str!("project_settings.rs"),
+            include_str!("profile.rs"),
+            include_str!("environments.rs"),
             include_str!("delivery.rs"),
         ];
         let mut seen = 0;
@@ -437,7 +459,24 @@ mod tests {
                     "tile {label:?} has no glossary entry"
                 );
             }
-            for call in src.split("tile(").skip(1) {
+            // detail::kpi("Label", value, foot): the detail pages (#545)
+            for call in src.split("detail::kpi(").skip(1) {
+                let label = call.split('"').nth(1).unwrap();
+                seen += 1;
+                assert!(
+                    super::definition(label).is_some(),
+                    "tile {label:?} has no glossary entry"
+                );
+            }
+            // A word boundary before `tile(`: `digest_tile(` and the like
+            // are other helpers, not the board's tile.
+            let calls = src.match_indices("tile(").filter(|(i, _)| {
+                !src[..*i]
+                    .chars()
+                    .next_back()
+                    .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+            });
+            for call in calls.map(|(i, _)| &src[i + "tile(".len()..]) {
                 // tile("accent", "glyph", "Label" | &format!("Label (…)", …)
                 let args: Vec<&str> = call.splitn(4, ',').collect();
                 if args.len() < 3 {
@@ -475,6 +514,17 @@ mod tests {
             include_str!("features.rs"),
             include_str!("explore.rs"),
             include_str!("feature_page.rs"),
+            include_str!("people/mod.rs"),
+            include_str!("people/churn.rs"),
+            include_str!("tables.rs"),
+            include_str!("live.rs"),
+            include_str!("live_screens.rs"),
+            include_str!("detail.rs"),
+            include_str!("releases.rs"),
+            include_str!("project_settings.rs"),
+            include_str!("profile.rs"),
+            include_str!("slo.rs"),
+            include_str!("environments.rs"),
         ];
         let mut seen = 0;
         for src in sources {
@@ -489,6 +539,15 @@ mod tests {
                 !src.contains("th.num title="),
                 "a title= header: use th_num"
             );
+            // The v2 tables (#544): `Col::Num("…")` renders through th_num.
+            for rest in src.split("Col::Num(\"").skip(1) {
+                let label = rest.split('"').next().unwrap();
+                seen += 1;
+                assert!(
+                    super::column(label).is_some() || super::NOT_METRIC.contains(&label),
+                    "table header {label:?}: add a definition, or list it in NOT_METRIC"
+                );
+            }
             for f in ["th_num(\"", "th_def(\""] {
                 for rest in src.split(f).skip(1) {
                     let label = rest.split('"').next().unwrap();

@@ -308,3 +308,78 @@ async fn the_timeline_gathers_changes_and_notes() {
         StatusCode::SEE_OTHER
     );
 }
+
+/// The confirmation dialogs (#545): `?confirm=<action>` opens one on the
+/// page, holding the form that posts what it always did; an unknown action
+/// opens none; and the destructive POSTs still refuse a missing
+/// confirmation.
+#[tokio::test]
+async fn confirm_dialogs_post_the_same_forms_and_an_empty_confirmation_is_refused() {
+    let h = harness();
+    let body = serde_json::json!({
+        "key": h.key,
+        "batch": [{"event": "note_saved", "distinct_id": "ana"}]
+    })
+    .to_string();
+    let (status, _) = post(&h, "/capture", body.into_bytes(), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let owner = login_cookie(&h).await;
+    assert_eq!(
+        post_form(&h, "/p/default/flags-edit", &owner, "key=editor&rollout=10").await,
+        StatusCode::SEE_OTHER
+    );
+    for (uri, action) in [
+        (
+            "/p/default/people/ana?confirm=forget",
+            "/p/default/people/ana/forget",
+        ),
+        (
+            "/p/default/flags-edit?key=editor&confirm=delete",
+            "/p/default/flags/editor/delete",
+        ),
+        (
+            "/p/default/settings/data?confirm=delete",
+            "/p/default/settings/delete",
+        ),
+    ] {
+        let html = body_text(get(&h, uri, Some(&owner), false).await).await;
+        assert_eq!(html.matches("<dialog").count(), 1, "{uri}");
+        let dialog = &html[html.find("<dialog").unwrap()..html.find("</dialog>").unwrap()];
+        assert!(
+            dialog.contains(&format!("action=\"{action}\"")),
+            "{uri}: {dialog}"
+        );
+        assert!(dialog.contains("name=\"confirm\""), "{uri}");
+        assert!(
+            !html.contains("style=") && !html.contains("<script"),
+            "{uri}"
+        );
+    }
+    for uri in [
+        "/p/default/people/ana",
+        "/p/default/people/ana?confirm=wipe",
+        "/p/default/flags-edit?key=editor&confirm=forget",
+        "/p/default/settings/data?confirm=everything",
+    ] {
+        let html = body_text(get(&h, uri, Some(&owner), false).await).await;
+        assert!(!html.contains("<dialog"), "{uri}");
+    }
+    for (uri, body) in [
+        ("/p/default/people/ana/forget", ""),
+        ("/p/default/people/ana/forget", "confirm="),
+        ("/p/default/flags/editor/delete", ""),
+        ("/p/default/settings/delete", "confirm=+"),
+    ] {
+        assert_eq!(
+            post_form(&h, uri, &owner, body).await,
+            StatusCode::BAD_REQUEST,
+            "{uri} {body:?}"
+        );
+    }
+    let export =
+        body_text(get(&h, "/p/default/people/ana/export.json", Some(&owner), false).await).await;
+    assert!(export.contains("note_saved"), "nothing was forgotten");
+    assert_eq!(h.state.meta.flags("default").unwrap().len(), 1);
+    assert!(h.state.meta.project("default").unwrap().is_some());
+}

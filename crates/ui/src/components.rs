@@ -413,15 +413,6 @@ pub struct Mark {
     pub author_id: Option<String>,
 }
 
-pub(crate) fn mark_icon(kind: &str) -> &'static str {
-    match kind {
-        "release" => "release",
-        "alert" => "alert",
-        "note" => "idea",
-        _ => "flag",
-    }
-}
-
 pub(crate) fn sparkline(series: &[(String, i64)]) -> Markup {
     let max = series.iter().map(|(_, n)| *n).max().unwrap_or(0).max(1) as f64;
     let n = series.len().max(1) as f64;

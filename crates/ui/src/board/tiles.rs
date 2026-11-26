@@ -8,13 +8,13 @@
 use crate::*;
 
 /// How a number moved.
-pub(super) struct Delta {
+pub(crate) struct Delta {
     /// `good`, `bad` or `flat`.
-    pub(super) tone: &'static str,
+    pub(crate) tone: &'static str,
     /// `up`, `down` or `right` (flat).
-    pub(super) glyph: &'static str,
+    pub(crate) glyph: &'static str,
     /// The signed change: "+12%", "−0.4 pts".
-    pub(super) text: String,
+    pub(crate) text: String,
 }
 
 /// `d` with its sign, a real minus.
@@ -25,7 +25,7 @@ fn signed(d: f64, decimals: usize) -> String {
 /// `now` against `before`. `points`: shares compared in percentage
 /// points, else the relative change. `higher_good`: up is better. None
 /// when there is nothing to compare with.
-pub(super) fn delta(now: f64, before: f64, higher_good: bool, points: bool) -> Option<Delta> {
+pub(crate) fn delta(now: f64, before: f64, higher_good: bool, points: bool) -> Option<Delta> {
     if !now.is_finite() || !before.is_finite() {
         return None;
     }
@@ -57,7 +57,7 @@ pub(super) fn delta(now: f64, before: f64, higher_good: bool, points: bool) -> O
 
 /// A delta: icon, signed change, and the verdict in words for screen
 /// readers (the colour says it to the eye).
-pub(super) fn delta_mark(d: &Delta) -> Markup {
+pub(crate) fn delta_mark(d: &Delta) -> Markup {
     let word = match d.tone {
         "good" => "better",
         "bad" => "worse",
@@ -71,15 +71,15 @@ pub(super) fn delta_mark(d: &Delta) -> Markup {
 }
 
 /// What a tile shows besides its label.
-pub(super) struct Kpi {
+pub(crate) struct Kpi {
     /// The value (a `small` may follow the number).
-    pub(super) value: Markup,
+    pub(crate) value: Markup,
     /// A small chart next to the value, or nothing.
-    pub(super) spark: Markup,
+    pub(crate) spark: Markup,
     /// One line under the value.
-    pub(super) sub: String,
+    pub(crate) sub: String,
     /// The delta and what it is compared with ("vs the 10 days before").
-    pub(super) moved: Option<(Delta, String)>,
+    pub(crate) moved: Option<(Delta, String)>,
 }
 
 /// The ids of a tile's definition button and popover.
@@ -100,6 +100,12 @@ fn def_id(label: &str) -> String {
 /// A KPI tile that opens `href` (#409). It is marked `is-alert` when its
 /// delta is bad and `alert` says that matters (sessions with errors).
 pub(super) fn kpi_to(href: &str, label: &str, k: Kpi, alert: bool) -> Markup {
+    kpi_tile(Some(href), label, k, alert)
+}
+
+/// [`kpi_to`], or a plain tile when `href` is none: a detail page's own
+/// numbers (People screens, #550), which lead nowhere else.
+pub(crate) fn kpi_tile(href: Option<&str>, label: &str, k: Kpi, alert: bool) -> Markup {
     let alerting = alert && k.moved.as_ref().is_some_and(|(d, _)| d.tone == "bad");
     let cls = if alerting {
         "card kpi is-alert"
@@ -117,7 +123,10 @@ pub(super) fn kpi_to(href: &str, label: &str, k: Kpi, alert: bool) -> Markup {
     };
     html! {
         div.kpi-slot {
-            @if shared() { div class=(cls) { (inner) } } @else { a class=(cls) href=(href) { (inner) } }
+            @match href.filter(|_| !shared()) {
+                Some(href) => a class=(cls) href=(href) { (inner) },
+                None => div class=(cls) { (inner) },
+            }
             @if let Some(def) = crate::glossary::definition(label) {
                 button.info type="button" id={ (id) "-btn" } popovertarget=(id) aria-label={ "Definition: " (label) } { (icon("info")) }
                 div.kpi-pop popover="auto" id=(id) { strong { (label) } " " (def) }
@@ -234,5 +243,22 @@ pub(super) fn key_numbers(pid: &str, f: &Filters, b: &Board) -> Markup {
                 }, true))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// The sparkline draws in through `stroke-dashoffset` (#552), which
+    /// needs every line measured as one unit long.
+    #[test]
+    fn the_sparkline_draws_in_over_a_unit_path_length() {
+        let days: Vec<(String, i64)> = (1..=7)
+            .map(|d| (format!("2026-01-0{d}"), d * 3 % 5))
+            .collect();
+        let html = super::spark(&days).into_string();
+        let lines = html.matches("<polyline").count();
+        assert!(lines > 0, "{html}");
+        assert_eq!(html.matches(r#"pathLength="1""#).count(), lines);
+        assert!(crate::CSS.contains("spark polyline { stroke-dasharray: 1; stroke-dashoffset: 1;"));
     }
 }

@@ -48,6 +48,9 @@ pub(crate) struct Notice {
     /// *Environments*: the allow-list a preview counts (#485).
     #[serde(default)]
     allow: Option<String>,
+    /// *Data*: `?confirm=delete` opens the deletion's dialog (#545).
+    #[serde(default)]
+    confirm: Option<String>,
 }
 
 /// The days of a re-labelling form: empty is the default, anything not a
@@ -437,6 +440,7 @@ async fn page_at(
                 allow,
                 allow_preview,
                 status_page,
+                confirm: openlens_ui::Confirm::parse(nq.confirm.as_deref()),
                 setup: setup_steps(
                     &state,
                     &p.id,

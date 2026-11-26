@@ -37,7 +37,7 @@ impl TableCard<'_> {
                     thead { tr { @for c in self.cols {
                         @match c {
                             Col::Shown(l) => th scope="col" { (l) },
-                            Col::Num(l) => th.num scope="col" { (l) },
+                            Col::Num(l) => (th_num(l)),
                             Col::Hidden(l) => th scope="col" { span.sr-only { (l) } },
                         }
                     } } }
@@ -84,7 +84,7 @@ pub(crate) fn day_and_time(ts: &str, tz: &str) -> (String, String) {
 }
 
 /// A day as the group rows print it ("26 Nov 2026").
-fn day_label(day: &str) -> String {
+pub(crate) fn day_label(day: &str) -> String {
     chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d")
         .map_or_else(|_| day.to_owned(), |d| d.format("%-d %b %Y").to_string())
 }

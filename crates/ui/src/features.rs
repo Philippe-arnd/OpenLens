@@ -78,68 +78,140 @@ pub fn line_diff<'a>(old: &'a str, new: &'a str) -> Vec<(char, &'a str)> {
     out
 }
 
-/// The measured health of the map (#240): score, findings with their fix,
-/// areas and the adoption ladder.
-pub(crate) fn map_health(pid: &str, h: &openlens_engine::MapHealth) -> Markup {
-    let tone = if h.score >= 80 {
-        "good"
-    } else if h.score >= 50 {
-        "warn"
-    } else {
-        "bad"
-    };
+/// A v2 data table card (#551) whose header row is given, so metric
+/// headers keep their definitions (`th_num`): an optional head (a title, a
+/// link), the table, an optional footer.
+pub(crate) fn table_card(
+    label: &str,
+    head: Markup,
+    header: Markup,
+    body: Markup,
+    foot: Markup,
+) -> Markup {
     html! {
-        section.card.wide {
-            h2.mint { (icon("shield")) "Map health, last 30 days" }
-            p {
-                strong class={ "status " (tone) } { (h.score) " / 100" }
-                " · " (pct(h.coverage)) " of pages and clicks belong to a feature"
-                " · " (h.findings.len()) " findings"
-            }
-            (crate::cost::unavailable_note(&h.unavailable_days))
-            @if h.findings.is_empty() {
-                p.muted { "Nothing to fix: every feature is used, its success fires and no route overlaps." }
-            } @else {
-                ul.plain-list { @for f in &h.findings {
-                    li {
-                        span class={ "status " (if f.level == "error" { "bad" } else { "warn" }) } { (f.kind.replace('_', " ")) }
-                        " " (f.message) br;
-                        span.muted.small { (f.evidence) }
-                        @if let Some(fix) = &f.fix { details { summary.small { "Suggested change" } pre.diff { (fix) } } }
-                        " " a.small href={ "/p/" (pid) "/tickets/new?kind=map&subject=" (url_enc(&format!("{}:{}", f.kind, f.feature.as_deref().unwrap_or("")))) } { "Create ticket →" }
+        section.card.table-card aria-label=(label) {
+            @if !head.0.is_empty() { div.table-head { (head) } }
+            div.scroll { table {
+                thead { tr { (header) } }
+                tbody { (body) }
+            } }
+            (foot)
+        }
+    }
+}
+
+/// The tone and word of a map health score.
+fn health_tone(score: u8) -> (&'static str, &'static str) {
+    if score >= 80 {
+        ("good", "Healthy")
+    } else if score >= 50 {
+        ("warn", "Needs work")
+    } else {
+        ("bad", "Unhealthy")
+    }
+}
+
+/// Where a map finding's ticket is drafted.
+fn finding_ticket(pid: &str, f: &openlens_engine::maphealth::Finding) -> String {
+    format!(
+        "/p/{pid}/tickets/new?kind=map&subject={}",
+        url_enc(&format!(
+            "{}:{}",
+            f.kind,
+            f.feature.as_deref().unwrap_or("")
+        ))
+    )
+}
+
+/// The measured health of the map (#240, #551): the score as a lead card,
+/// the findings as a ranked list in the order given (highest impact
+/// first), each with its suggested change folded and its ticket; then the
+/// areas and the adoption ladder as tables.
+pub(crate) fn map_health(pid: &str, h: &openlens_engine::MapHealth) -> Markup {
+    let (tone, word) = health_tone(h.score);
+    html! {
+        section.map-health aria-labelledby="health-h" {
+            div.focus-grid {
+                article.card.lead {
+                    div.lead-top {
+                        span class={ "tag tone-" (tone) } { (icon(if tone == "good" { "task" } else { "alert" })) (word) }
+                        span.muted.small { (h.findings.len()) " findings" }
                     }
-                } }
+                    div.lead-text {
+                        h2 #health-h { "Map health, last 30 days" }
+                        p.score { strong { (h.score) } small { " / 100" } }
+                        svg.progress role="img" aria-label={ "Score " (h.score) " out of 100" } viewBox="0 0 100 6" preserveAspectRatio="none" {
+                            rect.track width="100" height="6" {}
+                            rect.bar width=(h.score.min(100)) height="6" {}
+                        }
+                        p.evidence { (pct(h.coverage)) " of pages and clicks belong to a feature." }
+                    }
+                    (crate::cost::unavailable_note(&h.unavailable_days))
+                    div.next {
+                        (icon("idea"))
+                        div {
+                            strong { "How it is scored" }
+                            p { "100, minus up to 40 for pages and clicks no feature claims, 10 per error and 4 per warning. Agents read the same report with " code { "openlens-cli features lint --live" } "." }
+                        }
+                    }
+                }
+                @if h.findings.is_empty() {
+                    div.card.pad.focus-empty {
+                        p { strong { "Nothing to fix." } " Every feature is used, its success fires and no route overlaps." }
+                    }
+                } @else {
+                    div.card.ranked.findings {
+                        ol {
+                            @for (i, f) in h.findings.iter().enumerate() {
+                                li.row {
+                                    span.rank aria-hidden="true" { (format!("{:02}", i + 1)) }
+                                    div {
+                                        h3 { span.sr-only { "Finding " (i + 1) ": " } (f.message) }
+                                        div.meta {
+                                            span class={ "tag tone-" (if f.level == "error" { "bad" } else { "warn" }) } title=(f.level) {
+                                                (icon("alert")) span.sr-only { (f.level) ": " } (f.kind.replace('_', " "))
+                                            }
+                                            span { (f.evidence) }
+                                        }
+                                        @if let Some(fix) = &f.fix {
+                                            details.fix { summary { "Suggested change" } pre.diff { (fix) } }
+                                        }
+                                        div.links { a href=(finding_ticket(pid, f)) { "Create ticket" } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            p.muted.small { "Score: 100, minus up to 40 for pages and clicks no feature claims, 10 per error and 4 per warning. Agents read the same report with " code { "openlens-cli features lint --live" } "." }
         }
         @if !h.areas.is_empty() {
-            section.card {
-                h2.violet { (icon("layers")) "Areas" }
-                div.table-scroll { table.plain {
-                    thead { tr { th { "Area" } (th_num("Features")) (th_num("Uses (30 d)")) (th_num("Users")) } }
-                    tbody { @for a in &h.areas {
-                        tr { th scope="row" { (a.area) } td.num { (a.features) } td.num { (compact(a.uses)) } td.num { (compact(a.users)) } }
-                    } }
-                } }
-            }
+            (table_card(
+                "Areas",
+                html! { h2 { (icon("layers")) "Areas" } },
+                html! { th scope="col" { "Area" } (th_num("Features")) (th_num("Uses (30 d)")) (th_num("Users")) },
+                html! { @for a in &h.areas {
+                    tr { th scope="row" { (a.area) } td.num { (a.features) } td.num { (compact(a.uses)) } td.num { (compact(a.users)) } }
+                } },
+                html! {},
+            ))
         }
         @if !h.ladder.is_empty() {
-            section.card {
-                h2.sky { (icon("funnel")) "Adoption ladder" }
-                div.table-scroll { table.plain {
-                    thead { tr { th { "From" } th { "Then" } (th_num("Users")) (th_num("Went on")) (th_num("Skipped the first")) } }
-                    tbody { @for r in &h.ladder {
-                        tr {
-                            th scope="row" { code { (r.from) } }
-                            td { code { (r.to) } }
-                            td.num { (compact(r.from_users)) }
-                            td.num { strong { (pct(r.reached as f64 / r.from_users.max(1) as f64)) } }
-                            td.num { (compact(r.skipped)) }
-                        }
-                    } }
-                } }
-                p.muted.small { "From the map's " code { "requires" } ": of the users of a feature, the share who went on to the one that requires it. Where most skip it, the requirement is probably wrong." }
-            }
+            (table_card(
+                "Adoption ladder",
+                html! { h2 { (icon("funnel")) "Adoption ladder" } },
+                html! { th scope="col" { "From" } th scope="col" { "Then" } (th_num("Users")) (th_num("Went on")) (th_num("Skipped the first")) },
+                html! { @for r in &h.ladder {
+                    tr {
+                        th scope="row" { code { (r.from) } }
+                        td { code { (r.to) } }
+                        td.num { (compact(r.from_users)) }
+                        td.num { strong { (pct(r.reached as f64 / r.from_users.max(1) as f64)) } }
+                        td.num { (compact(r.skipped)) }
+                    }
+                } },
+                html! { div.pager { span { "From the map's " code { "requires" } ": of the users of a feature, the share who went on to the one that requires it. Where most skip it, the requirement is probably wrong." } } },
+            ))
         }
         @if !h.relations.is_empty() { (relations(pid, &h.relations)) }
     }
@@ -237,33 +309,34 @@ pub fn feature_map(v: &MapView<'_>) -> Markup {
                 }
             }
             @if let Some(m) = v.map {
-                section.card.wide {
-                    h2.violet { (icon("layers")) (m.features.len()) " features · " (m.roles.len()) " roles · churn after " (m.churn_days()) " days" }
-                    div.table-scroll { table.plain {
-                        thead { tr { th { "Feature" } th { "Entry" } th { "Success" } (th_num("Uses (7 d)")) (th_num("Users")) th { "Status" } } }
-                        tbody { @for f in &m.features {
-                            @let u = uses(&f.key);
-                            @let h = f.success.as_deref().map(hits);
-                            tr {
-                                th scope="row" { strong { a href={ "/p/" (v.p.id) "/features/" (f.key) } { (f.name) } } br; code.small { (f.key) } @if let Some(o) = &f.owner { br; span.muted.small { (o) } } }
-                                td.small {
-                                    @for r in &f.entry.routes { code { (r) } " " }
-                                    @for s in &f.entry.selectors { code { (s) } " " }
-                                    @for c in &f.entry.calls { code { (c) } " " }
-                                }
-                                td.small { @match &f.success { Some(s) => { code { (s) } " · " (compact(h.unwrap_or(0))) } , None => span.muted { "—" } } }
-                                td.num { (compact(u.map_or(0, |x| x.1))) }
-                                td.num { (compact(u.map_or(0, |x| x.2))) }
-                                td { @if u.is_none() { span.status.bad { "not seen" } }
-                                     @else if h == Some(0) { span.status.warn { "no success" } }
-                                     @else { span.status.good { "live" } } }
+                (table_card(
+                    "Features",
+                    html! { h2 { (icon("layers")) (m.features.len()) " features · " (m.roles.len()) " roles · churn after " (m.churn_days()) " days" } },
+                    html! { th scope="col" { "Feature" } th scope="col" { "Entry" } th scope="col" { "Success" } (th_num("Uses (7 d)")) (th_num("Users")) th scope="col" { "Status" } },
+                    html! { @for f in &m.features {
+                        @let u = uses(&f.key);
+                        @let h = f.success.as_deref().map(hits);
+                        tr {
+                            th scope="row" { strong { a href={ "/p/" (v.p.id) "/features/" (f.key) } { (f.name) } } br; code.small { (f.key) } @if let Some(o) = &f.owner { br; span.muted.small { (o) } } }
+                            td.path {
+                                @for r in &f.entry.routes { (r) " " }
+                                @for s in &f.entry.selectors { (s) " " }
+                                @for c in &f.entry.calls { (c) " " }
                             }
-                        } }
-                    } }
-                    @if !m.roles.is_empty() {
-                        p.small { "Roles: " @for (i, r) in m.roles.iter().enumerate() { @if i > 0 { " · " } strong { (r.key) } " ← " (r.matches.join(", ")) } }
-                    }
-                }
+                            td.small { @match &f.success { Some(s) => { code { (s) } " · " (compact(h.unwrap_or(0))) } , None => span.muted { "—" } } }
+                            td.num { (compact(u.map_or(0, |x| x.1))) }
+                            td.num { (compact(u.map_or(0, |x| x.2))) }
+                            td { @if u.is_none() { span.tag.tone-bad { (icon("ban")) "not seen" } }
+                                 @else if h == Some(0) { span.tag.tone-warn { (icon("alert")) "no success" } }
+                                 @else { span.tag.tone-good { (icon("task")) "live" } } }
+                        }
+                    } },
+                    html! {
+                        @if !m.roles.is_empty() {
+                            div.pager { span { "Roles: " @for (i, r) in m.roles.iter().enumerate() { @if i > 0 { " · " } strong { (r.key) } " ← " (r.matches.join(", ")) } } }
+                        }
+                    },
+                ))
             }
             @if let Some(h) = v.health { (map_health(p.id, h)) }
             @if let Some(d) = &diff {
@@ -308,3 +381,6 @@ pub fn feature_map(v: &MapView<'_>) -> Markup {
         },
     )
 }
+
+#[cfg(test)]
+mod tests;

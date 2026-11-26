@@ -35,6 +35,18 @@ fn trend(now: i64, before: i64) -> String {
     format!("{}{d:.0}%", if d >= 0.0 { "+" } else { "" })
 }
 
+/// The tone and words of a feature's status tag (#545).
+fn status_tag(status: Option<&str>) -> (&'static str, &'static str) {
+    match status {
+        Some("ok") => ("good", "In use"),
+        Some("dead") => ("bad", "Not used"),
+        Some("no_success") => ("warn", "No success yet"),
+        Some("low_sample") => ("info", "Few users"),
+        Some("issues") => ("warn", "Has findings"),
+        _ => ("muted", "No data"),
+    }
+}
+
 /// The tabs of a feature page (`?tab=`), the first being the default.
 pub const TABS: &[&str] = &[
     "overview", "errors", "replays", "flags", "releases", "history",
@@ -91,15 +103,23 @@ pub fn feature_page(v: &FeaturePage<'_>) -> Markup {
         }
     };
     let share = |a: i64, n: i64| pct(a as f64 / n.max(1) as f64);
+    let status = status_tag(v.ctx.health.as_ref().map(|h| h.status));
     layout_with(
         "Feature map",
         Some(v.p),
         &crumbs,
         html! {
-            div.heading { div {
-                h1 { (f.name) }
-                p.muted { code { (f.key) } @if let Some(p) = &f.purpose { " · " (p) } }
-            } }
+            (crate::detail::entity(&f.name, html! {
+                (f.name) " " span class={ "tag tone-" (status.0) } { (status.1) }
+            }, html! {
+                @if let Some(purpose) = &f.purpose { p.muted { (purpose) } }
+                dl.facts {
+                    div { dt { "Key" } dd { code { (f.key) } } }
+                    div { dt { "Area" } dd { (area) } }
+                    @if let Some(o) = &f.owner { div { dt { "Owner" } dd { (o) } } }
+                    @if let Some(s) = &f.success { div { dt { "Success event" } dd { code { (s) } } } }
+                }
+            }, html! {}))
             (components::tabs(&f.name, &tabs))
             @if v.tab == "errors" {
                 section.card.wide {
@@ -188,23 +208,21 @@ pub fn feature_page(v: &FeaturePage<'_>) -> Markup {
                 }
             } @else {
                 @if let Some(h) = &v.ctx.health {
-                    section.tiles aria-label="Use, last 30 days" {
-                        (tile("violet", "users", "Users", &compact(h.users), &format!("{} vs the 30 days before", trend(h.users, h.prev_users))))
-                        (tile("sky", "task", "Uses", &compact(h.uses), &format!("{} vs the 30 days before", trend(h.uses, h.prev_uses))))
-                        (tile("mint", "star", "Succeeded", &compact(h.success_users), &f.success.clone().unwrap_or_else(|| "no success event declared".into())))
+                    section.kpis aria-label="Use, last 30 days" {
+                        (crate::detail::kpi("Users", &compact(h.users), &format!("{} vs the 30 days before", trend(h.users, h.prev_users))))
+                        (crate::detail::kpi("Uses", &compact(h.uses), &format!("{} vs the 30 days before", trend(h.uses, h.prev_uses))))
+                        (crate::detail::kpi("Succeeded", &compact(h.success_users), &f.success.as_ref().map_or_else(|| "no success event declared".to_owned(), |_| format!("{} vs the 30 days before", trend(h.success_users, h.prev_success_users)))))
                     }
                 }
-                div.grid {
-                    section.card {
-                        h2.violet { (icon("route")) "How it is reached" }
-                        @if f.entry.routes.is_empty() { p.muted { "No route declared." } }
+                div.kpis {
+                    section.card.mini {
+                        h2 { (icon("route")) "How it is reached" }
+                        @if f.entry.routes.is_empty() { p.empty-line { "No route declared." } }
                         ul { @for r in &f.entry.routes { li { code { (r) } } } }
-                        @if !f.steps.is_empty() { p.small { "Steps: " (f.steps.join(" → ")) } }
-                        @if let Some(o) = &f.owner { p.small { "Owner: " (o) } }
-                    }
-                    section.card {
-                        h2.mint { (icon("users")) "Who uses it" }
-                        @if v.ctx.roles.is_empty() { p.muted { "Nobody in the last 30 days." } }
+                        @if !f.steps.is_empty() { p.small { "Steps: " (f.steps.join(" → ")) } }                    }
+                    section.card.mini {
+                        h2 { (icon("users")) "Who uses it" }
+                        @if v.ctx.roles.is_empty() { p.empty-line { "Nobody in the last 30 days." } }
                         @else {
                             table.plain {
                                 thead { tr { th { "Role" } (th_num("Users")) (th_num("Succeeded")) } }
@@ -212,13 +230,13 @@ pub fn feature_page(v: &FeaturePage<'_>) -> Markup {
                             }
                         }
                     }
-                    section.card {
-                        h2.sky { (icon("layers")) "Pages" }
-                        @if v.ctx.pages.is_empty() { p.muted { "No page seen." } }
+                    section.card.mini {
+                        h2 { (icon("layers")) "Pages" }
+                        @if v.ctx.pages.is_empty() { p.empty-line { "No page seen." } }
                         ul { @for (path, n) in &v.ctx.pages { li { code { (path) } " · " (compact(*n)) } } }
                     }
-                    section.card {
-                        h2.sun { (icon("funnel")) "Related features" }
+                    section.card.mini {
+                        h2 { (icon("funnel")) "Related features" }
                         @if !f.requires.is_empty() { p.small { "Requires: " @for (i, k) in f.requires.iter().enumerate() { @if i > 0 { ", " } a href={ "/p/" (v.p.id) "/features/" (k) } { (k) } } } }
                         @if !v.ctx.required_by.is_empty() { p.small { "Required by: " @for (i, k) in v.ctx.required_by.iter().enumerate() { @if i > 0 { ", " } a href={ "/p/" (v.p.id) "/features/" (k) } { (k) } } } }
                         @if !v.ctx.area_peers.is_empty() { p.small { "Same area: " @for (i, k) in v.ctx.area_peers.iter().enumerate() { @if i > 0 { ", " } a href={ "/p/" (v.p.id) "/features/" (k) } { (k) } } } }
