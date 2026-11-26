@@ -51,6 +51,9 @@ const TOOL_OF: &[(&str, &str)] = &[
     // release before reading the board.
     ("board.estimate", "board"),
     ("releases.record", "record_release"),
+    // Uptime history (#559).
+    ("uptime.days", "uptime_days"),
+    ("uptime.incidents", "incidents"),
 ];
 
 /// Commands deliberately without an MCP tool, each with its reason.

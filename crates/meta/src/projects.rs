@@ -160,6 +160,7 @@ impl Meta {
                 "replay_comments",
                 "uptime_checks",
                 "incidents",
+                "uptime_days",
                 "forgotten",
                 "share_links",
                 "notes",

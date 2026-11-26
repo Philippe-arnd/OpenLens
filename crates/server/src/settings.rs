@@ -8,6 +8,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use serde::Deserialize;
 
 use openlens_engine::commands::alerts::{self, ProjectInput};
+use openlens_engine::commands::uptime;
 use openlens_engine::commands::{Caller, Command, Error};
 
 use crate::AppState;
@@ -858,12 +859,20 @@ fn when(t: i64, tz: &str) -> String {
     })
 }
 
-/// `GET /p/{id}/uptime` (#256).
+/// The query of the Uptime page: the page of incidents (#559).
+#[derive(Debug, Deserialize)]
+pub(crate) struct UptimeQuery {
+    before: Option<i64>,
+}
+
+/// `GET /p/{id}/uptime` (#256): with the last 90 days and every incident,
+/// page by page (#559).
 pub(crate) async fn uptime(
     _: crate::access::Session,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    Query(q): Query<UptimeQuery>,
 ) -> Response {
     let Some(p) = load(&state, &id).await else {
         return html_page(
@@ -876,13 +885,32 @@ pub(crate) async fn uptime(
         Ok(u) => u,
         Err(e) => return oops(&e.to_string()),
     };
+    let days_input = uptime::DaysInput {
+        project: p.id.clone(),
+        from: None,
+        to: None,
+        environment: None,
+    };
+    let days = match uptime::GetDays::run(&state, &Caller::default(), days_input).await {
+        Ok(d) => d,
+        Err(e) => return oops(&e.to_string()),
+    };
+    let page_input = uptime::IncidentsInput {
+        project: p.id.clone(),
+        before: q.before,
+        limit: None,
+    };
+    let page = match uptime::GetIncidents::run(&state, &Caller::default(), page_input).await {
+        Ok(i) => i,
+        Err(e) => return oops(&e.to_string()),
+    };
     let view = openlens_ui::UptimeView {
         state: u.status.state,
         since: u.status.since.map(|t| when(t, &tz)),
         url: u.url,
         avail: u.avail,
         ms: u.ms,
-        incidents: u
+        incidents: page
             .incidents
             .into_iter()
             .map(|i| {
@@ -890,11 +918,15 @@ pub(crate) async fn uptime(
                 (i.rule, when(i.start, &tz), end, i.minutes, i.cause)
             })
             .collect(),
+        older: page.next,
+        paged: q.before.is_some(),
         last: u
             .last
             .into_iter()
             .map(|c| (when(c.0, &tz), c.1, c.2, c.3, c.4))
             .collect(),
+        days_avail: days.availability,
+        days: days.days,
     };
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
