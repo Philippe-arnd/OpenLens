@@ -22,13 +22,7 @@ on:
       - docs/deploy/docker.md
       - .github/workflows/deploy-recipes.yml
   push:
-    branches: [main]
-    paths:
-      - deploy/systemd/**
-      - deploy/docker/**
-      - deploy/swarm/**
-      - docs/deploy/docker.md
-      - .github/workflows/deploy-recipes.yml
+    tags: ["v*"]
   schedule:
     - cron: "23 4 * * *"
   workflow_dispatch:
@@ -58,6 +52,7 @@ jobs:
 
   systemd:
     name: systemd unit in a systemd container
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -132,6 +127,7 @@ jobs:
 
   compose:
     name: Compose file and openlens-compose-update
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -190,6 +186,7 @@ jobs:
 
   swarm:
     name: Swarm stack, update and rollback
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
