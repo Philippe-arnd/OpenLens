@@ -176,6 +176,12 @@ pub fn digest(p: &ProjectInfo<'_>, d: &openlens_engine::Digest, mailed: bool) ->
                     ul { @for i in &d.insights { li { strong { (i.title) } " · " span.muted { (i.evidence) } br; span.small { "Next step: " (i.next_step) } } } }
                 }
             }
+            @if !d.releases.is_empty() {
+                section.card.wide {
+                    h2 { "Releases this week" }
+                    ul.plain-list { @for (name, line) in &d.releases { li { code { (name) } " — " (line) } } }
+                }
+            }
             @if !d.goals.is_empty() {
                 section.card.wide {
                     h2.sun { (icon("star")) "Goals" }
