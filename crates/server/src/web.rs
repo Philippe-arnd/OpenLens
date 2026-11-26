@@ -358,7 +358,7 @@ async fn board(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
-    Query(q): Query<crate::api::BoardQuery>,
+    Query(q): Query<crate::board_query::BoardQuery>,
 ) -> Response {
     let Some(p) = project(&state, id).await else {
         return html(
