@@ -1,9 +1,13 @@
 //! People and data explorer (#222): a person's profile, a breakdown page,
-//! and read-only SQL for admins, over the same engine calls as the API.
+//! and read-only SQL for admins. The page, export and REST adapters of the
+//! engine's `explore.*` commands (#507, D-042), which hold the logic and
+//! the SQL (`openlens_engine::commands::explore`).
 
 use axum::extract::{Form, Path, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
+use openlens_engine::commands::explore::{self as cmd, FilteredInput};
+use openlens_engine::commands::{Caller, Command, Error, Host};
 use serde::Deserialize;
 
 use crate::AppState;
@@ -12,12 +16,23 @@ use crate::auth;
 use crate::web::html_page;
 
 async fn project(state: &AppState, id: &str) -> Option<openlens_meta::Project> {
-    let meta = state.meta.clone();
-    let id = id.to_owned();
-    tokio::task::spawn_blocking(move || meta.project(&id))
-        .await
-        .ok()?
-        .ok()?
+    state.project(id).await
+}
+
+/// The input of a report over `f`.
+fn filtered(p: &openlens_meta::Project, f: &openlens_engine::Filters) -> FilteredInput {
+    FilteredInput {
+        project: p.id.clone(),
+        filters: f.clone(),
+    }
+}
+
+/// The page shown when a report cannot be computed.
+fn cant_show(e: &str) -> Response {
+    html_page(
+        StatusCode::BAD_REQUEST,
+        openlens_ui::message("Can't show that", e),
+    )
 }
 
 fn not_found(what: &str) -> Response {
@@ -37,39 +52,16 @@ pub(crate) async fn person(
     let Some(p) = project(&state, &id).await else {
         return not_found("No such project.");
     };
-    if who.is_empty() || who.len() > 200 {
-        return not_found("No such person.");
-    }
-    let tz = auth::tz_for(&state, &headers, &p.timezone);
-    let map = crate::load_map(&state, &p.id).await;
-    let (meta, root, pid, w) = (
-        state.meta.clone(),
-        state.data_dir.clone(),
-        p.id.clone(),
-        who.clone(),
-    );
-    let stored = tokio::task::spawn_blocking(move || {
-        let person = meta.person(&pid, &w).ok().flatten();
-        let roles = meta.role_history(&pid, &w).unwrap_or_default();
-        let replays = openlens_replay::list(&root, &pid, Some(&w)).unwrap_or_default();
-        (person, roles, replays)
-    })
-    .await;
-    let Ok((person, roles, replays)) = stored else {
-        return not_found("The metadata store is unavailable.");
+    let input = cmd::PersonInput {
+        project: p.id.clone(),
+        distinct_id: who.clone(),
     };
-    let events = openlens_engine::person_events(
-        &state.query,
-        &p.id,
-        map.as_ref().map(|(m, _)| m),
-        &who,
-        100,
-    )
-    .await
-    .unwrap_or_default();
-    if person.is_none() && events.is_empty() {
-        return not_found("Nobody with this id in the last 90 days.");
-    }
+    let prof = match cmd::GetPerson::run(&state, &Caller::default(), input).await {
+        Ok(prof) => prof,
+        Err(Error::NotFound) => return not_found("No such project."),
+        Err(e) => return not_found(&e.to_string()),
+    };
+    let tz = auth::tz_for(&state, &headers, &p.timezone);
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
         name: &p.name,
@@ -80,10 +72,10 @@ pub(crate) async fn person(
         openlens_ui::person(
             &info,
             &who,
-            person.as_ref(),
-            &roles,
-            &replays,
-            &events,
+            prof.person.as_ref(),
+            &prof.roles,
+            &prof.replays,
+            &prof.events,
             &tz,
             auth::viewer(&state, &headers).is_some_and(|v| v.admin),
         ),
@@ -114,9 +106,15 @@ pub(crate) async fn breakdown(
     let by = q.by.unwrap_or_else(|| "role".into());
     let f = q.f.filters(&auth::tz_for(&state, &headers, &p.timezone));
     let map = crate::load_map(&state, &p.id).await;
+    let input = cmd::BreakdownInput {
+        project: p.id.clone(),
+        filters: f.clone(),
+        by: by.clone(),
+    };
+    let caller = Caller::default();
     let (b, rows) = tokio::join!(
         crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
-        openlens_engine::breakdown(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f, &by)
+        cmd::Breakdown::run(&state, &caller, input)
     );
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
@@ -128,10 +126,8 @@ pub(crate) async fn breakdown(
             StatusCode::OK,
             openlens_ui::breakdown(&info, &b, &f, &by, &rows),
         ),
-        (Err(e), _) | (_, Err(e)) => html_page(
-            StatusCode::BAD_REQUEST,
-            openlens_ui::message("Can't show that", &e.to_string()),
-        ),
+        (Err(e), _) => cant_show(&e.to_string()),
+        (_, Err(e)) => cant_show(&e.to_string()),
     }
 }
 
@@ -149,8 +145,10 @@ pub(crate) async fn sql_page(
         name: &p.name,
         key: &p.api_key,
     };
-    let sql = "SELECT event, count(*) AS n FROM events\nWHERE date >= current_date - INTERVAL '7 days'\nGROUP BY event ORDER BY n DESC";
-    html_page(StatusCode::OK, openlens_ui::sql(&info, sql, None, None))
+    html_page(
+        StatusCode::OK,
+        openlens_ui::sql(&info, cmd::DEFAULT_SQL, None, None),
+    )
 }
 
 #[derive(Deserialize)]
@@ -177,7 +175,11 @@ pub(crate) async fn sql_run(
         name: &p.name,
         key: &p.api_key,
     };
-    match state.query.cold().sql(&p.id, &f.sql).await {
+    let input = cmd::SqlInput {
+        project: p.id.clone(),
+        sql: f.sql.clone(),
+    };
+    match cmd::Sql::run(&state, &Caller::default(), input).await {
         Ok(res) if f.format == "csv" => {
             let mut r = csv(&res).into_response();
             let h = r.headers_mut();
@@ -264,43 +266,31 @@ pub(crate) async fn acquisition(
     let Ok(q) = serde_urlencoded::from_str::<AcqParams>(&raw.unwrap_or_default()) else {
         return not_found("Unreadable filters.");
     };
-    let by = ["source", "campaign", "referrer"]
-        .into_iter()
-        .find(|b| q.by.as_deref() == Some(*b))
-        .unwrap_or("channel");
-    let last = q.touch.as_deref() == Some("last");
     let f = q.f.filters(&auth::tz_for(&state, &headers, &p.timezone));
     let map = crate::load_map(&state, &p.id).await;
-    let touch = if last {
-        openlens_engine::Touch::Last
-    } else {
-        openlens_engine::Touch::First
+    let input = cmd::AcquisitionInput {
+        project: p.id.clone(),
+        filters: f.clone(),
+        by: q.by,
+        touch: q.touch,
     };
-    let (b, rows) = tokio::join!(
+    let caller = Caller::default();
+    let (b, a) = tokio::join!(
         crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
-        openlens_engine::acquisition(
-            &state.query,
-            &p.id,
-            map.as_ref().map(|(m, _)| m),
-            &f,
-            by,
-            touch
-        )
+        cmd::GetAcquisition::run(&state, &caller, input)
     );
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
         name: &p.name,
         key: &p.api_key,
     };
-    match (b, rows) {
-        (Ok(b), Ok(rows)) => html_page(
+    match (b, a) {
+        (Ok(b), Ok(a)) => html_page(
             StatusCode::OK,
-            openlens_ui::acquisition(&info, &b, &f, &rows, by, last),
+            openlens_ui::acquisition(&info, &b, &f, &a.rows, a.by, a.last),
         ),
-        (Err(e), _) | (_, Err(e)) => html_page(
-            StatusCode::BAD_REQUEST,
-            openlens_ui::message("Can't show that", &e.to_string()),
-        ),
+        (Err(e), _) => cant_show(&e.to_string()),
+        (_, Err(e)) => cant_show(&e.to_string()),
     }
 }
 
@@ -320,9 +310,10 @@ pub(crate) async fn forms(
     };
     let f = q.filters(&auth::tz_for(&state, &headers, &p.timezone));
     let map = crate::load_map(&state, &p.id).await;
+    let caller = Caller::default();
     let (b, list) = tokio::join!(
         crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
-        openlens_engine::forms::forms(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f)
+        cmd::Forms::run(&state, &caller, filtered(&p, &f))
     );
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
@@ -331,10 +322,8 @@ pub(crate) async fn forms(
     };
     match (b, list) {
         (Ok(b), Ok(list)) => html_page(StatusCode::OK, openlens_ui::forms(&info, &b, &f, &list)),
-        (Err(e), _) | (_, Err(e)) => html_page(
-            StatusCode::BAD_REQUEST,
-            openlens_ui::message("Can't show that", &e.to_string()),
-        ),
+        (Err(e), _) => cant_show(&e.to_string()),
+        (_, Err(e)) => cant_show(&e.to_string()),
     }
 }
 
@@ -392,9 +381,14 @@ pub(crate) async fn churn(
     };
     let f = q.filters(&auth::tz_for(&state, &headers, &p.timezone));
     let map = crate::load_map(&state, &p.id).await;
+    let input = cmd::ChurnInput {
+        project: p.id.clone(),
+        filters: Some(f.clone()),
+    };
+    let caller = Caller::default();
     let (b, c) = tokio::join!(
         crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
-        openlens_engine::churn(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f)
+        cmd::Churn::run(&state, &caller, input)
     );
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
@@ -413,10 +407,8 @@ pub(crate) async fn churn(
             StatusCode::OK,
             openlens_ui::churn(&info, &b, &f, &c, &extras),
         ),
-        (Err(e), _) | (_, Err(e)) => html_page(
-            StatusCode::BAD_REQUEST,
-            openlens_ui::message("Can't show that", &e.to_string()),
-        ),
+        (Err(e), _) => cant_show(&e.to_string()),
+        (_, Err(e)) => cant_show(&e.to_string()),
     }
 }
 
@@ -449,60 +441,22 @@ async fn exit_answers(
 /// Flags made from the users at risk (#269): how many of the treated and
 /// of the held-out users were active in the last 7 days.
 async fn audiences(state: &AppState, project: &str) -> Vec<openlens_ui::Audience> {
-    let mut out = Vec::new();
-    for f in crate::flags::load(state, project)
+    let input = cmd::ProjectInput {
+        project: project.to_owned(),
+    };
+    cmd::FlagAudiences::run(state, &Caller::default(), input)
         .await
+        .unwrap_or_default()
         .into_iter()
-        .filter(|f| !f.users.is_empty())
-        .take(5)
-    {
-        let mut params = openlens_sqlgen::Params::new();
-        let ids: Vec<String> = f.users.iter().filter_map(|u| params.bind(u).ok()).collect();
-        if ids.is_empty() {
-            continue;
-        }
-        let since = (chrono::Utc::now() - chrono::Duration::days(7)).format("%Y-%m-%d");
-        let sql = format!(
-            "SELECT DISTINCT distinct_id FROM events WHERE date >= '{since}' AND distinct_id IN ({})",
-            ids.join(", ")
-        );
-        let active: std::collections::HashSet<String> = state
-            .query
-            .with_params(&params)
-            .sql(project, &sql)
-            .await
-            .map(|r| {
-                r.rows
-                    .iter()
-                    .filter_map(|x| {
-                        x.get("distinct_id")
-                            .and_then(|v| v.as_str())
-                            .map(str::to_owned)
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        let (mut t, mut ta, mut h, mut ha) = (0i64, 0i64, 0i64, 0i64);
-        for u in &f.users {
-            let a = i64::from(active.contains(u));
-            if f.held_out(u) {
-                h += 1;
-                ha += a;
-            } else {
-                t += 1;
-                ta += a;
-            }
-        }
-        out.push(openlens_ui::Audience {
-            flag: f.key.clone(),
-            enabled: f.enabled,
-            treated: t,
-            treated_active: ta,
-            held: h,
-            held_active: ha,
-        });
-    }
-    out
+        .map(|a| openlens_ui::Audience {
+            flag: a.flag,
+            enabled: a.enabled,
+            treated: a.treated,
+            treated_active: a.treated_active,
+            held: a.held,
+            held_active: a.held_active,
+        })
+        .collect()
 }
 
 /// `GET /p/{id}/churn/at-risk.csv` or `.json` (admins, #269): the users at
@@ -516,13 +470,11 @@ pub(crate) async fn at_risk_export(
     let Some(p) = project(&state, &id).await else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let f = openlens_engine::Filters {
-        tz: p.timezone.clone(),
-        ..openlens_engine::Filters::default()
+    let input = cmd::ChurnInput {
+        project: p.id.clone(),
+        filters: None,
     };
-    let map = crate::load_map(&state, &p.id).await;
-    let Ok(c) = openlens_engine::churn(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f).await
-    else {
+    let Ok(c) = cmd::Churn::run(&state, &Caller::default(), input).await else {
         return StatusCode::BAD_REQUEST.into_response();
     };
     crate::privacy::audit(
@@ -600,40 +552,27 @@ pub(crate) async fn make_audience(
     let Some(p) = project(&state, &id).await else {
         return not_found("No such project.");
     };
-    let f = openlens_engine::Filters {
-        tz: p.timezone.clone(),
-        ..openlens_engine::Filters::default()
+    let input = cmd::MakeAudienceInput {
+        project: p.id.clone(),
+        holdout: form.holdout,
     };
-    let map = crate::load_map(&state, &p.id).await;
-    let Ok(c) = openlens_engine::churn(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f).await
-    else {
-        return not_found("The churn report is unavailable.");
+    let key = match cmd::MakeAudience::run(&state, &Caller::default(), input).await {
+        Ok(made) => made.key,
+        Err(Error::NotFound) => return not_found("No such project."),
+        Err(Error::Unavailable(e)) => return not_found(&e),
+        Err(Error::Invalid(e)) => {
+            return html_page(
+                StatusCode::BAD_REQUEST,
+                openlens_ui::message("Nobody at risk", &e),
+            );
+        }
+        Err(Error::Storage(e)) => {
+            return html_page(
+                StatusCode::BAD_REQUEST,
+                openlens_ui::message("Can't make it", &e),
+            );
+        }
     };
-    if c.at_risk.is_empty() {
-        return html_page(
-            StatusCode::BAD_REQUEST,
-            openlens_ui::message("Nobody at risk", "No user is at risk right now."),
-        );
-    }
-    let key = format!("win-back-{}", chrono::Utc::now().format("%y%m%d"));
-    let flag = openlens_flags::Flag {
-        key: key.clone(),
-        description: format!("Win-back nudge for {} users at risk", c.at_risk.len()),
-        enabled: false,
-        rollout: 100,
-        roles: Vec::new(),
-        accounts: Vec::new(),
-        variants: Vec::new(),
-        rules: Vec::new(),
-        users: c.at_risk.iter().map(|a| a.distinct_id.clone()).collect(),
-        holdout: form.holdout.unwrap_or(20).min(50),
-    };
-    if let Err(e) = crate::flags::save(&state, &p.id, &flag).await {
-        return html_page(
-            StatusCode::BAD_REQUEST,
-            openlens_ui::message("Can't make it", &e),
-        );
-    }
     crate::privacy::audit(&state, &headers, Some(&p.id), "flag.save", &key);
     Redirect::to(&format!("/p/{}/flags-edit?key={key}", p.id)).into_response()
 }
@@ -647,16 +586,13 @@ pub(crate) async fn api_churn(
     if !auth::has_bearer(&state, &headers) {
         return crate::apierr::json(StatusCode::UNAUTHORIZED, "admin bearer token required");
     }
-    let Some(p) = project(&state, &id).await else {
-        return crate::apierr::json(StatusCode::NOT_FOUND, "unknown project");
+    let input = cmd::ChurnInput {
+        project: id,
+        filters: None,
     };
-    let f = openlens_engine::Filters {
-        tz: p.timezone.clone(),
-        ..openlens_engine::Filters::default()
-    };
-    let map = crate::load_map(&state, &p.id).await;
-    match openlens_engine::churn(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f).await {
+    match cmd::Churn::run(&state, &Caller::default(), input).await {
         Ok(c) => axum::Json(c).into_response(),
+        Err(Error::NotFound) => crate::apierr::json(StatusCode::NOT_FOUND, "unknown project"),
         Err(e) => crate::apierr::json(StatusCode::BAD_REQUEST, e.to_string()),
     }
 }
@@ -675,10 +611,10 @@ pub(crate) async fn api_vitals(
     let Some(p) = project(&state, &id).await else {
         return crate::apierr::json(StatusCode::NOT_FOUND, "unknown project");
     };
-    let map = crate::load_map(&state, &p.id).await;
     let f = q.filters(&p.timezone);
-    match openlens_engine::vitals(&state.query, &p.id, &f, map.as_ref().map(|(m, _)| m)).await {
+    match cmd::Vitals::run(&state, &Caller::default(), filtered(&p, &f)).await {
         Ok(v) => axum::Json(serde_json::json!({ "filters": f, "vitals": v })).into_response(),
+        Err(Error::NotFound) => crate::apierr::json(StatusCode::NOT_FOUND, "unknown project"),
         Err(e) => crate::apierr::json(StatusCode::BAD_REQUEST, e.to_string()),
     }
 }
@@ -700,9 +636,10 @@ pub(crate) async fn audience(
     crate::audience::init(&state.data_dir);
     let f = q.filters(&auth::tz_for(&state, &headers, &p.timezone));
     let map = crate::load_map(&state, &p.id).await;
+    let caller = Caller::default();
     let (b, a) = tokio::join!(
         crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
-        openlens_engine::audience(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f)
+        cmd::GetAudience::run(&state, &caller, filtered(&p, &f))
     );
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
@@ -714,10 +651,8 @@ pub(crate) async fn audience(
             StatusCode::OK,
             openlens_ui::audience(&info, &b, &f, &a, crate::audience::has_geo()),
         ),
-        (Err(e), _) | (_, Err(e)) => html_page(
-            StatusCode::BAD_REQUEST,
-            openlens_ui::message("Can't show that", &e.to_string()),
-        ),
+        (Err(e), _) => cant_show(&e.to_string()),
+        (_, Err(e)) => cant_show(&e.to_string()),
     }
 }
 
@@ -729,10 +664,16 @@ pub(crate) struct FlowParams {
     to: Option<String>,
 }
 
-fn flow_query(q: &FlowParams) -> openlens_engine::FlowQuery {
-    openlens_engine::FlowQuery {
-        from: q.from.clone().filter(|s| !s.trim().is_empty()),
-        to_success: q.to.as_deref() == Some("success"),
+fn flows_input(
+    p: &openlens_meta::Project,
+    f: &openlens_engine::Filters,
+    q: &FlowParams,
+) -> cmd::FlowsInput {
+    cmd::FlowsInput {
+        project: p.id.clone(),
+        filters: f.clone(),
+        from: q.from.clone(),
+        to: q.to.clone(),
     }
 }
 
@@ -751,11 +692,12 @@ pub(crate) async fn flows(
         return not_found("Unreadable filters.");
     };
     let f = q.f.filters(&auth::tz_for(&state, &headers, &p.timezone));
-    let fq = flow_query(&q);
+    let fq = cmd::flow_query(q.from.as_deref(), q.to.as_deref());
     let map = crate::load_map(&state, &p.id).await;
+    let caller = Caller::default();
     let (b, flow) = tokio::join!(
         crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
-        openlens_engine::flows(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f, &fq)
+        cmd::Flows::run(&state, &caller, flows_input(&p, &f, &q))
     );
     let features: Vec<(String, String)> = map
         .as_ref()
@@ -784,10 +726,8 @@ pub(crate) async fn flows(
                 fq.to_success,
             ),
         ),
-        (Err(e), _) | (_, Err(e)) => html_page(
-            StatusCode::BAD_REQUEST,
-            openlens_ui::message("Can't show that", &e.to_string()),
-        ),
+        (Err(e), _) => cant_show(&e.to_string()),
+        (_, Err(e)) => cant_show(&e.to_string()),
     }
 }
 
@@ -809,17 +749,9 @@ pub(crate) async fn api_flows(
         return crate::apierr::json(StatusCode::BAD_REQUEST, "bad query");
     };
     let f = q.f.filters(&p.timezone);
-    let map = crate::load_map(&state, &p.id).await;
-    match openlens_engine::flows(
-        &state.query,
-        &p.id,
-        map.as_ref().map(|(m, _)| m),
-        &f,
-        &flow_query(&q),
-    )
-    .await
-    {
+    match cmd::Flows::run(&state, &Caller::default(), flows_input(&p, &f, &q)).await {
         Ok(flow) => axum::Json(flow).into_response(),
+        Err(Error::NotFound) => crate::apierr::json(StatusCode::NOT_FOUND, "unknown project"),
         Err(e) => crate::apierr::json(StatusCode::BAD_REQUEST, e.to_string()),
     }
 }
@@ -840,7 +772,6 @@ pub(crate) async fn live(
         return not_found("Unreadable filters.");
     };
     let f = q.filters(&auth::tz_for(&state, &headers, &p.timezone));
-    let map = crate::load_map(&state, &p.id).await;
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
         name: &p.name,
@@ -860,7 +791,7 @@ pub(crate) async fn live(
             serde_urlencoded::to_string(&keep).unwrap_or_default()
         )
     };
-    match openlens_engine::live(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f).await {
+    match cmd::GetLive::run(&state, &Caller::default(), filtered(&p, &f)).await {
         Ok(l) => {
             let mut r = html_page(StatusCode::OK, openlens_ui::live(&info, &f, &l));
             if let Ok(v) = HeaderValue::from_str(&format!("10;url=/p/{}/live{query}", p.id)) {
@@ -868,9 +799,6 @@ pub(crate) async fn live(
             }
             r
         }
-        Err(e) => html_page(
-            StatusCode::BAD_REQUEST,
-            openlens_ui::message("Can't show that", &e.to_string()),
-        ),
+        Err(e) => cant_show(&e.to_string()),
     }
 }

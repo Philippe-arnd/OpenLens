@@ -92,6 +92,10 @@ impl Host for AppState {
         let _ = self.meta.set_setting("github_token", &s);
         Ok(())
     }
+
+    fn data_dir(&self) -> &std::path::Path {
+        &self.data_dir
+    }
 }
 
 /// The caller of a command made from a dashboard request: the viewer's
