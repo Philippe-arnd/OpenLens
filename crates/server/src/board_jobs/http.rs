@@ -191,10 +191,7 @@ pub(crate) async fn page_cancel(
     Path((project, id)): Path<(String, String)>,
 ) -> Response {
     let jobs = &state.caches.board_jobs;
-    if jobs
-        .get(&v.id, &id)
-        .is_none_or(|j| j.project != project)
-    {
+    if jobs.get(&v.id, &id).is_none_or(|j| j.project != project) {
         return not_found();
     }
     jobs.cancel(&v.id, &id);

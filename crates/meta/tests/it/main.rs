@@ -539,6 +539,8 @@ fn a_recorded_release_starts_its_range_after_the_previous_one() {
         3,
         "a release is a deploy"
     );
+}
+
 /// #510: a write transaction that meets the write lock held waits for it
 /// (`BEGIN IMMEDIATE` calls the busy handler) instead of failing at once
 /// with "database is locked", which capture answered with a 503.
@@ -584,6 +586,9 @@ fn a_batch_of_identifies_is_recorded_in_one_write() {
     assert_eq!(m.aliases_of("p", "ann").unwrap(), vec!["anon-9".to_owned()]);
     // Nothing to record: no write, nothing changed.
     assert!(!m.record_identify("p", &[], &[]).unwrap());
+}
+
+#[test]
 fn a_release_keeps_the_map_version_first_recorded() {
     use openlens_meta::release_maps::ReleaseMap;
     let m = Meta::in_memory().unwrap();

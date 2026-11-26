@@ -246,7 +246,10 @@ pub(crate) fn start(state: &AppState, new: NewJob) -> Result<String, Refused> {
     {
         let mut m = registry.jobs.lock().map_err(|_| Refused::Full)?;
         purge(&mut m, Instant::now());
-        if let Some(j) = m.values().find(|j| j.owner == new.owner && j.state.active()) {
+        if let Some(j) = m
+            .values()
+            .find(|j| j.owner == new.owner && j.state.active())
+        {
             return Err(Refused::Yours(j.id.clone()));
         }
         if m.values().filter(|j| j.state.active()).count() >= ACTIVE || m.len() >= CAPACITY {
