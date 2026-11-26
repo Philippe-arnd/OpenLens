@@ -155,7 +155,9 @@ jobs:
           fi
           start() {
             if [ -n "$MEMORY" ]; then echo $$ | sudo tee /sys/fs/cgroup/openlens/cgroup.procs > /dev/null; fi
-            OPENLENS_DATA_DIR="$D" OPENLENS_ADDR=127.0.0.1:18741 OPENLENS_ADMIN_TOKEN=perf ./target/perf/openlens >> server.log 2>&1 &
+            # Each query with its time (the query layer logs it at debug), so a
+            # slow board says which block is slow: see queries.txt.
+            RUST_LOG=info,openlens_query=debug OPENLENS_DATA_DIR="$D" OPENLENS_ADDR=127.0.0.1:18741 OPENLENS_ADMIN_TOKEN=perf ./target/perf/openlens >> server.log 2>&1 &
             PID=$!
             for _ in $(seq 120); do curl -sf 127.0.0.1:18741/healthz > /dev/null && break; sleep 1; done
           }
@@ -208,6 +210,8 @@ jobs:
           }, indent=2))
           PY
           cat scale.json
+          # The 25 slowest queries of the whole run, longest first.
+          sed 's/\x1b\[[0-9;]*m//g' server.log | grep ' query ' | sed -n 's/.* ms=\([0-9]*\) sql=\(.*\)/\1\t\2/p' | sort -rn | head -25 > queries.txt || true
           { echo "## Board at scale: $EVENTS events, cap ${MEMORY:-none}"; echo; echo '```json'; cat scale.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: always()
@@ -215,4 +219,5 @@ jobs:
           name: scale-${{ matrix.events }}-${{ matrix.memory || 'nocap' }}
           path: |
             scale.json
+            queries.txt
             server.log
