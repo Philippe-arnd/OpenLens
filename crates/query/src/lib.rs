@@ -34,6 +34,7 @@ pub use identity::{IdentityFn, IdentityRows, IdentitySource, PersonRow};
 mod internal;
 mod retry;
 mod rollup;
+pub use openlens_storage::DaySize;
 pub use openlens_storage::rollup::last_closed;
 pub use rollup::{DayFeatures, INTERACTION};
 mod typed;
@@ -370,6 +371,24 @@ impl QueryEngine {
         tokio::task::spawn_blocking(work)
             .await
             .map_err(|e| QueryError::Storage(format!("summary task: {e}")))?
+    }
+
+    /// What each stored UTC day of `project` from `from` to `to` weighs
+    /// (#514): files, bytes and rows, from the file sizes and the Parquet
+    /// footers, without a query (`openlens_storage::day_sizes`).
+    pub async fn day_sizes(
+        &self,
+        project: &str,
+        from: chrono::NaiveDate,
+        to: chrono::NaiveDate,
+    ) -> Result<Vec<DaySize>, QueryError> {
+        let (root, project) = (self.root.clone(), project.to_owned());
+        tokio::task::spawn_blocking(move || {
+            openlens_storage::day_sizes(&root, &project, from, to)
+                .map_err(|e| QueryError::Storage(e.to_string()))
+        })
+        .await
+        .map_err(|e| QueryError::Storage(format!("day sizes task: {e}")))?
     }
 
     /// Segments read by [`QueryEngine::raw_summary`] since the start: the

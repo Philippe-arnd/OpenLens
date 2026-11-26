@@ -68,7 +68,13 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "GET",
         "/api/projects/{project}/board",
         "read",
-        "The Focus board as JSON: its period blocks since the current release, against the same length before (`window=fixed`: the fixed 7-, 14- and 30-day windows).",
+        "The Focus board as JSON: its period blocks since the current release, against the same length before (`window=fixed`: the fixed 7-, 14- and 30-day windows). A date range or past release (`from`/`to`, `since`) reading more than 30 days of events answers 409 with its `estimate` until asked with `confirm=1`.",
+    ),
+    (
+        "GET",
+        "/api/projects/{project}/board/estimate",
+        "read",
+        "What the board's window would read, with the board's parameters: days from the daily rollups and from the events, bytes, rows, a rough time, and whether it needs `confirm=1` (`null` for the fixed windows).",
     ),
     (
         "GET",

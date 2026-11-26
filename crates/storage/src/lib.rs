@@ -22,7 +22,7 @@ mod segments;
 mod typed;
 pub use pending::Pending;
 use pending::projects_of;
-pub use segments::{SegmentFacts, count_rows, segment_facts, segment_files};
+pub use segments::{DaySize, SegmentFacts, count_rows, day_sizes, segment_facts, segment_files};
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Write};

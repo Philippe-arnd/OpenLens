@@ -61,6 +61,10 @@ pub struct BoardWindow {
     /// The environment's releases a window can be asked since, newest
     /// first (`releases.list`): the board page's picker (D-060).
     pub releases: Vec<String>,
+    /// What a date range or a past release read (D-061): days from the
+    /// rollups and from the events, bytes and a rough time; none for the
+    /// current release's window.
+    pub estimate: Option<crate::Estimate>,
 }
 
 /// A window with the spans its queries read.

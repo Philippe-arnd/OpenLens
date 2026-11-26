@@ -51,6 +51,38 @@ fn flushed_events_land_in_hive_partitions_and_count_back() {
     );
 }
 
+/// The size of a day comes from its files' footers (#514): rows as stored,
+/// only the days asked for, and nothing for a day without events.
+#[test]
+fn day_sizes_count_each_days_rows_and_bytes_from_the_footers() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let t = Utc.with_ymd_and_hms(2026, 11, 21, 9, 30, 0).unwrap();
+    w.append(&[ev("p1", t), ev("p1", t), ev("p1", t + Duration::days(2))])
+        .unwrap();
+    w.flush().unwrap();
+    // A second segment the same day adds up.
+    w.append(&[ev("p1", t)]).unwrap();
+    w.flush().unwrap();
+    let day = |d: u32| chrono::NaiveDate::from_ymd_opt(2026, 11, d).unwrap();
+    let sizes = openlens_storage::day_sizes(dir.path(), "p1", day(20), day(23)).unwrap();
+    let days: Vec<_> = sizes.iter().map(|s| s.day).collect();
+    assert_eq!(days, [day(21), day(23)], "the empty day is absent");
+    assert_eq!(sizes[0].rows, 3);
+    assert!(sizes[0].files >= 1);
+    assert!(
+        sizes[0].bytes > sizes[1].bytes,
+        "three rows weigh more than one"
+    );
+    let one = openlens_storage::day_sizes(dir.path(), "p1", day(22), day(23)).unwrap();
+    assert_eq!(one.len(), 1, "only the days asked for");
+    assert!(
+        openlens_storage::day_sizes(dir.path(), "nobody", day(1), day(30))
+            .unwrap()
+            .is_empty()
+    );
+}
+
 #[test]
 fn unflushed_events_survive_a_restart() {
     let dir = tempfile::tempdir().unwrap();
