@@ -19,10 +19,32 @@ pub(crate) fn projects_of(events: &[Event]) -> std::collections::BTreeSet<String
     events.iter().map(|e| e.project.clone()).collect()
 }
 
+/// The UTC days (`date=` partitions) the events land on, per project.
+pub(crate) fn days_of(
+    events: &[Event],
+) -> std::collections::BTreeMap<String, std::collections::BTreeSet<chrono::NaiveDate>> {
+    let mut by: std::collections::BTreeMap<&str, std::collections::BTreeSet<chrono::NaiveDate>> =
+        std::collections::BTreeMap::new();
+    for e in events {
+        by.entry(e.project.as_str())
+            .or_default()
+            .insert(e.timestamp.date_naive());
+    }
+    by.into_iter().map(|(p, d)| (p.to_owned(), d)).collect()
+}
+
 impl Pending {
     /// The distinct projects these events belong to.
     pub fn projects(&self) -> std::collections::BTreeSet<String> {
         projects_of(&self.events)
+    }
+
+    /// The UTC days these events are written to, per project (#516: a
+    /// late event invalidates the results kept for its day).
+    pub fn days(
+        &self,
+    ) -> std::collections::BTreeMap<String, std::collections::BTreeSet<chrono::NaiveDate>> {
+        days_of(&self.events)
     }
 
     /// Write the segments, then remove the WAL that covered them. Returns

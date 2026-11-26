@@ -294,12 +294,14 @@ pub(crate) fn offload(cfg: &Config, root: &Path, today: NaiveDate) -> Result<usi
 
 /// The cold tier, after a good S3 copy (#326, D-031): people forgotten
 /// since the last pass are erased from cold days too, then old days move
-/// to S3 and cold days past retention go.
-pub(crate) fn run(cfg: &Config, root: &Path, meta: &openlens_meta::Meta) {
+/// to S3 and cold days past retention go. Returns whether a day was
+/// changed, moved or removed (#516).
+pub(crate) fn run(cfg: &Config, root: &Path, meta: &openlens_meta::Meta) -> bool {
     const DONE: &str = "cold_erased_at";
     let Ok(_guard) = crate::privacy::MAINTENANCE.lock() else {
-        return;
+        return false;
     };
+    let mut changed = false;
     let now = chrono::Utc::now();
     for p in meta.projects().unwrap_or_default() {
         let since = meta
@@ -315,7 +317,10 @@ pub(crate) fn run(cfg: &Config, root: &Path, meta: &openlens_meta::Meta) {
             .collect();
         if !ids.is_empty() {
             match erase(cfg, root, &p.id, &ids) {
-                Ok(n) => tracing::info!(project = %p.id, events = n, "erased from cold days"),
+                Ok(n) => {
+                    changed |= n > 0;
+                    tracing::info!(project = %p.id, events = n, "erased from cold days");
+                }
                 Err(err) => {
                     tracing::warn!(project = %p.id, %err, "cold erasure failed; retried next hour");
                     continue;
@@ -326,14 +331,21 @@ pub(crate) fn run(cfg: &Config, root: &Path, meta: &openlens_meta::Meta) {
     }
     match offload_checked(cfg, root, meta, now.date_naive()) {
         Ok(0) => {}
-        Ok(n) => tracing::info!(days = n, "moved old event days to S3"),
+        Ok(n) => {
+            changed = true;
+            tracing::info!(days = n, "moved old event days to S3");
+        }
         Err(err) => tracing::warn!(%err, "cold tier: move to S3 failed"),
     }
     match expire(cfg, root, now.date_naive()) {
         Ok(0) => {}
-        Ok(n) => tracing::info!(days = n, "expired cold days on S3"),
+        Ok(n) => {
+            changed = true;
+            tracing::info!(days = n, "expired cold days on S3");
+        }
         Err(err) => tracing::warn!(%err, "cold tier: expiry failed"),
     }
+    changed
 }
 
 /// Bring a cold day back to the disk, as it was uploaded. Returns the
