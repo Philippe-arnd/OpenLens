@@ -803,7 +803,7 @@ pub fn storage(v: &StorageView) -> Markup {
                 form.inline method="post" action="/settings/storage/backups/run" {
                     button type="submit" disabled[v.running] { (if v.running { "Backing up…" } else { "Back up now" }) }
                 }
-                @if v.has_latest { a.button href="/settings/storage/backups/latest.tar.gz" { (icon("down")) "Download the latest" } }
+                @if v.has_latest { a.btn href="/settings/storage/backups/latest.tar.gz" { (icon("down")) "Download the latest" } }
             }
             @if !v.history.is_empty() {
                 (crate::tables::TableCard {

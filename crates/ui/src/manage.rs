@@ -34,7 +34,7 @@ pub fn flags(p: &ProjectInfo<'_>, flags: &[openlens_flags::Flag]) -> Markup {
                     h1 { "Flags" }
                     p.muted { "Ship a change to some users first, then compare. Each flag's users show up as their own cohort." }
                 }
-                a.button href={ "/p/" (p.id) "/flags-edit" } { (icon("plus")) "New flag" }
+                a.btn href={ "/p/" (p.id) "/flags-edit" } { (icon("plus")) "New flag" }
             }
             @if flags.is_empty() {
                 section.card.empty aria-labelledby="no-flags" {
@@ -329,7 +329,7 @@ pub fn pages(
                                     " "
                                 }
                             }
-                            td { a.button.sm href=(heatmap_href(p.id, &pg.path)) { (icon("spark")) "Heatmap" } }
+                            td { a.btn.sm href=(heatmap_href(p.id, &pg.path)) { (icon("spark")) "Heatmap" } }
                         }
                     } },
                     foot: html! {},
@@ -496,11 +496,11 @@ pub fn replays(
                         @if min_minutes > 0 {
                             h2 #rep-empty-h { "No recording has more than " (min_minutes) " min of active time" }
                             p { "Lower the active time to see shorter sessions." }
-                            div.actions { a.button href={ "/p/" (p.id) "/replays" } { "Show every recording" } }
+                            div.actions { a.btn.primary href={ "/p/" (p.id) "/replays" } { "Show every recording" } }
                         } @else {
                             h2 #rep-empty-h { "No recordings yet" }
                             p { "The SDK records sessions once a page has loaded; they show up here within a few seconds." }
-                            div.actions { a.button href={ "/p/" (p.id) "/settings/install" } { "Check the install" } }
+                            div.actions { a.btn.primary href={ "/p/" (p.id) "/settings/install" } { "Check the install" } }
                         }
                     }
                 }

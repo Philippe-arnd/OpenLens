@@ -57,8 +57,8 @@ pub fn live(p: &ProjectInfo<'_>, f: &Filters, l: &openlens_engine::Live) -> Mark
                         } }
                         p { "Nobody used the app in " strong { (f.environment) } " in the last 30 minutes. Releases, roles, features and pages show up here as soon as traffic comes back." }
                         div.actions {
-                            a.button href={ "/p/" (p.id) "/uptime" } { "Open Uptime" }
-                            a.button href={ "/p/" (p.id) "/settings/install" } { "Check the install" }
+                            a.btn.primary href={ "/p/" (p.id) "/uptime" } { "Open Uptime" }
+                            a.btn href={ "/p/" (p.id) "/settings/install" } { "Check the install" }
                         }
                     }
                 }
