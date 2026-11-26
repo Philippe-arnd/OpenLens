@@ -1,10 +1,117 @@
-//! Shared page parts: the filter bar, tiles, sparklines, bars, release comparison, insight cards, the empty state.
+//! Shared page parts: the context bar, tiles, sparklines, bars, release comparison, insight cards, the empty state.
 //!
 //! Moved out of `lib.rs` as is (#307).
 
 use super::*;
 
-pub(crate) fn filter_bar(project: &str, b: &Board, f: &Filters, action: &str) -> Markup {
+/// Which part of the context bar a form sets (#542): its own field is
+/// left out of the hidden ones the form carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Ctx {
+    /// The board's window (`since`, `from`, `to`).
+    Period,
+    /// `env`.
+    Env,
+    /// `role`.
+    Role,
+    /// `release`.
+    Release,
+    /// `internal` (the team toggle).
+    Team,
+}
+
+/// A page's own path and query (`/breakdown?by=role`): a GET form drops
+/// the query of its action, so the pairs ride along as hidden fields. The
+/// pages put fixed, plain values there.
+fn split_action(action: &str) -> (&str, Vec<(&str, &str)>) {
+    match action.split_once('?') {
+        Some((path, q)) => (
+            path,
+            q.split('&')
+                .filter(|kv| !kv.is_empty())
+                .map(|kv| kv.split_once('=').unwrap_or((kv, "")))
+                .collect(),
+        ),
+        None => (action, Vec::new()),
+    }
+}
+
+/// The page's query and every current filter but `own`, as the
+/// `(name, value)` pairs of the URL (D-060: the window too), so applying
+/// one chip keeps the others.
+pub(crate) fn kept_filters(f: &Filters, own: Ctx, page: &[(&str, &str)]) -> Vec<(String, String)> {
+    use openlens_engine::Window;
+    let mut v: Vec<(String, String)> = page
+        .iter()
+        .map(|&(k, val)| (k.to_owned(), val.to_owned()))
+        .collect();
+    if own != Ctx::Env {
+        v.push(("env".into(), f.environment.clone()));
+    }
+    if let Some(r) = f.role.as_ref().filter(|_| own != Ctx::Role) {
+        v.push(("role".into(), r.clone()));
+    }
+    if let Some(r) = f.release.as_ref().filter(|_| own != Ctx::Release) {
+        v.push(("release".into(), r.clone()));
+    }
+    if f.internal && own != Ctx::Team {
+        v.push(("internal".into(), "1".into()));
+    }
+    if own != Ctx::Period {
+        match &f.window {
+            Window::Since { release } => v.push(("since".into(), release.clone())),
+            Window::Range { from, to } => {
+                v.push(("from".into(), from.to_string()));
+                v.push(("to".into(), to.to_string()));
+            }
+            Window::Fixed | Window::Release => {}
+        }
+    }
+    v
+}
+
+fn hidden_fields(pairs: &[(String, String)]) -> Markup {
+    html! { @for (k, v) in pairs { input type="hidden" name=(k) value=(v); } }
+}
+
+/// One chip and its popover form (#542). The ids pair them for the anchor
+/// positioning in CSS (`#ctx-env-btn` anchors `#ctx-env`).
+fn chip_pop(
+    id: &str,
+    title: &str,
+    label: Markup,
+    action: &str,
+    body: Markup,
+    keep: &[(String, String)],
+    foot: &str,
+) -> Markup {
+    html! {
+        button.chip type="button" id={ "ctx-" (id) "-btn" } popovertarget={ "ctx-" (id) } aria-haspopup="dialog" {
+            span.sr-only { (title) ": " } (label) span.chev aria-hidden="true" { "▾" }
+        }
+        div.pop popover="auto" id={ "ctx-" (id) } {
+            form method="get" action=(action) aria-label=(title) {
+                h3 { (title) }
+                (body)
+                (hidden_fields(keep))
+                div.pop-foot { span { (foot) } button.primary.sm type="submit" { "Apply" } }
+            }
+        }
+    }
+}
+
+/// The context bar (#542): one chip per filter (the period on the board,
+/// the environment, the role, the release) whose label is the current
+/// value and whose popover form applies it with the others kept, and the
+/// team toggle as a link. `action` is the page's path after `/p/{project}`,
+/// with its own query if it has one. Nothing on a share link.
+pub(crate) fn context_bar(
+    project: &str,
+    b: &Board,
+    f: &Filters,
+    action: &str,
+    with_period: bool,
+) -> Markup {
     if shared() {
         return html! {};
     }
@@ -12,29 +119,124 @@ pub(crate) fn filter_bar(project: &str, b: &Board, f: &Filters, action: &str) ->
     if !envs.iter().any(|e| e == "production") {
         envs.insert(0, "production".into());
     }
+    let (path, page) = split_action(action);
+    let to = format!("/p/{project}{path}");
+    let mut team = kept_filters(f, Ctx::Team, &page);
+    if !f.internal {
+        team.push(("internal".into(), "1".into()));
+    }
+    let team_href = format!(
+        "{to}?{}",
+        team.iter()
+            .map(|(k, v)| format!("{}={}", url_enc(k), url_enc(v)))
+            .collect::<Vec<_>>()
+            .join("&")
+    );
+    let role = f.role.as_deref().unwrap_or("All roles");
+    let release = f.release.as_deref().unwrap_or("All releases");
     html! {
-        form.filters method="get" action={ "/p/" (project) (action) } aria-label="Filters" {
-            (filter_fields(&envs, b, f))
-            (window_fields(&f.window))
-            button type="submit" { "Apply" }
+        div.context role="group" aria-label="Filters" {
+            @if with_period { (period_chip(&to, b, f, &page)) }
+            (chip_pop("env", "Environment", html! { (icon("globe")) (f.environment) }, &to, html! {
+                label.field { "Environment"
+                    select name="env" {
+                        @for e in &envs { option value=(e) selected[*e == f.environment] { (e) } }
+                    }
+                }
+            }, &kept_filters(f, Ctx::Env, &page), ""))
+            (chip_pop("role", "Role", html! { (role) }, &to, html! {
+                label.field { "Role"
+                    select name="role" {
+                        option value="" { "All roles" }
+                        @for r in b.roles.iter().filter_map(|r| r.role.as_deref()) {
+                            option value=(r) selected[f.role.as_deref() == Some(r)] { (r) }
+                        }
+                    }
+                }
+            }, &kept_filters(f, Ctx::Role, &page), ""))
+            (chip_pop("release", "Release", html! { (icon("release")) (release) }, &to, html! {
+                label.field { "Release"
+                    select name="release" {
+                        option value="" { "All releases" }
+                        @for r in &b.releases {
+                            option value=(r.release) selected[f.release.as_deref() == Some(r.release.as_str())] { (r.release) }
+                        }
+                    }
+                }
+            }, &kept_filters(f, Ctx::Release, &page), ""))
+            a.chip.is-off[!f.internal] href=(team_href)
+                title=(if f.internal { "The team's own users are counted: leave them out" } else { "The team's own users are left out: count them" }) {
+                (if f.internal { "Team included" } else { "Team excluded" })
+            }
         }
     }
 }
 
-/// The board's window as hidden fields (D-060), so applying the filters
-/// keeps the period picked; nothing for the default windows.
-pub(crate) fn window_fields(w: &openlens_engine::Window) -> Markup {
+/// The period chip (#513, D-060, #542): since a release of the
+/// environment, as a segmented control, or a date range, in a GET form so
+/// the URL can be shared.
+fn period_chip(to: &str, b: &Board, f: &Filters, page: &[(&str, &str)]) -> Markup {
     use openlens_engine::Window;
-    html! {
-        @match w {
-            Window::Since { release } => { input type="hidden" name="since" value=(release); }
-            Window::Range { from, to } => {
-                input type="hidden" name="from" value=(from.to_string());
-                input type="hidden" name="to" value=(to.to_string());
-            }
-            Window::Fixed | Window::Release => {}
+    // The environment's releases (`releases.list`), or the board's latest
+    // ones when the window was not resolved (a board filtered on a release).
+    let releases: Vec<&str> = match b.window.as_ref().filter(|w| !w.releases.is_empty()) {
+        Some(w) => w.releases.iter().map(String::as_str).collect(),
+        None => b.releases.iter().map(|r| r.release.as_str()).collect(),
+    };
+    let (since, from, to_day) = match &f.window {
+        Window::Since { release } => (Some(release.as_str()), None, None),
+        Window::Range { from, to } => (None, Some(from.to_string()), Some(to.to_string())),
+        Window::Fixed | Window::Release => (None, None, None),
+    };
+    let days = |d: i64| {
+        if d == 1 {
+            "1 day".to_owned()
+        } else {
+            format!("{d} days")
         }
-    }
+    };
+    let (label, length) = match (&f.window, &b.window) {
+        (Window::Range { from, to }, w) => {
+            (format!("{from} – {to}"), w.as_ref().map(|w| days(w.days)))
+        }
+        (_, Some(w)) => match &w.release {
+            Some(r) => (format!("Since {r}"), Some(days(w.days))),
+            None => (w.label.clone(), None),
+        },
+        (Window::Since { release }, None) => (format!("Since {release}"), None),
+        _ => ("Current release".to_owned(), None),
+    };
+    let foot = b
+        .window
+        .as_ref()
+        .map(|w| format!("Compared with the {} before", days(w.days)))
+        .unwrap_or_default();
+    chip_pop(
+        "period",
+        "Period",
+        html! { (label) @if let Some(l) = &length { " " span { "· " (l) } } },
+        to,
+        html! {
+            fieldset.seg {
+                legend.sr-only { "Release window" }
+                label { input type="radio" name="since" value="" checked[since.is_none()]; "Current release" }
+                @for r in &releases {
+                    label { input type="radio" name="since" value=(r) checked[since == Some(*r)]; "Since " (r) }
+                }
+            }
+            h3 { "Or a range" }
+            div.range {
+                // The browser shows a date field in its own locale; the hint
+                // gives the format the rest of the UI prints (#557).
+                label.field { "From" input type="date" name="from" value=[from] aria-describedby="period-date-format"; }
+                label.field { "To" input type="date" name="to" value=[to_day] aria-describedby="period-date-format"; }
+            }
+            p.muted.small #period-date-format { "Dates as YYYY-MM-DD" }
+            p.muted.small { "Filled dates win over the release. At most 400 days; an empty end is today." }
+        },
+        &kept_filters(f, Ctx::Period, page),
+        &foot,
+    )
 }
 
 pub(crate) fn filter_fields(envs: &[String], b: &Board, f: &Filters) -> Markup {
@@ -457,5 +659,152 @@ pub(crate) fn empty(p: &ProjectInfo<'_>, host: &str) -> Markup {
             pre.copy { (tag) }
             p.muted { "Then call " code { "openlens.identify(user.id, { role })" } " once the user is known. This page fills in as soon as the first events land." }
         }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    /// The popover form labelled `label` in a rendered context bar.
+    pub(crate) fn pop_form(html: &str, label: &str) -> String {
+        let at = format!(r#"aria-label="{label}""#);
+        html.split("<form ")
+            .skip(1)
+            .find(|s| s.contains(&at))
+            .and_then(|s| s.split("</form>").next())
+            .unwrap_or_default()
+            .to_owned()
+    }
+
+    fn filters() -> Filters {
+        let day = |s: &str| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
+        Filters {
+            environment: "staging".into(),
+            role: Some("admin".into()),
+            release: Some("v2".into()),
+            internal: true,
+            window: openlens_engine::Window::Range {
+                from: day("2026-10-01"),
+                to: day("2026-10-31"),
+            },
+            ..Filters::default()
+        }
+    }
+
+    #[test]
+    fn applying_one_chip_keeps_the_other_filters_in_the_url() {
+        let f = filters();
+        let html =
+            context_bar("p1", &Board::default(), &f, "/breakdown?by=role", true).into_string();
+        // Each chip's form: its own field(s), and every other active filter
+        // (and the page's own query) as hidden inputs.
+        let all = [
+            ("by", "role"),
+            ("env", "staging"),
+            ("role", "admin"),
+            ("release", "v2"),
+            ("internal", "1"),
+            ("from", "2026-10-01"),
+            ("to", "2026-10-31"),
+        ];
+        for (label, own) in [
+            ("Period", &["from", "to"][..]),
+            ("Environment", &["env"][..]),
+            ("Role", &["role"][..]),
+            ("Release", &["release"][..]),
+        ] {
+            let form = pop_form(&html, label);
+            assert!(
+                form.contains(r#"action="/p/p1/breakdown""#),
+                "{label}: {form}"
+            );
+            for (k, v) in all {
+                let hidden = format!(r#"type="hidden" name="{k}" value="{v}""#);
+                assert_eq!(
+                    form.contains(&hidden),
+                    !own.contains(&k),
+                    "{label} / {k}: {form}"
+                );
+            }
+        }
+        assert!(!html.contains("style="), "CSP: {html}");
+        assert!(!html.contains("<script"), "{html}");
+    }
+
+    #[test]
+    fn the_team_chip_toggles_the_team_and_keeps_the_others() {
+        let href = |html: &str| {
+            html.split("<a ")
+                .nth(1)
+                .and_then(|a| a.split(r#"href=""#).nth(1))
+                .and_then(|h| h.split('"').next())
+                .unwrap_or_default()
+                .replace("&amp;", "&")
+        };
+        let on = filters();
+        let off = Filters {
+            internal: false,
+            ..filters()
+        };
+        let b = Board::default();
+        let (on_html, off_html) = (
+            context_bar("p1", &b, &on, "/audience", false).into_string(),
+            context_bar("p1", &b, &off, "/audience", false).into_string(),
+        );
+        let (from_on, from_off) = (href(&on_html), href(&off_html));
+        assert!(!from_on.contains("internal="), "{from_on}");
+        assert!(from_off.contains("internal=1"), "{from_off}");
+        for link in [&from_on, &from_off] {
+            assert!(link.starts_with("/p/p1/audience?"), "{link}");
+            for kept in [
+                "env=staging",
+                "role=admin",
+                "release=v2",
+                "from=2026-10-01",
+                "to=2026-10-31",
+            ] {
+                assert!(link.contains(kept), "{kept}: {link}");
+            }
+        }
+        // Dashed when the team is left out.
+        assert!(off_html.contains(r#"class="chip is-off""#), "{off_html}");
+        assert!(!on_html.contains("is-off"), "{on_html}");
+        // Off the board there is no period chip, but the window rides along.
+        assert!(pop_form(&on_html, "Period").is_empty(), "{on_html}");
+        assert!(
+            pop_form(&on_html, "Role").contains(r#"name="from" value="2026-10-01""#),
+            "{on_html}"
+        );
+    }
+
+    #[test]
+    fn every_chip_is_anchored_to_its_popover_in_the_stylesheet() {
+        let html = context_bar("p1", &Board::default(), &filters(), "", true).into_string();
+        for id in ["period", "env", "role", "release"] {
+            assert!(
+                html.contains(&format!(r#"popovertarget="ctx-{id}""#)),
+                "{id}: {html}"
+            );
+            assert!(
+                html.contains(&format!(r#"id="ctx-{id}-btn""#)),
+                "{id}: {html}"
+            );
+            assert!(html.contains(&format!(r#"id="ctx-{id}""#)), "{id}: {html}");
+            assert!(
+                crate::CSS.contains(&format!("#ctx-{id}-btn {{ anchor-name: --ctx-{id}; }}")),
+                "{id}"
+            );
+            assert!(
+                crate::CSS.contains(&format!("#ctx-{id} {{ position-anchor: --ctx-{id}; }}")),
+                "{id}"
+            );
+        }
+        assert_eq!(
+            html.matches(r#"type="date""#).count(),
+            html.matches(r#"aria-describedby="period-date-format""#)
+                .count(),
+            "{html}"
+        );
     }
 }

@@ -379,7 +379,7 @@ pub(crate) async fn icon(
     })
     .await;
     match found {
-        Ok(Some(p)) => crate::icon::stored(&state, &p.id, &p.name),
+        Ok(Some(p)) => crate::icon::stored_or_initial(&state, &p.id, &p.name),
         _ => absent(),
     }
 }

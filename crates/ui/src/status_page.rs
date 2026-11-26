@@ -153,7 +153,7 @@ pub fn status_page(v: &Public, slug: &str) -> Markup {
         .filter(|a| v.notice.as_ref().is_none_or(|n| n.id != a.id))
         .partition(|a| a.active || a.starts_at > v.generated_at);
     html! {
-        (DOCTYPE)
+        (maud::DOCTYPE)
         html lang="en" {
             head {
                 meta charset="utf-8";
