@@ -3,7 +3,7 @@
    scheme: html[data-theme] from the Appearance cookie, or the system when
    the attribute is absent. Tints mix in oklab (oklch swings the hue). */
 
-@layer tokens, base, layout, components, utilities;
+@layer tokens, base, layout, components, motion, utilities;
 
 @layer tokens {
   :root {
@@ -1161,5 +1161,121 @@
   @media (max-width: 640px) {
     .card.lead { padding: 18px; }
     .page-head h1 { font-size: var(--step-3); }
+  }
+}
+
+/* Motion (#552): CSS only, and only for people who have not asked for less
+   motion. Opacity, translate, scale and colours; never layout, except the
+   height of an opening disclosure. 120 ms for feedback, 180–320 ms for what
+   appears, 420 ms for arrival, 600–900 ms for data drawing in. Only the
+   incident dot and the live dot move on their own, and only while they
+   have something to report. The reduce rule in `utilities` still wins. */
+@layer motion {
+  @media (prefers-reduced-motion: no-preference) {
+    :root { --ease-out: cubic-bezier(.2, .8, .2, 1); --ease-spring: cubic-bezier(.3, 1.4, .5, 1); interpolate-size: allow-keywords; }
+
+    /* Page to page: the sidebar and the top bar stay still, the content fades and rises. */
+    @view-transition { navigation: auto; }
+    .side { view-transition-name: side; }
+    .topbar { view-transition-name: topbar; }
+    ::view-transition-old(root) { animation: 140ms var(--ease-out) both vt-out; }
+    ::view-transition-new(root) { animation: 240ms var(--ease-out) both vt-in; }
+    @keyframes vt-out { to { opacity: 0; } }
+    @keyframes vt-in { from { opacity: 0; translate: 0 6px; } }
+
+    /* Control feedback */
+    button, .btn, .chip, .side-nav a, .side .switch, .section-tabs a, .me-menu a, .seg label, .row {
+      transition: background-color 120ms, border-color 120ms, color 120ms, box-shadow 160ms, opacity 120ms,
+                  transform 150ms var(--ease-out), scale 120ms var(--ease-out);
+    }
+    :is(button, .btn):active { scale: .97; }
+    tbody td { transition: background-color 120ms; }
+    .chart .b, .spark .bar { transition: fill 120ms; }
+    a.stretch .details { transition: opacity 150ms; }
+    .blob { animation: none; }
+
+    /* Linked cards lift a little */
+    a.card, .card:has(a.stretch) { transition: translate 200ms var(--ease-out), box-shadow 200ms var(--ease-out), border-color 200ms; }
+    a.card:hover, .card:has(a.stretch):hover { translate: 0 -2px; box-shadow: var(--shadow), 0 6px 18px -8px color-mix(in oklab, var(--ink) 18%, transparent); }
+
+    /* Content arrives in order: the page, the board's parts, the focus grid, the numbers */
+    main > *, .board > *, .focus-grid > *, .kpis > * { animation: rise 420ms var(--ease-out) both; }
+    :is(main, .board) > :nth-child(2) { animation-delay: 40ms; }
+    :is(main, .board) > :nth-child(3) { animation-delay: 80ms; }
+    :is(main, .board) > :nth-child(4) { animation-delay: 120ms; }
+    :is(main, .board) > :nth-child(n+5) { animation-delay: 160ms; }
+    .focus-grid > :nth-child(2) { animation-delay: 90ms; }
+    .kpis > :nth-child(2) { animation-delay: 40ms; } .kpis > :nth-child(3) { animation-delay: 80ms; }
+    .kpis > :nth-child(4) { animation-delay: 120ms; } .kpis > :nth-child(n+5) { animation-delay: 160ms; }
+    @keyframes rise { from { opacity: 0; translate: 0 8px; } }
+
+    /* Data draws in: bars grow from their baseline, fills extend, the line draws */
+    .chart .b, .spark .bar { transform-box: fill-box; transform-origin: bottom; animation: grow-y 600ms var(--ease-out) both; }
+    :is(.chart .b, .spark .bar):nth-child(2) { animation-delay: 20ms; } :is(.chart .b, .spark .bar):nth-child(3) { animation-delay: 40ms; }
+    :is(.chart .b, .spark .bar):nth-child(4) { animation-delay: 60ms; } :is(.chart .b, .spark .bar):nth-child(5) { animation-delay: 80ms; }
+    :is(.chart .b, .spark .bar):nth-child(6) { animation-delay: 100ms; } :is(.chart .b, .spark .bar):nth-child(7) { animation-delay: 120ms; }
+    :is(.chart .b, .spark .bar):nth-child(8) { animation-delay: 140ms; } :is(.chart .b, .spark .bar):nth-child(9) { animation-delay: 160ms; }
+    :is(.chart .b, .spark .bar):nth-child(10) { animation-delay: 180ms; } :is(.chart .b, .spark .bar):nth-child(11) { animation-delay: 200ms; }
+    :is(.chart .b, .spark .bar):nth-child(12) { animation-delay: 220ms; } :is(.chart .b, .spark .bar):nth-child(13) { animation-delay: 240ms; }
+    :is(.chart .b, .spark .bar):nth-child(n+14) { animation-delay: 260ms; }
+    @keyframes grow-y { from { scale: 1 0; } }
+
+    .barcell .fg, .compare .fg, .fill rect, svg.progress .bar, svg.budget-meter .fill, .signal .meter .done {
+      transform-box: fill-box; transform-origin: left; animation: grow-x 700ms 200ms var(--ease-out) both;
+    }
+    @keyframes grow-x { from { scale: 0 1; } }
+
+    .kpi .spark polyline { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 900ms 250ms var(--ease-out) forwards; }
+    @keyframes draw { to { stroke-dashoffset: 0; } }
+
+    .heat .hc { animation: fade 500ms var(--ease-out) both; }
+    .heat tbody tr:nth-child(2) .hc { animation-delay: 60ms; } .heat tbody tr:nth-child(3) .hc { animation-delay: 120ms; }
+    .heat tbody tr:nth-child(4) .hc { animation-delay: 180ms; } .heat tbody tr:nth-child(5) .hc { animation-delay: 240ms; }
+    .heat tbody tr:nth-child(n+6) .hc { animation-delay: 300ms; }
+    @keyframes fade { from { opacity: 0; } }
+
+    /* Emphasis: the alerting number rings twice, its arrow nudges once */
+    .kpi.is-alert { animation: alert-ring 1.6s 600ms var(--ease-out) 2; }
+    @keyframes alert-ring {
+      0% { box-shadow: var(--shadow), 0 0 0 0 color-mix(in oklab, var(--bad) 35%, transparent); }
+      100% { box-shadow: var(--shadow), 0 0 0 10px color-mix(in oklab, var(--bad) 0%, transparent); }
+    }
+    .kpi .delta .icon { animation: nudge 500ms 650ms var(--ease-spring) both; }
+    @keyframes nudge { from { opacity: 0; translate: 0 3px; } }
+
+    /* Popovers (the context chips, the KPI definitions, the user menu) fade and scale in and out */
+    [popover] {
+      transition: opacity 180ms var(--ease-out), scale 220ms var(--ease-spring), translate 220ms var(--ease-out),
+                  display 220ms allow-discrete, overlay 220ms allow-discrete;
+    }
+    [popover]:not(:popover-open) { opacity: 0; scale: .96; translate: 0 -4px; }
+    @starting-style {
+      [popover]:popover-open { opacity: 0; scale: .96; translate: 0 -4px; }
+    }
+    .context .chip + .pop, .kpi-pop { transform-origin: top left; }
+    .me-menu[popover] { transform-origin: bottom left; }
+
+    /* Disclosures open smoothly (browsers without ::details-content just snap) */
+    :is(.disclose, .steps details)::details-content {
+      block-size: 0; overflow: clip;
+      transition: block-size 320ms var(--ease-out), content-visibility 320ms allow-discrete;
+    }
+    :is(.disclose, .steps details)[open]::details-content { block-size: auto; }
+    .disclose summary > .icon:last-child { transition: rotate 240ms var(--ease-spring); }
+
+    /* The top bar gains its shadow over the first 64 px of scroll */
+    @supports (animation-timeline: scroll()) {
+      .topbar { animation: bar-shadow linear both; animation-timeline: scroll(root); animation-range: 0 64px; }
+      @keyframes bar-shadow { to { box-shadow: 0 6px 16px -10px color-mix(in oklab, var(--ink) 25%, transparent); } }
+    }
+
+    /* Signals: the incident dot and the live dot breathe; the rest stays still */
+    .signal.bad .dot { --pulse: var(--bad); animation: breathe 2.4s ease-in-out infinite; }
+    .live-dot:not(.off) { --pulse: var(--good); animation: breathe 2.4s ease-in-out infinite; }
+    @keyframes breathe { 50% { box-shadow: 0 0 0 6px color-mix(in oklab, var(--pulse) 0%, transparent); } }
+
+    /* Setup: a done step's tick pops once */
+    .steps .step.done .state .icon { animation: pop-in 360ms 300ms var(--ease-spring) both; }
+    @keyframes pop-in { from { opacity: 0; scale: .6; } }
   }
 }

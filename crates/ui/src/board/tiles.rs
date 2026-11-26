@@ -236,3 +236,20 @@ pub(super) fn key_numbers(pid: &str, f: &Filters, b: &Board) -> Markup {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    /// The sparkline draws in through `stroke-dashoffset` (#552), which
+    /// needs every line measured as one unit long.
+    #[test]
+    fn the_sparkline_draws_in_over_a_unit_path_length() {
+        let days: Vec<(String, i64)> = (1..=7)
+            .map(|d| (format!("2026-01-0{d}"), d * 3 % 5))
+            .collect();
+        let html = super::spark(&days).into_string();
+        let lines = html.matches("<polyline").count();
+        assert!(lines > 0, "{html}");
+        assert_eq!(html.matches(r#"pathLength="1""#).count(), lines);
+        assert!(crate::CSS.contains("spark polyline { stroke-dasharray: 1; stroke-dashoffset: 1;"));
+    }
+}
