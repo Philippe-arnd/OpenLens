@@ -1,7 +1,8 @@
 name: Image
 
 # The Docker image is built, started and smoke-tested (packaging: volume
-# ownership, healthcheck, env), then published to GHCR:
+# ownership, healthcheck, env) for linux/amd64 and linux/arm64, each on its
+# own native runner, then published to GHCR as one multi-platform image:
 # - nightly, on v* tags and on demand (always);
 # - on main only when packaging changes, debounced: a newer push cancels an
 #   older build, so a burst of merges builds once.
@@ -34,9 +35,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # One native build per platform (a Rust build under QEMU emulation would
+  # take hours), each smoke-tested on its own runner, then pushed by digest.
+  # `publish` joins the two into one multi-platform image (#487).
   image:
-    name: build, smoke-test, publish ghcr.io/philippe-arnd/openlens
-    runs-on: ubuntu-latest
+    name: build, smoke-test ${{ matrix.platform }}
+    strategy:
+      matrix:
+        include:
+          - { runner: ubuntu-latest, platform: linux/amd64, arch: amd64 }
+          - { runner: ubuntu-24.04-arm, platform: linux/arm64, arch: arm64 }
+    runs-on: ${{ matrix.runner }}
     env:
       OPENLENS_ADMIN_TOKEN: adm_ci_smoke
       OPENLENS_PROJECT_KEY: pk_ci_smoke
@@ -44,14 +53,15 @@ jobs:
       - run: echo "GEOIP_MONTH=$(date -u +%Y-%m)" >> "$GITHUB_ENV"
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
-      - name: build (cargo-chef dependency layer, GHA cache)
+      - name: build (cargo-chef dependency layer, GHA cache per platform)
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
+          platforms: ${{ matrix.platform }}
           load: true
           tags: openlens-openlens:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=image-${{ matrix.arch }}
+          cache-to: type=gha,scope=image-${{ matrix.arch }},mode=max
           build-args: GEOIP_MONTH=${{ env.GEOIP_MONTH }}
       - name: start the container exactly as Coolify does (compose, named volume, healthcheck)
         run: docker compose up -d --wait --wait-timeout 60
@@ -62,12 +72,18 @@ jobs:
         run: docker compose logs
       - run: docker compose down -v
       - name: upgrade from the last release keeps the data (#158)
+        env:
+          PLATFORM: ${{ matrix.platform }}
         run: |
           # The previous stable release *of this commit's history*: a tag made
           # while this build ran may not have its image yet (#210).
           git fetch -q --tags --unshallow origin 2>/dev/null || git fetch -q --tags origin
           old=$(git tag --list 'v*' --merged HEAD --sort=-v:refname | grep -v -- - | grep -vx "${GITHUB_REF_NAME}" | head -1)
           if [ -z "$old" ]; then echo "no previous release yet"; exit 0; fi
+          # Releases before the multi-platform image are linux/amd64 only.
+          if ! docker pull -q --platform "$PLATFORM" "ghcr.io/philippe-arnd/openlens:$old"; then
+            echo "no $PLATFORM image of $old: nothing to upgrade from on this platform"; exit 0
+          fi
           scripts/upgrade-check.sh "ghcr.io/philippe-arnd/openlens:$old" openlens-openlens:latest
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
         with:
@@ -78,8 +94,58 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ghcr.io/philippe-arnd/openlens
+      - name: push by digest (reuses the cached layers), with an SBOM attached (#349)
+        id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=ghcr.io/philippe-arnd/openlens,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=image-${{ matrix.arch }}
+          build-args: GEOIP_MONTH=${{ env.GEOIP_MONTH }}
+          sbom: true
+      - name: keep the digest for the merge
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: mkdir -p digests && touch "digests/${DIGEST#sha256:}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: digest-${{ matrix.arch }}
+          path: digests/*
+          if-no-files-found: error
+          retention-days: 1
+      - if: failure() && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          gh issue create -R "$GITHUB_REPOSITORY" --title "Docker image broken on ${GITHUB_SHA::7} ($PLATFORM)" \
+            --body "Building, starting or smoke-testing the image failed. Run: $RUN"
+
+  publish:
+    name: publish ghcr.io/philippe-arnd/openlens (linux/amd64 + linux/arm64)
+    needs: image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: digest-*
+          merge-multiple: true
+          path: digests
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        with:
+          images: ghcr.io/philippe-arnd/openlens
           # Channels (#198): `latest` = newest stable release (set by the
-          # semver tags, never by main or a pre-release), `0.2` = patches of
+          # semver tags, never by main or a pre-release), `0.6` = patches of
           # a minor, `0` = every release of a major, `edge` = main. Installs
           # that update themselves follow `latest`, a minor or a major
           # channel, never `edge`. The action's README suggests skipping
@@ -93,25 +159,29 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-      - name: publish (reuses the cached layers), with an SBOM attached to the image (#349)
+      - name: one multi-platform image under every tag
         id: push
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          build-args: GEOIP_MONTH=${{ env.GEOIP_MONTH }}
-          sbom: true
-      # The digest is signed, not the tags: one signature covers edge,
-      # latest, the minor channel and the version (#349). See
-      # docs/deploy/README.md#verify-what-you-run for `cosign verify`.
+        working-directory: digests
+        env:
+          IMAGE: ghcr.io/philippe-arnd/openlens
+        run: |
+          tags=$(jq -r '.tags | map("--tag=" + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          sources=$(for d in *; do printf '%s@sha256:%s ' "$IMAGE" "$d"; done)
+          [ "$(echo "$sources" | wc -w)" -eq 2 ] || { echo "::error::expected two platform digests, got: $sources"; exit 1; }
+          # shellcheck disable=SC2086 # word splitting on purpose: one argument per tag and source
+          docker buildx imagetools create $tags $sources
+          first=$(jq -r '.tags[0]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          docker buildx imagetools inspect "$first"
+          digest=$(docker buildx imagetools inspect "$first" --format '{{json .Manifest}}' | jq -r .digest)
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      # The index digest is signed, and each platform's image with it
+      # (--recursive): one signature covers edge, latest, the minor channel
+      # and the version (#349). See docs/deploy/README.md#verify-what-you-run.
       - uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
       - name: sign the image (cosign keyless)
         env:
           DIGEST: ${{ steps.push.outputs.digest }}
-        run: cosign sign --yes "ghcr.io/philippe-arnd/openlens@${DIGEST}"
+        run: cosign sign --yes --recursive "ghcr.io/philippe-arnd/openlens@${DIGEST}"
       - name: build provenance of the image
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
@@ -134,4 +204,4 @@ jobs:
           RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           gh issue create -R "$GITHUB_REPOSITORY" --title "Docker image broken on ${GITHUB_SHA::7}" \
-            --body "Building, starting or smoke-testing the image failed. Run: $RUN"
+            --body "Publishing the multi-platform image failed. Run: $RUN"

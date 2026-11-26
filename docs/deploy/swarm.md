@@ -14,7 +14,7 @@ docker stack deploy -c openlens.yaml openlens
 docker service logs openlens_openlens | grep -i owner   # first start: a single-use owner link, valid 1 hour
 ```
 
-The stack publishes port 8686 through the routing mesh: put your reverse proxy with HTTPS in front ([docker.md](docker.md#https-and-reverse-proxy)) and keep the port closed to the outside. The image is `linux/amd64` for now.
+The stack publishes port 8686 through the routing mesh: put your reverse proxy with HTTPS in front ([docker.md](docker.md#https-and-reverse-proxy)) and keep the port closed to the outside. The image runs on `linux/amd64` and `linux/arm64` nodes.
 
 What the stack sets:
 

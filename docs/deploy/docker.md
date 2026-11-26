@@ -34,7 +34,7 @@ volumes:
   openlens-data:
 ```
 
-The image has no shell: the healthcheck uses the binary's own `healthcheck` subcommand. The image is `linux/amd64` for now; on ARM hosts use the [binary](systemd.md) until the multi-arch image lands ([#238](https://github.com/Philippe-arnd/OpenLens/issues/238)).
+The image has no shell: the healthcheck uses the binary's own `healthcheck` subcommand. The image runs on `linux/amd64` and `linux/arm64` (a Raspberry Pi 4 or 5 with a 64-bit system, Ampere and Graviton servers): Docker picks the right one.
 
 ## HTTPS and reverse proxy
 

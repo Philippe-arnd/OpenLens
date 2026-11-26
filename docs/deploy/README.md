@@ -24,7 +24,7 @@ The Nomad job, the NixOS module and the panel recipes follow each tool's public 
 
 ## Image and release channels
 
-The image `ghcr.io/philippe-arnd/openlens` is public. Binaries for `x86_64` and `aarch64` Linux are attached to each [GitHub release](https://github.com/Philippe-arnd/OpenLens/releases).
+The image `ghcr.io/philippe-arnd/openlens` is public, for `linux/amd64` and `linux/arm64` (one tag, both platforms, from 0.6 on; older releases are `linux/amd64` only). Binaries for `x86_64` and `aarch64` Linux are attached to each [GitHub release](https://github.com/Philippe-arnd/OpenLens/releases).
 
 | Tag | What it follows |
 | --- | --- |
@@ -39,7 +39,7 @@ The image `ghcr.io/philippe-arnd/openlens` is public. Binaries for `x86_64` and 
 Images and release assets are signed in CI with Sigstore, keyless: no key to leak, the signature names the GitHub workflow that built them. Each release also carries an SPDX SBOM (`openlens-vX.Y.Z.spdx.json`), and the image carries its own.
 
 ```sh
-# The image (any tag: the signature covers the digest behind it).
+# The image (any tag: the signature covers the digest behind it, and each platform's image).
 cosign verify ghcr.io/philippe-arnd/openlens:latest \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity-regexp '^https://github.com/Philippe-arnd/OpenLens/\.github/workflows/release\.yml@refs/(heads/main|tags/v.*)$'
