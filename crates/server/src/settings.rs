@@ -106,20 +106,96 @@ pub(crate) async fn environments_page(
     .await
 }
 
-/// The form of `POST /p/{id}/settings/environments`: set a host's rule, or
-/// remove it when `remove` is sent.
+/// The form of `POST /p/{id}/settings/environments`: `action` is `rule`
+/// (the default: set a host's rule, or remove it when `remove` is sent),
+/// `remove`, `alias`, `unalias`, `hide`, `show`, `monitor` or `unmonitor`.
 #[derive(Debug, Deserialize)]
 pub(crate) struct EnvironmentForm {
+    #[serde(default)]
+    action: String,
+    #[serde(default)]
     host: String,
     #[serde(default)]
     env: String,
     #[serde(default)]
     remove: Option<String>,
+    #[serde(default)]
+    from: String,
+    #[serde(default)]
+    to: String,
+    #[serde(default)]
+    url: String,
+    #[serde(default)]
+    level: String,
 }
 
-/// `POST /p/{id}/settings/environments` (#410): the engine commands
-/// `set_environment_rule` and `remove_environment_rule`, as the API's
-/// `PATCH /api/projects/{id}` runs them.
+impl EnvironmentForm {
+    /// The change this form asks for, and what the audit log records.
+    fn change(&self) -> Option<(crate::environments::RuleChange, String)> {
+        use crate::environments::{MonitorChange, RuleChange};
+        let t = |s: &str| s.trim().to_owned();
+        let c = match (self.action.as_str(), self.remove.is_some()) {
+            ("" | "rule", true) | ("remove", _) => RuleChange {
+                remove_environment_rule: Some(t(&self.host)),
+                ..Default::default()
+            },
+            ("" | "rule", false) => RuleChange {
+                environment_rule: Some(openlens_engine::environments::Rule {
+                    host: t(&self.host),
+                    env: t(&self.env),
+                }),
+                ..Default::default()
+            },
+            ("alias", _) => RuleChange {
+                environment_alias: Some(openlens_engine::environments::Alias {
+                    from: t(&self.from),
+                    to: t(&self.to),
+                }),
+                ..Default::default()
+            },
+            ("unalias", _) => RuleChange {
+                remove_environment_alias: Some(t(&self.from)),
+                ..Default::default()
+            },
+            ("hide", _) => RuleChange {
+                hide_environment: Some(t(&self.env)),
+                ..Default::default()
+            },
+            ("show", _) => RuleChange {
+                show_environment: Some(t(&self.env)),
+                ..Default::default()
+            },
+            ("monitor", _) => RuleChange {
+                environment_monitor: Some(MonitorChange {
+                    env: t(&self.env),
+                    url: t(&self.url),
+                    level: t(&self.level),
+                }),
+                ..Default::default()
+            },
+            ("unmonitor", _) => RuleChange {
+                remove_environment_monitor: Some(t(&self.env)),
+                ..Default::default()
+            },
+            _ => return None,
+        };
+        let subject = [&self.host, &self.from, &self.env]
+            .into_iter()
+            .map(|s| s.trim())
+            .find(|s| !s.is_empty())
+            .unwrap_or_default();
+        let action = if self.action.is_empty() {
+            "rule"
+        } else {
+            &self.action
+        };
+        Some((c, format!("{action} {subject}").chars().take(200).collect()))
+    }
+}
+
+/// `POST /p/{id}/settings/environments` (#410): the engine commands of
+/// the environment settings (rules, aliases, hidden, monitors), as the
+/// API's `PATCH /api/projects/{id}` runs them.
 pub(crate) async fn environments(
     _: crate::access::ProjectWrite,
     State(state): State<AppState>,
@@ -130,32 +206,15 @@ pub(crate) async fn environments(
     if load(&state, &id).await.is_none() {
         return oops("No such project.");
     }
-    let change = if f.remove.is_some() {
-        crate::environments::RuleChange {
-            remove_environment_rule: Some(f.host.trim().to_owned()),
-            ..Default::default()
-        }
-    } else {
-        crate::environments::RuleChange {
-            environment_rule: Some(openlens_engine::environments::Rule {
-                host: f.host.trim().to_owned(),
-                env: f.env.trim().to_owned(),
-            }),
-            ..Default::default()
-        }
+    let Some((change, detail)) = f.change() else {
+        return oops("Unknown action.");
     };
     let (st, pid) = (state.clone(), id.clone());
     let done =
         tokio::task::spawn_blocking(move || crate::environments::change(&st, &pid, &change)).await;
     match done {
         Ok(Ok(_)) => {
-            crate::privacy::audit(
-                &state,
-                &headers,
-                Some(&id),
-                "environments.update",
-                f.host.trim(),
-            );
+            crate::privacy::audit(&state, &headers, Some(&id), "environments.update", &detail);
             Redirect::to(&format!("/p/{id}/settings/environments?done=environments"))
                 .into_response()
         }
@@ -238,7 +297,9 @@ async fn page_at(
         Some("rotated") => Some("New capture key: update every app that sends events."),
         Some("created") => Some("Project created. Add the snippet below to the app."),
         Some("alerts") => Some("Alert settings saved."),
-        Some("environments") => Some("Rules saved: they apply to events received from now on."),
+        Some("environments") => {
+            Some("Saved. Rules and aliases apply to events received from now on.")
+        }
         Some("test") => Some("Test alert sent: check every channel."),
         Some("test-none") => {
             Some("No channel is set: add an email (SMTP), a webhook or an ntfy topic.")

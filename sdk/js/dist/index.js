@@ -8,7 +8,7 @@ function detectEnvironment(host) {
   if (/(^|[.-])(preview|pr-\d+|review)([.-]|$)/.test(h) || h.endsWith(".vercel.app") || h.endsWith(".netlify.app")) {
     return "preview";
   }
-  return "production";
+  return "unknown";
 }
 
 // src/attribution.ts

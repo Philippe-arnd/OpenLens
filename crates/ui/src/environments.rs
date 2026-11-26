@@ -1,0 +1,165 @@
+//! The *Environments* tab of project settings (#410): hosts per
+//! environment, host rules, aliases, hidden environments and the monitors
+//! of non-production environments. Every form posts to the same handler,
+//! which runs the engine commands the API runs.
+
+use super::*;
+use openlens_engine::environments::{Environments, LOG, NOTIFY};
+
+/// A small form posting one action to the tab's handler.
+fn action_form(base: &str, action: &str, fields: &[(&str, &str)], label: &str) -> Markup {
+    html! {
+        form.inline method="post" action={ (base) "/environments" } {
+            input type="hidden" name="action" value=(action);
+            @for (k, v) in fields { input type="hidden" name=(k) value=(v); }
+            button.ghost type="submit" { (label) }
+        }
+    }
+}
+
+/// The names suggested for an environment field.
+fn env_names(id: &str, e: &Environments, ignore: bool) -> Markup {
+    let mut names: Vec<&str> = vec!["production", "staging", "development", "preview", "test"];
+    for h in &e.hosts {
+        if !names.contains(&h.environment.as_str()) {
+            names.push(&h.environment);
+        }
+    }
+    html! {
+        datalist id=(id) {
+            @for n in names { option value=(n) {} }
+            @if ignore { option value="ignore" {} }
+        }
+    }
+}
+
+/// The tab's content.
+pub(crate) fn tab(base: &str, admin: bool, e: &Environments) -> Markup {
+    let mut seen: Vec<&str> = Vec::new();
+    for h in &e.hosts {
+        if !seen.contains(&h.environment.as_str()) {
+            seen.push(&h.environment);
+        }
+    }
+    for h in &e.hidden {
+        if !seen.contains(&h.as_str()) {
+            seen.push(h);
+        }
+    }
+    html! {
+        section.card.wide #environments {
+            h2.mint { (icon("route")) "Environments" }
+            p.small { "Each event's environment comes from its page address. The app's own setting wins, then a host rule below, then the usual hostname patterns (localhost, staging., …). A host that nothing matches is stored as " code { "unknown" } " and never counted as production. " code { "ignore" } " drops a host's events at ingestion. Aliases rename an environment the app sends. Rules and aliases apply to events received from now on." }
+            @if !e.unclassified.is_empty() {
+                p.notice role="status" { (e.unclassified.len()) " host(s) without a rule, stored as unknown: " @for (i, h) in e.unclassified.iter().enumerate() { @if i > 0 { ", " } span.mono { (h) } } }
+            }
+            (env_names("env-names", e, true))
+            @if admin {
+                form.settings method="post" action={ (base) "/environments" } {
+                    input type="hidden" name="action" value="rule";
+                    label { "Host " input type="text" name="host" required maxlength="253" placeholder="app.example.com or *.example.com" list="env-hosts"; }
+                    datalist id="env-hosts" { @for h in &e.unclassified { option value=(h) {} } }
+                    label { "Environment " input type="text" name="env" required maxlength="64" list="env-names" placeholder="production"; }
+                    button type="submit" { "Save the rule" }
+                }
+            }
+            h3 { "Rules" }
+            @if e.rules.is_empty() { p.muted.small { "No rule yet." } } @else {
+                div.table-scroll { table.plain {
+                    thead { tr { th { "Host" } th { "Environment" } @if admin { th { span.sr-only { "Actions" } } } } }
+                    tbody { @for r in &e.rules {
+                        tr {
+                            td.mono { (r.host) } td { (r.env) }
+                            @if admin { td { (action_form(base, "remove", &[("host", r.host.as_str())], "Remove")) } }
+                        }
+                    } }
+                } }
+            }
+            h3 { "Hosts seen (last " (e.days) " days)" }
+            @if e.hosts.is_empty() { p.muted.small { "No events in the window." } } @else {
+                div.table-scroll { table.plain {
+                    thead { tr { th { "Environment" } th { "Host" } (crate::glossary::th_num("Events")) th { "Last seen" } th { "Rule" } } }
+                    tbody { @for h in &e.hosts {
+                        tr {
+                            td { (h.environment) }
+                            td.mono { @if h.host.is_empty() { span.muted { "(no page address)" } } @else { (h.host) } }
+                            td.num { (compact(h.events)) }
+                            td.small { (h.last_seen) }
+                            td.small { (h.rule.as_deref().unwrap_or("—")) }
+                        }
+                    } }
+                } }
+            }
+        }
+        section.card.wide #env-aliases {
+            h2.sky { (icon("route")) "Aliases and visibility" }
+            p.small { "An alias stores an environment the app sends under another name (" code { "live-eu" } " → " code { "production" } "), on top of the usual ones (" code { "prod" } ", " code { "stage" } ", " code { "dev" } "); " code { "ignore" } " drops its events. A hidden environment keeps its events and stays readable by name (" code { "?env=" } "), but leaves the environment selector. Production is never aliased or hidden." }
+            @if admin {
+                form.settings method="post" action={ (base) "/environments" } {
+                    input type="hidden" name="action" value="alias";
+                    label { "Sent as " input type="text" name="from" required maxlength="64" placeholder="live-eu"; }
+                    label { "Store as " input type="text" name="to" required maxlength="64" list="env-names" placeholder="production"; }
+                    button type="submit" { "Save the alias" }
+                }
+            }
+            @if e.aliases.is_empty() { p.muted.small { "No alias." } } @else {
+                div.table-scroll { table.plain {
+                    thead { tr { th { "Sent as" } th { "Stored as" } @if admin { th { span.sr-only { "Actions" } } } } }
+                    tbody { @for a in &e.aliases {
+                        tr {
+                            td.mono { (a.from) } td { (a.to) }
+                            @if admin { td { (action_form(base, "unalias", &[("from", a.from.as_str())], "Remove")) } }
+                        }
+                    } }
+                } }
+            }
+            @if !seen.is_empty() {
+                div.table-scroll { table.plain {
+                    thead { tr { th { "Environment" } th { "Selector" } @if admin { th { span.sr-only { "Actions" } } } } }
+                    tbody { @for env in &seen {
+                        @let hidden = e.hidden.iter().any(|h| h == env);
+                        tr {
+                            td { (env) }
+                            td.small { @if hidden { "hidden" } @else { "shown" } }
+                            @if admin && *env != "production" { td {
+                                @if hidden { (action_form(base, "show", &[("env", *env)], "Show")) }
+                                @else { (action_form(base, "hide", &[("env", *env)], "Hide")) }
+                            } } @else if admin { td {} }
+                        }
+                    } }
+                } }
+            }
+        }
+        section.card.wide #env-monitors {
+            h2.coral { (icon("bolt")) "Checks per environment" }
+            p.small { "Production is checked at the app address (General) and gets every alert. Give another environment its own address: it is checked every minute with the same health path, and its certificate daily. At " strong { "notify" } " its incidents are announced like production's; at " strong { "log" } " they are only recorded on Uptime." }
+            @if admin {
+                form.settings method="post" action={ (base) "/environments" } {
+                    input type="hidden" name="action" value="monitor";
+                    label { "Environment " input type="text" name="env" required maxlength="64" list="env-names" placeholder="staging"; }
+                    label { "Address " input type="url" name="url" required maxlength="200" placeholder="https://staging.example.com"; }
+                    label { "Alerts "
+                        select name="level" {
+                            option value=(LOG) selected { "log only" }
+                            option value=(NOTIFY) { "notify" }
+                        }
+                    }
+                    button type="submit" { "Save the check" }
+                }
+            }
+            @if e.monitors.is_empty() { p.muted.small { "No environment besides production is checked." } } @else {
+                div.table-scroll { table.plain {
+                    thead { tr { th { "Environment" } th { "Address" } th { "Alerts" } @if admin { th { span.sr-only { "Actions" } } } } }
+                    tbody { @for m in &e.monitors {
+                        tr {
+                            td { (m.env) } td.mono { (m.url) }
+                            td.small { @if m.level == NOTIFY { "notify" } @else { "log only" } }
+                            @if admin { td { (action_form(base, "unmonitor", &[("env", m.env.as_str())], "Remove")) } }
+                        }
+                    } }
+                } }
+            }
+            p.muted.small { "Agents: " code { "openlens-cli env list" } ", " code { "env rule <host> <env>" } ", " code { "env alias <from> <to>" } ", " code { "env hide <env>" } ", " code { "env monitor <env> <url> --level notify" } ", or the MCP tool " code { "environments" } "." }
+        }
+    }
+}

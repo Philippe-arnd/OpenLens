@@ -1,6 +1,6 @@
-//! Environments per project (#410, D-034): host rules applied to every
-//! captured batch, the upgrade seed, and the API that reads and changes
-//! them. The rules and their precedence live in the engine
+//! Environments per project (#410, D-034): host rules and aliases applied
+//! to every captured batch, the upgrade seed, and the API that reads and
+//! changes them (rules, aliases, hidden environments, monitors). The rules and their precedence live in the engine
 //! ([`openlens_engine::environments`]); this module stores them, caches
 //! them and runs them.
 
@@ -178,6 +178,9 @@ pub(crate) async fn api_list(
             "hosts": e.hosts,
             "rules": e.rules,
             "unclassified": e.unclassified,
+            "aliases": e.aliases,
+            "hidden": e.hidden,
+            "monitors": e.monitors,
             "seeded": p.seeded,
         }))
         .into_response(),
@@ -185,7 +188,17 @@ pub(crate) async fn api_list(
     }
 }
 
-/// A change to the rules sent with `PATCH /api/projects/{id}`.
+/// A monitor as sent: the level may be left out (`log`).
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(crate) struct MonitorChange {
+    pub(crate) env: String,
+    pub(crate) url: String,
+    #[serde(default)]
+    pub(crate) level: String,
+}
+
+/// A change to the environment settings sent with `PATCH
+/// /api/projects/{id}`.
 #[derive(Debug, Default, serde::Deserialize)]
 pub(crate) struct RuleChange {
     /// Replace every rule.
@@ -194,6 +207,18 @@ pub(crate) struct RuleChange {
     pub(crate) environment_rule: Option<env::Rule>,
     /// Remove the rule for this host.
     pub(crate) remove_environment_rule: Option<String>,
+    /// Add or change an alias: `{"from", "to"}`.
+    pub(crate) environment_alias: Option<env::Alias>,
+    /// Remove the alias of this name.
+    pub(crate) remove_environment_alias: Option<String>,
+    /// Hide this environment from the selector.
+    pub(crate) hide_environment: Option<String>,
+    /// Show this hidden environment again.
+    pub(crate) show_environment: Option<String>,
+    /// Add or change a monitor: `{"env", "url", "level"}`.
+    pub(crate) environment_monitor: Option<MonitorChange>,
+    /// Remove the monitor of this environment.
+    pub(crate) remove_environment_monitor: Option<String>,
 }
 
 impl RuleChange {
@@ -201,17 +226,27 @@ impl RuleChange {
         self.environment_rules.is_none()
             && self.environment_rule.is_none()
             && self.remove_environment_rule.is_none()
+            && self.environment_alias.is_none()
+            && self.remove_environment_alias.is_none()
+            && self.hide_environment.is_none()
+            && self.show_environment.is_none()
+            && self.environment_monitor.is_none()
+            && self.remove_environment_monitor.is_none()
     }
 }
 
 /// Apply a [`RuleChange`] to `project` and store it (engine commands
-/// `set_environment_rule` and `remove_environment_rule`). Returns the rules
-/// now in force, or what is wrong with the request.
+/// `set_environment_rule`, `remove_environment_rule`,
+/// `set_environment_alias`, `remove_environment_alias`,
+/// `hide_environment`, `set_environment_monitor` and
+/// `remove_environment_monitor`). Returns the settings now in force, or
+/// what is wrong with the request; nothing is stored on an error.
 pub(crate) fn change(
     state: &AppState,
     project: &str,
     c: &RuleChange,
-) -> Result<Vec<env::Rule>, (StatusCode, String)> {
+) -> Result<Rules, (StatusCode, String)> {
+    let bad_request = |e: &str| (StatusCode::BAD_REQUEST, e.to_owned());
     let mut rules = load(state, project).rules;
     if let Some(all) = &c.environment_rules {
         if all.len() > env::MAX_RULES {
@@ -232,9 +267,51 @@ pub(crate) fn change(
         return Err((StatusCode::NOT_FOUND, format!("no rule for {h}")));
     }
     if let Some(r) = &c.environment_rule {
-        env::set_environment_rule(&mut rules, &r.host, &r.env)
-            .map_err(|e| (StatusCode::BAD_REQUEST, e.to_owned()))?;
+        env::set_environment_rule(&mut rules, &r.host, &r.env).map_err(bad_request)?;
+    }
+    if let Some(f) = &c.remove_environment_alias
+        && !env::remove_environment_alias(&mut rules, f)
+    {
+        return Err((StatusCode::NOT_FOUND, format!("no alias for {f}")));
+    }
+    if let Some(a) = &c.environment_alias {
+        env::set_environment_alias(&mut rules, &a.from, &a.to).map_err(bad_request)?;
+    }
+    if let Some(e) = &c.hide_environment {
+        env::hide_environment(&mut rules, e, true).map_err(bad_request)?;
+    }
+    if let Some(e) = &c.show_environment {
+        env::hide_environment(&mut rules, e, false).map_err(bad_request)?;
+    }
+    if let Some(e) = &c.remove_environment_monitor
+        && !env::remove_environment_monitor(&mut rules, e)
+    {
+        return Err((StatusCode::NOT_FOUND, format!("no monitor for {e}")));
+    }
+    if let Some(m) = &c.environment_monitor {
+        env::set_environment_monitor(&mut rules, &m.env, &m.url, &m.level).map_err(bad_request)?;
     }
     save(state, project, &rules).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    Ok(rules.rules)
+    Ok(rules)
+}
+
+/// The environment settings as the API answers a change.
+pub(crate) fn as_json(r: &Rules) -> serde_json::Value {
+    json!({
+        "environment_rules": r.rules,
+        "environment_aliases": r.aliases,
+        "hidden_environments": r.hidden,
+        "environment_monitors": r.monitors,
+    })
+}
+
+/// The environments a selector lists for `project` (hidden ones left out,
+/// except the one opened), engine command `visible`.
+pub(crate) fn visible(
+    state: &AppState,
+    project: &str,
+    seen: Vec<String>,
+    selected: &str,
+) -> Vec<String> {
+    env::visible(&current(state, project).rules, seen, selected)
 }

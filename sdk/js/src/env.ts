@@ -1,4 +1,4 @@
-/** Environment and release detection (docs/decisions.md, D-012). */
+/** Environment and release detection (docs/decisions.md, D-012, D-034). */
 
 export function detectEnvironment(host: string): string {
   const h = host.toLowerCase();
@@ -17,7 +17,9 @@ export function detectEnvironment(host: string): string {
   if (/(^|[.-])(preview|pr-\d+|review)([.-]|$)/.test(h) || h.endsWith(".vercel.app") || h.endsWith(".netlify.app")) {
     return "preview";
   }
-  return "production";
+  // No pattern: the server's host rules decide; without one it stays apart
+  // from production (D-034).
+  return "unknown";
 }
 
 export function detectRelease(script?: HTMLScriptElement | null): string | undefined {

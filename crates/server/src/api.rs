@@ -245,10 +245,9 @@ struct ProjectUpdate {
     rules: crate::environments::RuleChange,
 }
 
-/// `PATCH /api/projects/{id}` with any of `{"timezone": "Europe/Paris"}`
-/// (where the project's days and weeks start, D-017),
-/// `{"environment_rule": {"host", "env"}}`, `{"remove_environment_rule":
-/// "<host>"}` or `{"environment_rules": [...]}` (host rules, D-034).
+/// `PATCH /api/projects/{id}` with `{"timezone": "Europe/Paris"}` (where
+/// the project's days and weeks start, D-017) and/or the environment
+/// changes of [`crate::environments::RuleChange`] (D-034).
 async fn update_project(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -261,7 +260,7 @@ async fn update_project(
     if body.timezone.is_none() && body.rules.is_empty() {
         return err(
             StatusCode::BAD_REQUEST,
-            "nothing to change: send timezone, environment_rule, remove_environment_rule or environment_rules",
+            "nothing to change: send timezone or an environment change (environment_rule, environment_alias, hide_environment, environment_monitor, ...)",
         );
     }
     // A bad time zone changes nothing, rules included.
@@ -283,7 +282,9 @@ async fn update_project(
         };
         crate::privacy::audit(&state, &headers, Some(&project), "environments.set", "api");
         let Some(tz) = body.timezone else {
-            return Json(json!({ "id": project, "environment_rules": rules })).into_response();
+            let mut v = crate::environments::as_json(&rules);
+            v["id"] = json!(project);
+            return Json(v).into_response();
         };
         return set_timezone(&state, project, &tz, Some(rules)).await;
     }
@@ -297,7 +298,7 @@ async fn set_timezone(
     state: &AppState,
     project: String,
     tz: &str,
-    rules: Option<Vec<openlens_engine::environments::Rule>>,
+    rules: Option<openlens_engine::environments::Rules>,
 ) -> Response {
     let tz = match check_timezone(tz) {
         Ok(t) => t,
@@ -307,11 +308,11 @@ async fn set_timezone(
     let id = project.clone();
     let t = tz.clone();
     match tokio::task::spawn_blocking(move || meta.set_project_timezone(&id, &t)).await {
-        Ok(Ok(true)) => match rules {
-            Some(r) => Json(json!({ "id": project, "timezone": tz, "environment_rules": r })),
-            None => Json(json!({ "id": project, "timezone": tz })),
+        Ok(Ok(true)) => {
+            let mut v = rules.map_or_else(|| json!({}), |r| crate::environments::as_json(&r));
+            (v["id"], v["timezone"]) = (json!(project), json!(tz));
+            Json(v).into_response()
         }
-        .into_response(),
         Ok(Ok(false)) => err(StatusCode::NOT_FOUND, "no such project"),
         Ok(Err(e)) => err(StatusCode::BAD_REQUEST, &e.to_string()),
         Err(_) => err(

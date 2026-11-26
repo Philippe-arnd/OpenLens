@@ -342,6 +342,7 @@ pub fn uptime(p: &ProjectInfo<'_>, v: &UptimeView<'_>) -> Markup {
                                     "traffic" => "traffic stopped",
                                     "down" => "down",
                                     r if r.starts_with("error:") => "new error",
+                                    r if r.starts_with("env:") => "environment check",
                                     _ => "regression",
                                 }) } }
                                 td.small { (start) }

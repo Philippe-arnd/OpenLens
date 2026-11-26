@@ -742,54 +742,7 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
             }
             @if tab == SettingsTab::Environments {
             @if let Some(e) = &v.environments {
-            section.card.wide #environments {
-                h2.mint { (icon("route")) "Environments" }
-                p.small { "Each event's environment comes from its page address. The app's own setting wins, then a host rule below, then the usual hostname patterns (localhost, staging., …). A host that nothing matches is stored as " code { "unknown" } " and never counted as production. " code { "ignore" } " drops a host's events at ingestion. Rules apply to events received from now on." }
-                @if !e.unclassified.is_empty() {
-                    p.notice role="status" { (e.unclassified.len()) " host(s) without a rule, stored as unknown: " @for (i, h) in e.unclassified.iter().enumerate() { @if i > 0 { ", " } span.mono { (h) } } }
-                }
-                @if v.admin {
-                    form.settings method="post" action={ (base) "/environments" } {
-                        label { "Host " input type="text" name="host" required maxlength="253" placeholder="app.example.com or *.example.com" list="env-hosts"; }
-                        datalist id="env-hosts" { @for h in &e.unclassified { option value=(h) {} } }
-                        label { "Environment " input type="text" name="env" required maxlength="40" list="env-names" placeholder="production"; }
-                        datalist id="env-names" { option value="production" {} option value="staging" {} option value="development" {} option value="preview" {} option value="test" {} option value="ignore" {} }
-                        button type="submit" { "Save the rule" }
-                    }
-                }
-                h3 { "Rules" }
-                @if e.rules.is_empty() { p.muted.small { "No rule yet." } } @else {
-                    div.table-scroll { table.plain {
-                        thead { tr { th { "Host" } th { "Environment" } @if v.admin { th { span.sr-only { "Actions" } } } } }
-                        tbody { @for r in &e.rules {
-                            tr {
-                                td.mono { (r.host) } td { (r.env) }
-                                @if v.admin { td { form.inline method="post" action={ (base) "/environments" } {
-                                    input type="hidden" name="host" value=(r.host);
-                                    input type="hidden" name="remove" value="yes";
-                                    button.ghost type="submit" { "Remove" }
-                                } } }
-                            }
-                        } }
-                    } }
-                }
-                h3 { "Hosts seen (last " (e.days) " days)" }
-                @if e.hosts.is_empty() { p.muted.small { "No events in the window." } } @else {
-                    div.table-scroll { table.plain {
-                        thead { tr { th { "Environment" } th { "Host" } (crate::glossary::th_num("Events")) th { "Last seen" } th { "Rule" } } }
-                        tbody { @for h in &e.hosts {
-                            tr {
-                                td { (h.environment) }
-                                td.mono { @if h.host.is_empty() { span.muted { "(no page address)" } } @else { (h.host) } }
-                                td.num { (compact(h.events)) }
-                                td.small { (h.last_seen) }
-                                td.small { (h.rule.as_deref().unwrap_or("—")) }
-                            }
-                        } }
-                    } }
-                }
-                p.muted.small { "Agents: " code { "openlens-cli env list" } ", " code { "env rule <host> <env>" } ", " code { "env unrule <host>" } ", or the MCP tool " code { "environments" } "." }
-            }
+                (crate::environments::tab(&base, v.admin, e))
             } @else {
                 section.card { p.muted { "The environments could not be read just now." } }
             }

@@ -46,7 +46,7 @@ Framework recipes (Next.js, Nuxt, SvelteKit, Astro, Remix), strict CSP and ad-bl
   - localhost → `development`;
   - `staging.` → `staging`;
   - preview hosts → `preview`;
-  - anything else → `production`.
+  - anything else → `unknown`: the server's host rules then decide (Settings → Environments), and an unclassified host is never counted as production.
 - **Release** (`$release`), from `init`, `data-release` or `<meta name="openlens-release">`.
 
 **Delivery:** events are batched every 5 s and on page hide. A failed send (offline, 5xx, 429) is retried with the same event ids. Crawlers and monitoring robots are not captured.

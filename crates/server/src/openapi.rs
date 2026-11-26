@@ -26,13 +26,13 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "PATCH",
         "/api/projects/{project}",
         "admin",
-        "Rename a project, set its time zone or its environment host rules.",
+        "Rename a project, set its time zone or its environment settings (host rules, aliases, hidden environments, checks per environment).",
     ),
     (
         "GET",
         "/api/projects/{project}/environments",
         "read",
-        "Hosts per environment, host rules and unclassified hosts.",
+        "Hosts per environment, host rules, unclassified hosts, aliases, hidden environments and checks per environment.",
     ),
     (
         "GET",
