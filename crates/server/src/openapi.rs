@@ -182,7 +182,13 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "GET",
         "/api/projects/{project}/releases",
         "read",
-        "Releases per environment over 90 days (`env` for one): state (rolling out, live, superseded, rolled back) from the share of daily users, first and last seen, users and time in staging.",
+        "Releases per environment over 90 days (`env` for one): state (rolling out, live, superseded, rolled back; failed or deploying for a deploy with no traffic) from the share of daily users, first and last seen, users, time in staging, deploy time and last deploy status; the deploys the deploy hook recorded; when the hook was set up.",
+    ),
+    (
+        "POST",
+        "/api/projects/{project}/deploy-hook",
+        "write",
+        "Make or rotate the project's deploy hook URL (`/hooks/deploy/<secret>`, shown in this response only; the previous URL stops working). The hook takes Coolify, Vercel, Netlify, Render, GitHub deployment_status, Argo CD, Flux and Fly notifications, or `{status, release?, commit?, environment?, at?}`.",
     ),
     (
         "GET",

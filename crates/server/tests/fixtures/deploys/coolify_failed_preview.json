@@ -1,0 +1,13 @@
+{
+  "success": false,
+  "event": "deployment_failed",
+  "message": "Deployment failed",
+  "application_name": "example-app",
+  "application_uuid": "a1b2c3d4e5f6",
+  "deployment_uuid": "d9e8f7a6b5c4",
+  "deployment_url": "https://coolify.example.test/project/p1/environment/e1/application/a1b2c3d4e5f6/deployment/d9e8f7a6b5c4",
+  "project": "example",
+  "environment": "production",
+  "pull_request_id": 12,
+  "preview_fqdn": "https://pr-12.app.example.test"
+}

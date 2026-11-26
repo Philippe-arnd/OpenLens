@@ -439,3 +439,44 @@ fn build_fingerprints_stay_bounded_per_day_and_per_project() {
             .is_some()
     );
 }
+
+#[test]
+fn a_deploy_hook_secret_is_kept_hashed_and_deploys_stay_bounded() {
+    use openlens_meta::deploys::{Deploy, MAX_DEPLOYS};
+    let m = Meta::in_memory().unwrap();
+    m.ensure_default_project(None).unwrap();
+    assert_eq!(m.rotate_deploy_hook("nope").unwrap(), None);
+    let first = m.rotate_deploy_hook("default").unwrap().unwrap();
+    assert_eq!(
+        m.deploy_hook_project(&first).unwrap().as_deref(),
+        Some("default")
+    );
+    let second = m.rotate_deploy_hook("default").unwrap().unwrap();
+    assert_eq!(m.deploy_hook_project(&first).unwrap(), None, "rotated away");
+    assert_eq!(
+        m.deploy_hook_project(&second).unwrap().as_deref(),
+        Some("default")
+    );
+    assert!(m.deploy_hook_since("default").unwrap().is_some());
+    let d = |at: i64| Deploy {
+        environment: "production".into(),
+        release: None,
+        commit: None,
+        status: "succeeded".into(),
+        at,
+        source: "plain".into(),
+    };
+    for at in 0..MAX_DEPLOYS + 10 {
+        m.record_deploy("default", &d(at), at).unwrap();
+    }
+    let kept = m.deploys("default", 0).unwrap();
+    assert_eq!(kept.len() as i64, MAX_DEPLOYS);
+    assert_eq!(
+        kept.first().map(|d| d.at),
+        Some(10),
+        "the oldest went first"
+    );
+    assert!(m.delete_project("default").unwrap());
+    assert!(m.deploys("default", 0).unwrap().is_empty());
+    assert_eq!(m.deploy_hook_project(&second).unwrap(), None);
+}

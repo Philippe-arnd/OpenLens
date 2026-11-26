@@ -93,7 +93,7 @@ impl Buckets {
     }
 
     /// Take `cost` tokens from `key`'s bucket; false when it is empty.
-    fn take(&mut self, key: &str, cost: f64, rate: f64, burst: f64) -> bool {
+    pub(crate) fn take(&mut self, key: &str, cost: f64, rate: f64, burst: f64) -> bool {
         let now = std::time::Instant::now();
         if self.map.len() > MAX_BUCKETS {
             // Forget idle keys (a full bucket is the same as no entry).
