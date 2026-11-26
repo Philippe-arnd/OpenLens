@@ -273,30 +273,41 @@ pub fn forms(
             } }
             @if list.is_empty() { section.card.wide { p.muted { "No form filled yet (SDK builds from 2026-11-23 on send field events)." } } }
             @for fm in list {
-                section.card.wide {
-                    h2.violet { (icon("task")) span.mono { (fm.form) } span.muted.small { " · " (fm.path) } }
-                    p {
-                        strong { (compact(fm.starts)) } " started · " strong { (compact(fm.submits)) } " sent · "
-                        span class={ "status " (if fm.abandonment() > 0.5 { "bad" } else if fm.abandonment() > 0.25 { "warn" } else { "good" }) } { (pct(fm.abandonment())) " abandoned" }
-                        @if fm.submits > 0 { " · " (duration(fm.median_secs)) " to fill (median)" }
-                        @if fm.starts < 20 { " " span.chip title="Under 20 starts: the rates move a lot" { "low sample" } }
-                    }
-                    div.table-scroll { table.plain {
-                        thead { tr { th { "Field" } (th_num("Sessions")) (th_num("Last before leaving")) th { span.sr-only { "Share" } } (th_num("Came back to it")) (th_num("Time spent")) } }
-                        tbody { @for fl in &fm.fields {
-                            @let left = fl.last_before_leaving as f64 / (fm.starts - fm.submits).max(1) as f64;
-                            tr {
-                                th scope="row" { span.mono { (fl.name) } }
-                                td.num { (compact(fl.sessions)) }
-                                td.num { (compact(fl.last_before_leaving)) }
-                                td.meter { (meter(left)) }
-                                td.num { (compact(fl.revisited)) }
-                                td.num { (duration(fl.median_ms as f64 / 1000.0)) }
+                // One table per form (#548): each field's funnel bar is the
+                // share of the starts that reached it.
+                (crate::tables::TableCard {
+                    label: &fm.form,
+                    head: html! {
+                        h2 { (icon("task")) span.mono { (fm.form) } span.muted.small { " · " (fm.path) } }
+                        p.form-sum {
+                            strong { (compact(fm.starts)) } " started · " strong { (compact(fm.submits)) } " sent · "
+                            span class={ "status " (if fm.abandonment() > 0.5 { "bad" } else if fm.abandonment() > 0.25 { "warn" } else { "good" }) } { (pct(fm.abandonment())) " abandoned" }
+                            @if fm.submits > 0 { " · " (duration(fm.median_secs)) " to fill (median)" }
+                            @if fm.starts < 20 { " " span.chip title="Under 20 starts: the rates move a lot" { "low sample" } }
+                        }
+                    },
+                    cols: &[
+                        crate::tables::Col::Shown("Field"), crate::tables::Col::Shown("Reached"),
+                        crate::tables::Col::Num("Last before leaving"), crate::tables::Col::Num("Came back to it"),
+                        crate::tables::Col::Num("Time spent"),
+                    ],
+                    body: html! { @for fl in &fm.fields {
+                        @let left = fl.last_before_leaving as f64 / (fm.starts - fm.submits).max(1) as f64;
+                        tr {
+                            th scope="row" { span.mono { (fl.name) } }
+                            td.funnel title={ (compact(fl.sessions)) " sessions" } {
+                                (crate::board::bar_with(fl.sessions as f64 / fm.starts.max(1) as f64, &pct((fl.sessions as f64 / fm.starts.max(1) as f64).min(1.0))))
                             }
-                        } }
-                    } }
-                    @if let Some(s) = &fm.abandoned_session { p.small { a href={ "/p/" (p.id) "/replays/" (s) } { (icon("play")) " Replay a session that gave up" } } }
+                            td.num { (compact(fl.last_before_leaving)) " " span.muted { "(" (pct(left)) ")" } }
+                            td.num { (compact(fl.revisited)) }
+                            td.num { (duration(fl.median_ms as f64 / 1000.0)) }
+                        }
+                    } },
+                    foot: html! {
+                        @if let Some(s) = &fm.abandoned_session { p.small.pad { a href={ "/p/" (p.id) "/replays/" (s) } { (icon("play")) " Replay a session that gave up" } } }
+                    },
                 }
+                .render())
             }
         },
     )
