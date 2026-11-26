@@ -11,7 +11,7 @@ On Coolify, the template maps two values that Coolify generates itself: the publ
 3. Open the domain and log in with that token. Or let your agent call `POST /api/login-links` and send you the link.
    The first time, OpenLens asks for your email and creates your admin account, so the team list knows who you are (you can skip it). Invite others from **Team**.
 
-The template follows `:latest`. For hands-off patch updates only, change the image tag to the minor channel (for example `:0.2`).
+The template follows the minor channel of the current release (for example `:0.5`): a redeploy brings its fixes, never a behaviour change. Moving to the next minor is a choice: read its **Changed** section in the [CHANGELOG](../../CHANGELOG.md), then change the tag (for example to `:0.6`) and redeploy. To take every release as it comes, use `:latest` instead. The template is updated to each new minor by the release train, so a new install starts on the newest one.
 
 ## Option B: build from the repository
 
@@ -21,7 +21,9 @@ The root compose file already carries the healthcheck (Coolify reads healthcheck
 
 ## Updates
 
-**A restart does not pull the image again; a redeploy does.** To redeploy after each release, call Coolify's deploy API from the release workflow. In this repository, set the secrets `COOLIFY_DEPLOY_URL` (`https://<coolify>/api/v1/deploy?uuid=<service uuid>`) and `COOLIFY_TOKEN` (a token with the *deploy* ability). Then `release.yml` triggers it for every stable release, once the image has passed its smoke and upgrade tests.
+**A restart does not pull the image again; a redeploy does.** Without anything else, redeploy by hand when the footer says *Update available*, or call Coolify's deploy API (the URL and token below) from a cron job on any machine: `curl -fsS -H "Authorization: Bearer $TOKEN" "$URL"`. With the minor channel, that only ever brings fixes.
+
+To redeploy after each release, call Coolify's deploy API from the release workflow. In this repository, set the secrets `COOLIFY_DEPLOY_URL` (`https://<coolify>/api/v1/deploy?uuid=<service uuid>`) and `COOLIFY_TOKEN` (a token with the *deploy* ability). Then `release.yml` triggers it for every stable release, once the image has passed its smoke and upgrade tests.
 
 ## Backups
 

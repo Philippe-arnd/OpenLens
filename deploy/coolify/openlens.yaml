@@ -10,7 +10,11 @@
 # - projects (and their capture keys) are created by your agent: /agents.md.
 services:
   openlens:
-    image: ghcr.io/philippe-arnd/openlens:latest
+    # The minor channel: patches only, no behaviour change, so a redeploy
+    # never brings a surprise. The release train moves it to each new minor
+    # for new installs; moving an existing one is a choice (read the
+    # CHANGELOG's Changed section). `:latest` follows every release.
+    image: ghcr.io/philippe-arnd/openlens:0.5
     environment:
       - SERVICE_FQDN_OPENLENS_8686
       - OPENLENS_ADMIN_TOKEN=${SERVICE_PASSWORD_64_OPENLENSADMIN}
