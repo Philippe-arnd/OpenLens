@@ -612,7 +612,9 @@ mod tests {
     fn only_a_board_out_of_memory_is_computed_again() {
         use openlens_engine::EngineError;
         use openlens_query::QueryError;
-        assert!(super::out_of_memory(&EngineError::Query(QueryError::TooBig)));
+        assert!(super::out_of_memory(&EngineError::Query(
+            QueryError::TooBig
+        )));
         assert!(super::out_of_memory(&EngineError::Query(
             QueryError::Rejected("Resources exhausted: Failed to allocate".into())
         )));
