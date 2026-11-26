@@ -3,7 +3,7 @@
 // Test helpers may unwrap: a failure here is a test failure.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use openlens_featuremap::{parse, route_regex};
+use openlens_featuremap::{parse, route_regex, to_yaml};
 
 const EXAMPLE: &str = include_str!("../../../../docs/schema/features.example.yaml");
 
@@ -12,6 +12,15 @@ fn the_documented_example_is_valid() {
     let p = parse(EXAMPLE);
     assert!(p.map.is_some(), "{:?}", p.issues);
     assert!(p.issues.iter().all(|i| i.level != "error"));
+}
+
+/// `set_feature` (#524) rewrites the stored map from its parsed form: what
+/// it writes must read back as the same map.
+#[test]
+fn a_written_map_reads_back_the_same() {
+    let m = parse(EXAMPLE).map.unwrap();
+    let again = parse(&to_yaml(&m).unwrap());
+    assert_eq!(again.map.as_ref(), Some(&m), "{:?}", again.issues);
 }
 
 #[test]
