@@ -642,7 +642,157 @@ async fn instance_pages_keep_the_project_menu_and_a_breadcrumb() {
     );
     // The setup progress (#403): required steps as a bar, the rest optional.
     assert!(settings.contains("aria-label=\"Setup\""), "{settings}");
-    assert!(settings.contains("An alert channel") && settings.contains("· optional"));
+    // The optional steps are folded under their count (#546).
+    assert!(settings.contains("An alert channel") && settings.contains("optional steps"));
+}
+
+/// The form of `html` whose action is exactly `action`.
+fn form_at<'a>(html: &'a str, action: &str) -> &'a str {
+    let at = html
+        .find(&format!("action=\"{action}\""))
+        .unwrap_or_else(|| panic!("no form posts to {action}"));
+    let start = html[..at].rfind("<form").unwrap();
+    &html[start..at + html[at..].find("</form>").unwrap()]
+}
+
+/// The fields of a form, as (name, type) — `select` for a select.
+fn form_fields(form: &str) -> Vec<(String, String)> {
+    form.split('<')
+        .filter(|t| {
+            t.starts_with("input ") || t.starts_with("select ") || t.starts_with("textarea ")
+        })
+        .filter_map(|t| {
+            let tag = &t[..t.find('>').unwrap_or(t.len())];
+            let attr = |k: &str| {
+                let v = tag.split(&format!(" {k}=\"")).nth(1)?;
+                Some(v[..v.find('"')?].to_owned())
+            };
+            let kind = attr("type")
+                .unwrap_or_else(|| tag[..tag.find(' ').unwrap_or(tag.len())].to_owned());
+            Some((attr("name")?, kind))
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn the_settings_forms_post_the_fields_their_handlers_read() {
+    // #546 changed the markup of these forms only: each still posts to
+    // the same action the fields its handler reads, and posting the form
+    // back as rendered changes what the page then shows.
+    let h = harness();
+    let owner = login_cookie(&h).await;
+    let names = |f: &[(String, String)]| {
+        f.iter()
+            .map(|x| x.0.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+
+    // General: `SaveForm` in server/src/settings.rs.
+    let page = body_text(get(&h, "/p/default/settings", Some(&owner), false).await).await;
+    let general = form_fields(form_at(&page, "/p/default/settings"));
+    assert_eq!(
+        names(&general),
+        ["app_url", "name", "timezone"].map(String::from).into(),
+        "{general:?}"
+    );
+    assert!(form_at(&page, "/p/default/settings").contains("method=\"post\""));
+    let body = general
+        .iter()
+        .map(|(n, _)| match n.as_str() {
+            "name" => "name=Renamed%20shop",
+            "timezone" => "timezone=Pacific%2FAuckland",
+            _ => "app_url=",
+        })
+        .collect::<Vec<_>>()
+        .join("&");
+    assert_eq!(
+        post_form(&h, "/p/default/settings", &owner, &body).await,
+        StatusCode::SEE_OTHER
+    );
+    let after = body_text(get(&h, "/p/default/settings", Some(&owner), false).await).await;
+    let form = form_at(&after, "/p/default/settings");
+    assert!(
+        form.contains("name=\"name\" value=\"Renamed shop\""),
+        "{form}"
+    );
+    assert!(
+        form.contains("name=\"timezone\" value=\"Pacific/Auckland\""),
+        "{form}"
+    );
+
+    // Alerts: `AlertsForm`. Every switch on, every threshold changed.
+    let uri = "/p/default/settings/alerts";
+    let page = body_text(get(&h, uri, Some(&owner), false).await).await;
+    let alerts = form_fields(form_at(&page, uri));
+    assert_eq!(
+        names(&alerts),
+        [
+            "cert",
+            "down",
+            "down_wait",
+            "email",
+            "failing",
+            "health_path",
+            "ntfy",
+            "quiet_end",
+            "quiet_start",
+            "regressions",
+            "traffic",
+            "webhook",
+        ]
+        .map(String::from)
+        .into(),
+        "{alerts:?}"
+    );
+    let value = |n: &str| match n {
+        "down_wait" => "7",
+        "health_path" => "%2Freadyz",
+        "quiet_start" => "22",
+        "quiet_end" => "6",
+        "ntfy" => "ops-alerts",
+        _ => "",
+    };
+    let body = alerts
+        .iter()
+        .map(|(n, kind)| {
+            if kind == "checkbox" {
+                format!("{n}=on")
+            } else {
+                format!("{n}={}", value(n))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("&");
+    assert_eq!(
+        post_form(&h, uri, &owner, &body).await,
+        StatusCode::SEE_OTHER,
+        "{body}"
+    );
+    let after = body_text(get(&h, uri, Some(&owner), false).await).await;
+    let form = form_at(&after, uri);
+    for tag in form
+        .split("<input ")
+        .skip(1)
+        .filter(|t| t.contains("type=\"checkbox\""))
+    {
+        let tag = &tag[..tag.find('>').unwrap()];
+        assert!(
+            tag.contains("role=\"switch\"") && tag.contains(" checked"),
+            "{tag}"
+        );
+    }
+    for shown in [
+        "name=\"down_wait\" min=\"1\" max=\"60\" value=\"7\"",
+        "name=\"health_path\" value=\"/readyz\"",
+        "name=\"ntfy\" value=\"ops-alerts\"",
+        "value=\"22\" selected",
+        "value=\"6\" selected",
+    ] {
+        assert!(form.contains(shown), "{shown}: {form}");
+    }
+    for page in [&page, &after] {
+        assert!(!page.contains(" style=") && !page.contains("<script"));
+    }
 }
 
 #[tokio::test]
