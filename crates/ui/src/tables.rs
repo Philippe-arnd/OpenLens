@@ -254,17 +254,26 @@ mod tests {
         };
         let html = event_table("d", "Events", html! {}, &rows, "UTC", cols, html! {}).into_string();
         assert_eq!(html.matches("class=\"group\"").count(), 2, "{html}");
-        let (a, b) = (html.find("2026-11-26").unwrap(), html.find("2026-11-25").unwrap());
+        let (a, b) = (
+            html.find("2026-11-26").unwrap(),
+            html.find("2026-11-25").unwrap(),
+        );
         assert!(a < b, "the newer day comes first, as the rows do");
         // The day is the reader's: 23:30 UTC on the 25th is the 26th in Paris.
-        let late = [ev("2026-11-25 23:30:00", "$click"), ev("2026-11-25 22:30:00", "$click")];
+        let late = [
+            ev("2026-11-25 23:30:00", "$click"),
+            ev("2026-11-25 22:30:00", "$click"),
+        ];
         let utc = event_table("d", "E", html! {}, &late, "UTC", cols, html! {}).into_string();
         let paris =
             event_table("d", "E", html! {}, &late, "Europe/Paris", cols, html! {}).into_string();
         assert_eq!(utc.matches("class=\"group\"").count(), 1);
         assert_eq!(paris.matches("class=\"group\"").count(), 2);
         // Users and features link to their pages; paths are monospace.
-        assert!(html.contains("href=\"/p/d/people/u1\"") && html.contains("href=\"/p/d/features/billing\""));
+        assert!(
+            html.contains("href=\"/p/d/people/u1\"")
+                && html.contains("href=\"/p/d/features/billing\"")
+        );
         assert!(html.contains("class=\"path\""));
     }
 
@@ -283,6 +292,10 @@ mod tests {
         // The coloured families each have their own pill; the rest share the neutral one.
         assert_eq!(seen.len(), coloured.len() + 1);
         assert_eq!(ev_class("not-a-family"), ev_class("custom"));
-        assert!(ev_pill("order_paid").into_string().contains(ev_class("custom")));
+        assert!(
+            ev_pill("order_paid")
+                .into_string()
+                .contains(ev_class("custom"))
+        );
     }
 }

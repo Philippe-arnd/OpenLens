@@ -46,7 +46,11 @@ pub fn events(
     let later_page = eq.before.is_some() || eq.skip > 0;
     let first = events_url(p.id, f, eq, "");
     let active: Vec<(&str, &str, String)> = [
-        ("family", "Family", eq.family.as_deref().map(|k| family_label(k).to_owned())),
+        (
+            "family",
+            "Family",
+            eq.family.as_deref().map(|k| family_label(k).to_owned()),
+        ),
         ("event", "Event", eq.event.clone()),
         ("person", "User", eq.person.clone()),
         ("path", "Page", eq.path.clone()),
@@ -196,8 +200,21 @@ mod tests {
             Some("/p/d/events?next"),
         ));
         let pager = &html[html.find("class=\"pager\"").unwrap()..];
-        let first = pager.split("href=\"").nth(1).unwrap().split('"').next().unwrap();
-        for kept in ["env=staging", "role=admin", "family=error", "person=u%201", "path=/billing", "days=7"] {
+        let first = pager
+            .split("href=\"")
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap();
+        for kept in [
+            "env=staging",
+            "role=admin",
+            "family=error",
+            "person=u%201",
+            "path=/billing",
+            "days=7",
+        ] {
             assert!(first.contains(kept), "{kept} in {first}");
         }
         assert!(!first.contains("before="));
@@ -205,7 +222,9 @@ mod tests {
         // Each active filter can be removed on its own, the others kept.
         let chips = &html[html.find("class=\"active-filters\"").unwrap()..];
         assert!(chips.contains("Errors") && chips.contains("u 1"));
-        assert!(html.contains("class=\"card refine\"") && html.contains("class=\"card table-card\""));
+        assert!(
+            html.contains("class=\"card refine\"") && html.contains("class=\"card table-card\"")
+        );
         assert!(!html.contains("style=") && !html.contains("<script"));
     }
 }

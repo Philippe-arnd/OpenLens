@@ -28,7 +28,10 @@ pub fn live(p: &ProjectInfo<'_>, f: &Filters, l: &openlens_engine::Live) -> Mark
             "Refreshes every 10 s"
         }
     };
-    let since = l.events.first().map(|e| local_time(&e.timestamp, &f.tz, false));
+    let since = l
+        .events
+        .first()
+        .map(|e| local_time(&e.timestamp, &f.tz, false));
     layout_in(
         "Live",
         Some(p),
@@ -125,7 +128,10 @@ mod tests {
         let html = render(live(&p(), &f(), &quiet));
         assert_eq!(html.matches("class=\"card empty\"").count(), 1);
         assert!(html.contains("live-dot off"));
-        assert!(html.contains("2026-11-26 07:54"), "the reason says since when");
+        assert!(
+            html.contains("2026-11-26 07:54"),
+            "the reason says since when"
+        );
         assert!(html.contains("/p/d/uptime") && html.contains("/p/d/settings/install"));
         assert!(!html.contains("Nothing in the last 30 minutes"));
         assert!(!html.contains("style=") && !html.contains("<script"));
