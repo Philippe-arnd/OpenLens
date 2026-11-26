@@ -91,6 +91,7 @@ pub const REGISTRY: &[Spec] = &[
     spec::<alerts::SetSettings>(),
     spec::<alerts::Test>(),
     spec::<releases::List>(),
+    spec::<releases::ReleaseReport>(),
     spec::<tickets::List>(),
     spec::<tickets::DraftTicket>(),
     spec::<tickets::File>(),

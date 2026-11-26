@@ -352,7 +352,14 @@ pub(crate) async fn compute(
     if let [new, old] = rel.as_slice() {
         let rate = |r: &Map<String, Value>| int(r, "bad") as f64 / int(r, "sessions").max(1) as f64;
         let (rn, ro) = (rate(new), rate(old));
-        if int(new, "sessions") >= 2 * MIN_GROUP && rn > ro * 1.5 && rn - ro > 0.03 {
+        // The release comparison's error rule, shared with the verdict
+        // (#522, D-067).
+        if crate::verdict::errors_regressed(
+            int(new, "sessions"),
+            int(new, "bad"),
+            int(old, "sessions"),
+            int(old, "bad"),
+        ) {
             let name = text(new, "release").unwrap_or_default();
             cards.push(Insight {
                 kind: "release_regression",

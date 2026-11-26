@@ -13,7 +13,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use openlens_engine::commands::deploys::{ProjectInput, RotateHook};
-use openlens_engine::commands::releases::{List, ListInput};
+use openlens_engine::commands::releases::{List, ListInput, ReleaseReport, ReportInput};
 use openlens_engine::commands::{Caller, Command, Error, Host};
 use serde::Deserialize;
 
@@ -24,6 +24,10 @@ pub(crate) fn routes() -> Router<AppState> {
     Router::new()
         .route("/p/{project}/releases", get(page))
         .route("/api/projects/{project}/releases", get(api))
+        .route(
+            "/api/projects/{project}/releases/{release}/report",
+            get(report_api),
+        )
         .route("/p/{project}/releases/hook", post(rotate_page))
         .route("/api/projects/{project}/deploy-hook", post(rotate_api))
 }
@@ -98,6 +102,31 @@ pub(crate) async fn api(
         environment: q.env,
     };
     match List::run(&state, &Caller::default(), input).await {
+        Ok(r) => Json(r).into_response(),
+        Err(Error::NotFound) => crate::apierr::json(StatusCode::NOT_FOUND, "unknown project"),
+        Err(Error::Invalid(m)) => crate::apierr::json(StatusCode::BAD_REQUEST, m),
+        Err(e) => crate::apierr::json(StatusCode::SERVICE_UNAVAILABLE, e.to_string()),
+    }
+}
+
+/// `GET /api/projects/{id}/releases/{release}/report[?env=]` (bearer):
+/// `releases.report`, the release compared with the one before it in the
+/// environment (production by default), with its verdict (#522, D-067).
+pub(crate) async fn report_api(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((id, release)): Path<(String, String)>,
+    Query(q): Query<EnvQuery>,
+) -> Response {
+    if !auth::has_bearer(&state, &headers) {
+        return crate::apierr::json(StatusCode::UNAUTHORIZED, "admin bearer token required");
+    }
+    let input = ReportInput {
+        project: id,
+        release,
+        environment: q.env,
+    };
+    match ReleaseReport::run(&state, &Caller::default(), input).await {
         Ok(r) => Json(r).into_response(),
         Err(Error::NotFound) => crate::apierr::json(StatusCode::NOT_FOUND, "unknown project"),
         Err(Error::Invalid(m)) => crate::apierr::json(StatusCode::BAD_REQUEST, m),

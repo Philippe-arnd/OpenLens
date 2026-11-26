@@ -197,6 +197,12 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "Releases per environment over 90 days (`env` for one): state (rolling out, live, superseded, rolled back; failed or deploying for a deploy with no traffic) from the share of daily users, first and last seen, users, time in staging, deploy time and last deploy status; the deploys the deploy hook recorded; when the hook was set up.",
     ),
     (
+        "GET",
+        "/api/projects/{project}/releases/{release}/report",
+        "read",
+        "One release (`env`: its environment, production by default) compared with the release before it: the verdict (healthy, regressed or inconclusive; none until 30 sessions and 8 users or 24 h) and its reasons, both releases' numbers, and every check (sessions with errors, bounce, tasks, new error groups, Web Vitals, features with a success event, goals and guardrails).",
+    ),
+    (
         "POST",
         "/api/projects/{project}/deploy-hook",
         "write",
