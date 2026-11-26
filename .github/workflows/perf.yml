@@ -58,6 +58,9 @@ jobs:
           python3 -c 'import json; print(json.dumps({"sha": "'"$GITHUB_SHA"'", "ingest": json.load(open("ingest.json")), "with_board": json.load(open("with_board.json"))}))' > perf.json
           cat perf.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        # Also when the bench fails: server.log is how a failed request is
+        # explained.
+        if: always()
         with:
           name: perf
           path: |
@@ -192,9 +195,14 @@ jobs:
           import json, sys
           gen, role, disk, conc, mem, profile = sys.argv[1:]
           runs = [json.loads(l) for l in open("runs.jsonl") if l.strip()]
+          g = json.load(open("gen.json"))
+          # bench-gen also writes the rollups of closed days (D-046): report
+          # that time apart, so generation times stay comparable.
+          rolled = float(g.get("rollup_seconds") or 0)
           print(json.dumps({
-              "generator": json.load(open("gen.json")), "profile": profile or "default",
+              "generator": g, "profile": profile or "default",
               "memory_cap": mem or None, "generate_seconds": int(gen),
+              "rollup_seconds": rolled, "days_rolled": g.get("days_rolled"),
               "runs": runs, "board_role_filter_cold_s": float(role),
               "four_filtered_boards_max_s": float(conc), "data_dir_mb": int(disk),
           }, indent=2))
