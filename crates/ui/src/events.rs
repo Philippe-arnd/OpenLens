@@ -82,7 +82,7 @@ pub fn events(
                         ", last " (days) (if days == 1 { " day" } else { " days" }) ", 100 per page. Times in " (f.tz) "."
                     }
                 }
-                a.button href={ "/p/" (p.id) "/settings/data" } { (icon("down")) "Export" }
+                a.btn href={ "/p/" (p.id) "/settings/data" } { (icon("down")) "Export" }
             }
             form.card.refine method="get" action={ "/p/" (p.id) "/events" } aria-label="Refine the events" {
                 (filter_fields(&envs, b, f))
@@ -131,7 +131,7 @@ pub fn events(
                     div {
                         h2 { "Nothing matches" }
                         p { "Widen the period or clear a filter." }
-                        @if !active.is_empty() || later_page { p { a.button href=(events_url(p.id, f, &openlens_engine::EventQuery::default(), "")) { "Clear the filters" } } }
+                        @if !active.is_empty() || later_page { p { a.btn href=(events_url(p.id, f, &openlens_engine::EventQuery::default(), "")) { "Clear the filters" } } }
                     }
                 }
             } @else {

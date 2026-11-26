@@ -288,8 +288,8 @@ pub fn feature_map(v: &MapView<'_>) -> Markup {
                     }
                 }
                 @if v.latest.is_some() {
-                    p { a.button href={ "/p/" (p.id) "/features/map.yaml" (v.version.map(|n| format!("?v={n}")).unwrap_or_default()) } { "YAML" }
-                        " " a.button href={ "/p/" (p.id) "/features/map.json" (v.version.map(|n| format!("?v={n}")).unwrap_or_default()) } { "JSON" } }
+                    p { a.btn href={ "/p/" (p.id) "/features/map.yaml" (v.version.map(|n| format!("?v={n}")).unwrap_or_default()) } { "YAML" }
+                        " " a.btn href={ "/p/" (p.id) "/features/map.json" (v.version.map(|n| format!("?v={n}")).unwrap_or_default()) } { "JSON" } }
                 }
             }
             @if let Some(n) = v.notice { p.notice role="status" { (n) } }
