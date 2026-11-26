@@ -30,6 +30,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 - **Checks per environment** (#410, part 3, D-034): a non-production environment can get its own address (`openlens-cli env monitor staging https://staging.example.com`), probed every minute and checked for TLS expiry, with its own alert level: `log` (recorded on Uptime only, the default) or `notify` (sent like production's). Production keeps the app address and every alert.
 - **Replays pause when nobody is there** (#404): the recorder pauses after 2 minutes without input and as soon as the tab is hidden, and records and sends nothing meanwhile. The next input resumes the same replay with an `idle` marker and a fresh snapshot (a new replay after the 30-minute session gap). The player's seek bar covers active time only: each gap shows as *⏸ 1 h 52 min idle* and playback jumps it, for older replays too. The replay list sorts on active time and filters on *More than N min active* (`?sort=active&active=N`, also on the replays API).
 - **Password reset by an admin** (#428): *Team → Reset the password* stops the old password, ends the user's sessions and gives a one-time link (24 h) to set a new one. No password is ever shown.
+- **`:0` image channel** (#198): each stable release also moves `ghcr.io/philippe-arnd/openlens:0`, every release of major 0 (the same as `:latest` until 1.0; from then on `:1` follows 1.x).
 
 ### Changed
 

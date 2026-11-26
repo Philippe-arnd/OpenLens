@@ -39,6 +39,11 @@ jobs:
           if helm template t "$CHART" --set replicaCount=2 > /dev/null 2>&1; then
             echo "replicaCount=2 must be refused"; exit 1
           fi
+          # Auto-update (#198): a channel tag pulled again; a pinned one refused.
+          helm template t "$CHART" --set autoUpdate.enabled=true | grep -q "imagePullPolicy: Always"
+          if helm template t "$CHART" --set autoUpdate.enabled=true,image.tag=v0.5.0 > /dev/null 2>&1; then
+            echo "autoUpdate with a pinned release must be refused"; exit 1
+          fi
       - name: plain manifests are rendered from the chart
         run: |
           scripts/render-k8s.sh
@@ -96,6 +101,15 @@ jobs:
           kubectl create job lens-backup-now --from=cronjob/lens-openlens-backup
           kubectl wait --for=condition=complete job/lens-backup-now --timeout=3m
           kubectl logs job/lens-backup-now | tee /dev/stderr | grep -q '"ok":true'
+      - name: the auto-update CronJob restarts the server with its own rights (#198)
+        # Tags test a pinned release, which auto-update refuses.
+        if: github.ref_type != 'tag'
+        run: |
+          helm upgrade lens "$CHART" --reuse-values --set autoUpdate.enabled=true,image.tag=latest --wait --timeout 5m
+          kubectl create job lens-autoupdate-now --from=cronjob/lens-openlens-autoupdate
+          kubectl wait --for=condition=complete job/lens-autoupdate-now --timeout=10m
+          kubectl get statefulset lens-openlens -o jsonpath='{.spec.template.metadata.annotations}' | grep -q restartedAt
+          kubectl rollout status statefulset/lens-openlens --timeout 3m
       - name: plain manifests (Kustomize) run too
         run: |
           kubectl create namespace kz
