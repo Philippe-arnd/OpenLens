@@ -96,6 +96,7 @@ pub(crate) fn map_health(pid: &str, h: &openlens_engine::MapHealth) -> Markup {
                 " · " (pct(h.coverage)) " of pages and clicks belong to a feature"
                 " · " (h.findings.len()) " findings"
             }
+            (crate::cost::unavailable_note(&h.unavailable_days))
             @if h.findings.is_empty() {
                 p.muted { "Nothing to fix: every feature is used, its success fires and no route overlaps." }
             } @else {

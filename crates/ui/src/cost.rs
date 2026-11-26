@@ -37,6 +37,26 @@ pub(crate) fn cost_line(e: &Estimate) -> Markup {
     }
 }
 
+/// The days a board or the map cannot count (#489, D-070), said instead of
+/// counting nobody on them silently; nothing when there are none.
+pub(crate) fn unavailable_note(gone: &[String]) -> Markup {
+    let (Some(first), Some(last)) = (gone.first(), gone.last()) else {
+        return html! {};
+    };
+    let span = if first == last {
+        first.clone()
+    } else {
+        format!("{first} to {last}")
+    };
+    html! {
+        p.notice role="status" {
+            (icon("alert")) " Not available: " (days(gone.len())) " (" (span) ", UTC). "
+            "Their events are gone (cold storage or past retention) and they have no daily rollups "
+            "made with the current feature map, so the numbers that cover them count nobody on those days."
+        }
+    }
+}
+
 /// The page shown instead of the board when the window `e` must be
 /// confirmed: the estimate, a "Run it" link to `run` and a way back.
 pub fn board_confirm(p: &ProjectInfo<'_>, e: &Estimate, run: &str) -> Markup {

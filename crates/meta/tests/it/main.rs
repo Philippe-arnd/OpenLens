@@ -480,3 +480,29 @@ fn a_deploy_hook_secret_is_kept_hashed_and_deploys_stay_bounded() {
     assert!(m.deploys("default", 0).unwrap().is_empty());
     assert_eq!(m.deploy_hook_project(&second).unwrap(), None);
 }
+
+#[test]
+fn a_release_keeps_the_map_version_first_recorded() {
+    use openlens_meta::release_maps::ReleaseMap;
+    let m = Meta::in_memory().unwrap();
+    let row = |release: &str, version: i64| ReleaseMap {
+        environment: "production".into(),
+        release: release.into(),
+        first_seen: "2026-11-01 10:00:00".into(),
+        map_version: version,
+        before_first_map: false,
+    };
+    assert_eq!(m.record_release_maps("p", &[row("v1", 1)]).unwrap(), 1);
+    // A later read derives another version (its first event left the
+    // window, or the version left the newest 50): the record wins.
+    assert_eq!(
+        m.record_release_maps("p", &[row("v1", 3), row("v2", 3)])
+            .unwrap(),
+        1
+    );
+    let got = m.release_maps("p", "production").unwrap();
+    let v1 = got.iter().find(|r| r.release == "v1").unwrap();
+    assert_eq!(v1.map_version, 1);
+    assert_eq!(got.len(), 2);
+    assert!(m.release_maps("p", "staging").unwrap().is_empty());
+}

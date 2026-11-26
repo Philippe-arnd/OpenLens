@@ -128,6 +128,8 @@ pub struct MapHealth {
     pub ladder: Vec<Rung>,
     /// Relations inferred from sessions (#283), most shared sessions first.
     pub relations: Vec<crate::relations::Relation>,
+    /// Days of the 60 read that count nobody (#489, D-070), oldest first.
+    pub unavailable_days: Vec<String>,
 }
 
 /// Turn a path into a route pattern: ids (digits, long hex, uuids) become `:id`.
@@ -185,7 +187,7 @@ pub struct Usage {
     pub sessions: crate::mapsessions::Sessions,
     /// The relations' counts (#483); `None`: taken from `sessions`.
     pub relations: Option<crate::relations::Counts>,
-    /// The newest release's routes (#283).
+    /// The current release's routes (#283, D-070).
     pub drift: crate::drift::Observed,
 }
 
@@ -602,13 +604,16 @@ async fn measure(
             u.tagged.push((k, int(r, "n")));
         }
     }
-    let (s, d, rel) = futures::join!(
+    let (s, d, rel, gone) = futures::join!(
         crate::mapsessions::load(q, project, m, f),
         crate::drift::load(q, project, m, f),
-        days.relations(q, project, m, f)
+        days.relations(q, project, m, f),
+        days.unavailable(q, project)
     );
     (u.sessions, u.drift, u.relations) = (s?, d?, Some(rel?));
-    Ok(assess(m, &u))
+    let mut h = assess(m, &u);
+    h.unavailable_days = gone?;
+    Ok(h)
 }
 
 /// One feature in depth (#240): its definition, health, numbers by role,
@@ -684,12 +689,14 @@ pub struct FeatureFlag {
 }
 
 /// [`FeatureContext`] for `key` (its current key or a former one).
-/// `history` holds the stored map versions, for the releases (#283).
+/// `history` holds the stored map versions and the recorded releases, for
+/// the releases (#283, D-070); record what they derived with
+/// [`crate::inforce::record`].
 pub async fn feature_context(
     q: &QueryEngine,
     project: &str,
     m: &FeatureMap,
-    history: &[crate::inforce::MapAt],
+    history: &crate::inforce::History,
     f: &Filters,
     key: &str,
 ) -> Result<Option<FeatureContext>> {
@@ -701,6 +708,7 @@ pub async fn feature_context(
     // The map's stored version, when `m` is one: its rolled-up days are
     // read from the rollups (#483, D-054).
     let version = history
+        .versions
         .iter()
         .filter(|h| h.map == *m)
         .map(|h| h.version)

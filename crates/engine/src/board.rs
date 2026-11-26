@@ -121,6 +121,16 @@ pub async fn board(
         board_people::rolled_days(q, project, "session_feature_day", version, now),
         board_people::rolled_days_back(q, project, "success_day", version, now, back),
     )?;
+    // A day with neither its events nor rollups made with the map in
+    // force counts nobody: the board names it (#489, D-070).
+    let unavailable = crate::unavailable::days(
+        q,
+        project,
+        (now - Duration::days(back - 1)).date_naive(),
+        &[&rolled_people, &rolled_sessions, &rolled_successes],
+        now,
+    )
+    .await?;
     // A date range or a past release says what it read (D-061).
     let costed = match &win {
         Some(w) if matches!(f.window, Window::Range { .. } | Window::Since { .. }) => {
@@ -342,6 +352,7 @@ pub async fn board(
 
     let mut b = Board {
         filters: Some(f.clone()),
+        unavailable_days: unavailable,
         ..Board::default()
     };
     if let Some(r) = users?.rows.first() {
