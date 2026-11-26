@@ -27,8 +27,6 @@ use futures::StreamExt;
 
 mod aggregate;
 pub mod functions;
-mod held;
-pub use held::HeldTable;
 mod host;
 mod identity;
 use identity::{AliasCache, person_of_udf};
@@ -193,8 +191,6 @@ pub struct QueryEngine {
     /// Queries of this copy are cold: free-form SQL from Ask, the SQL page
     /// or the API, which may scan anything (#326).
     cold: bool,
-    /// Rollup tables this copy reads from memory (#452, D-072).
-    held: Arc<Vec<Arc<held::Held>>>,
 }
 
 impl QueryEngine {
@@ -215,7 +211,6 @@ impl QueryEngine {
             timeouts: Arc::default(),
             params: Arc::default(),
             cold: false,
-            held: Arc::default(),
         }
     }
 
@@ -236,11 +231,6 @@ impl QueryEngine {
             params: Arc::new(params.clone()),
             ..self.clone()
         }
-    }
-
-    /// The query memory pool, in bytes (D-033).
-    pub fn memory(&self) -> usize {
-        self.limits.memory
     }
 
     /// How many queries stopped at the time limit since the start.
@@ -314,16 +304,6 @@ impl QueryEngine {
         let rdir = openlens_storage::rollup::rollups_dir(&self.root, project)
             .map_err(|e| QueryError::Storage(e.to_string()))?;
         for (name, schema) in openlens_storage::rollup::tables() {
-            // A table held in memory for this copy is read from there.
-            if let Some(h) = self
-                .held
-                .iter()
-                .find(|h| h.name == name && h.project == project)
-            {
-                ctx.register_table(name, h.table.clone())
-                    .map_err(|e| QueryError::Storage(e.to_string()))?;
-                continue;
-            }
             let url = ListingTableUrl::parse(format!("{}/", rdir.display()))
                 .map_err(|e| QueryError::Storage(e.to_string()))?;
             let options = ListingOptions::new(Arc::new(ParquetFormat::default()))
