@@ -60,7 +60,7 @@ async fn a_rollback_and_a_promotion_are_read_from_the_traffic() {
         first_seen: 0,
     };
     let builds = [build("staging", "2026-01-01.1"), build("production", "v2")];
-    let r = releases(&q, "p", "UTC", None, &builds).await.unwrap();
+    let r = releases(&q, "p", "UTC", None, &builds, &[]).await.unwrap();
     let find = |env: &str, rel: &str| {
         r.releases
             .iter()
@@ -78,7 +78,7 @@ async fn a_rollback_and_a_promotion_are_read_from_the_traffic() {
     assert!(r.releases.iter().all(|x| x.environment != "bot"));
     assert_eq!(r.releases[0].environment, "production", "production first");
     // One environment only.
-    let staging = releases(&q, "p", "UTC", Some("staging"), &builds)
+    let staging = releases(&q, "p", "UTC", Some("staging"), &builds, &[])
         .await
         .unwrap();
     assert!(!staging.releases.is_empty());

@@ -1,0 +1,29 @@
+{
+  "app": {
+    "metadata": {
+      "name": "example-app",
+      "namespace": "argocd"
+    },
+    "spec": {
+      "destination": {
+        "namespace": "example"
+      }
+    },
+    "status": {
+      "sync": {
+        "status": "OutOfSync",
+        "revision": "deadbeef0123456789deadbeef0123456789dead"
+      },
+      "health": {
+        "status": "Degraded"
+      },
+      "operationState": {
+        "phase": "Failed",
+        "message": "one or more objects failed to apply",
+        "startedAt": "2025-11-24T16:20:00Z",
+        "finishedAt": "2025-11-24T16:21:00Z"
+      }
+    }
+  },
+  "environment": "staging"
+}

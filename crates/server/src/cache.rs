@@ -132,6 +132,9 @@ pub struct Caches {
     pub(crate) ip_buckets: Mutex<crate::capture::Buckets>,
     /// Ingestion: event tokens per project key.
     pub(crate) key_buckets: Mutex<crate::capture::Buckets>,
+    /// Deploy hook (#504): request tokens per client address and deploy
+    /// tokens per project.
+    pub(crate) hook_buckets: Mutex<crate::capture::Buckets>,
     /// When "disk almost full" was last logged.
     pub(crate) disk_logged: Mutex<Option<Instant>>,
     /// Cookieless mode: visitor → (session id, last seen, Unix s).
@@ -178,6 +181,7 @@ impl Default for Caches {
             ask_last_sent: Bounded::new(1_000, 7 * 24 * 60 * MIN),
             ip_buckets: Mutex::default(),
             key_buckets: Mutex::default(),
+            hook_buckets: Mutex::default(),
             disk_logged: Mutex::default(),
             cookieless: Bounded::new(100_000, 30 * MIN),
             icons_in_flight: Bounded::new(10_000, 5 * MIN),
@@ -209,6 +213,7 @@ impl Caches {
             ("ask_last_sent", n(self.ask_last_sent.len())),
             ("ip_buckets", n(buckets(&self.ip_buckets))),
             ("key_buckets", n(buckets(&self.key_buckets))),
+            ("hook_buckets", n(buckets(&self.hook_buckets))),
             ("cookieless", n(self.cookieless.len())),
             ("icons_in_flight", n(self.icons_in_flight.len())),
             ("oidc", n(self.oidc.len())),
