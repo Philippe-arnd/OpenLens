@@ -50,6 +50,16 @@ async fn send(
     )
 }
 
+/// A deploy fixture: (file, headers, query, status, environment, commit or release).
+type Case<'a> = (
+    &'a str,
+    &'a [(&'a str, &'a str)],
+    &'a str,
+    &'a str,
+    &'a str,
+    Option<&'a str>,
+);
+
 #[tokio::test]
 async fn every_platform_format_is_recorded_with_its_status_environment_and_build() {
     let h = harness();
@@ -57,7 +67,7 @@ async fn every_platform_format_is_recorded_with_its_status_environment_and_build
     let gh = [("x-github-event", "deployment_status")];
     let flux = [("gotk-component", "kustomize-controller")];
     // (fixture, headers, query, status, environment, commit or release)
-    let cases: &[(&str, &[(&str, &str)], &str, &str, &str, Option<&str>)] = &[
+    let cases: &[Case] = &[
         (
             "coolify_success.json",
             &[],
