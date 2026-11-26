@@ -219,6 +219,7 @@ impl QueryEngine {
     /// the source is dropped (a cheap read); one derived from the files is
     /// kept, so this never adds a scan of the events.
     pub fn identity_changed(&self, project: &str) {
+        self.identity_gen.fetch_add(1, Ordering::SeqCst);
         if let Ok(mut cache) = self.aliases.lock()
             && cache.get(project).is_some_and(|(_, t)| t.from_source)
         {
@@ -229,6 +230,7 @@ impl QueryEngine {
     /// Read `project`'s identity again on the next query, wherever the
     /// cached copy came from (the source just became ready).
     pub fn identity_reload(&self, project: &str) {
+        self.identity_gen.fetch_add(1, Ordering::SeqCst);
         if let Ok(mut cache) = self.aliases.lock() {
             cache.remove(project);
         }
@@ -280,6 +282,9 @@ impl QueryEngine {
         {
             return Ok(t.clone());
         }
+        // A change made while this read runs must not be hidden behind a
+        // copy cached from before it: such a copy is used once, not kept.
+        let generation = self.identity_gen.load(Ordering::SeqCst);
         let kept = match &self.identity_source {
             Some(source) => {
                 let (f, p) = (source.0.clone(), project.to_owned());
@@ -301,7 +306,9 @@ impl QueryEngine {
             Some(rows) => build(&rows, true)?,
             None => build(&self.scan_identity(ctx).await?, false)?,
         };
-        if let Ok(mut cache) = self.aliases.lock() {
+        if let Ok(mut cache) = self.aliases.lock()
+            && self.identity_gen.load(Ordering::SeqCst) == generation
+        {
             cache.insert(project.to_owned(), (Instant::now(), identity.clone()));
         }
         Ok(identity)

@@ -213,6 +213,9 @@ pub struct QueryEngine {
     identity_source: Option<IdentitySource>,
     /// Times the identity tables were derived from the files (#450).
     identity_scans: Arc<std::sync::atomic::AtomicU64>,
+    /// Bumped by every identity change, so a read that overlapped one is
+    /// not cached (#450).
+    identity_gen: Arc<std::sync::atomic::AtomicU64>,
     /// One long (cold) query at a time per engine, so the board and
     /// ingestion never wait behind two of them (#326). Shared by every copy
     /// of the engine: one per process in the server. Not a process-wide
@@ -242,6 +245,7 @@ impl QueryEngine {
             aliases: AliasCache::default(),
             identity_source: None,
             identity_scans: Arc::default(),
+            identity_gen: Arc::default(),
             cold_turn: Arc::new(tokio::sync::Semaphore::new(1)),
             timeouts: Arc::default(),
             params: Arc::default(),

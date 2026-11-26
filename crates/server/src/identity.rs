@@ -104,6 +104,16 @@ pub async fn backfill(state: &AppState, project: &str) -> Result<(), String> {
         state.query.identity_reload(project);
         return Ok(());
     }
+    // A project deleted since the backfill was queued: reading its files
+    // would bring its directory back.
+    let (meta, p) = (state.meta.clone(), project.to_owned());
+    let exists = tokio::task::spawn_blocking(move || meta.project(&p).map(|o| o.is_some()))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+    if !exists {
+        return Ok(());
+    }
     let rows = state
         .query
         .identity_from_files(project)
