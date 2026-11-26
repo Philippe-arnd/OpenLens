@@ -62,7 +62,7 @@ async function shoot(tab, [name, path, theme, marker]) {
   if (!r || r.status() !== 200) throw new Error(`${name} (${path}): HTTP ${r ? r.status() : "none"}`);
   // A streamed page (#301) finishes after `load`: wait for its content.
   await tab.waitForLoadState("networkidle");
-  if ((await tab.locator(".page-loading").count()) > 0) throw new Error(`${name} (${path}): still loading`);
+  if ((await tab.locator(".board-waiting:visible").count()) > 0) throw new Error(`${name} (${path}): still loading`);
   // An error message, not the `alert` kind of a chart mark or timeline row.
   const alerts = (await tab.locator("main p.alert:visible, main [role=alert]:visible").allInnerTexts())
     .map((t) => t.trim())
