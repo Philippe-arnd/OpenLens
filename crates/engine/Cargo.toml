@@ -13,6 +13,9 @@ openlens-query = { path = "../query" }
 openlens-sqlgen = { path = "../sqlgen" }
 openlens-featuremap = { path = "../featuremap" }
 openlens-event = { path = "../event" }
+openlens-meta = { path = "../meta" }
+sha2.workspace = true
+hex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true

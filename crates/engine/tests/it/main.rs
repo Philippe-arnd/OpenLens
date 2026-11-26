@@ -10,6 +10,7 @@ use openlens_featuremap::parse;
 use openlens_query::{Limits, QueryEngine};
 use openlens_storage::{FlushPolicy, Writer};
 
+mod commands;
 mod map_lookups;
 mod map_shape;
 mod stored_totals;
