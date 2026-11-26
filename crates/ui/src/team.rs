@@ -26,7 +26,7 @@ pub fn projects(list: &[ProjectSummary], admin: bool) -> Markup {
         html! {
             div.heading {
                 div { h1 { "Projects" } p.muted { "One per app. Pick one to open its Focus board." } }
-                @if admin { a.button href="/users" { (icon("users")) "Team" } " " a.button href="/settings/storage" { (icon("layers")) "Storage and backups" } " " a.button href="/settings/tokens" { (icon("code")) "API tokens" } " " a.button href="/settings/ai" { (icon("spark")) "AI" } " " a.button href="/audit" { (icon("shield")) "Audit log" } }
+                @if admin { a.btn href="/users" { (icon("users")) "Team" } " " a.btn href="/settings/storage" { (icon("layers")) "Storage and backups" } " " a.btn href="/settings/tokens" { (icon("code")) "API tokens" } " " a.btn href="/settings/ai" { (icon("spark")) "AI" } " " a.btn href="/audit" { (icon("shield")) "Audit log" } }
             }
             @if admin {
                 details.card.wide.new-project {
@@ -195,7 +195,7 @@ pub fn heatmap(
                 }
             }
             @if let Some(href) = overlay {
-                p { a.button href=(href) { (icon("play")) "See it over the real page" } }
+                p { a.btn href=(href) { (icon("play")) "See it over the real page" } }
             } @else {
                 p.muted.small.no-replay { (icon("play")) " No recorded visit of this page yet: with session replays on, the map is also drawn over the page as it was recorded." }
             }
@@ -497,7 +497,7 @@ pub fn users(
                                 @if let Some(e) = &r.expires { br; span.muted { "until " (e) } }
                             }
                             td.small.muted { (u.last_sign_in.as_deref().and_then(|t| t.get(..16)).map(|t| t.replace('T', " ")).unwrap_or_else(|| "never".into())) }
-                            td { a.button href={ "/users/" (u.id) } { "Edit" } }
+                            td { a.btn href={ "/users/" (u.id) } { "Edit" } }
                         }
                     }
                 },
@@ -619,7 +619,7 @@ pub fn surveys(
                     h1 { "Micro-surveys" }
                     p.muted { "One question, right after a moment of value, to a sample of users, once each. Create them here or let agents do it (" code { "survey_set" } "); answers are " code { "$survey" } " events." }
                 }
-                a.button href={ "/p/" (p.id) "/surveys-edit" } { (icon("plus")) "New survey" }
+                a.btn href={ "/p/" (p.id) "/surveys-edit" } { (icon("plus")) "New survey" }
             }
             @if list.is_empty() {
                 section.card.empty aria-labelledby="no-surveys" {

@@ -141,7 +141,7 @@ pub(crate) fn pager(summary: &str, links: &[(&str, &str)]) -> Markup {
         div.pager {
             span { (summary) }
             @if !links.is_empty() {
-                div.actions { @for (href, label) in links { a.button href=(*href) { (label) } } }
+                div.actions { @for (href, label) in links { a.btn.sm href=(*href) { (label) } } }
             }
         }
     }
