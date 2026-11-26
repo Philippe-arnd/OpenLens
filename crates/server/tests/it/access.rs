@@ -716,7 +716,9 @@ async fn new_data_in_another_project_keeps_this_board_cached() {
     assert_eq!(h.state.boards.computed(), computed, "no recomputation");
     h.state.boards.bump("default");
     assert_eq!(get(&h, uri, None, true).await.status(), StatusCode::OK);
-    for _ in 0..100 {
+    // The recomputation runs in the background; under the whole suite's
+    // load it can take seconds, so wait up to 10 s for it.
+    for _ in 0..500 {
         if h.state.boards.computed() > computed {
             break;
         }
