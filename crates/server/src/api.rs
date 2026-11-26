@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 use crate::board_query::BoardQuery;
 use crate::{AppState, auth};
 
+mod actions;
 mod tokens;
 mod transfer;
 use tokens::*;
@@ -119,6 +120,7 @@ pub(crate) fn routes() -> Router<AppState> {
             "/api/users/{id}",
             axum::routing::delete(delete_user).patch(update_user),
         )
+        .merge(actions::routes())
 }
 
 /// Largest import chunk, in bytes (the CLI sends ~5,000 lines per chunk).
@@ -837,11 +839,13 @@ async fn breakdown(
         Ok(p) => p,
         Err(r) => return *r,
     };
-    let map = crate::load_map(&state, &p.id).await;
-    let f = q.filters.filters(&p.timezone);
-    match openlens_engine::breakdown(&state.query, &p.id, map.as_ref().map(|(m, _)| m), &f, &q.by)
-        .await
-    {
+    use openlens_engine::commands::{Caller, Command, explore};
+    let input = explore::BreakdownInput {
+        project: p.id.clone(),
+        filters: q.filters.filters(&p.timezone),
+        by: q.by.clone(),
+    };
+    match explore::Breakdown::run(&state, &Caller::default(), input).await {
         Ok(rows) => Json(json!({
             "by": q.by,
             "window_days": 30,
@@ -901,41 +905,24 @@ async fn person(
         Ok(p) => p,
         Err(r) => return *r,
     };
-    let map = crate::load_map(&state, &p.id).await;
-    let (meta, root, pid, who) = (
-        state.meta.clone(),
-        state.data_dir.clone(),
-        p.id.clone(),
-        distinct_id.clone(),
-    );
-    let stored = tokio::task::spawn_blocking(move || {
-        let person = meta.person(&pid, &who).ok().flatten();
-        let roles = meta.role_history(&pid, &who).unwrap_or_default();
-        let replays = openlens_replay::list(&root, &pid, Some(&who)).unwrap_or_default();
-        (person, roles, replays)
-    })
-    .await;
-    let Ok((person, roles, replays)) = stored else {
-        return err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "metadata store unavailable",
-        );
+    // `explore.person` (#525); an unknown id is the same 404 as before.
+    use openlens_engine::commands::{Caller, Command, Error, explore};
+    let input = explore::PersonInput {
+        project: p.id.clone(),
+        distinct_id: distinct_id.clone(),
     };
-    let events = match openlens_engine::person_events(
-        &state.query,
-        &p.id,
-        map.as_ref().map(|(m, _)| m),
-        &distinct_id,
-        100,
-    )
-    .await
-    {
-        Ok(e) => e,
+    let explore::Profile {
+        person,
+        roles,
+        replays,
+        events,
+    } = match explore::GetPerson::run(&state, &Caller::default(), input).await {
+        Ok(prof) => prof,
+        Err(Error::Invalid(_)) => {
+            return err(StatusCode::NOT_FOUND, "no such person in the last 90 days");
+        }
         Err(e) => return err(StatusCode::BAD_REQUEST, &e.to_string()),
     };
-    if person.is_none() && events.is_empty() {
-        return err(StatusCode::NOT_FOUND, "no such person in the last 90 days");
-    }
     Json(json!({
         "distinct_id": distinct_id,
         "person": person.map(|p| json!({
