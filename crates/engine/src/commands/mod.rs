@@ -27,6 +27,7 @@ pub mod explore;
 pub mod flags;
 pub mod goals;
 pub mod maintenance;
+pub mod goto;
 pub mod releases;
 pub mod tickets;
 pub mod uptime;
@@ -147,6 +148,8 @@ pub const REGISTRY: &[Spec] = &[
     spec::<announcements::Close>(),
     spec::<announcements::Delete>(),
     spec::<announcements::SetSend>(),
+    // The sidebar's Go to… field (#541).
+    spec::<goto::Lookup>(),
 ];
 
 /// A 12-character id from `s` (the first bytes of its SHA-256, in hex).

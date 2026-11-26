@@ -260,7 +260,7 @@ pub fn board(
                                     td.num { (pct(r.bounce_rate)) }
                                     td.num { (format!("{:.2}", r.tasks_per_session)) }
                                     td.num { (pct(r.error_rate)) }
-                                    td.muted { (r.first_seen.get(..16).unwrap_or(&r.first_seen)) }
+                                    td.muted { (local_time(&r.first_seen, &f.tz, false)) }
                                 }
                             } }
                         }
@@ -656,8 +656,11 @@ pub(crate) fn window_picker(project: &str, b: &Board, f: &Filters) -> Markup {
                     }
                 }
             }
-            label { "Or from " input type="date" name="from" value=[from]; }
-            label { "To " input type="date" name="to" value=[to]; }
+            // The browser shows a date field in its own locale; the hint
+            // gives the format the rest of the UI prints (#557).
+            label { "Or from " input type="date" name="from" value=[from] aria-describedby="period-date-format"; }
+            label { "To " input type="date" name="to" value=[to] aria-describedby="period-date-format"; }
+            span.muted.small #period-date-format { "Dates as YYYY-MM-DD" }
             button type="submit" { "Show" }
         }
         p.muted.small { "Filled dates win over the release: clear them to pick one. A range covers at most 400 days, none before the 400 days kept; an empty end is today. It is compared with the same length just before." }
@@ -723,6 +726,17 @@ mod tests {
             "{html}"
         );
         assert!(!html.contains("<script"), "no JavaScript");
+        // Both date fields point at the format hint (#557), which exists.
+        assert_eq!(
+            html.matches(r#"type="date""#).count(),
+            html.matches(r#"aria-describedby="period-date-format""#)
+                .count(),
+            "{html}"
+        );
+        assert!(
+            html.contains(r#"id="period-date-format">Dates as YYYY-MM-DD<"#),
+            "{html}"
+        );
         // A past release is selected, and the dates are left empty.
         let f = Filters {
             window: openlens_engine::Window::Since {
@@ -765,5 +779,29 @@ mod tests {
         assert!(line.contains("Since v2.1 (4 days)"), "{line}");
         assert!(line.contains("against the 4 days before"), "{line}");
         assert!(line.contains("users (+"), "more users than before: {line}");
+    }
+
+    #[test]
+    fn the_release_table_prints_first_seen_as_the_other_screens_do() {
+        // #556: the table printed the engine's ISO string (`…T20:49`).
+        let p = ProjectInfo {
+            id: "p1",
+            name: "P",
+            key: "k",
+        };
+        let b = Board {
+            total_events: 1,
+            releases: vec![openlens_engine::ReleaseRow {
+                release: "v2".into(),
+                first_seen: "2026-11-16T20:49:31.5Z".into(),
+                users: 3,
+                sessions: 4,
+                ..openlens_engine::ReleaseRow::default()
+            }],
+            ..Board::default()
+        };
+        let html = board(&p, &b, &Filters::default(), "h", &[], None, &[]).into_string();
+        assert!(html.contains("2026-11-16 20:49"), "{html}");
+        assert!(!crate::tests::has_iso_time(&html), "{html}");
     }
 }

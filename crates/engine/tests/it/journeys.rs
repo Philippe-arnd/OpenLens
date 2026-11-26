@@ -1,0 +1,83 @@
+//! Paths to value (journeys): the common path into each success, listed
+//! once per success event (#555).
+
+use super::*;
+
+/// Six users who go home, search, then write an entry.
+fn journey_dataset() -> (tempfile::TempDir, QueryEngine) {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let mut evs = Vec::new();
+    for u in 0..6 {
+        let user = format!("j{u}");
+        let steps: &[(&str, Option<&str>, &str)] = &[
+            ("$pageview", None, "/home"),
+            ("$pageview", None, "/home"),
+            ("$click", Some("search"), "/search"),
+            ("$pageview", None, "/entries/new"),
+            ("entry_saved", None, "/entries/new"),
+        ];
+        for (i, (name, feat, path)) in steps.iter().enumerate() {
+            let e = E {
+                user: &user,
+                role: "member",
+                session: "s",
+                event: name,
+                mins_ago: 50 - i as i64,
+                feature: *feat,
+                release: "v1",
+                props: "{}",
+            };
+            let mut ev = mk(&e, u * 10 + i);
+            ev.path = Some((*path).into());
+            evs.push(ev);
+        }
+    }
+    w.append(&evs).unwrap();
+    w.flush().unwrap();
+    let q = QueryEngine::new(dir.path(), Limits::default());
+    (dir, q)
+}
+
+#[tokio::test]
+async fn journeys_show_the_common_path_into_a_success() {
+    let (_d, q) = journey_dataset();
+    let map = parse("features:\n  - key: write\n    name: Write\n    success: entry_saved\n    entry: { routes: ['/entries/new'] }\n").map.unwrap();
+    let b = board(&q, "p", &Filters::default(), Some((&map, 1)))
+        .await
+        .unwrap();
+    let j = b.journeys.first().expect("a journey");
+    assert_eq!(j.success, "entry_saved");
+    // Places are features, in the order of their first use in the
+    // session; a page without a feature is not one (D-059).
+    assert_eq!(
+        j.path,
+        ["search", "write"],
+        "repeats collapse; route resolves to the feature"
+    );
+    assert_eq!(j.users, 6);
+    assert!((j.share - 1.0).abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn features_sharing_a_success_event_list_each_path_once() {
+    let (_d, q) = journey_dataset();
+    let map = parse(
+        "features:\n  - key: write\n    name: Write\n    success: entry_saved\n    entry: { routes: ['/entries/new'] }\n  - key: draft\n    name: Draft\n    success: entry_saved\n    entry: { routes: ['/drafts'] }\n",
+    )
+    .map
+    .unwrap();
+    let b = board(&q, "p", &Filters::default(), Some((&map, 1)))
+        .await
+        .unwrap();
+    assert!(!b.journeys.is_empty());
+    let mut keys: Vec<_> = b.journeys.iter().map(|j| (&j.success, &j.path)).collect();
+    keys.sort();
+    keys.dedup();
+    assert_eq!(keys.len(), b.journeys.len(), "{:?}", b.journeys);
+    assert!(
+        b.journeys
+            .iter()
+            .all(|j| j.feature.contains("write") && j.feature.contains("draft"))
+    );
+}

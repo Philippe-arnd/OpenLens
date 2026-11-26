@@ -22,6 +22,7 @@ mod feature_page;
 mod features;
 mod glossary;
 mod goals;
+mod goto;
 mod icons;
 mod maintenance;
 mod manage;
@@ -43,6 +44,7 @@ pub use feature_page::*;
 pub use features::*;
 pub(crate) use glossary::{th_def, th_num, vital_info};
 pub use goals::*;
+pub use goto::{GotoPlace, goto_results, goto_sections};
 pub use icons::icon;
 pub use maintenance::{MaintenanceRow, MaintenanceView, maintenance_card};
 pub use manage::*;
@@ -558,6 +560,7 @@ fn layout_with(
                                 img.picon src={ "/p/" (p.id) "/icon" } alt="" width="24" height="24";
                                 span.label { (p.name) }
                             }
+                            (goto::goto_form(p))
                             nav.side-nav aria-label="Project" {
                                 @for g in NAV {
                                     a href={ "/p/" (p.id) (g.tabs[0].0) } title=(g.label) aria-current=[group_of(title, p.name).is_some_and(|c| c.label == g.label).then_some("page")] {
@@ -726,6 +729,18 @@ pub fn render(m: Markup) -> String {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    /// Whether `html` holds an ISO time (`…6T20:49`) rather than the
+    /// `YYYY-MM-DD HH:MM` the screens print (#556).
+    pub(crate) fn has_iso_time(html: &str) -> bool {
+        html.as_bytes().windows(5).any(|w| {
+            w[0].is_ascii_digit()
+                && w[1] == b'T'
+                && w[2].is_ascii_digit()
+                && w[3].is_ascii_digit()
+                && w[4] == b':'
+        })
+    }
 
     #[test]
     fn a_security_release_gets_a_louder_notice() {

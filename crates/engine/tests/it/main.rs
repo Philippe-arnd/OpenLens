@@ -16,6 +16,7 @@ mod board_people;
 mod board_window;
 mod commands;
 mod maintenance;
+mod journeys;
 mod map_lookups;
 mod map_shape;
 mod releases;
@@ -409,56 +410,6 @@ async fn no_insights_without_enough_users() {
             .all(|i| i.kind == "slow_pages" || i.kind == "release_regression")
     );
     assert!(b.readiness.judged_users < b.readiness.needed);
-}
-
-#[tokio::test]
-async fn journeys_show_the_common_path_into_a_success() {
-    let dir = tempfile::tempdir().unwrap();
-    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
-    let mut evs = Vec::new();
-    for u in 0..6 {
-        let user = format!("j{u}");
-        let steps: &[(&str, Option<&str>, &str)] = &[
-            ("$pageview", None, "/home"),
-            ("$pageview", None, "/home"),
-            ("$click", Some("search"), "/search"),
-            ("$pageview", None, "/entries/new"),
-            ("entry_saved", None, "/entries/new"),
-        ];
-        for (i, (name, feat, path)) in steps.iter().enumerate() {
-            let e = E {
-                user: &user,
-                role: "member",
-                session: "s",
-                event: name,
-                mins_ago: 50 - i as i64,
-                feature: *feat,
-                release: "v1",
-                props: "{}",
-            };
-            let mut ev = mk(&e, u * 10 + i);
-            ev.path = Some((*path).into());
-            evs.push(ev);
-        }
-    }
-    w.append(&evs).unwrap();
-    w.flush().unwrap();
-    let q = QueryEngine::new(dir.path(), Limits::default());
-    let map = parse("features:\n  - key: write\n    name: Write\n    success: entry_saved\n    entry: { routes: ['/entries/new'] }\n").map.unwrap();
-    let b = board(&q, "p", &Filters::default(), Some((&map, 1)))
-        .await
-        .unwrap();
-    let j = b.journeys.first().expect("a journey");
-    assert_eq!(j.success, "entry_saved");
-    // Places are features, in the order of their first use in the
-    // session; a page without a feature is not one (D-059).
-    assert_eq!(
-        j.path,
-        ["search", "write"],
-        "repeats collapse; route resolves to the feature"
-    );
-    assert_eq!(j.users, 6);
-    assert!((j.share - 1.0).abs() < 1e-9);
 }
 
 #[tokio::test]

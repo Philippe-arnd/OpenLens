@@ -29,3 +29,4 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Announcement | On Uptime (and the status page): what the team says about the app's state, with a level, components and a start and end |
 | Incident update | A dated update of an announcement that follows an incident: investigating, identified, monitoring or resolved |
 | Pinned notice | The one information announcement shown at the top of the page while it is active |
+| Go to… | The sidebar field that opens a section, a feature or a person by typing its name |
