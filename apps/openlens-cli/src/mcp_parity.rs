@@ -48,6 +48,7 @@ const TOOL_OF: &[(&str, &str)] = &[
     // `GET /api/projects/{id}/board` runs it for a date range or a past
     // release before reading the board.
     ("board.estimate", "board"),
+    ("releases.record", "record_release"),
 ];
 
 /// Commands deliberately without an MCP tool, each with its reason.

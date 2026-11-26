@@ -1,6 +1,7 @@
 //! The deploy hook (#504, D-053): one fixture per platform format, a
 //! wrong secret answers like no route, rotation, bounds, and deploys on
-//! the Releases page and in `releases.list`.
+//! the Releases page and in `releases.list`; a release recorded by the
+//! deploy step with its commit range (#521, D-066).
 
 use super::*;
 
@@ -326,4 +327,85 @@ async fn deploys_show_on_the_releases_page_and_in_the_list() {
     let cookie = login_cookie(&h).await;
     let page = body_text(get(&h, "/p/default/releases", Some(&cookie), false).await).await;
     assert!(page.contains("v9.9.9") && page.contains("failed"));
+}
+
+/// `POST /api/projects/{id}/releases` (#521, D-066), as `openlens-cli
+/// release` sends it.
+async fn record(
+    h: &Harness,
+    project: &str,
+    body: serde_json::Value,
+) -> (StatusCode, serde_json::Value) {
+    send(
+        h,
+        &format!("/api/projects/{project}/releases"),
+        body.to_string(),
+        &[("authorization", "Bearer adm_test")],
+    )
+    .await
+}
+
+#[tokio::test]
+async fn a_release_from_the_deploy_step_is_a_deploy_with_its_commit_range() {
+    let h = harness();
+    let (s, first) = record(
+        &h,
+        "default",
+        serde_json::json!({"release": "v1", "commit": "AAAAAAA1"}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{first}");
+    assert!(first["from"].is_null(), "no earlier release: {first}");
+    assert_eq!(first["environment"], "production");
+    // The next one starts after the previous recorded commit…
+    let (s, second) = record(
+        &h,
+        "default",
+        serde_json::json!({"release": "v2", "commit": "bbbbbbb2"}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{second}");
+    assert_eq!(second["from"], first["commit"]);
+    // …unless the deploy step says where it starts.
+    let body = serde_json::json!({"release": "v3", "commit": "ccccccc3", "from": "aaaaaaa1"});
+    let (_, third) = record(&h, "default", body).await;
+    assert_eq!(third["from"], "aaaaaaa1");
+    // Another environment has its own range.
+    let body = serde_json::json!({"release": "v3", "commit": "ccccccc3", "environment": "staging"});
+    let (_, staged) = record(&h, "default", body).await;
+    assert!(staged["from"].is_null(), "{staged}");
+
+    for bad in [
+        serde_json::json!({"release": "v4", "commit": "not-a-sha"}),
+        serde_json::json!({"release": "v4", "commit": "ddddddd4", "from": "nope"}),
+        serde_json::json!({"release": "", "commit": "ddddddd4"}),
+        serde_json::json!({"commit": "ddddddd4"}),
+    ] {
+        assert_eq!(
+            record(&h, "default", bad.clone()).await.0,
+            StatusCode::BAD_REQUEST,
+            "{bad}"
+        );
+    }
+    let (s, _) = record(&h, "nope", serde_json::json!({"release": "v1"})).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let anon = send(
+        &h,
+        "/api/projects/default/releases",
+        r#"{"release":"v9"}"#.into(),
+        &[],
+    )
+    .await;
+    assert!(anon.0.is_client_error(), "{}", anon.0);
+
+    // Listed like the deploys the hook reports, with no hook set up.
+    let r = get(&h, "/api/projects/default/releases", None, true).await;
+    let v: serde_json::Value = serde_json::from_str(&body_text(r).await).unwrap();
+    let deploys = v["deploys"].as_array().unwrap();
+    assert_eq!(deploys.len(), 4, "{v}");
+    assert!(
+        deploys
+            .iter()
+            .all(|d| d["source"] == "cli" && d["status"] == "succeeded")
+    );
 }
