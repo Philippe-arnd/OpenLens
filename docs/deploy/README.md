@@ -47,7 +47,22 @@ cosign verify ghcr.io/philippe-arnd/openlens:latest \
 gh attestation verify openlens-vX.Y.Z-x86_64-linux.tar.gz -R Philippe-arnd/OpenLens
 ```
 
-Releases before 0.6 are not signed. The provenance is SLSA Build level 2: the build runs on GitHub's hosted runners in the same workflow that publishes.
+Releases before 0.6 are not signed. The provenance above is SLSA Build level 2: it is made by the same workflow that builds and publishes.
+
+**SLSA Build level 3.** Each release also carries `openlens-vX.Y.Z.intoto.jsonl`, and each image a second provenance, made by the [SLSA GitHub generator](https://github.com/slsa-framework/slsa-github-generator)'s reusable workflows. They run apart from the release workflow, with their own identity, and receive only the hashes of what was built, so the build cannot forge them. Check them with [`slsa-verifier`](https://github.com/slsa-framework/slsa-verifier); it prints the builder that signed (`generator_generic_slsa3.yml` or `generator_container_slsa3.yml`, at a release tag of the generator):
+
+```sh
+# A downloaded asset (binary, SDK bundle, chart, SBOM or SHA256SUMS), with the release's provenance file.
+slsa-verifier verify-artifact openlens-vX.Y.Z-x86_64-linux.tar.gz \
+  --provenance-path openlens-vX.Y.Z.intoto.jsonl \
+  --source-uri github.com/Philippe-arnd/OpenLens
+# The image, by digest (slsa-verifier refuses a tag).
+DIGEST=$(docker buildx imagetools inspect ghcr.io/philippe-arnd/openlens:latest --format '{{json .Manifest}}' | jq -r .digest)
+slsa-verifier verify-image "ghcr.io/philippe-arnd/openlens@$DIGEST" \
+  --source-uri github.com/Philippe-arnd/OpenLens
+```
+
+The provenance records the ref the workflow ran on: `main` for build releases and for releases cut by the release train (it starts the release workflow from `main`), the tag for a tag pushed by hand and for the image of a tag. `--source-branch main` or `--source-tag vX.Y.Z` checks that too. Build releases before this change have no level 3 provenance; 0.6.0 is the first release with it.
 
 ## Updates without anyone
 - **Safety net, built in:** on start, OpenLens backs up its data when the version changed (`backups/upgrade/`). It refuses data written by a newer release, so going back to the previous tag (and restoring that copy) undoes an update.
