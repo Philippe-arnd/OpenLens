@@ -20,6 +20,8 @@
 //!   (#310; part of `ci`).
 //! - `cargo xtask file-length`: no Rust file above 1,000 lines (#307; part
 //!   of `ci`).
+//! - `cargo xtask server-sql`: no SQL in `crates/server/src`, queries live
+//!   in the engine (#509, D-058; part of `ci`).
 
 mod bench;
 mod bench_gen;
@@ -28,6 +30,7 @@ mod demo_site;
 mod env_docs;
 mod file_length;
 mod layers;
+mod server_sql;
 mod sql_guard;
 
 use std::process::{Command, ExitCode};
@@ -45,8 +48,9 @@ fn main() -> ExitCode {
         "env-docs" => env_docs::check(),
         "file-length" => file_length::check(),
         "sql-guard" => sql_guard::check(),
+        "server-sql" => server_sql::check(),
         _ => Err(
-            "usage: cargo xtask <ci|layers|env-docs|file-length|sql-guard|demo DIR|demo-site DIR|bench URL KEY|bench-gen DIR|crash [--secs N] [--kills N] [--seed N]>"
+            "usage: cargo xtask <ci|layers|env-docs|file-length|sql-guard|server-sql|demo DIR|demo-site DIR|bench URL KEY|bench-gen DIR|crash [--secs N] [--kills N] [--seed N]>"
                 .to_owned(),
         ),
     };
@@ -90,6 +94,7 @@ fn ci() -> Result<(), String> {
     env_docs::check()?;
     file_length::check()?;
     sql_guard::check()?;
+    server_sql::check()?;
     // cargo-deny is optional locally; CI installs it. Say so instead of
     // silently skipping.
     if Command::new("cargo")
