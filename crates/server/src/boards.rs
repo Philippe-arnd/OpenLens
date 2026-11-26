@@ -188,8 +188,25 @@ pub(crate) fn warm(
         .is_some_and(|e| servable(&e, generation))
 }
 
-/// The board of `project` for these filters, from the cache when possible.
+/// The board of `project` for these filters, from the cache when possible,
+/// with the environments the project hides left out of its selector.
 pub(crate) async fn board(
+    state: &AppState,
+    project: &str,
+    f: &Filters,
+    map: Option<(&FeatureMap, i64)>,
+) -> openlens_engine::Result<Board> {
+    let mut b = cached(state, project, f, map).await?;
+    b.environments = crate::environments::visible(
+        state,
+        project,
+        std::mem::take(&mut b.environments),
+        &f.environment,
+    );
+    Ok(b)
+}
+
+async fn cached(
     state: &AppState,
     project: &str,
     f: &Filters,

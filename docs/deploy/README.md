@@ -99,5 +99,10 @@ Every event carries an environment, and the board shows production by default.
 - **Unknown, not production:** a host that no pattern and no rule matches is stored as `unknown` and kept out of production numbers (D-034). `openlens-cli verify` lists these hosts.
 - **Say which one it is:** `openlens-cli env rule kanban-test.example.com staging`, or `*.preview.example.com preview`. `ignore` drops a host's events entirely, for example your developers' machines. The rule applies to the next events, with no change to the app. `openlens-cli env list` shows the hosts per environment, and agents use the MCP `environments` tool.
 - **Set in the app:** `init({ environment })`, or the server SDKs' option or `OPENLENS_ENVIRONMENT`, always wins over the rules.
+- **Aliases:** `openlens-cli env alias live-eu production` stores what the app sends as `live-eu` under `production`, on top of the usual folding (`prod`, `stage`, `dev`, …). `openlens-cli env alias sandbox ignore` drops it. Like rules, aliases apply to the next events.
+- **Hide:** `openlens-cli env hide qa` takes `qa` out of the environment selector. Its events stay stored and readable by name (`?env=qa`, SQL, the API). `env show qa` brings it back. Production cannot be hidden.
+- **Checks per environment:** production is checked at the project's app address and gets every alert. `openlens-cli env monitor staging https://staging.example.com` checks staging every minute too (same health path, certificate daily). At the default level, `log`, its incidents are only recorded on Uptime. With `--level notify` they are sent on the project's alert channels like production's.
+
+All of this is also in *Settings → Environments*, `PATCH /api/projects/{id}` and the MCP `environments` tool. The browser SDK sends `unknown` for a host no pattern matches, and older SDKs send `production`: the server reads both the same way.
 
 After an upgrade, every host that sent production events in the last 30 days gets a `production` rule, so nothing moves.

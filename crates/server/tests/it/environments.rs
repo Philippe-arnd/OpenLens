@@ -1,5 +1,6 @@
-//! Environments per project (#410, D-034): host rules at ingestion, the
-//! upgrade seed, and the API.
+//! Environments per project (#410, D-034): host rules and aliases at
+//! ingestion, the upgrade seed, hidden environments, per-environment
+//! checks, and the API.
 
 use super::*;
 
@@ -234,4 +235,167 @@ async fn the_settings_tab_sets_and_removes_a_rule_like_the_api() {
             .any(|r| r["host"] == "shop.example.com"),
         "{v}"
     );
+}
+
+async fn patch(h: &Harness, body: serde_json::Value) {
+    let (status, v) = api(h, "PATCH", "/api/projects/default", Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+}
+
+#[tokio::test]
+async fn an_alias_renames_what_the_app_sends_at_ingestion() {
+    let h = harness();
+    capture(&h, vec![]).await;
+    seeded(&h).await;
+    patch(
+        &h,
+        serde_json::json!({ "environment_alias": { "from": "live-eu", "to": "production" } }),
+    )
+    .await;
+    patch(
+        &h,
+        serde_json::json!({ "environment_alias": { "from": "sandbox", "to": "ignore" } }),
+    )
+    .await;
+    // A chain is refused: `production` is not itself an alias source.
+    let (status, _) = api(
+        &h,
+        "PATCH",
+        "/api/projects/default",
+        Some(serde_json::json!({ "environment_alias": { "from": "eu", "to": "live-eu" } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let v = capture(
+        &h,
+        vec![
+            page("eu.example.com", 1, Some("live-eu")),
+            page("sbx.example.com", 2, Some("sandbox")),
+        ],
+    )
+    .await;
+    assert_eq!(v["accepted"], 1, "the ignored alias is dropped: {v}");
+    let s = stored(&h).await;
+    assert_eq!(s["eu.example.com"], ["production"], "{s:?}");
+    assert!(!s.contains_key("sbx.example.com"), "{s:?}");
+}
+
+#[tokio::test]
+async fn a_new_sdk_sending_unknown_is_classified_by_the_host_rules() {
+    let h = harness();
+    capture(&h, vec![]).await;
+    seeded(&h).await;
+    patch(
+        &h,
+        serde_json::json!({ "environment_rule": { "host": "app.example.com", "env": "production" } }),
+    )
+    .await;
+    capture(
+        &h,
+        vec![
+            page("app.example.com", 1, Some("unknown")),
+            page("other.example.com", 2, Some("unknown")),
+        ],
+    )
+    .await;
+    let s = stored(&h).await;
+    assert_eq!(s["app.example.com"], ["production"], "{s:?}");
+    assert_eq!(s["other.example.com"], ["unknown"], "{s:?}");
+}
+
+#[tokio::test]
+async fn a_hidden_environment_leaves_the_selector_but_stays_readable() {
+    let h = harness();
+    capture(
+        &h,
+        vec![
+            page("app.example.com", 1, Some("production")),
+            page("qa-box.example.com", 2, Some("qa")),
+        ],
+    )
+    .await;
+    openlens_server::flush_now(&h.state).unwrap();
+    let envs = |v: &serde_json::Value| -> Vec<String> {
+        v["environments"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let (_, before) = api(&h, "GET", "/api/projects/default/board", None).await;
+    assert!(envs(&before).contains(&"qa".to_owned()), "{before}");
+
+    patch(&h, serde_json::json!({ "hide_environment": "qa" })).await;
+    let (status, _) = api(
+        &h,
+        "PATCH",
+        "/api/projects/default",
+        Some(serde_json::json!({ "hide_environment": "production" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "production stays shown");
+
+    let (_, after) = api(&h, "GET", "/api/projects/default/board", None).await;
+    assert!(!envs(&after).contains(&"qa".to_owned()), "{after}");
+    let owner = login_cookie(&h).await;
+    let html = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
+    assert!(!html.contains(r#"value="qa""#), "not in the selector");
+
+    // Still stored, and readable by name.
+    let (status, qa) = api(&h, "GET", "/api/projects/default/board?env=qa", None).await;
+    assert_eq!(status, StatusCode::OK, "{qa}");
+    assert!(qa["total_events"].as_i64().unwrap_or(0) > 0, "{qa}");
+    assert!(
+        envs(&qa).contains(&"qa".to_owned()),
+        "the one opened stays listed"
+    );
+}
+
+#[tokio::test]
+async fn a_monitored_environment_is_announced_only_at_the_notify_level() {
+    let h = harness();
+    for (env, level) in [("staging", "log"), ("qa", "notify")] {
+        patch(
+            &h,
+            serde_json::json!({ "environment_monitor": { "env": env, "url": "http://127.0.0.1:9", "level": level } }),
+        )
+        .await;
+    }
+    let (status, _) = api(
+        &h,
+        "PATCH",
+        "/api/projects/default",
+        Some(serde_json::json!({ "environment_monitor": { "env": "production", "url": "http://127.0.0.1:9" } })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "production keeps the app address"
+    );
+    // Both have been down for ten minutes, longer than the wait.
+    let ten_min_ago = chrono::Utc::now().timestamp() - 600;
+    for env in ["staging", "qa"] {
+        h.state
+            .meta
+            .start_incident("default", &format!("env:{env}:down"), ten_min_ago, "down")
+            .unwrap();
+    }
+    openlens_server::alert_tick(&h.state, 7).await;
+    openlens_server::alert_tick(&h.state, 8).await;
+    let incidents = h.state.meta.incidents("default", 0).unwrap();
+    let notified = |rule: &str| {
+        incidents
+            .iter()
+            .find(|i| i.0 == rule)
+            .map(|i| i.4)
+            .unwrap_or_else(|| panic!("no {rule} incident: {incidents:?}"))
+    };
+    assert!(notified("env:qa:down"), "{incidents:?}");
+    assert!(!notified("env:staging:down"), "{incidents:?}");
+    // Production's own status is not touched by another environment.
+    assert!(!incidents.iter().any(|i| i.0 == "down"), "{incidents:?}");
 }

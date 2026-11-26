@@ -548,7 +548,13 @@ async fn events(
         openlens_engine::event_list(&state.query, &p.id, &f, map.as_ref().map(|(m, _)| m), &eq)
     );
     match (b, rows) {
-        (Ok(b), Ok(rows)) => {
+        (Ok(mut b), Ok(rows)) => {
+            b.environments = crate::environments::visible(
+                &state,
+                &p.id,
+                std::mem::take(&mut b.environments),
+                &f.environment,
+            );
             // The next page keeps every filter: a cursor when newest first,
             // an offset for the other sorts.
             let next = (rows.len() == eq.limit).then(|| {
@@ -761,7 +767,13 @@ async fn errors_page(
         openlens_engine::error_groups(&state.query, &p.id, &src, &f)
     );
     match (b, groups) {
-        (Ok(b), Ok(g)) => {
+        (Ok(mut b), Ok(g)) => {
+            b.environments = crate::environments::visible(
+                &state,
+                &p.id,
+                std::mem::take(&mut b.environments),
+                &f.environment,
+            );
             let original = crate::resolve_frames(&state, &p.id, &g).await;
             html(
                 StatusCode::OK,
@@ -801,7 +813,15 @@ async fn pages_page(
         openlens_engine::pages(&state.query, &p.id, &src, &f)
     );
     match (b, list) {
-        (Ok(b), Ok(l)) => html(StatusCode::OK, openlens_ui::pages(&info, &b, &l, &f)),
+        (Ok(mut b), Ok(l)) => {
+            b.environments = crate::environments::visible(
+                &state,
+                &p.id,
+                std::mem::take(&mut b.environments),
+                &f.environment,
+            );
+            html(StatusCode::OK, openlens_ui::pages(&info, &b, &l, &f))
+        }
         (Err(e), _) | (_, Err(e)) => html(
             StatusCode::BAD_REQUEST,
             openlens_ui::message("Can't show that", &e.to_string()),

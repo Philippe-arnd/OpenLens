@@ -58,6 +58,56 @@ fn project(args: &Value) -> String {
     s(args, "project").unwrap_or_else(|| "default".into())
 }
 
+/// The `PATCH /api/projects/{id}` body of the `environments` tool's
+/// optional changes, or `None` when it only reads. Each change needs its
+/// companion argument (`host`+`env`, `alias`+`to`, `monitor`+`url`).
+fn environment_change(args: &Value) -> Result<Option<Value>, String> {
+    let mut body = serde_json::Map::new();
+    match (s(args, "host"), s(args, "env")) {
+        (Some(host), Some(env)) => {
+            body.insert(
+                "environment_rule".into(),
+                json!({ "host": host, "env": env }),
+            );
+        }
+        (None, None) => {}
+        _ => return Err("send host and env together to set a rule".into()),
+    }
+    match (s(args, "alias"), s(args, "to")) {
+        (Some(from), Some(to)) => {
+            body.insert(
+                "environment_alias".into(),
+                json!({ "from": from, "to": to }),
+            );
+        }
+        (None, None) => {}
+        _ => return Err("send alias and to together to set an alias".into()),
+    }
+    match (s(args, "monitor"), s(args, "url")) {
+        (Some(env), Some(url)) => {
+            let level = s(args, "level").unwrap_or_default();
+            body.insert(
+                "environment_monitor".into(),
+                json!({ "env": env, "url": url, "level": level }),
+            );
+        }
+        (None, None) => {}
+        _ => return Err("send monitor and url together to check an environment".into()),
+    }
+    for (arg, field) in [
+        ("remove", "remove_environment_rule"),
+        ("unalias", "remove_environment_alias"),
+        ("hide", "hide_environment"),
+        ("show", "show_environment"),
+        ("unmonitor", "remove_environment_monitor"),
+    ] {
+        if let Some(v) = s(args, arg) {
+            body.insert(field.into(), json!(v));
+        }
+    }
+    Ok((!body.is_empty()).then_some(Value::Object(body)))
+}
+
 fn ok_or(status: u16, v: Value) -> Result<Value, String> {
     if (200..300).contains(&status) {
         Ok(v)
@@ -156,8 +206,8 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "environments",
-                description: "The app's environments: hosts per environment over 30 days (events, last seen, the rule that applies), the host rules, and hosts no rule classifies yet (stored as 'unknown', counted in no production number). With host and env, first sets the rule for that host (an exact host or *.suffix; env is an environment name or 'ignore' to drop its events); with remove, first removes the rule for that host. Rules apply to the next events, with no change to the app.",
-                input_schema: json!({"type":"object","properties":with(json!({"host":{"type":"string"},"env":{"type":"string"},"remove":{"type":"string"}}))}),
+                description: "The app's environments: hosts per environment over 30 days (events, last seen, the rule that applies), the host rules, hosts no rule classifies yet (stored as 'unknown', counted in no production number), aliases, hidden environments and per-environment checks. Optional changes, applied first: host+env sets the rule for a host (exact or *.suffix; env is a name or 'ignore' to drop its events), remove removes it; alias+to stores an environment the app sends under another name ('ignore' drops it), unalias removes it; hide / show takes an environment out of the selector or back (its events stay readable by name); monitor+url (+level 'log' or 'notify', default log) checks a non-production environment at its own address every minute, unmonitor stops it. Rules and aliases apply to the next events, with no change to the app.",
+                input_schema: json!({"type":"object","properties":with(json!({"host":{"type":"string"},"env":{"type":"string"},"remove":{"type":"string"},"alias":{"type":"string"},"to":{"type":"string"},"unalias":{"type":"string"},"hide":{"type":"string"},"show":{"type":"string"},"monitor":{"type":"string"},"url":{"type":"string"},"level":{"type":"string","enum":["log","notify"]},"unmonitor":{"type":"string"}}))}),
             },
             ToolSpec {
                 name: "verify",
@@ -385,14 +435,7 @@ impl Tools for OpenLensTools {
             }
             "environments" => {
                 let p = project(args);
-                let change = match (s(args, "host"), s(args, "env"), s(args, "remove")) {
-                    (Some(host), Some(env), None) => {
-                        Some(json!({ "environment_rule": { "host": host, "env": env } }))
-                    }
-                    (None, None, Some(host)) => Some(json!({ "remove_environment_rule": host })),
-                    (None, None, None) => None,
-                    _ => return Err("send host and env to set a rule, or remove alone".into()),
-                };
+                let change = environment_change(args)?;
                 if let Some(body) = change {
                     let (st, v) = c.call(
                         "PATCH",

@@ -12,6 +12,7 @@ use maud::{DOCTYPE, Markup, PreEscaped, html};
 mod audience;
 mod board;
 mod components;
+mod environments;
 mod explore;
 mod feature_page;
 mod features;
