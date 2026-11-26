@@ -80,6 +80,8 @@ mod projects;
 pub mod release_maps;
 /// Automatic release names per build fingerprint (#495).
 pub mod releases;
+/// The public status page's settings (#561, D-079).
+pub mod status_page;
 mod totp;
 mod uptime;
 /// Uptime history: daily rows, and checks kept around incidents (#559).
@@ -623,6 +625,7 @@ impl Meta {
         conn.execute_batch(maintenance::SCHEMA)?;
         migrate(&conn)?;
         conn.execute_batch(announcements::SCHEMA)?;
+        conn.execute_batch(status_page::SCHEMA)?;
         let readers = (0..READERS)
             .map(|_| {
                 let r = Connection::open_with_flags(
@@ -661,6 +664,7 @@ impl Meta {
         conn.execute_batch(maintenance::SCHEMA)?;
         migrate(&conn)?;
         conn.execute_batch(announcements::SCHEMA)?;
+        conn.execute_batch(status_page::SCHEMA)?;
         Ok(Self {
             conn: Mutex::new(conn),
             readers: Vec::new(),

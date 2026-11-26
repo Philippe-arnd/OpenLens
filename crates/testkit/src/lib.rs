@@ -65,6 +65,38 @@ pub fn hostile_texts() -> Vec<String> {
     ]
 }
 
+/// Hostile slugs for the public status page (#561): what a scan or a
+/// careless admin sends as `/status/<slug>` or as the slug to save. Path
+/// tricks, encoded separators, a route suffix, a project id shape,
+/// Unicode look-alikes, control characters, and lengths around the
+/// limits. None is a valid slug as typed; a page lookup never reaches the
+/// store with one.
+pub fn hostile_slugs() -> Vec<String> {
+    vec![
+        String::new(),
+        "ab".into(),
+        "-lead".into(),
+        "trail-".into(),
+        "../etc/passwd".into(),
+        "..%2F..%2Fadmin".into(),
+        "a%00b".into(),
+        "slug.json".into(),
+        "slug/badge.svg".into(),
+        "slug?window=24h".into(),
+        "slug#x".into(),
+        "UPPER-case".into(),
+        "with space".into(),
+        "tab\there".into(),
+        "nul\u{0000}byte".into(),
+        "ſtatus".into(),
+        "stаtus".into(),
+        "<script>".into(),
+        "' OR 1=1 --".into(),
+        "a".repeat(41),
+        "b".repeat(10_000),
+    ]
+}
+
 use chrono::{DateTime, Duration, Utc};
 use openlens_event::Event;
 

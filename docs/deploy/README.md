@@ -125,6 +125,19 @@ Guide: https://<your-domain>/agents.md — admin token: <token>.
 
 The agent creates the project, wires the SDK with roles, writes the feature map and sends you a login link.
 
+## A status page on its own host name
+
+A project's public status page (Settings → Sharing, #561) is served at `/status/<slug>`. To show it at the root of a host such as `status.example.com`, point that host at OpenLens and rewrite `/` to the page in the reverse proxy, keeping `/status/` and `/assets/` as they are. With Caddy:
+
+```
+status.example.com {
+    rewrite / /status/my-app
+    reverse_proxy openlens:8686
+}
+```
+
+With Nginx: `location = / { proxy_pass http://openlens:8686/status/my-app; }` and `location / { proxy_pass http://openlens:8686; }`. Only the status page and its assets need to be reachable on that host.
+
 ## Environments
 
 Every event carries an environment, and the board shows production by default.

@@ -576,6 +576,8 @@ pub struct SettingsView<'a> {
     pub allow: Option<openlens_engine::environments::AllowReport>,
     /// The preview of a new allow-list, or why it was refused (#485).
     pub allow_preview: Option<Result<openlens_engine::environments::AllowPreview, String>>,
+    /// The public status page's card (#561), on the *Sharing* tab.
+    pub status_page: Option<Markup>,
 }
 
 /// A project's alert settings as the page shows them (#256).
@@ -728,6 +730,7 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
             }
             }
             @if tab == SettingsTab::Sharing {
+            @if let Some(card) = &v.status_page { (card) }
             @if !v.admin { section.card { p.muted { "Admins make and revoke share links." } } }
             @if v.admin {
                 section.card.wide #share {

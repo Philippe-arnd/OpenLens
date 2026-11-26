@@ -29,6 +29,7 @@ mod manage;
 mod releases;
 mod settings;
 mod slo;
+mod status_page;
 mod team;
 mod totp;
 mod world;
@@ -53,6 +54,9 @@ use openlens_engine::{Board, EventRow, Filters};
 pub use releases::*;
 pub use settings::*;
 pub use slo::{AvailabilityView, availability_card};
+pub use status_page::{
+    StatusComponentRow, StatusPageCard, state_words, status_page, status_page_card,
+};
 pub use team::*;
 pub use totp::{TotpCard, login_code, totp_recovery_codes};
 

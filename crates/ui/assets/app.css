@@ -632,3 +632,48 @@
   form.settings input.switch:checked::after { translate: 14px 0; }
   input.switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
+
+/* Public status page (#561) and its Settings card, in the v2 parts
+   (docs/design/ui-v2): tags with tones, form cards, table cards, an empty
+   state. The page has no shell: one centred column like the entry pages,
+   light or dark from color-scheme. */
+@layer components {
+  .tone-info { --tone: var(--info); } .tone-accent { --tone: var(--accent); }
+  .form-card { padding: 22px; display: flex; flex-direction: column; gap: 20px; }
+  .form-card form { display: flex; flex-direction: column; gap: 16px; }
+  .field label.check { display: flex; align-items: center; gap: 6px; font-weight: 400; }
+  .table-card { overflow: hidden; padding: 18px 0 6px; }
+  .table-card h2 { padding: 0 20px; }
+  .table-card td:first-child, .table-card th:first-child { padding-left: 20px; }
+  .table-card td:last-child, .table-card th:last-child { padding-right: 20px; }
+
+  .status-page { background: var(--bg); }
+  .status { width: min(780px, 100% - 32px); margin: 0 auto; padding: 40px 0 24px; display: flex; flex-direction: column; gap: 14px; }
+  .status .card { padding: 20px 22px; margin: 0; }
+  .status .card.table-card { padding: 18px 0 6px; }
+  .status .card.empty { max-width: none; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 18px 22px; align-items: center; padding: 24px 22px; }
+  .status .empty .art { width: 96px; height: 72px; color: var(--muted); }
+  .status .empty h2 { margin: 0 0 4px; }
+  .status .empty p { color: var(--muted); margin: 0; }
+  .status-head { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
+  .status-head h1 { margin: 0; }
+  .status-head p { margin: 0; }
+  .status-icon { border-radius: var(--r-s); flex: none; }
+  .status-now { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+  .status-now .tag { height: 32px; padding: 0 14px; font-size: var(--step-1); }
+  .status-now p { margin: 0; }
+  .status-line { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 12px; }
+  .status-line h2 { margin: 0; }
+  .status-component .uptime-days { margin: 14px 0 12px; }
+  .status-figures { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 0; }
+  .status-figures div { display: flex; flex-direction: column; gap: 2px; }
+  .status-figures dt { font-size: 12px; color: var(--muted); }
+  .status-figures dd { margin: 0; font-weight: 550; font-variant-numeric: tabular-nums; }
+  .status-list ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+  .status-list ul > li + li { border-top: 1px solid var(--line-2); padding-top: 14px; }
+  .status-list p { margin: 6px 0 0; }
+  .status-updates { margin: 8px 0 0; padding-left: 18px; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+  .status-legend { margin: 0; }
+  .status-foot { border-top: 0; padding: 12px 0 0; }
+  @media (max-width: 480px) { .status .card.empty { grid-template-columns: minmax(0, 1fr); } }
+}

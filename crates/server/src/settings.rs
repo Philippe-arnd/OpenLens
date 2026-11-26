@@ -352,6 +352,7 @@ async fn page_at(
             "Past events re-labelled. Boards follow at once; closed days are rolled up again within minutes.",
         ),
         Some("allow") => Some("Allowed hosts saved."),
+        Some("status") => Some("Status page saved."),
         Some("test") => Some("Test alert sent: check every channel."),
         Some("test-none") => {
             Some("No channel is set: add an email (SMTP), a webhook or an ntfy topic.")
@@ -401,6 +402,11 @@ async fn page_at(
         _ => None,
     };
     let host = crate::public_url(&headers);
+    let status_page = if tab == openlens_ui::SettingsTab::Sharing {
+        crate::status_page::card(&state, &p, &host, viewer.admin).await
+    } else {
+        None
+    };
     let a = alerts::GetSettings::run(&state, &Caller::default(), project_input(&p.id))
         .await
         .unwrap_or_default();
@@ -430,6 +436,7 @@ async fn page_at(
                 relabel,
                 allow,
                 allow_preview,
+                status_page,
                 setup: setup_steps(
                     &state,
                     &p.id,

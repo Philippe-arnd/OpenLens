@@ -338,6 +338,8 @@ impl Tools for OpenLensTools {
         tools.extend(crate::mcp_maintenance::specs());
         // Status announcements and incident updates (#562).
         tools.extend(crate::mcp_announcements::specs());
+        // The public status page (#561).
+        tools.extend(crate::mcp_status_page::specs());
         tools.extend(crate::agent_kit::specs(&proj));
         tools
     }
@@ -875,6 +877,7 @@ impl Tools for OpenLensTools {
             _ => crate::mcp_commands::call(c, name, args)
                 .or_else(|| crate::mcp_maintenance::call(c, name, args))
                 .or_else(|| crate::mcp_announcements::call(c, name, args))
+                .or_else(|| crate::mcp_status_page::call(c, name, args))
                 .unwrap_or_else(|| Err(format!("unknown tool {name}"))),
         }
     }

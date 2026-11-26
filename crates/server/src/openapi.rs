@@ -396,6 +396,18 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
     ),
     (
         "GET",
+        "/api/projects/{project}/status-page",
+        "read",
+        "The public status page's settings (#561): `enabled`, `slug`, `components` (production first, then monitored environments, each with its public `name` and `response_time`), `path` (`/status/<slug>`) and the `monitored` environments that can be shown. The page itself is `/status/<slug>` (also `.json`, `/badge.svg?window=state|24h|7d|30d|90d` and `/feed.atom`), public, without a token.",
+    ),
+    (
+        "PUT",
+        "/api/projects/{project}/status-page",
+        "write",
+        "Change the public status page: only the fields given change. `enabled` (needs a slug), `slug` (3 to 40 of a-z, 0-9 and -, unique across projects), `components` (`[{environment, name, response_time}]`; production is always first).",
+    ),
+    (
+        "GET",
         "/api/projects/{project}/alerts",
         "read",
         "Alert settings (a webhook URL or ntfy topic that is set reads `(set)`).",

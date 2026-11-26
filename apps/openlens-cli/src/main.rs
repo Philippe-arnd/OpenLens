@@ -18,6 +18,7 @@ mod mcp_commands;
 mod mcp_maintenance;
 #[cfg(test)]
 mod mcp_parity;
+mod mcp_status_page;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -28,6 +29,7 @@ use serde_json::{Value, json};
 mod commands;
 mod maintenance;
 mod release;
+mod status_page;
 mod verify;
 use commands::*;
 pub(crate) use verify::*;
@@ -584,6 +586,7 @@ fn run(cli: Cli) -> Result<bool, String> {
         }
         Command::Maintenance { action } => maintenance::run(&client()?, action),
         Command::Announce { action } => announce::run(&client()?, action),
+        Command::StatusPage { action } => status_page::run(&client()?, action),
         Command::Status { project } => {
             let (status, v) =
                 client()?.call("GET", &format!("/api/projects/{project}/status"), None)?;

@@ -30,6 +30,7 @@ mod pages;
 mod privacy;
 mod releases;
 mod slo;
+mod status_page;
 mod team;
 mod totp;
 
