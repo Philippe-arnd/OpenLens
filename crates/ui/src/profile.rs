@@ -77,28 +77,29 @@ pub fn me(
                 section.card { p.muted { "Password sign-in is turned off on this server: you sign in with a link or your identity provider." } }
             }
             @if tab == MeTab::SignIn && pw.enabled {
-                section.card.wide #password {
-                    @if pw.owner {
-                        h2.violet { (icon("shield")) "Create your admin account" }
+                @if pw.owner {
+                    form.card.wide.form-card #password method="post" action="/me/password" aria-labelledby="password-h" {
+                        div.section-head { h2 #password-h { (icon("shield")) "Create your admin account" } }
                         p.small { "You signed in with the admin token. Create an account with your email and a password to sign in without it. The token keeps working as the way back in (a lost password, a locked account)." }
-                        form.settings method="post" action="/me/password" {
-                            label { "Email " input type="email" name="email" autocomplete="username" required maxlength="200"; }
-                            label { "Password " input type="password" name="password" autocomplete="new-password" required minlength="12" maxlength="200"; }
-                            label { "Again " input type="password" name="again" autocomplete="new-password" required minlength="12" maxlength="200"; }
-                            button type="submit" { "Create my account" }
+                        div.form-grid {
+                            label.field.wide { "Email" input type="email" name="email" autocomplete="username" required maxlength="200"; }
+                            label.field { "Password" input type="password" name="password" autocomplete="new-password" required minlength="12" maxlength="200"; small { "At least 12 characters; a few words work well." } }
+                            label.field { "Again" input type="password" name="again" autocomplete="new-password" required minlength="12" maxlength="200"; }
                         }
-                    } @else {
-                        h2.violet { (icon("shield")) (if pw.has_password { "Change password" } else { "Set a password" }) }
-                        form.settings method="post" action="/me/password" {
-                            input type="email" name="email" value=[email] autocomplete="username" hidden;
+                        (crate::project_settings::form_foot("Create my account", html! { "You then sign in with your email and this password." }))
+                    }
+                } @else {
+                    form.card.wide.form-card #password method="post" action="/me/password" aria-labelledby="password-h" {
+                        div.section-head { h2 #password-h { (icon("shield")) (if pw.has_password { "Change password" } else { "Set a password" }) } }
+                        input type="email" name="email" value=[email] autocomplete="username" hidden;
+                        div.form-grid {
                             @if pw.has_password {
-                                label { "Current password " input type="password" name="current" autocomplete="current-password" required maxlength="200"; }
+                                label.field.wide { "Current password" input type="password" name="current" autocomplete="current-password" required maxlength="200"; }
                             }
-                            label { "New password " input type="password" name="password" autocomplete="new-password" required minlength="12" maxlength="200"; }
-                            label { "Again " input type="password" name="again" autocomplete="new-password" required minlength="12" maxlength="200"; }
-                            button type="submit" { "Save the password" }
+                            label.field { "New password" input type="password" name="password" autocomplete="new-password" required minlength="12" maxlength="200"; small { "At least 12 characters; a few words work well." } }
+                            label.field { "Again" input type="password" name="again" autocomplete="new-password" required minlength="12" maxlength="200"; }
                         }
-                        p.muted.small { "At least 12 characters; a few words work well. Saving it signs out your other sessions." }
+                        (crate::project_settings::form_foot("Save the password", html! { "Saving it signs out your other sessions." }))
                     }
                 }
                 (crate::totp::totp_card(&pw.totp))

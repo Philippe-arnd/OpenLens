@@ -278,7 +278,23 @@ pub struct UserRow<'a> {
     pub expires: Option<String>,
 }
 
-/// The team: invite, find, edit, disable and remove users (#216).
+/// The tag tone of a team role.
+fn role_tone(role: &str) -> &'static str {
+    if role == "admin" { "accent" } else { "info" }
+}
+
+/// The tag tone of a team member's status.
+fn member_tone(status: &str) -> &'static str {
+    match status {
+        "active" => "good",
+        "disabled" => "bad",
+        "expired" => "warn",
+        _ => "info",
+    }
+}
+
+/// The team (#216, #551): the invite form card, then the people as a
+/// table with role and status tags, its search in the table's head.
 pub fn users(
     rows: &[UserRow<'_>],
     projects: &[String],
@@ -302,44 +318,62 @@ pub fn users(
                     pre.snippet { code { (link) } }
                 }
             }
-            section.card.wide {
-                h2.violet { (icon("users")) "Invite someone" }
-                form.invite method="post" action="/users" {
-                    label { "Email " input type="email" name="email" required; }
-                    label { "Name " input type="text" name="name" maxlength="80"; }
-                    label { "Role " select name="role" { option value="viewer" { "viewer" } option value="admin" { "admin" } } }
-                    label { "Projects " input type="text" name="projects" placeholder="all" list="project-ids"; }
-                    datalist #project-ids { @for p in projects { option value=(p) {} } }
-                    button type="submit" { "Create the login link" }
+            form.card.wide.form-card method="post" action="/users" aria-labelledby="invite-h" {
+                div.section-head { h2 #invite-h { (icon("users")) "Invite someone" } }
+                div.form-grid {
+                    label.field { "Email" input type="email" name="email" required; }
+                    label.field { "Name" input type="text" name="name" maxlength="80"; }
+                    fieldset.field {
+                        legend { "Role" }
+                        div.seg {
+                            label { input type="radio" name="role" value="viewer" checked; "viewer" }
+                            label { input type="radio" name="role" value="admin"; "admin" }
+                        }
+                    }
+                    label.field { "Projects"
+                        input type="text" name="projects" placeholder="all" list="project-ids";
+                        small { "Comma-separated ids (" (projects.join(", ")) "), or empty for all." }
+                    }
                 }
-                p.muted.small { "Projects: comma-separated ids (" (projects.join(", ")) "), or empty for all." }
+                datalist #project-ids { @for p in projects { option value=(p) {} } }
+                (crate::project_settings::form_foot("Create the login link", html! { "The one-time link shows up at the top of this page, for you to send." }))
             }
-            section.card.wide {
-                form.inline method="get" action="/users" role="search" {
-                    label { "Find " input type="text" name="q" value=(q) placeholder="name or email"; }
-                    button.ghost type="submit" { "Search" }
-                }
-                @if rows.is_empty() { p.muted { @if q.is_empty() { "Nobody invited yet." } @else { "Nobody matches." } } }
-                @else {
-                    div.table-scroll { table.plain {
-                        thead { tr { th { "User" } th { "Role" } th { "Projects" } th { "Status" } th { "Last sign-in" } th { span.sr-only { "Actions" } } } }
-                        tbody { @for r in rows {
-                            @let u = r.user;
-                            tr {
-                                td { @if let Some(n) = &u.name { strong { (n) } br; } span.small { (u.email) } }
-                                td { span.chip { (u.role) } }
-                                td.small { @match &u.projects { Some(p) => (p.join(", ")), None => span.muted { "all" } } }
-                                td.small {
-                                    span class={ "status " (match r.status { "active" => "good", "disabled" => "bad", _ => "muted" }) } { (r.status) }
-                                    @if let Some(e) = &r.expires { br; span.muted { "until " (e) } }
-                                }
-                                td.small.muted { (u.last_sign_in.as_deref().and_then(|t| t.get(..16)).map(|t| t.replace('T', " ")).unwrap_or_else(|| "never".into())) }
-                                td { a.button href={ "/users/" (u.id) } { "Edit" } }
+            (crate::tables::TableCard {
+                label: "People",
+                head: html! {
+                    h2 { (icon("users")) "People" }
+                    form.inline method="get" action="/users" role="search" {
+                        label { "Find " input type="text" name="q" value=(q) placeholder="name or email"; }
+                        button.ghost type="submit" { "Search" }
+                    }
+                },
+                cols: &[
+                    crate::tables::Col::Shown("User"), crate::tables::Col::Shown("Role"),
+                    crate::tables::Col::Shown("Projects"), crate::tables::Col::Shown("Status"),
+                    crate::tables::Col::Shown("Last sign-in"), crate::tables::Col::Hidden("Actions"),
+                ],
+                body: html! {
+                    @if rows.is_empty() {
+                        tr { td.muted colspan="6" { @if q.is_empty() { "Nobody invited yet." } @else { "Nobody matches." } } }
+                    }
+                    @for r in rows {
+                        @let u = r.user;
+                        tr {
+                            td { @if let Some(n) = &u.name { strong { (n) } br; } span.small { (u.email) } }
+                            td { span class={ "tag tone-" (role_tone(&u.role)) } { (u.role) } }
+                            td.small { @match &u.projects { Some(p) => (p.join(", ")), None => span.muted { "all" } } }
+                            td.small {
+                                span class={ "tag tone-" (member_tone(r.status)) } { (r.status) }
+                                @if let Some(e) = &r.expires { br; span.muted { "until " (e) } }
                             }
-                        } }
-                    } }
-                }
+                            td.small.muted { (u.last_sign_in.as_deref().and_then(|t| t.get(..16)).map(|t| t.replace('T', " ")).unwrap_or_else(|| "never".into())) }
+                            td { a.button href={ "/users/" (u.id) } { "Edit" } }
+                        }
+                    }
+                },
+                foot: html! {},
             }
+            .render())
         },
     )
 }
@@ -399,10 +433,15 @@ pub fn user_edit(u: &openlens_meta::User, status: &str, projects: &[String]) -> 
     )
 }
 
-/// Instance settings → About (#438): the version, whether a newer one is
-/// out, and where the docs are.
+/// Instance settings → About (#438, #551): the version, whether a newer
+/// one is out (a tag says it besides the line), and where the docs are.
 pub fn about() -> Markup {
     let update = crate::update_available();
+    let (tone, word) = match &update {
+        Some(u) if u.security => ("bad", "Security update"),
+        Some(_) => ("warn", "Update available"),
+        None => ("good", "Up to date"),
+    };
     layout(
         "About",
         None,
@@ -411,8 +450,11 @@ pub fn about() -> Markup {
                 h1 { "Instance settings" }
                 p.muted { "What runs here, for the whole install." }
             } }
-            section.card.wide {
-                h2.violet { (icon("idea")) "About" }
+            section.card.wide.about aria-labelledby="about-h" {
+                div.section-head {
+                    h2 #about-h { (icon("idea")) "About" }
+                    span class={ "tag tone-" (tone) } { (icon(if tone == "good" { "task" } else { "alert" })) (word) }
+                }
                 dl.facts {
                     dt { "Version" } dd { "OpenLens " (env!("CARGO_PKG_VERSION")) }
                     dt { "Updates" } dd {
@@ -422,10 +464,10 @@ pub fn about() -> Markup {
                         }
                     }
                 }
-                p.small {
-                    a href="/agents.md" { "Wiring guide for agents" } " · "
-                    a href="https://github.com/Philippe-arnd/OpenLens/tree/main/docs" { "Documentation" } " · "
-                    a href="https://github.com/Philippe-arnd/OpenLens/blob/main/SECURITY.md" { "Security policy" }
+                div.actions {
+                    a.btn href="/agents.md" { "Wiring guide for agents" }
+                    a.btn href="https://github.com/Philippe-arnd/OpenLens/tree/main/docs" { "Documentation" }
+                    a.btn href="https://github.com/Philippe-arnd/OpenLens/blob/main/SECURITY.md" { "Security policy" }
                 }
             }
         },
