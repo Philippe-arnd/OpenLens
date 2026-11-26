@@ -261,22 +261,60 @@ pub fn heatmap_overlay(p: &ProjectInfo<'_>, path: &str, session: &str) -> Markup
     )
 }
 
-/// The weekly digest page.
+/// A week's change as the board's delta (#551): an icon, the signed
+/// change, the verdict in words for screen readers. `higher_good`: up is
+/// better (users, sessions), down is better (errors).
+fn digest_delta(x: &openlens_engine::Delta, higher_good: bool) -> Markup {
+    match x.change() {
+        None => html! { span.delta.flat title="nothing last week to compare with" { "—" } },
+        Some(c) => {
+            let flat = c.abs() < 0.005;
+            let (tone, glyph, word) = if flat {
+                ("flat", "right", "about the same")
+            } else if (c > 0.0) == higher_good {
+                ("good", if c > 0.0 { "up" } else { "down" }, "better")
+            } else {
+                ("bad", if c > 0.0 { "up" } else { "down" }, "worse")
+            };
+            let text = if flat {
+                "same".to_owned()
+            } else {
+                format!("{:+.0}%", c * 100.0).replacen('-', "−", 1)
+            };
+            html! {
+                span class={ "delta " (tone) } title=(word) {
+                    (icon(glyph)) (text) span.sr-only { " (" (word) ")" }
+                }
+            }
+        }
+    }
+}
+
+/// One read-only KPI tile of the digest: this week, and the change
+/// against last week.
+fn digest_tile(label: &str, x: &openlens_engine::Delta, higher_good: bool) -> Markup {
+    html! {
+        div.kpi-slot {
+            div.card.kpi {
+                div.kpi-head { span { (label) } }
+                div.kpi-mid { div.kpi-value { (compact(x.now)) } }
+                div.kpi-foot { (digest_delta(x, higher_good)) span { "vs " (compact(x.before)) " last week" } }
+            }
+        }
+    }
+}
+
+/// The weekly digest page (#551): the board's parts, read-only. The key
+/// numbers as tiles, completed tasks as a table, the insights as the lead
+/// card and the ranked list, then the releases and the goals.
 pub fn digest(p: &ProjectInfo<'_>, d: &openlens_engine::Digest, mailed: bool) -> Markup {
     let row = |label: &str, x: &openlens_engine::Delta| {
-        let change = x.change();
         html! {
             tr {
                 th scope="row" { (label) }
                 td.num { strong { (compact(x.now)) } }
                 td.num.muted { (compact(x.before)) }
-                td.num {
-                    @match change {
-                        Some(c) if c.abs() >= 0.005 => span class=(if c > 0.0 { "up" } else { "down" }) { (format!("{:+.0}%", c * 100.0)) },
-                        Some(_) => span.muted { "same" },
-                        None => span.muted { "—" },
-                    }
-                }
+                td.num { (digest_delta(x, true)) }
             }
         }
     };
@@ -284,40 +322,75 @@ pub fn digest(p: &ProjectInfo<'_>, d: &openlens_engine::Digest, mailed: bool) ->
         "Weekly digest",
         Some(p),
         html! {
-            div.heading { div {
-                h1 { "This week vs last" }
-                p.muted { "Last 7 days against the 7 before, production. "
-                    @if mailed { "Emailed every Monday." } @else { "Set OPENLENS_SMTP_URL and OPENLENS_DIGEST_TO to receive it by email every Monday." } }
-            } }
-            section.card.wide {
-                table.plain {
-                    thead { tr { th { span.sr-only { "Metric" } } (th_num("This week")) (th_num("Last week")) (th_num("Change")) } }
-                    tbody {
-                        (row("Active users", &d.users))
-                        (row("Sessions", &d.sessions))
-                        (row("Errors", &d.errors))
-                        @for (k, t) in &d.tasks { (row(&format!("Completed: {k}"), t)) }
+            div.board.digest {
+                div.page-head { div {
+                    h1 { "This week vs last" }
+                    p { "Last 7 days against the 7 before, production. "
+                        @if mailed { "Emailed every Monday." } @else { "Set OPENLENS_SMTP_URL and OPENLENS_DIGEST_TO to receive it by email every Monday." } }
+                } }
+                section.kpis aria-label="Key numbers" {
+                    (digest_tile("Active users", &d.users, true))
+                    (digest_tile("Sessions", &d.sessions, true))
+                    (digest_tile("Errors", &d.errors, false))
+                }
+                @if !d.tasks.is_empty() {
+                    (crate::features::table_card(
+                        "Completed tasks",
+                        html! { h2 { (icon("task")) "Completed tasks" } },
+                        html! { th scope="col" { span.sr-only { "Metric" } } (th_num("This week")) (th_num("Last week")) (th_num("Change")) },
+                        html! { @for (k, t) in &d.tasks { (row(&format!("Completed: {k}"), t)) } },
+                        html! {},
+                    ))
+                }
+                @if !d.insights.is_empty() {
+                    section.focus aria-labelledby="digest-focus-h" {
+                        h2.eyebrow #digest-focus-h { "What to focus on" " " span.count { (d.insights.len()) } }
+                        div.focus-grid {
+                            @if let Some(i) = d.insights.first() {
+                                article.card.lead {
+                                    div.lead-top { span.rank aria-hidden="true" { "01" } }
+                                    div.lead-text {
+                                        h2 { span.sr-only { "Insight 1: " } (i.title) }
+                                        p.evidence { (i.evidence) }
+                                    }
+                                    div.next { (icon("idea")) div { strong { "Next step" } p { (i.next_step) } } }
+                                }
+                            }
+                            @if d.insights.len() > 1 {
+                                div.card.ranked {
+                                    ol start="2" {
+                                        @for (n, i) in d.insights.iter().enumerate().skip(1) {
+                                            li.row {
+                                                span.rank aria-hidden="true" { (format!("{:02}", n + 1)) }
+                                                div {
+                                                    h3 { span.sr-only { "Insight " (n + 1) ": " } (i.title) }
+                                                    div.meta { span { (i.evidence) } }
+                                                    p.step { span.label { "Next step: " } (i.next_step) }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
-            }
-            @if !d.insights.is_empty() {
-                section.card.wide {
-                    h2.violet { (icon("idea")) "What to focus on" }
-                    ul { @for i in &d.insights { li { strong { (i.title) } " · " span.muted { (i.evidence) } br; span.small { "Next step: " (i.next_step) } } } }
+                @if !d.releases.is_empty() {
+                    (crate::features::table_card(
+                        "Releases this week",
+                        html! { h2 { (icon("release")) "Releases this week" } },
+                        html! { th scope="col" { "Release" } th scope="col" { "Verdict" } },
+                        html! { @for (name, line) in &d.releases { tr { th scope="row" { code { (name) } } td { (line) } } } },
+                        html! {},
+                    ))
                 }
-            }
-            @if !d.releases.is_empty() {
-                section.card.wide {
-                    h2 { "Releases this week" }
-                    ul.plain-list { @for (name, line) in &d.releases { li { code { (name) } " — " (line) } } }
-                }
-            }
-            @if !d.goals.is_empty() {
-                section.card.wide {
-                    h2.sun { (icon("star")) "Goals" }
-                    ul.plain-list {
-                        @for o in &d.objectives_at_risk { li { span.status.bad { "objective at risk" } " " (o) } }
-                        @for (line, st) in &d.goals { li { (line) " — " strong { (st) } } }
+                @if !d.goals.is_empty() {
+                    section.card.pad {
+                        h2 { (icon("star")) "Goals" }
+                        ul.plain-list {
+                            @for o in &d.objectives_at_risk { li { span.tag.tone-bad { (icon("alert")) "objective at risk" } " " (o) } }
+                            @for (line, st) in &d.goals { li { (line) " — " strong { (st) } } }
+                        }
                     }
                 }
             }
@@ -335,7 +408,23 @@ pub struct UserRow<'a> {
     pub expires: Option<String>,
 }
 
-/// The team: invite, find, edit, disable and remove users (#216).
+/// The tag tone of a team role.
+fn role_tone(role: &str) -> &'static str {
+    if role == "admin" { "accent" } else { "info" }
+}
+
+/// The tag tone of a team member's status.
+fn member_tone(status: &str) -> &'static str {
+    match status {
+        "active" => "good",
+        "disabled" => "bad",
+        "expired" => "warn",
+        _ => "info",
+    }
+}
+
+/// The team (#216, #551): the invite form card, then the people as a
+/// table with role and status tags, its search in the table's head.
 pub fn users(
     rows: &[UserRow<'_>],
     projects: &[String],
@@ -359,44 +448,62 @@ pub fn users(
                     pre.snippet { code { (link) } }
                 }
             }
-            section.card.wide {
-                h2.violet { (icon("users")) "Invite someone" }
-                form.invite method="post" action="/users" {
-                    label { "Email " input type="email" name="email" required; }
-                    label { "Name " input type="text" name="name" maxlength="80"; }
-                    label { "Role " select name="role" { option value="viewer" { "viewer" } option value="admin" { "admin" } } }
-                    label { "Projects " input type="text" name="projects" placeholder="all" list="project-ids"; }
-                    datalist #project-ids { @for p in projects { option value=(p) {} } }
-                    button type="submit" { "Create the login link" }
+            form.card.wide.form-card method="post" action="/users" aria-labelledby="invite-h" {
+                div.section-head { h2 #invite-h { (icon("users")) "Invite someone" } }
+                div.form-grid {
+                    label.field { "Email" input type="email" name="email" required; }
+                    label.field { "Name" input type="text" name="name" maxlength="80"; }
+                    fieldset.field {
+                        legend { "Role" }
+                        div.seg {
+                            label { input type="radio" name="role" value="viewer" checked; "viewer" }
+                            label { input type="radio" name="role" value="admin"; "admin" }
+                        }
+                    }
+                    label.field { "Projects"
+                        input type="text" name="projects" placeholder="all" list="project-ids";
+                        small { "Comma-separated ids (" (projects.join(", ")) "), or empty for all." }
+                    }
                 }
-                p.muted.small { "Projects: comma-separated ids (" (projects.join(", ")) "), or empty for all." }
+                datalist #project-ids { @for p in projects { option value=(p) {} } }
+                (crate::project_settings::form_foot("Create the login link", html! { "The one-time link shows up at the top of this page, for you to send." }))
             }
-            section.card.wide {
-                form.inline method="get" action="/users" role="search" {
-                    label { "Find " input type="text" name="q" value=(q) placeholder="name or email"; }
-                    button.ghost type="submit" { "Search" }
-                }
-                @if rows.is_empty() { p.muted { @if q.is_empty() { "Nobody invited yet." } @else { "Nobody matches." } } }
-                @else {
-                    div.table-scroll { table.plain {
-                        thead { tr { th { "User" } th { "Role" } th { "Projects" } th { "Status" } th { "Last sign-in" } th { span.sr-only { "Actions" } } } }
-                        tbody { @for r in rows {
-                            @let u = r.user;
-                            tr {
-                                td { @if let Some(n) = &u.name { strong { (n) } br; } span.small { (u.email) } }
-                                td { span.chip { (u.role) } }
-                                td.small { @match &u.projects { Some(p) => (p.join(", ")), None => span.muted { "all" } } }
-                                td.small {
-                                    span class={ "status " (match r.status { "active" => "good", "disabled" => "bad", _ => "muted" }) } { (r.status) }
-                                    @if let Some(e) = &r.expires { br; span.muted { "until " (e) } }
-                                }
-                                td.small.muted { (u.last_sign_in.as_deref().and_then(|t| t.get(..16)).map(|t| t.replace('T', " ")).unwrap_or_else(|| "never".into())) }
-                                td { a.button href={ "/users/" (u.id) } { "Edit" } }
+            (crate::tables::TableCard {
+                label: "People",
+                head: html! {
+                    h2 { (icon("users")) "People" }
+                    form.inline method="get" action="/users" role="search" {
+                        label { "Find " input type="text" name="q" value=(q) placeholder="name or email"; }
+                        button.ghost type="submit" { "Search" }
+                    }
+                },
+                cols: &[
+                    crate::tables::Col::Shown("User"), crate::tables::Col::Shown("Role"),
+                    crate::tables::Col::Shown("Projects"), crate::tables::Col::Shown("Status"),
+                    crate::tables::Col::Shown("Last sign-in"), crate::tables::Col::Hidden("Actions"),
+                ],
+                body: html! {
+                    @if rows.is_empty() {
+                        tr { td.muted colspan="6" { @if q.is_empty() { "Nobody invited yet." } @else { "Nobody matches." } } }
+                    }
+                    @for r in rows {
+                        @let u = r.user;
+                        tr {
+                            td { @if let Some(n) = &u.name { strong { (n) } br; } span.small { (u.email) } }
+                            td { span class={ "tag tone-" (role_tone(&u.role)) } { (u.role) } }
+                            td.small { @match &u.projects { Some(p) => (p.join(", ")), None => span.muted { "all" } } }
+                            td.small {
+                                span class={ "tag tone-" (member_tone(r.status)) } { (r.status) }
+                                @if let Some(e) = &r.expires { br; span.muted { "until " (e) } }
                             }
-                        } }
-                    } }
-                }
+                            td.small.muted { (u.last_sign_in.as_deref().and_then(|t| t.get(..16)).map(|t| t.replace('T', " ")).unwrap_or_else(|| "never".into())) }
+                            td { a.button href={ "/users/" (u.id) } { "Edit" } }
+                        }
+                    }
+                },
+                foot: html! {},
             }
+            .render())
         },
     )
 }
@@ -456,10 +563,15 @@ pub fn user_edit(u: &openlens_meta::User, status: &str, projects: &[String]) -> 
     )
 }
 
-/// Instance settings → About (#438): the version, whether a newer one is
-/// out, and where the docs are.
+/// Instance settings → About (#438, #551): the version, whether a newer
+/// one is out (a tag says it besides the line), and where the docs are.
 pub fn about() -> Markup {
     let update = crate::update_available();
+    let (tone, word) = match &update {
+        Some(u) if u.security => ("bad", "Security update"),
+        Some(_) => ("warn", "Update available"),
+        None => ("good", "Up to date"),
+    };
     layout(
         "About",
         None,
@@ -468,8 +580,11 @@ pub fn about() -> Markup {
                 h1 { "Instance settings" }
                 p.muted { "What runs here, for the whole install." }
             } }
-            section.card.wide {
-                h2.violet { (icon("idea")) "About" }
+            section.card.wide.about aria-labelledby="about-h" {
+                div.section-head {
+                    h2 #about-h { (icon("idea")) "About" }
+                    span class={ "tag tone-" (tone) } { (icon(if tone == "good" { "task" } else { "alert" })) (word) }
+                }
                 dl.facts {
                     dt { "Version" } dd { "OpenLens " (env!("CARGO_PKG_VERSION")) }
                     dt { "Updates" } dd {
@@ -479,10 +594,10 @@ pub fn about() -> Markup {
                         }
                     }
                 }
-                p.small {
-                    a href="/agents.md" { "Wiring guide for agents" } " · "
-                    a href="https://github.com/Philippe-arnd/OpenLens/tree/main/docs" { "Documentation" } " · "
-                    a href="https://github.com/Philippe-arnd/OpenLens/blob/main/SECURITY.md" { "Security policy" }
+                div.actions {
+                    a.btn href="/agents.md" { "Wiring guide for agents" }
+                    a.btn href="https://github.com/Philippe-arnd/OpenLens/tree/main/docs" { "Documentation" }
+                    a.btn href="https://github.com/Philippe-arnd/OpenLens/blob/main/SECURITY.md" { "Security policy" }
                 }
             }
         },
@@ -507,23 +622,36 @@ pub fn surveys(
                 a.button href={ "/p/" (p.id) "/surveys-edit" } { (icon("plus")) "New survey" }
             }
             @if list.is_empty() {
-                section.card { p.muted { "No survey yet. Ask your agent, for example: “after entry_saved, ask 10% of users how useful writing felt, 1 to 5”." } }
+                section.card.empty aria-labelledby="no-surveys" {
+                    (crate::tables::empty_art())
+                    div {
+                        h2 #no-surveys { "No survey yet" }
+                        p { "Ask your agent, in plain words, for example:" }
+                        pre.snippet { code { "After entry_saved, ask 10% of users how useful writing felt, 1 to 5." } }
+                        p { "It sets the survey up with " code { "survey_set" } ". Answers then arrive here, and in Events as " code { "$survey" } "." }
+                        div.actions { a.btn.primary href={ "/p/" (p.id) "/surveys-edit" } { (icon("plus")) "New survey" } }
+                    }
+                }
             }
             @for s in list {
                 @let r = results.iter().find(|r| r.key == s.key);
                 @let answered: i64 = r.map_or(0, |r| r.answers.iter().map(|a| a.1).sum());
                 @let max = r.map_or(1, |r| r.answers.iter().map(|a| a.1).max().unwrap_or(1)).max(1) as f64;
-                section.card.wide {
-                    h2.violet { (icon("idea")) (s.question) }
-                    p.small.muted {
-                        span.chip { (s.kind) } " after " code { (s.trigger) } " · " (s.sample) "% of "
-                        @if s.roles.is_empty() { "everyone" } @else { (s.roles.join(", ")) }
-                        " · " (compact(answered)) " answers"
-                        @if let Some(r) = r { " · " (compact(r.dismissed)) " dismissed" }
-                        " · " a href={ "/p/" (p.id) "/surveys-edit?key=" (s.key) } { "Edit" }
+                section.card.wide.survey {
+                    div.section-head {
+                        h2 { (icon("idea")) (s.question) }
+                        a href={ "/p/" (p.id) "/surveys-edit?key=" (s.key) } { "Edit" }
+                    }
+                    p.meta {
+                        @if s.enabled { span.tag.tone-good { (icon("task")) "on" } } @else { span.tag { (icon("ban")) "off" } }
+                        span.tag.tone-info { (s.kind) }
+                        span { "after " code { (s.trigger) } " · " (s.sample) "% of "
+                            @if s.roles.is_empty() { "everyone" } @else { (s.roles.join(", ")) }
+                            " · " (compact(answered)) " answers"
+                            @if let Some(r) = r { " · " (compact(r.dismissed)) " dismissed" } }
                     }
                     form.inline method="post" action={ "/p/" (p.id) "/surveys/" (s.key) } {
-                        label { input type="checkbox" name="enabled" checked[s.enabled]; " on" }
+                        label { input type="checkbox" role="switch" name="enabled" checked[s.enabled]; " on" }
                         label { "sample " input type="number" name="sample" min="0" max="100" value=(s.sample); "%" }
                         button.soft type="submit" { "Save" }
                     }
