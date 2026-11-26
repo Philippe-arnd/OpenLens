@@ -300,6 +300,18 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
     ),
     (
         "GET",
+        "/api/projects/{project}/uptime/days",
+        "read",
+        "Uptime history, one row per UTC day (`uptime.days`): `from` and `to` (YYYY-MM-DD, at most 400 days; default the last 90), `env` (default production). Per day: state (up, partial, down, none), availability, seconds up and measured, checks, failed checks, down incidents, p50/p95/max response time.",
+    ),
+    (
+        "GET",
+        "/api/projects/{project}/incidents",
+        "read",
+        "Every incident, newest first, page by page (`uptime.incidents`): `limit` (1 to 100, default 50) and `before` (the previous page's `next`).",
+    ),
+    (
+        "GET",
         "/api/projects/{project}/alerts",
         "read",
         "Alert settings (a webhook URL or ntfy topic that is set reads `(set)`).",

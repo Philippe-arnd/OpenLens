@@ -297,10 +297,38 @@ pub struct UptimeView<'a> {
     pub avail: (Option<f64>, Option<f64>),
     /// p50 and p95 response time over 24 h, ms.
     pub ms: (Option<i64>, Option<i64>),
-    /// (rule, start, end, length in minutes, cause), newest first.
+    /// (rule, start, end, length in minutes, cause), newest first: one
+    /// page of every incident (#559).
     pub incidents: Vec<(String, String, Option<String>, i64, String)>,
+    /// The `before` of the next page of incidents, when there may be one.
+    pub older: Option<i64>,
+    /// Whether this page of incidents is not the first.
+    pub paged: bool,
     /// The last checks, newest first: (time, ok, status, ms, error).
     pub last: Vec<CheckRow>,
+    /// The last 90 UTC days, oldest first (#559).
+    pub days: Vec<openlens_engine::commands::uptime::Day>,
+    /// Availability over those days (share of good checks).
+    pub days_avail: Option<f64>,
+}
+
+/// A day bar's tooltip: the day, its availability and incidents.
+fn day_title(d: &openlens_engine::commands::uptime::Day) -> String {
+    match (&d.stats, d.availability) {
+        (Some(s), Some(a)) => {
+            let mut t = format!("{} (UTC): {:.2}% available", d.day, a * 100.0);
+            if s.incidents > 0 {
+                let n = s.incidents;
+                let mins = s.down_seconds / 60;
+                t.push_str(&format!(
+                    ", {n} incident{}, {mins} min down",
+                    if n == 1 { "" } else { "s" }
+                ));
+            }
+            t
+        }
+        _ => format!("{} (UTC): not checked", d.day),
+    }
 }
 
 /// The Uptime page.
@@ -330,9 +358,21 @@ pub fn uptime(p: &ProjectInfo<'_>, v: &UptimeView<'_>) -> Markup {
                 }
                 p.muted.small { "Checking " span.mono { (v.url.as_deref().unwrap_or("")) } " every minute. Down after two failed checks in a row (no answer, or HTTP 5xx)." }
             }
+            @if !v.days.is_empty() {
+                section.card.wide {
+                    h2 { (icon("pulse")) "Last 90 days" }
+                    div.uptime-days role="img" aria-label=(format!("Daily availability over {} days; {}", v.days.len(), v.days_avail.map_or_else(|| "not checked yet".to_owned(), |a| format!("{:.2}% available", a * 100.0)))) {
+                        @for d in &v.days { span class={ "uptime-day " (d.state) } title=(day_title(d)) {} }
+                    }
+                    p.muted.small {
+                        @if let Some(a) = v.days_avail { strong { (format!("{:.2}%", a * 100.0)) } " available over the days checked. " }
+                        "Green: no down time. Amber: down less than an hour. Red: down an hour or more. Grey: not checked. Days are UTC; hover a day for its numbers."
+                    }
+                }
+            }
             section.card.wide {
-                h2.coral { (icon("alert")) "Incidents and alerts, last 30 days" }
-                @if v.incidents.is_empty() { p.muted { "None." } }
+                h2.coral { (icon("alert")) "Incidents and alerts" }
+                @if v.incidents.is_empty() { p.muted { @if v.paged { "No older incident." } @else { "None." } } }
                 @else {
                     div.table-scroll { table.plain {
                         thead { tr { th { "What" } th { "Started" } th { "Ended" } (th_num("Length")) th { "Cause" } } }
@@ -352,6 +392,13 @@ pub fn uptime(p: &ProjectInfo<'_>, v: &UptimeView<'_>) -> Markup {
                             }
                         } }
                     } }
+                }
+                @if v.older.is_some() || v.paged {
+                    p.small {
+                        @if v.paged { a href={ "/p/" (p.id) "/uptime" } { "Newest incidents" } }
+                        @if v.paged && v.older.is_some() { " · " }
+                        @if let Some(b) = v.older { a href={ "/p/" (p.id) "/uptime?before=" (b) } { "Older incidents" } }
+                    }
                 }
             }
             @if !v.last.is_empty() {

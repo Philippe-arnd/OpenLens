@@ -1,6 +1,6 @@
 //! MCP tools over engine commands that only a page ran before (#525,
 //! follow-up of #308, D-058): goals' removal and objectives, alerts and
-//! uptime, the GitHub repository of tickets, switching a flag, churn and
+//! uptime (and its history, #559), the GitHub repository of tickets, switching a flag, churn and
 //! the win-back flag, and the explore reports. Like every tool, each one
 //! calls the REST API (D-020). Kept apart from `mcp.rs` so that file stays
 //! small; [`specs`] are listed after its tools and [`call`] answers the
@@ -130,6 +130,23 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
             name: "alerts",
             description: "Uptime and alerting: the status, availability over a day and a week, response times over a day (median, p95), incidents of 30 days, the last 15 checks, and the alert settings (what raises an alert, quiet hours, the probe's path, channels; a webhook or ntfy topic that is set reads '(set)').",
             input_schema: json!({"type":"object","properties":proj()}),
+        },
+        ToolSpec {
+            name: "uptime_days",
+            description: "Uptime history, one row per UTC day: from and to (YYYY-MM-DD, at most 400 days; default the last 90), env (default production). Per day: state (up, partial: down under an hour, down: an hour or more, none: not checked), availability (share of good checks), up_seconds, and stats (checks, failed, down_seconds, measured_seconds, incidents, p50/p95/max ms); plus the range's availability, seconds up and measured. Read it for an SLO or a monthly report.",
+            input_schema: json!({"type":"object","properties":with(json!({
+                "from":{"type":"string"},
+                "to":{"type":"string"},
+                "env":{"type":"string"}
+            }))}),
+        },
+        ToolSpec {
+            name: "incidents",
+            description: "Every incident of the project (kept as long as the project), newest first, page by page: limit (1-100, default 50) and before (the previous page's next). Each has its id, rule (down, traffic, failing, cert, insight:…, error:…, env:<env>:down…), start, end (null while open), minutes and cause.",
+            input_schema: json!({"type":"object","properties":with(json!({
+                "before":{"type":"integer"},
+                "limit":{"type":"integer","minimum":1,"maximum":100}
+            }))}),
         },
         ToolSpec {
             name: "alert_set",
@@ -284,6 +301,16 @@ pub(crate) fn call(c: &Client, name: &str, args: &Value) -> Option<Result<Value,
         }),
         "status" => get(c, &at(args, "/status")),
         "alerts" => alerts(c, args),
+        "uptime_days" => get(c, &query(args, "/uptime/days", &["from", "to", "env"])),
+        "incidents" => {
+            let mut q: Vec<String> = Vec::new();
+            for k in ["before", "limit"] {
+                if let Some(n) = args.get(k).and_then(Value::as_i64) {
+                    q.push(format!("{k}={n}"));
+                }
+            }
+            get(c, &at(args, &format!("/incidents?{}", q.join("&"))))
+        }
         "alert_set" => alert_set(c, args),
         "ticket_target" => required(args, "repo").and_then(|repo| {
             let body = json!({ "repo": repo });

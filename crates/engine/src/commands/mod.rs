@@ -27,6 +27,7 @@ pub mod flags;
 pub mod goals;
 pub mod releases;
 pub mod tickets;
+pub mod uptime;
 
 /// Who may run a command, in the terms of the server's access policy
 /// (`crates/server/src/access.rs`, #294).
@@ -127,6 +128,9 @@ pub const REGISTRY: &[Spec] = &[
     spec::<board::GetEstimate>(),
     // Delivery metrics (#523).
     spec::<delivery::GetDelivery>(),
+    // Uptime history (#559).
+    spec::<uptime::GetDays>(),
+    spec::<uptime::GetIncidents>(),
 ];
 
 /// A 12-character id from `s` (the first bytes of its SHA-256, in hex).

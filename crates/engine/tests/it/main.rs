@@ -19,6 +19,7 @@ mod map_shape;
 mod releases;
 mod stored_totals;
 mod typed_facts;
+mod uptime_days;
 mod vitals;
 
 struct E<'a> {
