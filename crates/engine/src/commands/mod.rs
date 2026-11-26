@@ -19,6 +19,7 @@ use crate::{Board, Filters};
 
 pub mod alerts;
 pub mod goals;
+pub mod releases;
 
 /// Who may run a command, in the terms of the server's access policy
 /// (`crates/server/src/access.rs`, #294).
@@ -83,6 +84,7 @@ pub const REGISTRY: &[Spec] = &[
     spec::<alerts::GetSettings>(),
     spec::<alerts::SetSettings>(),
     spec::<alerts::Test>(),
+    spec::<releases::List>(),
 ];
 
 /// A 12-character id from `s` (the first bytes of its SHA-256, in hex).

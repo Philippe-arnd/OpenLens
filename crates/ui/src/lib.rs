@@ -20,6 +20,7 @@ mod glossary;
 mod goals;
 mod icons;
 mod manage;
+mod releases;
 mod settings;
 mod team;
 mod totp;
@@ -35,6 +36,7 @@ pub use goals::*;
 pub use icons::icon;
 pub use manage::*;
 use openlens_engine::{Board, EventRow, Filters};
+pub use releases::*;
 pub use settings::*;
 pub use team::*;
 pub use totp::{TotpCard, login_code, totp_recovery_codes};
@@ -121,6 +123,7 @@ const NAV: &[NavGroup] = &[
             ("/live", "Live", &["Live"]),
             ("/uptime", "Uptime", &["Uptime"]),
             ("/timeline", "Timeline", &["Timeline"]),
+            ("/releases", "Releases", &["Releases"]),
         ],
     },
     NavGroup {
