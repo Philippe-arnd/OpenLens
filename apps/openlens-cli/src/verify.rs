@@ -3,7 +3,7 @@
 use super::*;
 
 /// The wiring checklist an agent must get to all-green before handing over.
-pub(super) fn verify(c: &Client, project: &str) -> Result<bool, String> {
+pub(super) fn verify<A: Api + ?Sized>(c: &A, project: &str) -> Result<bool, String> {
     let report = verify_report(c, project)?;
     let ok = report["ok"] == true;
     out(&report);
@@ -11,7 +11,7 @@ pub(super) fn verify(c: &Client, project: &str) -> Result<bool, String> {
 }
 
 /// The verify checklist as JSON (shared with the MCP tool).
-pub(crate) fn verify_report(c: &Client, project: &str) -> Result<Value, String> {
+pub(crate) fn verify_report<A: Api + ?Sized>(c: &A, project: &str) -> Result<Value, String> {
     let n = |rows: Vec<Value>| rows.first().and_then(|r| r["n"].as_i64()).unwrap_or(0);
     let recent = "timestamp >= now() - INTERVAL '1 day'";
     let events = n(c.sql(
@@ -93,21 +93,17 @@ pub(crate) fn verify_report(c: &Client, project: &str) -> Result<Value, String> 
         .as_array()
         .is_some_and(|a| a.iter().take(3).all(|c| c["ok"] == true))
         && map_status == 200;
+    // The release layers (#524): reported, not required for `ok`.
+    let layers = crate::agent_kit::release_layers(c, project)?;
     Ok(json!({ "ok": ok, "checks": checks, "features": features,
+        "release_layers": layers,
         "robots_last_day": bots,
         "note": "features with 0 events have not been exercised yet; click through them once to confirm they fire" }))
 }
 
-/// The rule an app's own agents follow to keep the feature map current.
-pub(super) const RULES_SNIPPET: &str = "## Product analytics (OpenLens)
-
-- The app's features, success events and roles are declared in `openlens.features.yaml`.
-- When you add, rename or remove a user-facing feature, update that file in the same change:
-  its `entry` (routes, `data-feature` attribute) and its `success` event, and add
-  `data-feature=\"<key>\"` to the feature's main control.
-- When you add or rename a user role, map its raw value under `roles:`.
-- Run `openlens-cli features lint --src .` before committing, then `openlens-cli features push` on deploy.
-- Never send names, emails or content to OpenLens: ids, roles, plans and event names only.";
+/// The block an app's own agents add to their `AGENTS.md`: keep the
+/// feature map current, and keep releases measured (#524).
+pub(super) const RULES_SNIPPET: &str = include_str!("rules.md");
 
 /// Every date from `from` to `to`, inclusive, as YYYY-MM-DD (at most 366).
 pub(super) fn days_between(

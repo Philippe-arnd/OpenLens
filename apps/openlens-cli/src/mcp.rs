@@ -126,7 +126,7 @@ impl Tools for OpenLensTools {
             }
             p
         };
-        vec![
+        let mut tools = vec![
             ToolSpec {
                 name: "guide",
                 description: "The wiring guide: how to connect an app to OpenLens so the PM's first login shows a populated board. Read this first.",
@@ -236,7 +236,7 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "verify",
-                description: "Wiring checklist: events arrive, users identified with a role, release tagged, map pushed, events per feature. Each failing check carries its fix.",
+                description: "Wiring checklist: events arrive, users identified with a role, release tagged, map pushed, events per feature. Each failing check carries its fix. Also `release_layers`: which release layers are active (build fingerprint seen, deploy hook configured, releases recorded, verdicts present), each with how to turn it on.",
                 input_schema: json!({"type":"object","properties":proj}),
             },
             ToolSpec {
@@ -326,11 +326,11 @@ impl Tools for OpenLensTools {
                 description: "A one-time login link. Without email: an owner link for the PM (valid 24 hours). With email (+ role viewer|admin, optional projects): invites that person with that access (valid 7 days).",
                 input_schema: json!({"type":"object","properties":{"email":{"type":"string"},"role":{"type":"string","enum":["viewer","admin"]},"projects":{"type":"array","items":{"type":"string"}}}}),
             },
-        ]
-        .into_iter()
+        ];
         // Tools over the commands only a page ran before (#525).
-        .chain(crate::mcp_commands::specs())
-        .collect()
+        tools.extend(crate::mcp_commands::specs());
+        tools.extend(crate::agent_kit::specs(&proj));
+        tools
     }
 
     fn call(&self, name: &str, args: &Value) -> Result<Value, String> {
@@ -608,6 +608,9 @@ impl Tools for OpenLensTools {
                 Ok(v)
             }
             "verify" => crate::verify_report(c, &project(args)),
+            "suggested_features" | "set_feature" | "stale_flags" => {
+                crate::agent_kit::tool(c, name, args)
+            }
             "insights" | "kpi_report" | "board" => {
                 let mut q = Vec::new();
                 let keys: &[&str] = if name == "board" {

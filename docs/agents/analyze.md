@@ -14,7 +14,10 @@ Start from the summaries and drill down only where something stands out. Every t
 | What did this user do (before churning, before an error)? | `user_timeline { distinct_id }`: role history, recordings, latest events | the replay link it returns |
 | What breaks, for whom? | `errors`: groups with users, roles, releases, places and the original source line | `user_timeline` of an affected user |
 | Are pages slow, and what do we fix first? | `vitals`: each Web Vital explained, p75, rating, thresholds, worst pages and ranked actions | `sql` on `$vital` events |
-| Is the wiring complete? | `verify` | `feature_map_lint` |
+| Is the wiring complete? | `verify` (`release_layers`: build fingerprint, deploy hook, releases recorded, verdicts) | `feature_map_lint` |
+| Did the last deploy break something? | `release_report` after each deploy: act on a `regressed` verdict | `releases`, `errors` with `release` |
+| What does production use that the map misses? | `suggested_features`: proposed entries with evidence | `set_feature { feature }`, then commit the YAML it returns |
+| Which flags can go? | `stale_flags`: `ready_to_remove` (off for 14 days, or on for everyone on 95% of page views) | `flags` |
 | Turn a finding into a ticket | `create_ticket { kind, subject, to: markdown \| github }`: prefilled problem, evidence, hypothesis, success metric | `tickets` (learning log: what moved its metric) |
 | Where do our goals stand? | `goals`: status, guardrails, what moved each goal (releases and changes), objectives | `set_goal { kpi, target, deadline \| releases, guardrails }` |
 | Is the feature map any good? | `map_health`: score, findings with evidence and a YAML fix | `suggest_map_changes` (patches only) |

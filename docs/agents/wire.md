@@ -7,6 +7,7 @@ You are the agent that maintains a web app. Your goal is that the product manage
 **Available today:** `openlens-cli` (`init`, `features lint|push`, `import`, `verify`, `sourcemaps`, `release`, `flags`, `login-link`, `sql`, `guide`, `mcp`), the HTTP API below, the SDK and the dashboard. Everything below is available. Two small reference apps wired this way live in `examples/` (`notes-ssr`: script tag; `tasks-spa`: npm package). Journal, a real app wired outside this repo, is the third check of the M2 exit.
 
 **MCP:** `openlens-cli mcp --automation-read-root <app repo> --automation-write-root <scratch dir>` speaks MCP over stdio. Its tools are `guide`, `projects`, `init`, `feature_map_lint`, `feature_map_push`, `map_health`, `map_overview`, `feature_context`, `suggest_map_changes`, `verify`, `insights`, `kpi_report`, `board`, `errors`, `sql`, `flags`, `flag_set`, `login_link` and `record_release`, and it reads files only inside the read root.
+**MCP:** `openlens-cli mcp --automation-read-root <app repo> --automation-write-root <scratch dir>` speaks MCP over stdio. Its tools include `guide`, `projects`, `init`, `feature_map_lint`, `feature_map_push`, `map_health`, `map_overview`, `feature_context`, `suggest_map_changes`, `suggested_features`, `set_feature`, `verify`, `insights`, `kpi_report`, `board`, `errors`, `sql`, `flags`, `flag_set`, `stale_flags`, `releases`, `deploy_hook` and `login_link` (the `tools/list` call gives them all), and it reads files only inside the read root.
 
 `openlens-cli` reads `OPENLENS_SERVER` and `OPENLENS_TOKEN` (or `--server`/`--token`), prints JSON, and exits non-zero when something needs fixing. Prefer a scoped token to the admin token: an admin makes one with `openlens-cli tokens create --scope write --project <id> --label <agent>` (`read` is enough for `openlens-cli mcp`); it is printed once, and `tokens revoke <id>` ends it. It is in the server image (`docker exec <container> openlens-cli …`), or `cargo install --git <repo> openlens-cli`.
 
@@ -22,7 +23,7 @@ API quick reference (send `Authorization: Bearer <admin token>` on every call). 
 
 Errors are JSON: `{"code": "...", "message": "..."}`. Act on `code`, which is one of `invalid_request`, `unauthorized`, `forbidden`, `not_found`, `conflict`, `too_large`, `rate_limited`, `busy` (another long query is running: retry after `Retry-After`), `unavailable` and `internal`. Messages may change between releases. The old `error` field repeats the message for one more release.
 
-1. **Project.** `openlens-cli init --name <app> --timezone <IANA zone>` (or `POST /api/projects`) creates the project and returns its capture key and snippet. Days and weeks of every KPI start in that zone: use the team's, from the app's config (a `TZ` or locale setting) or the commit history, `UTC` if unknown. `openlens-cli timezone <project> <zone>` changes it later. Put the key and the server URL in the app's existing config mechanism (env file, settings module). Never hard-code the key anywhere else.
+1. **Project.** `openlens-cli init --name <app> --timezone <IANA zone>` (or `POST /api/projects`) creates the project and returns its capture key and snippet. `openlens-cli init` also makes the project's deploy hook URL and lists, under `keep_it_running`, the steps of [Keep it running](#keep-it-running) below: the hook URL is shown only there, so store it as a secret at once. Days and weeks of every KPI start in that zone: use the team's, from the app's config (a `TZ` or locale setting) or the commit history, `UTC` if unknown. `openlens-cli timezone <project> <zone>` changes it later. Put the key and the server URL in the app's existing config mechanism (env file, settings module). Never hard-code the key anywhere else.
 2. **SDK.** Pick one:
    - Server-rendered app: add `<script src="<url>/c.js" data-key="<key>" defer></script>` to the main layout.
    - SPA: `npm install @openlens/web`, then call `openlens.init({ host, key })` at startup.
@@ -60,11 +61,35 @@ Errors are JSON: `{"code": "...", "message": "..."}`. Act on `code`, which is on
 
    The action records `${{ github.sha }}` as the commit. Without CI, the MCP tool `record_release` (or `POST /api/projects/<id>/releases` with `{"release", "commit", "from", "environment"}`) records the same, without the source maps.
 6. **Verify.** Load a page of the app and click through the main features, then run `openlens-cli verify --project <id>`. It must say `"ok": true`: events arrive, users are identified with a role, a release is tagged, and the map is pushed. It also lists each feature's events, so a feature at 0 has not fired yet.
-7. **Keep it current.** Add the rule printed by `openlens-cli rules` to the app's own `AGENTS.md` (or `CLAUDE.md`). In short:
-   > When you add, rename or remove a user-facing feature, update `openlens.features.yaml` (entry points, success event) in the same change and run `openlens-cli features lint`.
+7. **Keep it current.** Add the block printed by `openlens-cli rules` to the app's own `AGENTS.md` (or `CLAUDE.md`). In short:
+   > When you add, rename or remove a user-facing feature, update `openlens.features.yaml` (entry points, success event) in the same change and run `openlens-cli features lint`. Run `openlens-cli release` in the deploy step, read `release_report` after each deploy and act on a `regressed` verdict, and remove the flags `stale_flags` reports ready to remove.
+
+   Then follow [Keep it running](#keep-it-running).
 8. **Flags (when shipping a change).** Put risky or experimental changes behind `openlens.isEnabled("<key>")`. Create the flag with `openlens-cli flags set <key> --rollout 10 [--roles admin]`, and widen it once the board shows its cohort is fine. Every event carries the user's active flags in `$flags`. To target by plan, country or any other property, add rules (all must match): `--rule 'plan in pro,team' --rule 'country not in FR'`. The browser SDK sends `plan` and `identify(id, { properties: { seats: 12 } })` to `/flags`; server SDKs take the same `plan` and `properties`; `country` comes from the address when the app does not send it. A user who did not send a property a rule tests does not get the flag.
 8b. **Ask (optional).** To learn *why*, add a micro-survey right after a success event: `survey_set { key, question, kind: rating|yes_no|choice|text, trigger: "<success event>", sample: 10 }`. Keep it to one short question about the moment that just happened. Results are on the Surveys page and in `surveys`.
 9. **Hand over.** `openlens-cli login-link` returns a one-time link. Send it to the PM, together with a short note on what was wired and anything you could not do. To invite other people with limited access, use `openlens-cli login-link --email <email> --role viewer|admin [--projects <id,id>]`. Viewers can look but not change anything; admins also manage flags and the team (`/users`).
+
+## Keep it running
+
+Once the app is wired, every release should be measured without anyone asking. `openlens-cli init` prints these steps under `keep_it_running`:
+
+- **Deploy hook.** `init` makes the URL (the MCP tool `deploy_hook` makes a new one later, and the old one then stops working). Store it as a secret of the platform or the CI and paste it where the platform sends deploy notifications (step 5c).
+- **Release step.** Add `openlens-cli release` (or the `openlens-release` GitHub Action) to the deploy step, after the build, with the release name the SDK sends.
+- **Rules.** Add the block printed by `openlens-cli rules` to the app's `AGENTS.md`. It tells the app's agents to keep the feature map and its code paths (routes, `data-feature` controls, success events) current, to keep the release step, to read `release_report` through MCP after each deploy and act on a `regressed` verdict, and to remove the flags `stale_flags` reports in `ready_to_remove`.
+- **Check.** `openlens-cli verify --project <id>` (MCP `verify`) lists the release layers under `release_layers`, each `active` or not, with its `detail` and a `fix`:
+
+| Layer | Active when |
+| --- | --- |
+| build fingerprint seen | an event of the last 7 days carries the browser SDK's `$build` fingerprint |
+| deploy hook configured | the project has a deploy hook URL |
+| releases recorded | a deploy was recorded in the last 90 days (by the hook or the release step) |
+| verdicts present | a release of the last 90 days has a verdict (`detail` says when the server does not judge releases yet) |
+
+The release layers never make `verify` fail: `ok` stays about the wiring.
+
+**Feature map from production.** `suggested_features` turns what production uses and no feature claims (map health's `coverage`, `drift` and `undeclared` findings, 30 days, production only) into proposed entries. Check each against the code, add its success event, then `set_feature { feature }` adds or replaces that entry (by key) and pushes the map as a new version. It returns the whole map as YAML: write it to `openlens.features.yaml` and commit it, since the file stays the source of truth and pushing an older file would undo the change. The stored map's comments are not kept.
+
+**Flags ready to remove.** `stale_flags` reads the flags and the production page views of the last 90 days. A flag is ready to remove when it is **off** and was seen before but on no page view of the last 14 days (delete it and the code behind `isEnabled`), or **on for everyone** (rollout 100, no roles, accounts, rules, users, variants or holdout) and carried by 95% or more of at least 100 production page views of the last 14 days (delete it and keep the code path users get now; the first visit of a user is sent before the SDK knows its flags, hence 95%). Off flags never seen in 90 days are listed under `never_seen`, and flags still rolling out or targeted under `in_rollout`.
 
 ## Cutting features well
 
