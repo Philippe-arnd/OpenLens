@@ -207,12 +207,12 @@ pub fn pages(
     list: &[openlens_engine::PageStats],
     f: &Filters,
 ) -> Markup {
-    layout(
+    layout_in(
         "Pages",
         Some(p),
+        context_bar(p.id, b, f, "/pages", false),
         html! {
             div.heading { div { h1 { "Pages" } p.muted { "How far people scroll, what they click, where they get frustrated. Last 30 days." } } }
-            (filter_bar(p.id, b, f, "/pages"))
             @if list.is_empty() { section.card { p.muted { "No page views yet." } } }
             div.grid {
                 @for pg in list {
@@ -257,14 +257,14 @@ pub fn errors(
             .collect::<Vec<_>>()
             .join(", ")
     };
-    layout(
+    layout_in(
         "Errors",
         Some(p),
+        context_bar(p.id, b, f, "/errors", false),
         html! {
             div.heading {
                 div { h1 { "Errors" } p.muted { "Uncaught errors grouped by cause, most users first, last 30 days." } }
             }
-            (filter_bar(p.id, b, f, "/errors"))
             @if groups.is_empty() {
                 section.card { p { (icon("task")) " No errors in the last 30 days. Nice." } }
             } @else {
