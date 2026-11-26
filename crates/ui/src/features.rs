@@ -381,3 +381,6 @@ pub fn feature_map(v: &MapView<'_>) -> Markup {
         },
     )
 }
+
+#[cfg(test)]
+mod tests;
