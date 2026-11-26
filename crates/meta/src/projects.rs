@@ -160,6 +160,7 @@ impl Meta {
                 "replay_comments",
                 "uptime_checks",
                 "incidents",
+                "uptime_days",
                 "forgotten",
                 "share_links",
                 "notes",
@@ -167,6 +168,10 @@ impl Meta {
                 "release_maps",
                 "deploy_hooks",
                 "deploys",
+                "maintenance_windows",
+                "announcements",
+                "announcement_updates",
+                "status_pages",
             ] {
                 tx.execute(&format!("DELETE FROM {table} WHERE project = ?1"), [id])?;
             }
