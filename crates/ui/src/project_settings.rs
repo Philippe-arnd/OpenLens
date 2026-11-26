@@ -87,6 +87,8 @@ pub struct SettingsView<'a> {
     pub allow: Option<openlens_engine::environments::AllowReport>,
     /// The preview of a new allow-list, or why it was refused (#485).
     pub allow_preview: Option<Result<openlens_engine::environments::AllowPreview, String>>,
+    /// The public status page's card (#561), on the *Sharing* tab.
+    pub status_page: Option<Markup>,
 }
 
 /// A project's alert settings as the page shows them (#256).
@@ -104,6 +106,10 @@ pub struct AlertsView {
     pub cert: bool,
     /// Failing-requests spike.
     pub failing: bool,
+    /// Error budget spent (#560).
+    pub budget_spent: bool,
+    /// Error budget burning fast (#560).
+    pub budget_burn: bool,
     /// Quiet hours (start, end).
     pub quiet: Option<(u8, u8)>,
     /// Probe path.
@@ -369,6 +375,8 @@ fn alerts(p: &ProjectInfo<'_>, v: &SettingsView<'_>, base: &str) -> Markup {
                     (alert_row("regressions", a.regressions, "Regressions and new errors", "Checked every hour: more errors after a release or a flag, pages turning slow, a new error hitting several users.", html! {}))
                     (alert_row("failing", a.failing, "Failing requests spike", "Many more failed requests than usual.", html! {}))
                     (alert_row("cert", a.cert, "Certificate expiring", "14 days before it ends.", html! {}))
+                    (alert_row("budget_spent", a.budget_spent, "Error budget spent", "With an availability target (Uptime): once, when its 30-day budget is used up.", html! {}))
+                    (alert_row("budget_burn", a.budget_burn, "Error budget burning fast", "At the last day's rate, what is left of the budget is gone within 2 days.", html! {}))
                 }
                 datalist id="health-paths" { option value="/" {} option value="/healthz" {} option value="/readyz" {} option value="/health" {} }
                 fieldset {
@@ -402,6 +410,7 @@ fn alerts(p: &ProjectInfo<'_>, v: &SettingsView<'_>, base: &str) -> Markup {
 /// *Sharing* (#229): the form card, then the links as a table.
 fn sharing(v: &SettingsView<'_>, base: &str) -> Markup {
     html! {
+        @if let Some(card) = &v.status_page { (card) }
         @if !v.admin { section.card { p.muted { "Admins make and revoke share links." } } }
         @if v.admin {
             form.card.wide.form-card #share method="post" action={ (base) "/share" } aria-labelledby="share-h" {
@@ -550,6 +559,7 @@ pub(crate) mod tests {
             relabel: None,
             allow: None,
             allow_preview: None,
+            status_page: None,
         }
     }
 
@@ -607,7 +617,16 @@ pub(crate) mod tests {
         let html = project_settings(&P, &view(SettingsTab::Alerts)).into_string();
         let at = html.find(r#"action="/p/p1/settings/alerts""#).unwrap();
         let form = &html[at..at + html[at..].find("</form>").unwrap()];
-        for name in ["down", "traffic", "regressions", "failing", "cert", "email"] {
+        for name in [
+            "down",
+            "traffic",
+            "regressions",
+            "failing",
+            "cert",
+            "budget_spent",
+            "budget_burn",
+            "email",
+        ] {
             let tag = inputs(form)
                 .into_iter()
                 .find(|t| t.contains(&format!(r#"name="{name}""#)))

@@ -230,7 +230,7 @@ pub type CheckRow = (String, bool, Option<i64>, Option<i64>, Option<String>);
 /// Uptime (#256): the app's state, availability, response times and
 /// incidents.
 pub struct UptimeView<'a> {
-    /// `up`, `down`, `unknown` or `off`.
+    /// `up`, `down`, `maintenance`, `unknown` or `off`.
     pub state: &'a str,
     /// Since when (a time, in the reader's zone).
     pub since: Option<String>,
@@ -238,12 +238,48 @@ pub struct UptimeView<'a> {
     pub url: Option<String>,
     /// Availability over 24 h and 7 days (share of good checks).
     pub avail: (Option<f64>, Option<f64>),
+    /// Planned maintenance left out of each figure, in words (#563).
+    pub left_out: (Option<String>, Option<String>),
+    /// The planned maintenance card (#563).
+    pub maintenance: MaintenanceView,
     /// p50 and p95 response time over 24 h, ms.
     pub ms: (Option<i64>, Option<i64>),
-    /// (rule, start, end, length in minutes, cause), newest first.
+    /// (rule, start, end, length in minutes, cause), newest first: one
+    /// page of every incident (#559).
     pub incidents: Vec<(String, String, Option<String>, i64, String)>,
+    /// The `before` of the next page of incidents, when there may be one.
+    pub older: Option<i64>,
+    /// Whether this page of incidents is not the first.
+    pub paged: bool,
     /// The last checks, newest first: (time, ok, status, ms, error).
     pub last: Vec<CheckRow>,
+    /// The last 90 UTC days, oldest first (#559).
+    pub days: Vec<openlens_engine::commands::uptime::Day>,
+    /// Availability over those days (share of good checks).
+    pub days_avail: Option<f64>,
+    /// The announcements section (#562), from [`notices`].
+    pub notices: Option<Markup>,
+    /// The availability card (#560), from [`availability_card`].
+    pub availability: Option<Markup>,
+}
+
+/// A day bar's tooltip: the day, its availability and incidents.
+fn day_title(d: &openlens_engine::commands::uptime::Day) -> String {
+    match (&d.stats, d.availability) {
+        (Some(s), Some(a)) => {
+            let mut t = format!("{} (UTC): {:.2}% available", d.day, a * 100.0);
+            if s.incidents > 0 {
+                let n = s.incidents;
+                let mins = s.down_seconds / 60;
+                t.push_str(&format!(
+                    ", {n} incident{}, {mins} min down",
+                    if n == 1 { "" } else { "s" }
+                ));
+            }
+            t
+        }
+        _ => format!("{} (UTC): not checked", d.day),
+    }
 }
 
 /// The Uptime page.
@@ -251,6 +287,7 @@ pub fn uptime(p: &ProjectInfo<'_>, v: &UptimeView<'_>) -> Markup {
     let (cls, word) = match v.state {
         "up" => ("good", "Up"),
         "down" => ("bad", "Down"),
+        "maintenance" => ("warn", "Under maintenance"),
         "off" => ("muted", "Not checked"),
         _ => ("muted", "Waiting for the first check"),
     };
@@ -267,15 +304,30 @@ pub fn uptime(p: &ProjectInfo<'_>, v: &UptimeView<'_>) -> Markup {
             } @else {
                 // no_detail (#409): this page is the uptime detail already.
                 section.tiles aria-label="Availability" {
-                    (tile("mint", "task", "Last 24 hours", &v.avail.0.map_or_else(|| "—".into(), |a| format!("{:.2}%", a * 100.0)), "available"))
-                    (tile("sky", "clock", "Last 7 days", &v.avail.1.map_or_else(|| "—".into(), |a| format!("{:.2}%", a * 100.0)), "available"))
+                    (tile("mint", "task", "Last 24 hours", &v.avail.0.map_or_else(|| "—".into(), |a| format!("{:.2}%", a * 100.0)), &v.left_out.0.as_ref().map_or_else(|| "available".into(), |m| format!("available · {m} of planned maintenance not counted"))))
+                    (tile("sky", "clock", "Last 7 days", &v.avail.1.map_or_else(|| "—".into(), |a| format!("{:.2}%", a * 100.0)), &v.left_out.1.as_ref().map_or_else(|| "available".into(), |m| format!("available · {m} of planned maintenance not counted"))))
                     (tile("violet", "bolt", "Response time", &v.ms.0.map_or_else(|| "—".into(), |m| format!("{m} ms")), &v.ms.1.map_or_else(|| "p50, last 24 hours".into(), |m| format!("p50 · p95 {m} ms"))))
                 }
                 p.muted.small { "Checking " span.mono { (v.url.as_deref().unwrap_or("")) } " every minute. Down after two failed checks in a row (no answer, or HTTP 5xx)." }
             }
+            @if !v.days.is_empty() {
+                section.card.wide {
+                    h2 { (icon("pulse")) "Last 90 days" }
+                    div.uptime-days role="img" aria-label=(format!("Daily availability over {} days; {}", v.days.len(), v.days_avail.map_or_else(|| "not checked yet".to_owned(), |a| format!("{:.2}% available", a * 100.0)))) {
+                        @for d in &v.days { span class={ "uptime-day " (d.state) } title=(day_title(d)) {} }
+                    }
+                    p.muted.small {
+                        @if let Some(a) = v.days_avail { strong { (format!("{:.2}%", a * 100.0)) } " available over the days checked. " }
+                        "Green: no down time. Amber: down less than an hour. Red: down an hour or more. Grey: not checked. Days are UTC; hover a day for its numbers."
+                    }
+                }
+            }
+            @if let Some(a) = &v.availability { (a) }
+            (crate::maintenance::maintenance_card(p.id, &v.maintenance))
+            @if let Some(n) = &v.notices { (n) }
             section.card.wide {
-                h2.coral { (icon("alert")) "Incidents and alerts, last 30 days" }
-                @if v.incidents.is_empty() { p.muted { "None." } }
+                h2.coral { (icon("alert")) "Incidents and alerts" }
+                @if v.incidents.is_empty() { p.muted { @if v.paged { "No older incident." } @else { "None." } } }
                 @else {
                     div.table-scroll { table.plain {
                         thead { tr { th { "What" } th { "Started" } th { "Ended" } (th_num("Length")) th { "Cause" } } }
@@ -284,6 +336,7 @@ pub fn uptime(p: &ProjectInfo<'_>, v: &UptimeView<'_>) -> Markup {
                                 td { span class={ "status " (if end.is_none() { "bad" } else { "muted" }) } { (match rule.as_str() {
                                     "traffic" => "traffic stopped",
                                     "down" => "down",
+                                    r if r.starts_with("budget_") || (r.starts_with("env:") && r.contains(":budget_")) => "error budget",
                                     r if r.starts_with("error:") => "new error",
                                     r if r.starts_with("env:") => "environment check",
                                     _ => "regression",
@@ -295,6 +348,13 @@ pub fn uptime(p: &ProjectInfo<'_>, v: &UptimeView<'_>) -> Markup {
                             }
                         } }
                     } }
+                }
+                @if v.older.is_some() || v.paged {
+                    p.small {
+                        @if v.paged { a href={ "/p/" (p.id) "/uptime" } { "Newest incidents" } }
+                        @if v.paged && v.older.is_some() { " · " }
+                        @if let Some(b) = v.older { a href={ "/p/" (p.id) "/uptime?before=" (b) } { "Older incidents" } }
+                    }
                 }
             }
             @if !v.last.is_empty() {

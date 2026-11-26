@@ -62,6 +62,8 @@ pub struct Person {
 }
 
 mod access;
+/// Status announcements and their updates (#562).
+pub mod announcements;
 mod collab;
 mod config;
 mod forget;
@@ -70,14 +72,21 @@ pub use identity::{Identified, IdentityTables, PersonIdentity};
 pub use projects::Seen;
 /// Deploys reported by the deploy hook, and its secret (#504).
 pub mod deploys;
+/// Planned maintenance windows (#563, D-076).
+pub mod maintenance;
 /// Read-only connections next to the writer (#344).
 mod projects;
 /// The feature map version each release shipped with (#483).
 pub mod release_maps;
 /// Automatic release names per build fingerprint (#495).
 pub mod releases;
+/// The public status page's settings (#561, D-079).
+pub mod status_page;
 mod totp;
 mod uptime;
+/// Uptime history: daily rows, and checks kept around incidents (#559).
+pub mod uptime_history;
+pub use uptime_history::{IncidentRow, Probe, UptimeDay};
 mod users;
 pub use totp::Totp;
 
@@ -328,6 +337,8 @@ fn migrate(c: &Connection) -> rusqlite::Result<()> {
             c.execute_batch(ddl)?;
         }
     }
+    // Uptime history (#559): daily rows, environments and kept checks.
+    uptime_history::migrate(c)?;
     // Deploys: the first commit of a release's range, for a release
     // recorded by `openlens-cli release` (#521, D-066).
     let has_from: bool = c
@@ -611,7 +622,10 @@ impl Meta {
         conn.set_transaction_behavior(TransactionBehavior::Immediate);
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
         conn.execute_batch(SCHEMA)?;
+        conn.execute_batch(maintenance::SCHEMA)?;
         migrate(&conn)?;
+        conn.execute_batch(announcements::SCHEMA)?;
+        conn.execute_batch(status_page::SCHEMA)?;
         let readers = (0..READERS)
             .map(|_| {
                 let r = Connection::open_with_flags(
@@ -647,7 +661,10 @@ impl Meta {
         let mut conn = Connection::open_in_memory()?;
         conn.set_transaction_behavior(TransactionBehavior::Immediate);
         conn.execute_batch(SCHEMA)?;
+        conn.execute_batch(maintenance::SCHEMA)?;
         migrate(&conn)?;
+        conn.execute_batch(announcements::SCHEMA)?;
+        conn.execute_batch(status_page::SCHEMA)?;
         Ok(Self {
             conn: Mutex::new(conn),
             readers: Vec::new(),

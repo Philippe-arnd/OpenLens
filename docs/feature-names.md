@@ -25,4 +25,12 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Do they come back? | Weekly retention cohorts |
 | Came back | Resurrected users: active again after a gap longer than the churn window |
 | Why and what to do | Under a Web Vital that is not good: its worst pages, the likely cause and what to fix first |
+| Planned maintenance | A window declared ahead when components are expected down: shown as *under maintenance*, its incidents not announced, its time not counted in availability |
+| Announcement | On Uptime (and the status page): what the team says about the app's state, with a level, components and a start and end |
+| Incident update | A dated update of an announcement that follows an incident: investigating, identified, monitoring or resolved |
+| Pinned notice | The one information announcement shown at the top of the page while it is active |
 | Go to… | The sidebar field that opens a section, a feature or a person by typing its name |
+| Availability | On Uptime: time up over time measured per window (24 hours to 365 days, this and last month), time with no check shown as not measured and planned maintenance left out |
+| Availability target | One per environment over a rolling 30 days; with it, the error budget (downtime it allows), what is spent and left, and the burn rate |
+| Status page | The public, read-only page of a project at `/status/<slug>`: its state, components, 90 daily bars, announcements and planned maintenance |
+| Component | A line of the status page: production or a monitored environment, under a public name |

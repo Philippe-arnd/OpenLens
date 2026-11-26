@@ -51,6 +51,30 @@ const TOOL_OF: &[(&str, &str)] = &[
     // release before reading the board.
     ("board.estimate", "board"),
     ("releases.record", "record_release"),
+    // Uptime history (#559).
+    ("uptime.days", "uptime_days"),
+    ("uptime.incidents", "incidents"),
+    // Availability windows and the SLO (#560).
+    ("uptime.report", "availability"),
+    ("uptime.set_target", "availability_target"),
+    // Planned maintenance (#563).
+    ("maintenance.list", "maintenance"),
+    ("maintenance.schedule", "maintenance_set"),
+    ("maintenance.extend", "maintenance_set"),
+    ("maintenance.end_now", "maintenance_set"),
+    ("maintenance.cancel", "maintenance_set"),
+    // Status announcements (#562).
+    ("announcements.list", "announcements"),
+    ("announcements.create", "announce"),
+    ("announcements.add_update", "announcement_update"),
+    ("announcements.update", "announcement_edit"),
+    ("announcements.close", "announcement_close"),
+    ("announcements.delete", "announcement_delete"),
+    ("announcements.send", "announcement_send"),
+    // The public status page (#561).
+    ("status_page.get", "status_page"),
+    ("status_page.set", "status_page_set"),
+    ("status_page.public", "status_page"),
 ];
 
 /// Commands deliberately without an MCP tool, each with its reason.

@@ -6,14 +6,19 @@
 //! `OPENLENS_TOKEN` (no config file, D-014).
 
 mod agent_kit;
+mod announce;
+use announce::AnnounceCmd;
 #[cfg(test)]
 mod agent_kit_tests;
 mod convert;
 mod lint;
 mod mcp;
+mod mcp_announcements;
 mod mcp_commands;
+mod mcp_maintenance;
 #[cfg(test)]
 mod mcp_parity;
+mod mcp_status_page;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -22,7 +27,9 @@ use clap::{Parser, Subcommand};
 use serde_json::{Value, json};
 
 mod commands;
+mod maintenance;
 mod release;
+mod status_page;
 mod verify;
 use commands::*;
 pub(crate) use verify::*;
@@ -577,11 +584,72 @@ fn run(cli: Cli) -> Result<bool, String> {
             out(&v);
             Ok(status == 200)
         }
+        Command::Maintenance { action } => maintenance::run(&client()?, action),
+        Command::Announce { action } => announce::run(&client()?, action),
+        Command::StatusPage { action } => status_page::run(&client()?, action),
         Command::Status { project } => {
             let (status, v) =
                 client()?.call("GET", &format!("/api/projects/{project}/status"), None)?;
             out(&v);
             Ok(status == 200 && v["state"] != "down")
+        }
+        Command::Uptime {
+            project,
+            from,
+            to,
+            env,
+        } => {
+            let q: Vec<String> = [("from", from), ("to", to), ("env", env)]
+                .into_iter()
+                .filter_map(|(k, v)| v.as_ref().map(|v| format!("{k}={}", query_value(v))))
+                .collect();
+            let (status, v) = client()?.call(
+                "GET",
+                &format!("/api/projects/{project}/uptime/days?{}", q.join("&")),
+                None,
+            )?;
+            out(&v);
+            Ok(status == 200)
+        }
+        Command::Availability {
+            project,
+            env,
+            target,
+            clear,
+        } => {
+            let (status, v) = if target.is_some() || *clear {
+                let body = serde_json::json!({ "environment": env, "target": target });
+                client()?.call(
+                    "PUT",
+                    &format!("/api/projects/{project}/uptime/target"),
+                    Some(Body::Json(body)),
+                )?
+            } else {
+                let q = env
+                    .as_ref()
+                    .map(|e| format!("?env={}", query_value(e)))
+                    .unwrap_or_default();
+                client()?.call(
+                    "GET",
+                    &format!("/api/projects/{project}/uptime/report{q}"),
+                    None,
+                )?
+            };
+            out(&v);
+            Ok(status == 200)
+        }
+        Command::Incidents {
+            project,
+            before,
+            limit,
+        } => {
+            let mut path = format!("/api/projects/{project}/incidents?limit={limit}");
+            if let Some(b) = before {
+                path.push_str(&format!("&before={b}"));
+            }
+            let (status, v) = client()?.call("GET", &path, None)?;
+            out(&v);
+            Ok(status == 200)
         }
         Command::Flows {
             project,

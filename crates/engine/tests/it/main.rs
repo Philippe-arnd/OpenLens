@@ -10,16 +10,21 @@ use openlens_featuremap::parse;
 use openlens_query::{Limits, QueryEngine};
 use openlens_storage::{FlushPolicy, Writer};
 
+mod announcements;
 mod board_cohorts;
 mod board_people;
 mod board_window;
 mod commands;
 mod journeys;
+mod maintenance;
 mod map_lookups;
 mod map_shape;
 mod releases;
+mod slo;
+mod status_page;
 mod stored_totals;
 mod typed_facts;
+mod uptime_days;
 mod vitals;
 
 struct E<'a> {
