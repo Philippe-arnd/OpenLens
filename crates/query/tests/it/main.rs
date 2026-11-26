@@ -9,6 +9,7 @@ use openlens_query::{Limits, QueryEngine};
 use openlens_storage::{FlushPolicy, Writer};
 
 mod person_day;
+mod session_day;
 
 fn ev(project: &str, role: &str, days_ago: i64) -> Event {
     let ts = Utc::now() - Duration::days(days_ago);
