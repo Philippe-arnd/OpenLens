@@ -55,6 +55,50 @@ async fn the_board_is_computed_once_and_follows_new_data() {
     );
 }
 
+/// The board page as the `scale` job loads it (D-071): `GET /p/default`,
+/// whose window is the release window (D-055), twice with the same
+/// session. The second load computes nothing; new data computes it again.
+#[tokio::test]
+async fn the_release_window_board_page_is_computed_once() {
+    let h = harness();
+    let owner = login_cookie(&h).await;
+    let batch = serde_json::json!({"key": h.key, "batch": [
+        {"event": "$pageview", "distinct_id": "u1", "properties": {"$pathname": "/", "$release": "1.0.0"}}
+    ]});
+    let (status, _) = post(&h, "/capture", batch.to_string().into_bytes(), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let boards = h.state.boards.clone();
+    let before = boards.computed();
+    let cold = get(&h, "/p/default", Some(&owner), false).await;
+    assert_eq!(cold.status(), StatusCode::OK);
+    let cold = body_text(cold).await;
+    // "Can't show that": the page of a board that failed.
+    assert!(!cold.contains("t show that"), "the board was computed");
+    assert_eq!(boards.computed(), before + 1, "the cold page computes it");
+    let warm = get(&h, "/p/default", Some(&owner), false).await;
+    assert_eq!(warm.status(), StatusCode::OK);
+    let _ = body_text(warm).await;
+    assert_eq!(
+        boards.computed(),
+        before + 1,
+        "the second page is served from the cache"
+    );
+    // A real data change still invalidates it (recomputed behind a stale
+    // page, up to 20 s on a loaded runner).
+    let (status, _) = post(&h, "/capture", batch.to_string().into_bytes(), false).await;
+    assert_eq!(status, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let _ = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
+    for _ in 0..400 {
+        if boards.computed() > before + 1 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(boards.computed() > before + 1, "new data recomputes it");
+}
+
 /// A board page loaded twice with no new data is answered from the cache
 /// as a whole (#480): the revenue on it used to be queried again on every
 /// load, which made a cached page as slow as a cold one.
