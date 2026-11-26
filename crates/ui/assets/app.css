@@ -88,7 +88,7 @@
 
 @layer components {
   /* Links inside text are underlined, so they don't rely on colour alone (WCAG 1.4.1). */
-  p a:not(.button), .small a, .hint a { text-decoration: underline; text-underline-offset: 2px; }
+  p a:not(.btn), .small a:not(.btn), .hint a { text-decoration: underline; text-underline-offset: 2px; }
   /* Small text links are still 24 × 24 px targets (WCAG 2.5.8, #303). */
   .small a, a.small { display: inline-flex; align-items: center; min-height: 24px; min-width: 24px; }
   /* Layout: a sidebar on the left, collapsible to icons (#170). The choice is
@@ -518,7 +518,7 @@
   .card.form-card { margin-top: 16px; display: flex; flex-direction: column; gap: 20px; }
   .field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--ink); font-weight: 500; }
   .field input, .field select { height: 38px; font-size: 14px; }
-  .field small { color: var(--muted); font-weight: 400; font-size: 12.5px; }
+  .field small { color: var(--muted); font-weight: 400; font-size: var(--step--1); line-height: 1.45; }
   /* Settings → Alerts: one row per rule, a checkbox drawn as a switch. */
   form.settings label.alert-row { display: grid; grid-template-columns: auto minmax(0, 1fr); flex-direction: row; align-items: start; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line-2); grid-column: 1 / -1; }
   form.settings label.alert-row b { display: block; font-weight: 550; color: var(--ink); }
@@ -682,9 +682,7 @@
   .auth .brand-mark, .shared-banner .brand-mark { display: inline-block; flex: none; width: 22px; height: 22px; border-radius: 7px;
     background: conic-gradient(from 200deg, var(--accent), var(--info), var(--good), var(--warn), var(--accent)); }
   .auth-form { display: flex; flex-direction: column; gap: 14px; }
-  .auth-card .field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 500; color: var(--ink); }
-  .auth-card .field input { height: 42px; padding: 0 12px; border: 1px solid var(--line); border-radius: var(--r-s);
-    background: var(--bg); color: var(--ink); font: inherit; font-size: 14px; font-weight: 400; }
+  .auth-card .field input { height: 42px; padding: 0 12px; font-size: 14px; font-weight: 400; }
   .auth-card .field input.mono { font-family: var(--mono); }
   .auth-card .btn { min-height: 42px; width: 100%; font-size: 14px; }
   .auth-card details.token-login summary { cursor: pointer; font-size: 13px; color: var(--accent); margin-bottom: 12px; }
@@ -841,11 +839,10 @@
   :is(.form-card, .form-body) legend { padding: 0; margin: 0 0 10px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
   .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 16px 20px; align-items: start; }
   .form-grid > .wide { grid-column: 1 / -1; }
-  .form-grid .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 13px; font-weight: 500; color: var(--ink); }
+  .form-grid .field { min-width: 0; }
   .form-grid fieldset.field legend { margin-bottom: 6px; font-weight: 500; color: var(--ink); }
   .form-grid .field :is(input:not([type=checkbox], [type=radio]), select) { width: 100%; min-height: 38px; box-sizing: border-box;
     font-size: 14px; }
-  .form-grid .field small { color: var(--muted); font-weight: 400; font-size: var(--step--1); line-height: 1.45; }
   .form-card details.models > summary { cursor: pointer; font-size: 13px; font-weight: 500; color: var(--ink-2); }
   .form-card details.models[open] > summary { margin-bottom: 14px; }
   .form-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 16px; border-top: 1px solid var(--line-2); }
