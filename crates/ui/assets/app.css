@@ -580,3 +580,89 @@
   @media (max-width: 640px) { .side form.goto { display: none; } }
   ul.goto-results { margin: 8px 0 16px; padding-left: 20px; line-height: 1.8; }
 }
+
+/* Shell (#540) */
+@layer components {
+  /* Sidebar: brand, project switcher, Go to…, the sections, the user menu. */
+  .side { height: 100dvh; width: 232px; gap: 12px; padding: 16px 12px 12px; font-size: var(--step-0); }
+  .side .brand { padding: 2px 6px; }
+  .side .switch { gap: 10px; padding: 8px 10px; margin: 0; border-radius: var(--r); background: var(--raised); font-size: var(--step-0); }
+  .side .switch:hover { border-color: color-mix(in oklab, var(--accent) 40%, var(--line)); }
+  .side .switch .label small, .me .label small { display: block; color: var(--muted); font-size: 11.5px; font-weight: 400; }
+  .monogram { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; flex: none;
+    font-size: 12px; font-weight: 600; line-height: 1; color: var(--accent); background: color-mix(in oklab, var(--accent) var(--tint), transparent); }
+  .side form.goto { margin: 0; }
+  .side form.goto input { height: 36px; padding: 0 10px; border-radius: var(--r-s); background: var(--bg); font-size: 13px; }
+  .side form.goto input::placeholder { color: var(--muted); }
+  .side-nav a { min-height: 36px; padding: 0 10px; border-radius: var(--r-s); font-size: var(--step-0); font-weight: 450; }
+  .side-nav a[aria-current="page"] { color: var(--accent); background: color-mix(in oklab, var(--accent) var(--tint), transparent); font-weight: 550; }
+  /* The access key, shown on hover or focus only. */
+  .side-nav kbd { margin-left: auto; visibility: hidden; padding: 3px 5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px;
+    background: var(--surface); color: var(--muted); font: 500 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .side-nav:hover kbd, .side-nav a:focus-visible kbd { visibility: visible; }
+  html[data-nav="collapsed"] .side-nav kbd { display: none; }
+  .side-foot { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--line-2); }
+  .me { anchor-name: --me; display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 8px; border: 0; border-radius: var(--r-s);
+    background: transparent; color: var(--ink); font-size: var(--step-0); font-weight: 500; text-align: left; }
+  .me:hover { background: var(--line-2); transform: none; }
+  .avatar { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; flex: none; color: var(--ink-2); background: var(--line); }
+  html[data-nav="collapsed"] .me { justify-content: center; padding: 6px; }
+
+  /* The user menu: a native popover, placed by the button where anchor
+     positioning exists, else where the browser puts popovers. */
+  .me-menu { flex-direction: column; gap: 2px; min-width: 220px; padding: 6px; color: var(--ink); }
+  .me-menu[popover] { border: 1px solid var(--line); border-radius: var(--r); background: var(--surface);
+    box-shadow: 0 12px 32px -8px oklch(20% 0.03 285 / .22), 0 2px 6px oklch(20% 0.03 285 / .08); }
+  .me-menu[popover]:popover-open, .me-menu.inline { display: flex; }
+  .me-menu.inline { min-width: 0; padding: 0; }
+  @supports (position-area: block-start) {
+    .me-menu[popover] { position-anchor: --me; position-area: block-start span-inline-end; margin: 0 0 6px; }
+  }
+  .me-menu a, .me-menu button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 36px; padding: 0 10px; border: 0;
+    border-radius: var(--r-s); background: none; color: var(--ink-2); font-size: var(--step-0); font-weight: 450; text-align: left; }
+  .me-menu a:hover, .me-menu button:hover { background: var(--line-2); color: var(--ink); text-decoration: none; transform: none; }
+  .me-menu a[aria-current="page"] { color: var(--accent); }
+  .me-menu form { margin: 2px 0 0; padding-top: 2px; border-top: 1px solid var(--line-2); }
+  html[data-nav="collapsed"] .me-menu[popover] .label { display: inline; }
+  html[data-nav="collapsed"] .me-menu.inline a { justify-content: center; padding: 0; }
+
+  /* Top bar: the breadcrumb, then the page's context; sticky, translucent. */
+  .topbar { position: sticky; top: 0; z-index: 3; border-bottom: 1px solid var(--line);
+    background: color-mix(in oklab, var(--bg) 88%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+  .topbar .bar, .subnav .section-tabs { width: min(1200px, 100% - 40px); margin-inline: auto; }
+  .topbar .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; min-height: 52px; padding-block: 8px; font-size: var(--step-0); }
+  .topbar .crumbs ol { margin: 0; font-size: 13px; }
+  .topbar .context { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto; }
+
+  /* Section tabs, under the top bar: an underline on the current one. */
+  .subnav { border-bottom: 1px solid var(--line); }
+  .subnav .section-tabs { gap: 2px; margin-block: 0; border-bottom: 0; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .subnav .section-tabs a { display: inline-flex; align-items: center; min-height: 40px; padding: 0 12px; margin-bottom: 0; white-space: nowrap;
+    color: var(--muted); font-size: var(--step-0); font-weight: 500; border-bottom: 2px solid transparent; }
+  .subnav .section-tabs a:hover { color: var(--ink); }
+  .subnav .section-tabs a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--ink); font-weight: 500; }
+  .subnav + main { padding-top: 14px; }
+
+  /* Signals: the page's alerts and pending setup, one line of pills. */
+  .signals { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 18px; }
+  .signal { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 32px; padding: 4px 12px; border: 1px solid var(--line);
+    border-radius: var(--r-pill); background: var(--surface); color: var(--ink-2); font-size: 13px; }
+  .signal.bad { border-color: color-mix(in oklab, var(--bad) 35%, var(--line)); }
+  .signal .dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: currentColor; color: var(--warn); }
+  .signal.bad .dot { color: var(--bad); box-shadow: 0 0 0 3px color-mix(in oklab, var(--bad) 18%, transparent); }
+  .signal a { display: inline-flex; align-items: center; min-height: 24px; font-weight: 500; }
+  .signal .meter { flex: none; width: 44px; height: 4px; }
+  .signal .meter .track { fill: var(--line); }
+  .signal .meter .done { fill: var(--warn); }
+
+  @media (max-width: 640px) {
+    .side { width: 56px; padding: 10px 6px; }
+    .side .switch { border: 0; padding: 6px; justify-content: center; background: none; }
+    .side-nav a { justify-content: center; padding: 0; }
+    .side-nav kbd { display: none; }
+    .me { justify-content: center; padding: 6px; }
+    .me-menu[popover] .label { display: inline; }
+    .topbar .bar, .subnav .section-tabs { width: calc(100% - 20px); }
+  }
+  @media (pointer: coarse) { .side-nav kbd { display: none; } }
+}

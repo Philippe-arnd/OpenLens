@@ -93,13 +93,7 @@ pub fn board(
                 h1 { "Focus board" }
                 p.muted { "What " (scope) " did " (period("lately")) " in " strong { (f.environment) } ". " @if !shared() { a href={ "/p/" (p.id) "/digest" } { "This week vs last →" } " · " a href={ "/p/" (p.id) "/breakdown?by=role&env=" (url_enc(&f.environment)) } { "Break down →" } } }
             }
-            @if let Some(d) = &b.app_down { @if !shared() { p.alert role="alert" { (icon("alert")) " " (d) " — " a href={ "/p/" (p.id) "/uptime" } { "Uptime" } } } }
-            @if !b.objectives_at_risk.is_empty() && !shared() {
-                p.notice role="status" { (icon("star")) " Objectives at risk: " (b.objectives_at_risk.join(" · ")) " — " a href={ "/p/" (p.id) "/goals" } { "Goals" } }
-            }
-            @if let Some((done, total)) = b.setup.filter(|_| !shared()) {
-                p.notice role="status" { (icon("task")) " Setup: " (done) " of " (total) " required steps done — " a href={ "/p/" (p.id) "/settings" } { "Finish in Settings" } }
-            }
+            @if !shared() { (signals(&board_signals(p.id, b))) }
             @if let Some(w) = &b.window {
                 (window_line(w))
                 @if let Some(e) = &w.estimate { (crate::cost::cost_line(e)) }
@@ -275,6 +269,40 @@ pub fn board(
             }
         },
     )
+}
+
+/// What the board flags (#540): the app is down, objectives at risk, the
+/// setup left to do; one pill each on the signals line.
+fn board_signals(pid: &str, b: &Board) -> Vec<Signal> {
+    let mut out = Vec::new();
+    if let Some(d) = &b.app_down {
+        out.push(Signal {
+            tone: "bad",
+            text: d.clone(),
+            progress: None,
+            href: format!("/p/{pid}/uptime"),
+            link: "Uptime",
+        });
+    }
+    if !b.objectives_at_risk.is_empty() {
+        out.push(Signal {
+            tone: "warn",
+            text: format!("Objectives at risk: {}", b.objectives_at_risk.join(" · ")),
+            progress: None,
+            href: format!("/p/{pid}/goals"),
+            link: "Goals",
+        });
+    }
+    if let Some((done, total)) = b.setup {
+        out.push(Signal {
+            tone: "todo",
+            text: format!("Setup: {done} of {total} required steps done"),
+            progress: Some((done, total)),
+            href: format!("/p/{pid}/settings"),
+            link: "Finish in Settings",
+        });
+    }
+    out
 }
 
 /// Recent events.
