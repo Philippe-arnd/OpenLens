@@ -4,6 +4,7 @@
 //! which runs the engine commands the API runs.
 
 use super::*;
+use crate::project_settings::form_foot;
 use openlens_engine::environments::{
     ACTIVE_DAYS, AllowPreview, AllowReport, AllowStatus, Environments, LOG, MAX_ALLOWED,
     MAX_RELABEL_DAYS, NOTIFY, RELABEL_DAYS, Relabelled,
@@ -66,12 +67,14 @@ pub(crate) fn tab(
             }
             (env_names("env-names", e, true))
             @if admin {
-                form.settings method="post" action={ (base) "/environments" } {
+                form.form-body method="post" action={ (base) "/environments" } {
                     input type="hidden" name="action" value="rule";
-                    label { "Host " input type="text" name="host" required maxlength="253" placeholder="app.example.com or *.example.com" list="env-hosts"; }
+                    div.form-grid {
+                        label.field { "Host" input type="text" name="host" required maxlength="253" placeholder="app.example.com or *.example.com" list="env-hosts"; small { "A hostname, or *.example.com for its sub-domains." } }
+                        label.field { "Environment" input type="text" name="env" required maxlength="64" list="env-names" placeholder="production"; small { code { "ignore" } " drops its events." } }
+                    }
                     datalist id="env-hosts" { @for h in &e.unclassified { option value=(h) {} } }
-                    label { "Environment " input type="text" name="env" required maxlength="64" list="env-names" placeholder="production"; }
-                    button type="submit" { "Save the rule" }
+                    (form_foot("Save the rule", html! { "It applies to events received from now on." }))
                 }
             }
             h3 { "Rules" }
@@ -108,11 +111,13 @@ pub(crate) fn tab(
             h2.sky { (icon("route")) "Aliases and visibility" }
             p.small { "An alias stores an environment the app sends under another name (" code { "live-eu" } " → " code { "production" } "), on top of the usual ones (" code { "prod" } ", " code { "stage" } ", " code { "dev" } "); " code { "ignore" } " drops its events. A hidden environment keeps its events and stays readable by name (" code { "?env=" } "), but leaves the environment selector. Production is never aliased or hidden." }
             @if admin {
-                form.settings method="post" action={ (base) "/environments" } {
+                form.form-body method="post" action={ (base) "/environments" } {
                     input type="hidden" name="action" value="alias";
-                    label { "Sent as " input type="text" name="from" required maxlength="64" placeholder="live-eu"; }
-                    label { "Store as " input type="text" name="to" required maxlength="64" list="env-names" placeholder="production"; }
-                    button type="submit" { "Save the alias" }
+                    div.form-grid {
+                        label.field { "Sent as" input type="text" name="from" required maxlength="64" placeholder="live-eu"; small { "The name the app sends." } }
+                        label.field { "Store as" input type="text" name="to" required maxlength="64" list="env-names" placeholder="production"; small { code { "ignore" } " drops its events." } }
+                    }
+                    (form_foot("Save the alias", html! { "It applies to events received from now on." }))
                 }
             }
             @if e.aliases.is_empty() { p.muted.small { "No alias." } } @else {
@@ -147,17 +152,20 @@ pub(crate) fn tab(
             h2.coral { (icon("bolt")) "Checks per environment" }
             p.small { "Production is checked at the app address (General) and gets every alert. Give another environment its own address: it is checked every minute with the same health path, and its certificate daily. At " strong { "notify" } " its incidents are announced like production's; at " strong { "log" } " they are only recorded on Uptime." }
             @if admin {
-                form.settings method="post" action={ (base) "/environments" } {
+                form.form-body method="post" action={ (base) "/environments" } {
                     input type="hidden" name="action" value="monitor";
-                    label { "Environment " input type="text" name="env" required maxlength="64" list="env-names" placeholder="staging"; }
-                    label { "Address " input type="url" name="url" required maxlength="200" placeholder="https://staging.example.com"; }
-                    label { "Alerts "
-                        select name="level" {
-                            option value=(LOG) selected { "log only" }
-                            option value=(NOTIFY) { "notify" }
+                    div.form-grid {
+                        label.field { "Environment" input type="text" name="env" required maxlength="64" list="env-names" placeholder="staging"; small { "Not production: it uses the app address." } }
+                        label.field { "Address" input type="url" name="url" required maxlength="200" placeholder="https://staging.example.com"; small { "Checked every minute, with the same health path." } }
+                        fieldset.field {
+                            legend { "Alerts" }
+                            div.seg {
+                                label { input type="radio" name="level" value=(LOG) checked; "log only" }
+                                label { input type="radio" name="level" value=(NOTIFY); "notify" }
+                            }
                         }
                     }
-                    button type="submit" { "Save the check" }
+                    (form_foot("Save the check", html! { "Its incidents show on Uptime." }))
                 }
             }
             @if e.monitors.is_empty() { p.muted.small { "No environment besides production is checked." } } @else {
@@ -192,11 +200,13 @@ fn relabel_card(
         section.card.wide #env-relabel {
             h2.violet { (icon("route")) "Re-label past events" }
             p.small { "Rules apply to new events. After changing a host's rule, move that host's events of the last days (at most " (MAX_RELABEL_DAYS) ") to the environment the rules give now. Bots stay bots, and a host the rules ignore keeps its events. What the app set itself moves too: check the preview first." }
-            form.settings method="get" action={ (base) "/environments" } {
-                label { "Host " input type="text" name="relabel" required maxlength="253" value=(host) placeholder="app.example.com or *.example.com" list="env-rule-hosts"; }
+            form.form-body method="get" action={ (base) "/environments" } {
+                div.form-grid {
+                    label.field { "Host" input type="text" name="relabel" required maxlength="253" value=(host) placeholder="app.example.com or *.example.com" list="env-rule-hosts"; small { "A host with a rule." } }
+                    label.field { "Days" input type="number" name="days" min="1" max=(MAX_RELABEL_DAYS) value=(days); small { "At most " (MAX_RELABEL_DAYS) "." } }
+                }
                 datalist id="env-rule-hosts" { @for r in &e.rules { option value=(r.host) {} } }
-                label { "Days " input type="number" name="days" min="1" max=(MAX_RELABEL_DAYS) value=(days); }
-                button.ghost type="submit" { "Preview" }
+                (form_foot("Preview", html! { "Nothing moves until you confirm." }))
             }
             @match relabel {
                 Some(Err(msg)) => { p.alert role="alert" { (msg) } }
@@ -268,9 +278,11 @@ fn allow_card(
                 p.muted.small { "Nothing dropped since " (since) "." }
             }
             @if admin {
-                form.settings method="get" action={ (base) "/environments" } {
-                    label { "Hosts " input type="text" name="allow" maxlength="4000" value=(draft) placeholder="app.example.com *.example.com"; }
-                    button.ghost type="submit" { "Preview" }
+                form.form-body method="get" action={ (base) "/environments" } {
+                    div.form-grid {
+                        label.field.wide { "Hosts" input type="text" name="allow" maxlength="4000" value=(draft) placeholder="app.example.com *.example.com"; small { "Separated by spaces. Empty: every host is accepted." } }
+                    }
+                    (form_foot("Preview", html! { "Nothing is saved until you confirm." }))
                 }
                 @match preview {
                     Some(Err(msg)) => { p.alert role="alert" { (msg) } }

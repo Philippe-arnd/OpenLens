@@ -471,3 +471,196 @@ fn data(p: &ProjectInfo<'_>, v: &SettingsView<'_>, base: &str) -> Markup {
         }
     }
 }
+
+#[cfg(test)]
+pub(crate) mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    /// The `<input …>` tags of `html`, without their `<input `.
+    pub(crate) fn inputs(html: &str) -> Vec<&str> {
+        html.split("<input ")
+            .skip(1)
+            .map(|t| &t[..t.find('>').unwrap_or(t.len())])
+            .collect()
+    }
+
+    /// Three required steps, `done` of them done, and two optional ones.
+    fn steps(done: usize) -> Vec<SetupStep> {
+        let s = |label, done, required, href: &str| SetupStep {
+            label,
+            done,
+            required,
+            href: href.into(),
+        };
+        vec![
+            s("First event received", done > 0, true, "/s/install"),
+            s("App address known", done > 1, true, "/s/general"),
+            s("An alert channel", done > 2, true, "/s/alerts"),
+            s("Releases detected", false, false, "/s/releases"),
+            s("SMTP for emails", true, false, "/s/smtp"),
+        ]
+    }
+
+    /// The `width` of the `<rect class="{class}">` in `html`.
+    fn rect_width(html: &str, class: &str) -> f64 {
+        let at = html.find(&format!(r#"<rect class="{class}""#)).unwrap();
+        let tag = &html[at..at + html[at..].find('>').unwrap()];
+        let w = tag.split(r#"width=""#).nth(1).unwrap();
+        w[..w.find('"').unwrap()].parse().unwrap()
+    }
+
+    /// The markup of the step labelled `label`.
+    fn step_block<'a>(html: &'a str, label: &str) -> &'a str {
+        let at = html.find(&format!("<b>{label}</b>")).unwrap();
+        let start = html[..at].rfind(r#"<div class="step "#).unwrap();
+        let end = [r#"<div class="step "#, "<details", "</details>"]
+            .iter()
+            .filter_map(|m| html[at..].find(m))
+            .min()
+            .map_or(html.len(), |e| at + e);
+        &html[start..end]
+    }
+
+    fn view(tab: SettingsTab) -> SettingsView<'static> {
+        SettingsView {
+            tab,
+            timezone: "Europe/Paris",
+            app_url: None,
+            detected_url: Some("https://app.example.com"),
+            host: "https://lens.example.com",
+            checks: &[],
+            map_version: None,
+            admin: true,
+            notice: None,
+            yesterday: "2026-11-25",
+            alerts: AlertsView::default(),
+            shares: vec![],
+            setup: steps(1),
+            releases: &[],
+            environments: Some(openlens_engine::environments::Environments {
+                days: 30,
+                hosts: vec![],
+                rules: vec![],
+                unclassified: vec![],
+                aliases: vec![],
+                hidden: vec![],
+                monitors: vec![],
+            }),
+            relabel: None,
+            allow: None,
+            allow_preview: None,
+        }
+    }
+
+    const P: ProjectInfo<'static> = ProjectInfo {
+        id: "p1",
+        name: "Shop",
+        key: "pk_test",
+    };
+
+    #[test]
+    fn the_setup_bar_grows_with_the_steps_done_and_stays_in_its_track() {
+        let mut last = -1.0;
+        for done in 0..=3 {
+            let html = setup_progress(&steps(done)).into_string();
+            let (bar, track) = (rect_width(&html, "bar"), rect_width(&html, "track"));
+            assert!(bar > last, "{done} done: {bar} after {last}");
+            assert!((0.0..=track).contains(&bar), "{bar} in {track}");
+            last = bar;
+        }
+        let all = setup_progress(&steps(3)).into_string();
+        assert!(rect_width(&all, "track") - rect_width(&all, "bar") < 1e-9);
+        // Only optional steps: the bar is full, never past its track.
+        let optional: Vec<SetupStep> = steps(0).into_iter().filter(|s| !s.required).collect();
+        let html = setup_progress(&optional).into_string();
+        assert!(rect_width(&html, "bar") <= rect_width(&html, "track"));
+    }
+
+    #[test]
+    fn done_steps_are_ticked_and_steps_to_do_keep_their_action() {
+        for done in 0..=3 {
+            let list = steps(done);
+            let html = setup_progress(&list).into_string();
+            for st in &list {
+                let block = step_block(&html, st.label);
+                let link = format!(r#"href="{}""#, st.href);
+                if st.done {
+                    assert!(block.contains(r#"class="step done""#), "{block}");
+                    assert!(!block.contains(&link), "{block}");
+                } else {
+                    assert!(block.contains(r#"class="step todo""#), "{block}");
+                    assert!(block.contains(&link), "{block}");
+                }
+            }
+            // One primary action at most: the next required step.
+            let primary = html.matches("btn primary").count();
+            assert_eq!(primary, usize::from(done < 3), "{done} done");
+            // The optional steps are folded.
+            let fold = html.find("<details").unwrap();
+            assert!(html.find("<b>SMTP for emails</b>").unwrap() > fold);
+        }
+    }
+
+    #[test]
+    fn every_alert_type_is_a_switch_in_the_form_that_posts_the_alerts() {
+        let html = project_settings(&P, &view(SettingsTab::Alerts)).into_string();
+        let at = html.find(r#"action="/p/p1/settings/alerts""#).unwrap();
+        let form = &html[at..at + html[at..].find("</form>").unwrap()];
+        for name in ["down", "traffic", "regressions", "failing", "cert", "email"] {
+            let tag = inputs(form)
+                .into_iter()
+                .find(|t| t.contains(&format!(r#"name="{name}""#)))
+                .unwrap();
+            assert!(
+                tag.contains(r#"type="checkbox""#) && tag.contains(r#"role="switch""#),
+                "{name}: {tag}"
+            );
+        }
+        // A threshold sits in the row of its alert type.
+        let down = form
+            .split("<li>")
+            .find(|r| r.contains(r#"name="down""#))
+            .unwrap();
+        assert!(down.contains(r#"name="down_wait""#) && down.contains(r#"name="health_path""#));
+    }
+
+    #[test]
+    fn the_settings_tabs_need_no_inline_style_or_script() {
+        for tab in [
+            SettingsTab::General,
+            SettingsTab::Install,
+            SettingsTab::Alerts,
+            SettingsTab::Sharing,
+            SettingsTab::Environments,
+            SettingsTab::Data,
+        ] {
+            let html = project_settings(&P, &view(tab)).into_string();
+            assert!(!html.contains(" style="), "{tab:?}");
+            assert!(!html.contains("<script"), "{tab:?}");
+            assert!(
+                html.contains("form-card") || html.contains("form-body"),
+                "{tab:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_two_option_choices_keep_one_checked_radio() {
+        // Sharing's "What" and an environment check's alert level.
+        for (tab, name) in [
+            (SettingsTab::Sharing, "scope"),
+            (SettingsTab::Environments, "level"),
+        ] {
+            let html = project_settings(&P, &view(tab)).into_string();
+            let field = format!(r#"name="{name}""#);
+            let radios: Vec<&str> = inputs(&html)
+                .into_iter()
+                .filter(|t| t.contains(r#"type="radio""#) && t.contains(&field))
+                .collect();
+            assert!(radios.len() >= 2, "{name}");
+            let checked = radios.iter().filter(|t| t.contains(" checked")).count();
+            assert_eq!(checked, 1, "{name}");
+        }
+    }
+}

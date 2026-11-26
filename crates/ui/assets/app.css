@@ -742,3 +742,110 @@
     .context .pop { inset: auto; margin: 8px 0 0; position-area: block-end span-inline-end; position-try-fallbacks: flip-inline; }
   }
 }
+
+/* Settings and forms (#546) */
+@layer components {
+  /* Setup steps: numbered, ticked when done, one action when not. */
+  .card.setup { padding: 0; }
+  .setup-head { display: flex; flex-direction: column; gap: 10px; padding: 18px 22px 14px; }
+  :is(.setup, .form-card) .section-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; }
+  :is(.setup, .form-card) .section-head h2 { margin: 0; font-size: var(--step-1); }
+  :is(.setup, .form-card) .section-head p { margin: 0; color: var(--muted); font-size: 13px; }
+  .setup .section-head .num { font-size: 13px; }
+  svg.progress { display: block; width: 100%; height: 6px; border-radius: var(--r-pill); overflow: hidden; }
+  svg.progress .track { fill: var(--line-2); }
+  svg.progress .bar { fill: var(--accent); }
+  .steps { display: flex; flex-direction: column; border-top: 1px solid var(--line-2); }
+  .steps .step { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 4px 14px; padding: 14px 22px;
+    background: none; border: 0; border-radius: 0; font-size: var(--step-0); font-weight: 400; color: var(--ink); }
+  .steps .step + .step { border-top: 1px solid var(--line-2); }
+  .steps .state { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; border: 1.5px dashed var(--line);
+    color: var(--muted); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .steps .state .icon { width: 14px; height: 14px; vertical-align: 0; }
+  .steps .step.done .state { border: 0; background: color-mix(in oklab, var(--good) 14%, transparent); color: var(--good); }
+  .steps .step.todo .state { border: 1.5px solid var(--accent); color: var(--accent); }
+  .steps .step b { font-weight: 550; }
+  .steps .step p { margin: 2px 0 0; color: var(--muted); font-size: var(--step--1); }
+  .steps .step.done b { color: var(--muted); font-weight: 500; text-decoration: line-through; text-decoration-color: var(--line); }
+  .steps details { border-top: 1px solid var(--line-2); }
+  .steps .step + details { border-top: 1px solid var(--line-2); }
+  .steps details > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 14px 22px; font-size: 13px; font-weight: 500; }
+  .steps details > summary span { color: var(--muted); font-weight: 400; }
+  @media (max-width: 640px) {
+    .setup-head, .steps .step, .steps details > summary { padding-inline: 16px; }
+    .steps .step { grid-template-columns: 28px minmax(0, 1fr); }
+    .steps .step > :last-child { grid-column: 2; justify-self: start; }
+  }
+
+  /* Buttons of the forms and the steps. */
+  :is(.form-card, .form-body, .steps) .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px;
+    padding: 0 14px; border: 1px solid var(--line); border-radius: var(--r-pill); background: var(--surface); color: var(--ink);
+    font: inherit; font-size: 13.5px; font-weight: 500; white-space: nowrap; text-decoration: none; cursor: pointer; transition: none; }
+  :is(.form-card, .form-body, .steps) .btn:hover { transform: none; text-decoration: none; border-color: color-mix(in oklab, var(--ink) 22%, var(--line)); }
+  :is(.form-card, .form-body, .steps) .btn.primary { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+  :is(.form-card, .form-body, .steps) .btn.primary:hover { background: color-mix(in oklab, var(--ink) 88%, var(--accent)); }
+  :is(.form-card, .form-body, .steps) .btn.ghost { border-color: transparent; background: transparent; color: var(--accent); padding-inline: 8px; }
+  :is(.form-card, .form-body, .steps) .btn.ghost:hover { background: color-mix(in oklab, var(--accent) 8%, transparent); }
+  :is(.form-card, .form-body, .steps) .btn.sm { min-height: 30px; padding: 0 10px; font-size: var(--step--1); }
+  .form-card .btn.danger { color: var(--bad); border-color: color-mix(in oklab, var(--bad) 40%, var(--line)); }
+  .form-card.danger { border-color: color-mix(in oklab, var(--bad) 40%, var(--line)); }
+
+  /* Form card: the form is the card; fields in a grid, help under each. */
+  .form-card, .form-body { display: flex; flex-direction: column; gap: 18px; margin: 0; }
+  .card.form-card { padding: 22px; }
+  .form-body { margin-top: 14px; }
+  :is(.form-card, .form-body) > p, .form-card details { margin: 0; }
+  :is(.form-card, .form-body) fieldset { min-width: 0; margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 12px; }
+  :is(.form-card, .form-body) legend { padding: 0; margin: 0 0 10px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 16px 20px; align-items: start; }
+  .form-grid > .wide { grid-column: 1 / -1; }
+  .form-grid .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 13px; font-weight: 500; color: var(--ink); }
+  .form-grid fieldset.field legend { margin-bottom: 6px; font-weight: 500; color: var(--ink); }
+  .form-grid .field :is(input:not([type=checkbox], [type=radio]), select) { width: 100%; min-height: 38px; box-sizing: border-box;
+    padding: 0 10px; border-radius: var(--r-s); background: var(--bg); font-size: 14px; }
+  .form-grid .field small { color: var(--muted); font-weight: 400; font-size: var(--step--1); line-height: 1.45; }
+  .form-card details.models > summary { cursor: pointer; font-size: 13px; font-weight: 500; color: var(--ink-2); }
+  .form-card details.models[open] > summary { margin-bottom: 14px; }
+  .form-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 16px; border-top: 1px solid var(--line-2); }
+  .form-foot p { margin: 0; color: var(--muted); font-size: var(--step--1); }
+
+  /* Segmented control: radio inputs, the checked one raised. */
+  :is(.form-card, .form-body) .seg { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 4px; padding: 3px;
+    border-radius: 10px; background: var(--line-2); }
+  :is(.form-card, .form-body) .seg label { position: relative; display: grid; place-items: center; gap: 6px; min-height: 32px; padding: 4px 8px;
+    border-radius: 8px; font-size: 13px; font-weight: 450; color: var(--ink-2); text-align: center; cursor: pointer; }
+  :is(.form-card, .form-body) .seg label:has(input:checked) { background: var(--surface); color: var(--ink); font-weight: 550; box-shadow: var(--shadow); }
+  :is(.form-card, .form-body) .seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+  :is(.form-card, .form-body) .seg input { position: absolute; opacity: 0; pointer-events: none; }
+  .seg.themes { max-width: 520px; }
+  .seg.themes label { padding: 10px 8px; }
+  .seg .swatch { display: block; width: 56px; height: 34px; border-radius: 6px; border: 1px solid var(--line); position: relative; overflow: hidden; }
+  .seg .swatch::after { content: ""; position: absolute; left: 8px; top: 10px; width: 24px; height: 4px; border-radius: 2px; }
+  .seg .swatch.light { background: oklch(97.6% 0.005 85); }
+  .seg .swatch.light::after { background: oklch(21% 0.018 285); }
+  .seg .swatch.dark { background: oklch(15.5% 0.010 285); }
+  .seg .swatch.dark::after { background: oklch(95% 0.006 285); }
+  .seg .swatch.auto { background: linear-gradient(135deg, oklch(97.6% 0.005 85) 50%, oklch(15.5% 0.010 285) 50%); }
+  .seg .swatch.auto::after { background: var(--accent); }
+
+  /* Switch: a checkbox with role=switch. */
+  label.switch { display: flex; align-items: flex-start; gap: 12px; font-size: 13.5px; color: var(--ink); cursor: pointer; }
+  label.switch b { display: block; font-weight: 550; }
+  label.switch small { display: block; color: var(--muted); font-size: var(--step--1); }
+  label.switch input[type=checkbox]:not([role=switch]) { flex: none; margin: 3px 0 0; accent-color: var(--bad); }
+  input[role=switch] { appearance: none; flex: none; position: relative; width: 36px; height: 20px;
+    margin: 1px 0 0; padding: 0; border: 0; border-radius: var(--r-pill); background: color-mix(in oklab, var(--muted) 45%, var(--line)); cursor: pointer; }
+  input[role=switch]::before { content: ""; position: absolute; top: 2px; left: 2px;
+    width: 16px; height: 16px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px color-mix(in oklab, var(--ink) 25%, transparent); }
+  input[role=switch]:checked { background: var(--accent); }
+  input[role=switch]:checked::before { left: 18px; }
+  input[role=switch]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* Alerts: one row per alert type, its switch and its fields. */
+  ul.alert-rows { list-style: none; margin: 0; padding: 0; }
+  ul.alert-rows li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 12px 24px; align-items: start; padding: 14px 0; border-top: 1px solid var(--line-2); }
+  ul.alert-rows li:last-child { border-bottom: 1px solid var(--line-2); }
+  ul.alert-rows li .form-grid:empty { display: none; }
+  ul.alert-rows li:has(input[role=switch]:not(:checked)) .form-grid { opacity: .55; }
+  @media (max-width: 760px) { ul.alert-rows li { grid-template-columns: minmax(0, 1fr); } }
+}
