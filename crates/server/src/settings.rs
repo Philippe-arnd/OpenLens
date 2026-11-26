@@ -445,6 +445,8 @@ async fn page_at(
                         regressions: a.regressions,
                         cert: a.cert,
                         failing: a.failing,
+                        budget_spent: a.budget_spent,
+                        budget_burn: a.budget_burn,
                         quiet: a.quiet,
                         health_path: a.health_path,
                         email: a.email,
@@ -769,6 +771,10 @@ pub(crate) struct AlertsForm {
     #[serde(default)]
     failing: Option<String>,
     #[serde(default)]
+    budget_spent: Option<String>,
+    #[serde(default)]
+    budget_burn: Option<String>,
+    #[serde(default)]
     quiet_start: String,
     #[serde(default)]
     quiet_end: String,
@@ -798,6 +804,8 @@ pub(crate) async fn alerts(
         regressions: f.regressions.as_deref() == Some("on"),
         cert: f.cert.as_deref() == Some("on"),
         failing: f.failing.as_deref() == Some("on"),
+        budget_spent: f.budget_spent.as_deref() == Some("on"),
+        budget_burn: f.budget_burn.as_deref() == Some("on"),
         quiet: match (
             f.quiet_start.trim().parse::<u8>(),
             f.quiet_end.trim().parse::<u8>(),
@@ -958,6 +966,7 @@ pub(crate) async fn uptime(
         days_avail: days.availability,
         days: days.days,
         notices: crate::announcements::section(&state, &p, &tz).await,
+        availability: crate::slo::section(&state, &headers, &p).await,
     };
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
@@ -969,21 +978,4 @@ pub(crate) async fn uptime(
         r.headers_mut().insert(axum::http::header::REFRESH, v);
     }
     r
-}
-
-/// `GET /api/projects/{id}/status` (bearer): up, down, unknown or off,
-/// with open incidents (for agents around a deploy).
-pub(crate) async fn api_status(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-) -> Response {
-    if !crate::auth::has_bearer(&state, &headers) {
-        return crate::apierr::json(StatusCode::UNAUTHORIZED, "admin bearer token required");
-    }
-    match alerts::GetStatus::run(&state, &Caller::default(), project_input(&id)).await {
-        Ok(st) => axum::Json(st).into_response(),
-        Err(Error::NotFound) => crate::apierr::json(StatusCode::NOT_FOUND, "unknown project"),
-        Err(e) => crate::apierr::json(StatusCode::BAD_REQUEST, e.to_string()),
-    }
 }

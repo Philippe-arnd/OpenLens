@@ -54,6 +54,9 @@ const TOOL_OF: &[(&str, &str)] = &[
     // Uptime history (#559).
     ("uptime.days", "uptime_days"),
     ("uptime.incidents", "incidents"),
+    // Availability windows and the SLO (#560).
+    ("uptime.report", "availability"),
+    ("uptime.set_target", "availability_target"),
     // Planned maintenance (#563).
     ("maintenance.list", "maintenance"),
     ("maintenance.schedule", "maintenance_set"),

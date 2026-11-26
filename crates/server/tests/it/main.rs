@@ -29,6 +29,7 @@ mod manage;
 mod pages;
 mod privacy;
 mod releases;
+mod slo;
 mod team;
 mod totp;
 

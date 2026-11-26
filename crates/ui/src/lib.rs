@@ -28,6 +28,7 @@ mod maintenance;
 mod manage;
 mod releases;
 mod settings;
+mod slo;
 mod team;
 mod totp;
 mod world;
@@ -51,6 +52,7 @@ pub use manage::*;
 use openlens_engine::{Board, EventRow, Filters};
 pub use releases::*;
 pub use settings::*;
+pub use slo::{AvailabilityView, availability_card};
 pub use team::*;
 pub use totp::{TotpCard, login_code, totp_recovery_codes};
 

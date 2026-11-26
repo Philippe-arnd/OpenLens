@@ -30,3 +30,5 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Incident update | A dated update of an announcement that follows an incident: investigating, identified, monitoring or resolved |
 | Pinned notice | The one information announcement shown at the top of the page while it is active |
 | Go to… | The sidebar field that opens a section, a feature or a person by typing its name |
+| Availability | On Uptime: time up over time measured per window (24 hours to 365 days, this and last month), time with no check shown as not measured and planned maintenance left out |
+| Availability target | One per environment over a rolling 30 days; with it, the error budget (downtime it allows), what is spent and left, and the burn rate |

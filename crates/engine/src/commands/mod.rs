@@ -26,8 +26,8 @@ pub mod deploys;
 pub mod explore;
 pub mod flags;
 pub mod goals;
-pub mod maintenance;
 pub mod goto;
+pub mod maintenance;
 pub mod releases;
 pub mod tickets;
 pub mod uptime;
@@ -134,6 +134,9 @@ pub const REGISTRY: &[Spec] = &[
     // Uptime history (#559).
     spec::<uptime::GetDays>(),
     spec::<uptime::GetIncidents>(),
+    // Availability windows and the SLO (#560).
+    spec::<uptime::GetReport>(),
+    spec::<uptime::SetTarget>(),
     // Planned maintenance windows (#563).
     spec::<maintenance::List>(),
     spec::<maintenance::Schedule>(),

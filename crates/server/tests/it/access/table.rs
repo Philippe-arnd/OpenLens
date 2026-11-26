@@ -109,6 +109,10 @@ pub(super) const ROUTES: &[(&str, &str, Access)] = &[
         Api,
     ),
     ("GET", "/api/projects/{project}/uptime", Api),
+    ("GET", "/api/projects/{project}/uptime/days", Api),
+    ("GET", "/api/projects/{project}/incidents", Api),
+    ("GET", "/api/projects/{project}/uptime/report", Api),
+    ("PUT", "/api/projects/{project}/uptime/target", Api),
     ("GET", "/api/projects/{project}/alerts", Api),
     ("PUT", "/api/projects/{project}/alerts", Api),
     ("POST", "/api/projects/{project}/alerts/test", Api),
@@ -228,6 +232,7 @@ pub(super) const ROUTES: &[(&str, &str, Access)] = &[
     ("POST", "/p/{project}/settings/alerts/test", Write),
     ("GET", "/p/{project}/uptime", Read),
     ("POST", "/p/{project}/uptime/maintenance", Write),
+    ("POST", "/p/{project}/uptime/target", Write),
     (
         "POST",
         "/p/{project}/uptime/maintenance/{window}/{action}",

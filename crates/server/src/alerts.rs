@@ -194,6 +194,16 @@ pub(crate) async fn tick(state: &AppState, minute: u64) {
             ))
             .await;
         }
+        // Error budgets of the environments with a target (#560).
+        if minute % 5 == 2 {
+            Box::pin(openlens_engine::slo::alert_pass(
+                state,
+                &p,
+                &s,
+                chrono::Utc::now(),
+            ))
+            .await;
+        }
         Box::pin(cmd::flush_queue(state, &p.id, &s)).await;
         if s.traffic
             && minute.is_multiple_of(5)

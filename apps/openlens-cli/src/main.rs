@@ -608,6 +608,33 @@ fn run(cli: Cli) -> Result<bool, String> {
             out(&v);
             Ok(status == 200)
         }
+        Command::Availability {
+            project,
+            env,
+            target,
+            clear,
+        } => {
+            let (status, v) = if target.is_some() || *clear {
+                let body = serde_json::json!({ "environment": env, "target": target });
+                client()?.call(
+                    "PUT",
+                    &format!("/api/projects/{project}/uptime/target"),
+                    Some(Body::Json(body)),
+                )?
+            } else {
+                let q = env
+                    .as_ref()
+                    .map(|e| format!("?env={}", query_value(e)))
+                    .unwrap_or_default();
+                client()?.call(
+                    "GET",
+                    &format!("/api/projects/{project}/uptime/report{q}"),
+                    None,
+                )?
+            };
+            out(&v);
+            Ok(status == 200)
+        }
         Command::Incidents {
             project,
             before,
