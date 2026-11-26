@@ -8,6 +8,8 @@
 mod convert;
 mod lint;
 mod mcp;
+#[cfg(test)]
+mod mcp_parity;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
