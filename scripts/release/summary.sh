@@ -42,7 +42,10 @@ else
 fi
 pages=$(gh api "repos/$repo/pages" -q .html_url 2>/dev/null || true)
 if [ -n "$pages" ]; then
-  if curl -fsSL --max-time 20 "$pages" | grep -q "$v"; then
+  # Read the page first: `curl | grep -q` fails under pipefail when grep
+  # stops reading early (curl exit 23), which reported a good site as failed.
+  page=$(curl -fsSL --max-time 20 "$pages" || true)
+  if grep -q "$v" <<< "$page"; then
     row "Site" "✅ ok" "$pages names $v"
   else
     row "Site" "❌ failed" "$pages does not name $v yet"
@@ -50,7 +53,7 @@ if [ -n "$pages" ]; then
   # The images the site serves are the ones on main (#439): Pages builds
   # from main, after the screenshots PR of the release merges. A warning,
   # not a failure: Pages and its CDN can lag a few minutes.
-  shots=$(curl -fsSL --max-time 20 "$pages" | grep -o 'img/[A-Za-z0-9_.-]*\.png' | sort -u || true)
+  shots=$(grep -o 'img/[A-Za-z0-9_.-]*\.png' <<< "$page" | sort -u || true)
   stale=""
   for img in $shots; do
     served=$(curl -fsSL --max-time 20 "${pages%/}/$img" | sha256sum | cut -c1-64)
