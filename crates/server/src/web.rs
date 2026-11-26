@@ -841,29 +841,13 @@ async fn projects_page(
             openlens_ui::message("Oops", "The metadata store is unavailable."),
         );
     };
-    let since = (chrono::Utc::now() - chrono::Duration::days(7)).format("%Y-%m-%d");
-    let sql = format!(
-        "SELECT count(*) AS n, CAST(max(timestamp) AS VARCHAR) AS last FROM events WHERE date >= '{since}'"
-    );
     let mut list = Vec::new();
     for p in ps.into_iter().filter(|p| viewer.can_see(&p.id)) {
-        let row = state
-            .query
-            .sql(&p.id, &sql)
-            .await
-            .ok()
-            .and_then(|r| r.rows.into_iter().next());
+        let (recent_events, last_event) =
+            openlens_engine::reads::recent_activity(&state.query, &p.id).await;
         list.push(openlens_ui::ProjectSummary {
-            recent_events: row
-                .as_ref()
-                .and_then(|r| r.get("n"))
-                .and_then(serde_json::Value::as_i64)
-                .unwrap_or(0),
-            last_event: row
-                .as_ref()
-                .and_then(|r| r.get("last"))
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned),
+            recent_events,
+            last_event,
             id: p.id,
             name: p.name,
             timezone: p.timezone,

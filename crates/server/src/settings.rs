@@ -301,41 +301,26 @@ async fn page_at(
     };
     let app_url = state.meta.project_setting(&p.id, "app_url").ok().flatten();
     let detected = crate::icon::detected_origin(&state, &p.id).await;
-    let sql = "SELECT count(*) AS events, \
-               count(CASE WHEN event = '$identify' THEN 1 END) AS identified, \
-               count(role) AS with_role, count(DISTINCT release) AS releases \
-               FROM events WHERE timestamp >= now() - INTERVAL '1 day'";
-    let row = state
-        .query
-        .sql(&p.id, sql)
-        .await
-        .ok()
-        .and_then(|r| r.rows.into_iter().next());
-    let n = |k: &str| {
-        row.as_ref()
-            .and_then(|r| r.get(k))
-            .and_then(serde_json::Value::as_i64)
-            .unwrap_or(0)
-    };
+    let counts = openlens_engine::reads::day_counts(&state.query, &p.id).await;
     let checks = [
         (
             "Events",
-            n("events"),
+            counts.events,
             "add the script tag or an SDK to the app",
         ),
         (
             "Logins (identify)",
-            n("identified"),
+            counts.identified,
             "call identify(id, { role }) after sign-in",
         ),
         (
             "Events with a role",
-            n("with_role"),
+            counts.with_role,
             "pass the user's role to identify",
         ),
         (
             "Releases",
-            n("releases"),
+            counts.releases,
             "set data-release (or release) to the app's version",
         ),
     ];
@@ -447,8 +432,8 @@ async fn page_at(
                 setup: setup_steps(
                     &state,
                     &p.id,
-                    n("events") > 0,
-                    n("releases") > 0,
+                    counts.events > 0,
+                    counts.releases > 0,
                     detected.is_some(),
                 ),
                 alerts: {
