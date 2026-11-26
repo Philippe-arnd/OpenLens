@@ -310,6 +310,9 @@ function idleMarks(gs: readonly Gap[], sc: Scale, marks: HTMLElement, jump: (t: 
   });
 }
 
+/** Session events this long before the recording are not in it. */
+const EARLIER_MS = 10_000;
+
 /** Markers on the seek bar, a legend, and the list of events. */
 async function timeline(
   url: string,
@@ -326,6 +329,10 @@ async function timeline(
   const seen = new Set<string>();
   const out: { t: number; li: HTMLLIElement }[] = [];
   for (const m of data.events ?? []) {
+    // A recording that starts mid-session (sent after an error or a rage
+    // click, #327) has none of the session's earlier events. The page view
+    // a few seconds before the recorder loaded still shows, at the start.
+    if (m.ms < first - EARLIER_MS) continue;
     const t = Math.max(0, Math.min(sc.total, m.ms - first));
     const k = kindOf(m);
     seen.add(k);

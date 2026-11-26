@@ -196,6 +196,16 @@ function trackVitals(report) {
   addEventListener("pagehide", () => flush2(true), true);
 }
 
+// src/sampling.ts
+function decide(prev, sid, rate2, rand) {
+  if (prev && prev.sid === sid) return prev;
+  if (rate2 === void 0) return void 0;
+  return { sid, on: rand() < rate2 };
+}
+function validRate(v) {
+  return typeof v === "number" && v >= 0 && v <= 1 ? v : void 0;
+}
+
 // src/unload.ts
 var KEY = "openlens_unsent";
 var UNLOAD_BUDGET = 6e4;
@@ -288,6 +298,7 @@ var timer;
 var lastPath = "";
 var activeFlags = [];
 var activeVariants = {};
+var replayRate;
 var activeSurveys = [];
 var surveyOpen = false;
 function uuid() {
@@ -382,7 +393,7 @@ function base() {
   return p;
 }
 function track(event, props) {
-  var _a;
+  var _a, _b, _c;
   if (!cfg || consent === "denied") return;
   const now = Date.now();
   refresh();
@@ -398,6 +409,11 @@ function track(event, props) {
   });
   if (queue.length > MAX_QUEUE) queue = queue.slice(-MAX_QUEUE);
   if (queue.length >= 20) flush();
+  if (event === "$error" || (props == null ? void 0 : props.$rage) === true) {
+    state.rs = { sid: state.sid, on: true };
+    save();
+    (_c = (_b = window.__openlensReplay) == null ? void 0 : _b.wake) == null ? void 0 : _c.call(_b);
+  }
   maybeSurvey(event);
 }
 function maybeSurvey(event) {
@@ -448,11 +464,20 @@ function loadFlags() {
     if (v !== void 0 && v !== null && v !== "") q.set(`p.${k.toLowerCase()}`, String(v).slice(0, 100));
   }
   origFetch(`${cfg.host.replace(/\/$/, "")}/flags?${q}`).then((r) => r.ok ? r.json() : null).then((j) => {
-    var _a2;
+    var _a2, _b2, _c, _d;
     if (Array.isArray(j == null ? void 0 : j.surveys)) activeSurveys = j.surveys;
+    const rate2 = j ? (_a2 = validRate(j.replay_rate)) != null ? _a2 : 1 : void 0;
+    if (rate2 !== void 0) {
+      replayRate = rate2;
+      try {
+        store().setItem(`${storageKey()}_rate`, String(rate2));
+      } catch {
+      }
+      (_c = (_b2 = window.__openlensReplay) == null ? void 0 : _b2.wake) == null ? void 0 : _c.call(_b2);
+    }
     if (j == null ? void 0 : j.flags) {
       activeFlags = j.flags;
-      activeVariants = (_a2 = j.variants) != null ? _a2 : {};
+      activeVariants = (_d = j.variants) != null ? _d : {};
       try {
         store().setItem(`${storageKey()}_flags`, JSON.stringify(activeFlags));
         store().setItem(`${storageKey()}_variants`, JSON.stringify(activeVariants));
@@ -484,9 +509,11 @@ function reset() {
   save();
 }
 function setConsent(granted) {
+  var _a, _b;
   consent = granted ? "granted" : "denied";
   if (!granted) {
     queue = [];
+    (_b = (_a = window.__openlensReplay) == null ? void 0 : _a.wake) == null ? void 0 : _b.call(_a);
     if (cfg && !cfg.cookieless) {
       try {
         clearParked(localStorage);
@@ -748,7 +775,7 @@ function autocapture() {
   };
 }
 function init(config) {
-  var _a, _b;
+  var _a, _b, _c;
   if (cfg || typeof window === "undefined") return;
   if (!config.host || !config.key) return;
   const gpc = navigator.globalPrivacyControl === true;
@@ -760,6 +787,7 @@ function init(config) {
   try {
     activeFlags = JSON.parse(store().getItem(`${storageKey()}_flags`) || "[]");
     activeVariants = JSON.parse(store().getItem(`${storageKey()}_variants`) || "{}");
+    replayRate = validRate(Number((_c = store().getItem(`${storageKey()}_rate`)) != null ? _c : NaN));
   } catch {
     activeFlags = [];
     activeVariants = {};
@@ -799,6 +827,15 @@ function startReplay() {
       refresh();
       touchSession(Date.now());
       save();
+    },
+    sampled: () => {
+      refresh();
+      const d = decide(state.rs, state.sid, replayRate, Math.random);
+      if (d && d !== state.rs) {
+        state.rs = d;
+        save();
+      }
+      return d == null ? void 0 : d.on;
     }
   };
   const load2 = () => {

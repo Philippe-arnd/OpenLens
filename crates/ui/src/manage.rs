@@ -315,6 +315,7 @@ pub fn replays(
     view: openlens_replay::View,
     tz: &str,
     comments: &[(String, i64)],
+    rate: &openlens_engine::ReplayRate,
 ) -> Markup {
     let min_minutes = view.min_active_secs / 60;
     layout(
@@ -328,6 +329,7 @@ pub fn replays(
                         "Recorded sessions, " (if view.by_active { "most active first" } else { "most recent first" }) ". Inputs are always masked."
                         @if let Some(w) = who { " Only " span.mono { (w) } ". " a href={ "/p/" (p.id) "/replays" } { "Show everyone" } }
                     }
+                    p.muted { (rate_reason(rate)) }
                 }
             }
             form.filters method="get" action={ "/p/" (p.id) "/replays" } aria-label="Sort and filter" {
@@ -373,6 +375,33 @@ pub fn replays(
             }
         },
     )
+}
+
+/// Why sessions are recorded at the current rate (#327, D-035).
+fn rate_reason(r: &openlens_engine::ReplayRate) -> String {
+    let budget = openlens_engine::replay_rate::DAILY_BUDGET;
+    let triggers = "plus every session with an error or a rage click";
+    if r.rate < 1.0 {
+        let pct = r.rate * 100.0;
+        let share = if pct >= 10.0 {
+            format!("{pct:.0}")
+        } else {
+            format!("{pct:.1}")
+        };
+        format!(
+            "{budget} recordings a day budget: {share} % of yesterday's {} active users, {triggers}.",
+            crate::compact(r.active_users)
+        )
+    } else if r.day.is_empty() {
+        format!(
+            "Every session is recorded until a day of activity is counted. Above {budget} active users a day, a share is recorded, {triggers}."
+        )
+    } else {
+        format!(
+            "Every session is recorded: yesterday's {} active users fit the {budget} recordings a day budget. Above it, a share is recorded, {triggers}.",
+            crate::compact(r.active_users)
+        )
+    }
 }
 
 /// The replay player page. The player script (rrweb Replayer, MIT) is the

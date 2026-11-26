@@ -10,6 +10,7 @@
 import { detectEnvironment } from "./env";
 import { trackVitals } from "./vitals";
 import type { Bridge } from "./replay";
+import { type Decision, decide, validRate } from "./sampling";
 import { type Sender, type Store, UnloadBudget, clearParked, park, takeParked } from "./unload";
 
 declare global {
@@ -58,6 +59,9 @@ interface State {
   dims: Dimensions;
   sid: string;
   last: number;
+  /** Is this session recorded for replay (#327)? Drawn once per session,
+   * shared by its tabs. */
+  rs?: Decision;
 }
 
 const VERSION = "0.1.0";
@@ -72,6 +76,8 @@ let timer: ReturnType<typeof setInterval> | undefined;
 let lastPath = "";
 let activeFlags: string[] = [];
 let activeVariants: Record<string, string> = {};
+/** Share of sessions recorded from their start, from `/flags` (#327). */
+let replayRate: number | undefined;
 
 /** A micro-survey the server says this user may be asked (see survey.ts). */
 export interface SurveyDef {
@@ -215,6 +221,13 @@ export function track(event: string, props?: Props): void {
   });
   if (queue.length > MAX_QUEUE) queue = queue.slice(-MAX_QUEUE);
   if (queue.length >= 20) flush();
+  // An error or a rage click: the recorder sends what it buffered and
+  // records the rest of the session (#327).
+  if (event === "$error" || props?.$rage === true) {
+    state.rs = { sid: state.sid, on: true };
+    save();
+    window.__openlensReplay?.wake?.();
+  }
   maybeSurvey(event);
 }
 
@@ -275,8 +288,19 @@ function loadFlags(): void {
   }
   origFetch(`${cfg.host.replace(/\/$/, "")}/flags?${q}`)
     .then((r) => (r.ok ? r.json() : null))
-    .then((j: { flags?: string[]; variants?: Record<string, string>; surveys?: SurveyDef[] } | null) => {
+    .then((j: { flags?: string[]; variants?: Record<string, string>; surveys?: SurveyDef[]; replay_rate?: unknown } | null) => {
       if (Array.isArray(j?.surveys)) activeSurveys = j.surveys;
+      // A server without sampling (no `replay_rate`) records every session.
+      const rate = j ? (validRate(j.replay_rate) ?? 1) : undefined;
+      if (rate !== undefined) {
+        replayRate = rate;
+        try {
+          store().setItem(`${storageKey()}_rate`, String(rate));
+        } catch {
+          // memory only
+        }
+        window.__openlensReplay?.wake?.();
+      }
       if (j?.flags) {
         activeFlags = j.flags;
         activeVariants = j.variants ?? {};
@@ -327,6 +351,8 @@ export function setConsent(granted: boolean): void {
   consent = granted ? "granted" : "denied";
   if (!granted) {
     queue = [];
+    // The recorder empties its buffer (#327).
+    window.__openlensReplay?.wake?.();
     // Forget what was parked for the next visit (#433). Not through
     // deviceStore(): consent is already withdrawn here.
     if (cfg && !cfg.cookieless) {
@@ -658,6 +684,7 @@ export function init(config: Config): void {
   try {
     activeFlags = JSON.parse(store().getItem(`${storageKey()}_flags`) || "[]") as string[];
     activeVariants = JSON.parse(store().getItem(`${storageKey()}_variants`) || "{}") as Record<string, string>;
+    replayRate = validRate(Number(store().getItem(`${storageKey()}_rate`) ?? NaN));
   } catch {
     activeFlags = [];
     activeVariants = {};
@@ -696,6 +723,15 @@ function startReplay(): void {
       refresh();
       touchSession(Date.now());
       save();
+    },
+    sampled: () => {
+      refresh();
+      const d = decide(state.rs, state.sid, replayRate, Math.random);
+      if (d && d !== state.rs) {
+        state.rs = d;
+        save();
+      }
+      return d?.on;
     },
   };
   const load = () => {

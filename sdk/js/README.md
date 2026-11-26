@@ -73,6 +73,7 @@ Flags are fetched at init and after `identify`. The active flags travel with eve
 - `consent: "pending"` holds events until `setConsent(true)` is called.
 - `data-openlens-ignore`: nothing in that subtree is captured.
 - **Session replay** is on by default. Once the page is idle and consent is granted, the recorder (`/r.js`, rrweb under MIT) loads from your OpenLens server.
+- Not every session is recorded: the server sets a rate for about 300 recordings a day. A session left out keeps its last minute or two in memory and sends it only after an error or a rage click, then records the rest of the session.
 - Every input value and every text is masked in replays; `data-openlens-unmask` shows the text of a subtree (menus, labels).
 - `data-openlens-mask` masks text, both in replays and in the `$text`/`$href` of clicks. Outside `data-feature`, a click text with an `@` or more than 6 digits in a row is not sent.
 - `data-openlens-block` subtrees are not recorded at all.
