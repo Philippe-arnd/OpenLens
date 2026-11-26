@@ -192,6 +192,9 @@ pub struct RawSummary {
     pub environments: Vec<String>,
 }
 
+/// The empty directory a project with no stored events is read from.
+const EMPTY_DIR: &str = "query-empty";
+
 /// Runs read-only SQL against a data root.
 #[derive(Debug, Clone)]
 pub struct QueryEngine {
@@ -493,9 +496,15 @@ impl QueryEngine {
         ctx: &SessionContext,
         project: &str,
     ) -> Result<Arc<ListingTable>, QueryError> {
-        let dir = openlens_storage::project_dir(&self.root, project)
+        let mut dir = openlens_storage::project_dir(&self.root, project)
             .map_err(|e| QueryError::Storage(e.to_string()))?;
-        std::fs::create_dir_all(&dir).map_err(|e| QueryError::Storage(e.to_string()))?;
+        // A project with nothing stored reads an empty directory shared by
+        // all, never its own: a query still running when the project is
+        // deleted must not bring its directory back.
+        if !dir.is_dir() {
+            dir = self.root.join(EMPTY_DIR);
+            std::fs::create_dir_all(&dir).map_err(|e| QueryError::Storage(e.to_string()))?;
+        }
         let url = ListingTableUrl::parse(format!("{}/", dir.display()))
             .map_err(|e| QueryError::Storage(e.to_string()))?;
         let options = ListingOptions::new(Arc::new(ParquetFormat::default()))
