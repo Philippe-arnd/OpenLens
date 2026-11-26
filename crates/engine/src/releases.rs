@@ -110,6 +110,13 @@ pub struct Release {
     pub deployed_at: Option<String>,
     /// The status of its latest deploy in the environment (deploy hook).
     pub deploy: Option<Status>,
+    /// Healthy, regressed or inconclusive against the release before it
+    /// (#522, D-067); none until it has enough traffic or is a day old,
+    /// and for the environments not judged (`releases.list` judges
+    /// production, or the one environment asked for).
+    pub verdict: Option<crate::verdict::Verdict>,
+    /// Why, in plain words (also why there is no verdict yet).
+    pub reasons: Vec<String>,
 }
 
 /// The releases of a project.
@@ -386,6 +393,8 @@ pub async fn releases(
                 staged_as: promo.map(|p| p.1.clone()),
                 deployed_at: None,
                 deploy: None,
+                verdict: None,
+                reasons: Vec::new(),
             }
         })
         .collect();
@@ -508,6 +517,8 @@ fn with_deploys(
             staged_as: None,
             deployed_at: (st == Status::Succeeded).then_some(when),
             deploy: Some(st),
+            verdict: None,
+            reasons: Vec::new(),
         });
     }
     rows.reverse();
@@ -626,6 +637,8 @@ mod tests {
             staged_as: None,
             deployed_at: None,
             deploy: None,
+            verdict: None,
+            reasons: Vec::new(),
         };
         let dep = |release: Option<&str>, status: Status, at: i64| Deploy {
             environment: PRODUCTION.into(),

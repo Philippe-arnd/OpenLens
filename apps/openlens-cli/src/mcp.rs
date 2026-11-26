@@ -201,8 +201,13 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "releases",
-                description: "The app's releases per environment over 90 days: state (rolling out, live at 95 % or more of the latest day's users, superseded by a newer release, rolled back when an older release took the majority back), share of the latest day, first and last seen, users, events, and for production the time in staging (from the same name or build fingerprint first seen in staging). With the deploy hook: each release's deploy time and last deploy status, the deploys recorded, and releases with no traffic whose deploy failed ('failed'), was rolled back, or is under way ('deploying'). Optional env for one environment.",
+                description: "The app's releases per environment over 90 days: state (rolling out, live at 95 % or more of the latest day's users, superseded by a newer release, rolled back when an older release took the majority back), share of the latest day, first and last seen, users, events, and for production the time in staging (from the same name or build fingerprint first seen in staging). With the deploy hook: each release's deploy time and last deploy status, the deploys recorded, and releases with no traffic whose deploy failed ('failed'), was rolled back, or is under way ('deploying'). Each release of production (or of env when given) also has its verdict against the release before it: healthy, regressed or inconclusive (null until 30 sessions and 8 users or 24 h), with its reasons; `release_report` gives the whole comparison. Optional env for one environment.",
                 input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"}}))}),
+            },
+            ToolSpec {
+                name: "release_report",
+                description: "One release compared with the release before it in its environment (production unless env): the verdict (healthy, regressed or inconclusive; null until 30 sessions and 8 users or 24 h) and its reasons, both releases' numbers, and every check with its outcome (worse, better, same, too_few, info): sessions with errors, bounce rate, sessions with a completed task, sessions per user, error groups first seen in the release (2 users or more), LCP/INP/CLS p75 ratings, success rate of each feature with a success event, goal guardrails (breached by this release and not the one before) and goals (shown, not judged). Read it after each deploy and act on a regressed verdict.",
+                input_schema: json!({"type":"object","properties":with(json!({"release":{"type":"string"},"env":{"type":"string"}})),"required":["release"]}),
             },
             ToolSpec {
                 name: "deploy_hook",
@@ -449,6 +454,32 @@ impl Tools for OpenLensTools {
                         })
                         .collect();
                     path.push_str(&format!("?env={enc}"));
+                }
+                let (st, v) = c.call("GET", &path, None)?;
+                ok_or(st, v)
+            }
+            "release_report" => {
+                let enc = |v: &str| -> String {
+                    v.bytes()
+                        .map(|b| {
+                            if b.is_ascii_alphanumeric() || b"-_.".contains(&b) {
+                                (b as char).to_string()
+                            } else {
+                                format!("%{b:02X}")
+                            }
+                        })
+                        .collect()
+                };
+                let Some(release) = s(args, "release") else {
+                    return Err("release is required".into());
+                };
+                let mut path = format!(
+                    "/api/projects/{}/releases/{}/report",
+                    project(args),
+                    enc(&release)
+                );
+                if let Some(e) = s(args, "env") {
+                    path.push_str(&format!("?env={}", enc(&e)));
                 }
                 let (st, v) = c.call("GET", &path, None)?;
                 ok_or(st, v)
