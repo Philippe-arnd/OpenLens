@@ -727,6 +727,8 @@ async fn the_settings_forms_post_the_fields_their_handlers_read() {
     assert_eq!(
         names(&alerts),
         [
+            "budget_burn",
+            "budget_spent",
             "cert",
             "down",
             "down_wait",
