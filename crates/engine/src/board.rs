@@ -145,20 +145,6 @@ pub async fn board_reusing(
         now,
     )
     .await?;
-    // Most blocks read the same closed days of the same rollups: they are
-    // read once, into memory, for this board's queries (#452, D-072).
-    let held = hold_rollups(
-        q,
-        project,
-        &[
-            ("person_day", &rolled_people),
-            ("session_day", &rolled_sessions),
-            ("session_feature_day", &rolled_features),
-            ("success_day", &rolled_successes),
-        ],
-    )
-    .await;
-    let q = &held;
     // A date range or a past release says what it read (D-061).
     let costed = match &win {
         Some(w) if !reuse && matches!(f.window, Window::Range { .. } | Window::Since { .. }) => {
@@ -595,43 +581,6 @@ pub async fn board_reusing(
     b.readiness = readiness;
     b.total_events = i64::try_from(stored.rows).unwrap_or(i64::MAX);
     Ok(b)
-}
-
-/// The share of the query pool (D-033) the rollup rows one board holds
-/// in memory may take together (D-072).
-const HELD_SHARE: usize = 4;
-
-/// `q`, with the rows of the closed `days` of each rollup table held in
-/// memory (#452, D-072): the board's environment, every column. Each
-/// block reads its days of a rollup (`date IN (…)`, a subset of its
-/// table's `days`, D-040) and filters the environment (`environment =
-/// $env`, [`board_people::split_span`]), so it finds the same rows in
-/// memory as in the files. A table that does not fit is read from the
-/// files by every query, as before.
-async fn hold_rollups(
-    q: &QueryEngine,
-    project: &str,
-    tables: &[(&'static str, &Vec<chrono::NaiveDate>)],
-) -> QueryEngine {
-    let sql: Vec<(&'static str, String)> = tables
-        .iter()
-        .filter(|(_, days)| !days.is_empty())
-        .map(|(name, days)| {
-            let list = days
-                .iter()
-                .map(|d| format!("'{}'", d.format("%Y-%m-%d")))
-                .collect::<Vec<_>>()
-                .join(", ");
-            (
-                *name,
-                format!("SELECT * FROM {name} WHERE date IN ({list}) AND environment = $env"),
-            )
-        })
-        .collect();
-    if sql.is_empty() {
-        return q.clone();
-    }
-    q.holding(project, sql, q.memory() / HELD_SHARE).await.0
 }
 
 /// The sessions block from its row.
