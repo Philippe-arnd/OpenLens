@@ -20,6 +20,7 @@ mod allowlist;
 mod auth;
 mod environments;
 mod features;
+mod hooks;
 mod ingest;
 mod manage;
 mod pages;
