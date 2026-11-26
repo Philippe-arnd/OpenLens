@@ -96,7 +96,7 @@ pub(super) fn active_users(pid: &str, f: &Filters, b: &Board, marks: &[Mark]) ->
 }
 
 /// A share as a bar and its number (the bar's width is an SVG attribute).
-pub(super) fn barcell(frac: f64) -> Markup {
+pub(crate) fn barcell(frac: f64) -> Markup {
     bar_with(frac, &pct(frac))
 }
 
