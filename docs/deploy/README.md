@@ -67,7 +67,7 @@ None of these is needed. Each feature stays off until its variables are set.
 | --- | --- |
 | Where the server listens (default `0.0.0.0:8686`) and keeps its data (default `./data`; `/data` in the image) | `OPENLENS_ADDR`, `OPENLENS_DATA_DIR` |
 | Choose the admin token yourself, instead of a generated one and a one-hour owner link in the first log (#342) | `OPENLENS_ADMIN_TOKEN` |
-| Turn off email + password sign-in (#428), for installs that sign in with SSO only. On by default: after the first sign-in with the token, *My profile* creates your admin account (email + password), and the login page leads with it. **The admin token always works** on the login page (*Use the admin token*): it is the way back in after a lost password. An admin can also reset a member's password from *Team* (a one-time link) | `OPENLENS_PASSWORD_LOGIN=off` |
+| Turn off email + password sign-in (#428), for installs that sign in with SSO only. On by default: after the first sign-in with the token, *My profile* creates your admin account (email + password), and the login page leads with it. **The admin token always works** on the login page (*Use the admin token*): it is the way back in after a lost password. An admin can also reset a member's password from *Team* (a one-time link). Each member can add an authenticator app as a second factor on *My profile → Sign-in* (#440); it is sealed with the same key as the S3 secret, so a store restored without that key loses the second factors | `OPENLENS_PASSWORD_LOGIN=off` |
 | A project `default` with this capture key, created at start when there is no project yet (CI, demos, templates) | `OPENLENS_PROJECT_KEY` |
 | *Create ticket* posts the drafted issue to GitHub (else it is stored encrypted from the ticket page, or you copy the Markdown) | `OPENLENS_GITHUB_TOKEN` |
 | Single sign-on (OpenID Connect). Register `<public url>/oidc/callback` as the redirect URI. Only invited emails (Team) can sign in. | `OPENLENS_OIDC_ISSUER`, `OPENLENS_OIDC_CLIENT_ID`, `OPENLENS_OIDC_CLIENT_SECRET` |
@@ -90,3 +90,14 @@ Guide: https://<your-domain>/agents.md — admin token: <token>.
 ```
 
 The agent creates the project, wires the SDK with roles, writes the feature map and sends you a login link.
+
+## Environments
+
+Every event carries an environment, and the board shows production by default.
+
+- **Detected:** the browser SDK reads the page's host. `localhost`, `*.local` and `*.test` are `development`. A host with `staging`, `stage` or `stg` is `staging`. `preview`, `review`, `pr-<n>`, `*.vercel.app` and `*.netlify.app` are `preview`.
+- **Unknown, not production:** a host that no pattern and no rule matches is stored as `unknown` and kept out of production numbers (D-034). `openlens-cli verify` lists these hosts.
+- **Say which one it is:** `openlens-cli env rule kanban-test.example.com staging`, or `*.preview.example.com preview`. `ignore` drops a host's events entirely, for example your developers' machines. The rule applies to the next events, with no change to the app. `openlens-cli env list` shows the hosts per environment, and agents use the MCP `environments` tool.
+- **Set in the app:** `init({ environment })`, or the server SDKs' option or `OPENLENS_ENVIRONMENT`, always wins over the rules.
+
+After an upgrade, every host that sent production events in the last 30 days gets a `production` rule, so nothing moves.

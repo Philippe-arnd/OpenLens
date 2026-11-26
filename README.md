@@ -5,6 +5,7 @@
 <p align="center"><b>Product analytics as a method, not a toolbox.<br>Your agents wire it in. Your PM opens a board that already says where the value is.</b></p>
 
 <p align="center">
+  <a href="https://philippe-arnd.github.io/OpenLens/demo/"><b>See the demo</b></a> (read-only, nothing to install) ·
   <a href="#-try-it-in-two-minutes"><b>Try it</b></a> ·
   <a href="#-what-the-board-answers">The board</a> ·
   <a href="#-zero-human-setup">Agents</a> ·
@@ -85,7 +86,7 @@ OpenLens is built for apps that agents write and maintain. Every server serves i
 
 From then on, agents keep the map current. Over **MCP** (`openlens-cli mcp`) they can ask:
 - `insights`, `kpi_report` (by role, account, plan, page or feature), `user_timeline`;
-- `errors`, `digest`, read-only `sql`, `flags`, `surveys`.
+- `errors`, `vitals`, `digest`, read-only `sql`, `flags`, `surveys`.
 
 ## 🔌 Wire an app
 

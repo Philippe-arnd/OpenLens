@@ -25,6 +25,7 @@ Screenshots and observation notes stay in the gitignored `plan/` folder. They ar
 | 2026-11-21 | Public feature lists and pricing pages of hosted product-analytics suites | which capabilities the category offers, described in our own words | target-app-parity.md |
 | 2026-11-21 | rrweb README and event format (MIT; used as a dependency, not reimplemented) | recorder and replayer options, masking options | sdk/js replay, player |
 | 2026-11-21 | web.dev public pages on Core Web Vitals | LCP, INP, CLS, FCP, TTFB thresholds (good / needs improvement / poor) | sdk/js vitals, kpis.md |
+| 2026-11-26 | web.dev public guides on optimising LCP, INP and CLS | LCP sub-parts (first byte, load delay, load time, render delay), the three parts of an interaction, common causes of layout shifts and their fixes, rewritten in our own words | engine vitals.rs, kpis.md |
 | 2026-11-21 | W3C/WHATWG specs: Beacon, Fetch keepalive, History API, Page Visibility, Performance Timeline | delivery on page hide, SPA route detection | sdk/js |
 | 2026-11-21 | Apache Parquet and Arrow specs, DataFusion user guide | storage layout, SQL surface, listing tables | storage, query |
 | 2026-11-21 | MCP specification (public) | stdio transport, tools list and call shapes | openlens-cli mcp |
@@ -48,3 +49,4 @@ A pass over every mention of another product in the repository:
 - **Third-party code shipped:** rrweb (MIT) in the recorder (`/r.js`) and the player (`/assets/player.js`, `/assets/player.css`). Both are recorded in `ATTRIBUTION.md`.
 
 | 2026-11-22 | Public feature pages of five hosted and self-hosted product and web analytics suites | capabilities common to the category: path flows, world map and devices, acquisition and UTM, alerts and annotations, live view, share links, privacy tools, revenue, form analytics, importers | M11 issues #224–#233, target-app-parity.md |
+| 2026-11-26 | RFC 4226 (HOTP), RFC 6238 (TOTP) and its Appendix B test vectors, RFC 4648 (base32), the public "Key Uri Format" description of `otpauth://` links | one-time codes, the drift window, how authenticator apps read a key from a QR code | server totp.rs (#440) |

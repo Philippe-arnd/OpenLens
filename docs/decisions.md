@@ -230,3 +230,18 @@ Append-only. Each entry: id, date, decision, why, consequences.
 **Why:** with a fixed 768 MiB pool, memory beyond 1 GiB never helped the board (it failed at 2 M realistic events with 7 GB free), and on a 512 MiB container the pool was larger than the container, so the kernel killed the process before DataFusion could spill. A rollup pass running beside a board split the same pool and made the board fail at a third of its usual size. Following the container keeps D-014's promise (no tuning variable) while making "give it more memory" actually work.
 
 **Consequences:** no new variable; if the detection is wrong, the detection is fixed. Under the Helm chart's default 1 GiB limit, the pool is 768 MiB as before. The [architecture challenge](https://github.com/Philippe-arnd/OpenLens/issues/442) measures the effect with the realistic profile of `xtask bench-gen` (#443).
+
+## D-034 (2026-11-25, agent for #410) Environments: host rules on the server, and an unknown host is not production
+
+**Decision:** amends D-012. A project holds **host rules** (an exact host or `*.suffix`, mapped to an environment or to `ignore`, at most 200), stored as a project setting and applied at ingestion to the host of the event's page address. The precedence order:
+1. An environment the app set itself (it differs from what the SDK's hostname patterns give for that host) wins.
+2. A host rule. `ignore` drops the event.
+3. A hostname pattern of D-012.
+4. Otherwise `unknown`, not `production`. It is kept apart and counted in no production number.
+
+The browser SDK's patterns are ported to Rust (`openlens_event::detected_environment`), so the server tells a detected environment from a chosen one without an SDK change. Events with no page address (server SDKs) keep what they sent. Rules apply to new events only. **On upgrade**, once per project and in the background, every host that sent production events in the last 30 days gets a `production` rule. Until that has run, unclassified hosts keep what they sent.
+
+**Why:** a staging host that no pattern matched (`kanban-test.example.com`, a preview URL, a bare IP) was counted as production and skewed the real numbers. The fix is one place to say which host is which, with no redeploy of the app. A guessed `production` should not count.
+
+**Consequences:** a behaviour change for new hosts. An app that sets `init({ environment: "production" })` explicitly on a host no pattern matches looks the same as a guess, so a new host of that app is `unknown` until it gets a rule. Hosts seen before the upgrade are covered by the seed. No new setting or variable: the rules are project data, changed through `PATCH /api/projects/{id}`, `openlens-cli env` and the MCP `environments` tool. Re-labelling past days, an allow-list of hosts, per-environment uptime and alert levels, aliases and the settings card are follow-ups of #410.
+

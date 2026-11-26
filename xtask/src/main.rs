@@ -5,6 +5,8 @@
 //! - `cargo xtask demo <data-dir>`: write a realistic synthetic app (300
 //!   users, planted patterns) into the `default` project of a data dir, to
 //!   look at the board: `OPENLENS_DATA_DIR=<data-dir> cargo run -p openlens`.
+//! - `cargo xtask demo-site <dir> [--bin PATH]`: the same data set as a
+//!   static, read-only site crawled from the real server (#304).
 //! - `cargo xtask bench <url> <key>`: ingestion load test (docs/benchmarks.md).
 //! - `cargo xtask bench-gen <data-dir> [--events N] [--users N] [--profile realistic]`: a large
 //!   synthetic app (63 M events over 90 days by default) for scale runs (#321).
@@ -21,6 +23,7 @@
 mod bench;
 mod bench_gen;
 mod crash;
+mod demo_site;
 mod env_docs;
 mod file_length;
 mod layers;
@@ -34,6 +37,7 @@ fn main() -> ExitCode {
         "ci" => ci(),
         "layers" => check_layers(),
         "demo" => demo(std::env::args().nth(2)),
+        "demo-site" => demo_site::demo_site(&std::env::args().skip(2).collect::<Vec<_>>()),
         "bench" => bench::bench(&std::env::args().skip(2).collect::<Vec<_>>()),
         "bench-gen" => bench_gen::bench_gen(&std::env::args().skip(2).collect::<Vec<_>>()),
         "crash" => crash::crash(&std::env::args().skip(2).collect::<Vec<_>>()),
@@ -41,7 +45,7 @@ fn main() -> ExitCode {
         "file-length" => file_length::check(),
         "sql-guard" => sql_guard::check(),
         _ => Err(
-            "usage: cargo xtask <ci|layers|env-docs|file-length|sql-guard|demo DIR|bench URL KEY|bench-gen DIR|crash [--secs N] [--kills N] [--seed N]>"
+            "usage: cargo xtask <ci|layers|env-docs|file-length|sql-guard|demo DIR|demo-site DIR|bench URL KEY|bench-gen DIR|crash [--secs N] [--kills N] [--seed N]>"
                 .to_owned(),
         ),
     };
@@ -150,18 +154,23 @@ fn check_layers() -> Result<(), String> {
 
 fn demo(dir: Option<String>) -> Result<(), String> {
     let dir = dir.ok_or("usage: cargo xtask demo <data-dir>")?;
-    let (mut w, _) = openlens_storage::Writer::open(&dir, openlens_storage::FlushPolicy::default())
+    write_demo(std::path::Path::new(&dir))
+}
+
+/// The demo data set (300 users, planted patterns) in the `default` project.
+fn write_demo(dir: &std::path::Path) -> Result<(), String> {
+    let (mut w, _) = openlens_storage::Writer::open(dir, openlens_storage::FlushPolicy::default())
         .map_err(|e| e.to_string())?;
     let events = openlens_testkit::planted_dataset("default");
     w.append(&events).map_err(|e| e.to_string())?;
     w.flush().map_err(|e| e.to_string())?;
-    let meta = openlens_meta::Meta::open(&std::path::Path::new(&dir).join("meta.db"))
-        .map_err(|e| e.to_string())?;
+    let meta = openlens_meta::Meta::open(&dir.join("meta.db")).map_err(|e| e.to_string())?;
     meta.ensure_default_project(None)
         .map_err(|e| e.to_string())?;
     eprintln!(
-        "xtask: wrote {} demo events to {dir} (project default)",
-        events.len()
+        "xtask: wrote {} demo events to {} (project default)",
+        events.len(),
+        dir.display()
     );
     Ok(())
 }

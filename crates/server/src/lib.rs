@@ -20,6 +20,7 @@ mod comments;
 mod cookieless;
 mod csrf;
 mod digest;
+mod environments;
 mod explore;
 mod features;
 mod flags;
@@ -47,6 +48,7 @@ mod tickets;
 mod timeline;
 mod tls;
 pub mod tokens;
+mod totp;
 mod users;
 mod web;
 

@@ -21,6 +21,7 @@ mod icons;
 mod manage;
 mod settings;
 mod team;
+mod totp;
 mod world;
 pub use audience::*;
 pub use board::*;
@@ -28,13 +29,14 @@ pub use components::*;
 pub use explore::*;
 pub use feature_page::*;
 pub use features::*;
-pub(crate) use glossary::{th_def, th_num};
+pub(crate) use glossary::{th_def, th_num, vital_info};
 pub use goals::*;
 pub use icons::icon;
 pub use manage::*;
 use openlens_engine::{Board, EventRow, Filters};
 pub use settings::*;
 pub use team::*;
+pub use totp::{TotpCard, login_code, totp_recovery_codes};
 
 /// Stylesheet, served at `/assets/app.css`.
 pub const CSS: &str = include_str!("../assets/app.css");
@@ -168,6 +170,7 @@ const NAV: &[NavGroup] = &[
             ("/settings/install", "Install", &["Install"]),
             ("/settings/alerts", "Alerts", &["Alert settings"]),
             ("/settings/sharing", "Sharing", &["Share links"]),
+            ("/settings/environments", "Environments", &["Environments"]),
             ("/settings/data", "Data", &["Project data"]),
         ],
     },

@@ -334,6 +334,24 @@ pub(crate) fn info(label: &str) -> Markup {
     }
 }
 
+/// The ⓘ of a Web Vital (#408): what the visitor feels and the
+/// thresholds, from the engine's knowledge table.
+pub(crate) fn vital_info(name: &str) -> Markup {
+    let Some(g) = openlens_engine::vitals_guide(name) else {
+        return html! {};
+    };
+    let id = format!("def-vital-{}", name.to_ascii_lowercase());
+    let show = |v| openlens_engine::vitals::show(name, v);
+    html! {
+        span.kpi-info tabindex="0" aria-describedby=(id) aria-label={ "What is " (name) "?" } {
+            "ⓘ"
+            span.kpi-def role="tooltip" id=(id) {
+                strong { (g.title) } ". " (g.feels) " Good: " (show(g.good)) " or less; poor: above " (show(g.poor)) "."
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -443,6 +461,16 @@ mod tests {
                 .into_string()
                 .contains("p &lt; 0.05")
         );
+    }
+
+    /// A vital's ⓘ reads the engine's table: its meaning and thresholds.
+    #[test]
+    fn vital_info_shows_the_table_entry() {
+        let g = openlens_engine::vitals_guide("INP").unwrap();
+        let html = super::vital_info("INP").into_string();
+        assert!(html.contains(g.title) && html.contains("200 ms") && html.contains("500 ms"));
+        assert!(html.contains("id=\"def-vital-inp\""));
+        assert!(super::vital_info("XYZ").into_string().is_empty());
     }
 
     #[test]

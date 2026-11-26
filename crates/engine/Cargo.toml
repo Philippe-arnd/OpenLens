@@ -12,6 +12,7 @@ publish.workspace = true
 openlens-query = { path = "../query" }
 openlens-sqlgen = { path = "../sqlgen" }
 openlens-featuremap = { path = "../featuremap" }
+openlens-event = { path = "../event" }
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
@@ -23,7 +24,6 @@ futures = "0.3"
 serde_json.workspace = true
 openlens-testkit = { path = "../testkit" }
 openlens-featuremap = { path = "../featuremap" }
-openlens-event = { path = "../event" }
 openlens-storage = { path = "../storage" }
 tempfile.workspace = true
 tokio.workspace = true

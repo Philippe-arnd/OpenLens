@@ -146,6 +146,10 @@ pub struct Caches {
     pub(crate) share_pages: Bounded<String, String>,
     /// Login emails: sends in the last hour, and per address the last one.
     pub(crate) login_emails: Bounded<String, Vec<Instant>>,
+    /// Environment host rules per project (a minute; cleared on change).
+    pub(crate) env_rules: Bounded<String, std::sync::Arc<crate::environments::ProjectEnv>>,
+    /// Projects whose environment upgrade seed is running now.
+    pub(crate) env_seeding: Bounded<String, ()>,
 }
 
 impl Default for Caches {
@@ -165,6 +169,8 @@ impl Default for Caches {
             reword: Bounded::new(1_000, crate::reword::TTL),
             share_pages: Bounded::new(1_000, 5 * MIN),
             login_emails: Bounded::new(10_000, 60 * MIN),
+            env_rules: Bounded::new(10_000, MIN),
+            env_seeding: Bounded::new(10_000, 10 * MIN),
         }
     }
 }
@@ -187,6 +193,7 @@ impl Caches {
             ("reword", n(self.reword.len())),
             ("share_pages", n(self.share_pages.len())),
             ("login_emails", n(self.login_emails.len())),
+            ("env_rules", n(self.env_rules.len())),
         ]
     }
 }

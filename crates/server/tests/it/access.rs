@@ -123,6 +123,7 @@ const ROUTES: &[(&str, &str, Access)] = &[
     ("GET", "/api/projects/{project}/churn", Api),
     ("GET", "/api/projects/{project}/goals", Api),
     ("POST", "/api/projects/{project}/goals", Api),
+    ("GET", "/api/projects/{project}/environments", Api),
     ("GET", "/api/audit", Api),
     ("GET", "/api/tokens", Api),
     ("POST", "/api/tokens", Api),
@@ -209,6 +210,14 @@ const ROUTES: &[(&str, &str, Access)] = &[
     ("GET", "/s/{token}", Public),
     ("GET", "/p/{project}/settings/alerts", Read),
     ("POST", "/p/{project}/settings/alerts", Write),
+    ("GET", "/api/projects/{project}/vitals", Api),
+    ("POST", "/login/totp", Public),
+    ("POST", "/me/totp/start", Signed),
+    ("POST", "/me/totp/enable", Signed),
+    ("POST", "/me/totp/cancel", Signed),
+    ("POST", "/me/totp/disable", Signed),
+    ("GET", "/p/{project}/settings/environments", Read),
+    ("POST", "/p/{project}/settings/environments", Write),
     ("GET", "/p/{project}/settings/{tab}", Read),
     ("POST", "/p/{project}/settings/alerts/test", Write),
     ("GET", "/p/{project}/uptime", Read),
@@ -707,7 +716,9 @@ async fn new_data_in_another_project_keeps_this_board_cached() {
     assert_eq!(h.state.boards.computed(), computed, "no recomputation");
     h.state.boards.bump("default");
     assert_eq!(get(&h, uri, None, true).await.status(), StatusCode::OK);
-    for _ in 0..100 {
+    // The recomputation runs in the background; under the whole suite's
+    // load it can take seconds, so wait up to 10 s for it.
+    for _ in 0..500 {
         if h.state.boards.computed() > computed {
             break;
         }

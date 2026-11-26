@@ -67,8 +67,10 @@ mod config;
 mod forget;
 /// Read-only connections next to the writer (#344).
 mod projects;
+mod totp;
 mod uptime;
 mod users;
+pub use totp::Totp;
 
 const READERS: usize = 4;
 
@@ -293,6 +295,24 @@ fn migrate(c: &Connection) -> rusqlite::Result<()> {
         (
             "nav_folded",
             "ALTER TABLE users ADD COLUMN nav_folded INTEGER NOT NULL DEFAULT 0",
+        ),
+        // #440: the second factor. The secret is sealed by the server
+        // (never stored in clear); `totp_at` is set once enrolment is
+        // confirmed, `totp_step` is the last 30 s step used (a replay is
+        // refused), and `totp_recovery` holds the SHA-256 hashes of the
+        // unused recovery codes, comma-separated.
+        (
+            "totp_secret",
+            "ALTER TABLE users ADD COLUMN totp_secret TEXT",
+        ),
+        ("totp_at", "ALTER TABLE users ADD COLUMN totp_at INTEGER"),
+        (
+            "totp_step",
+            "ALTER TABLE users ADD COLUMN totp_step INTEGER",
+        ),
+        (
+            "totp_recovery",
+            "ALTER TABLE users ADD COLUMN totp_recovery TEXT",
         ),
     ] {
         let has: bool = c
