@@ -86,7 +86,9 @@ Replace `crates/ui/assets/app.css` with the layered structure in `mockups/v2.css
 | `--r-l` 16, `--r` 12, `--r-s` 8, `--r-pill` | radii |
 | `--step--1` … `--step-4` | type scale: 12.5, 14, 15.5, 19, 26, 34 px |
 
-### 3.3 Typography (needs a decision)
+### 3.3 Typography (decided: no webfont, D-080)
+
+**Decided (D-080):** no webfont; the product keeps the system stack. The steps below are kept for the record.
 
 The mockups use **Geist** and **Geist Mono** (SIL OFL 1.1), loaded from Google Fonts on the canvas only. In the product:
 
@@ -143,7 +145,7 @@ Rules: animate only `opacity`, `translate`, `scale` and colours (never layout pr
 ### 4.4 Navigation feel
 
 - **Cross-document view transitions:** see 3.4. Pure CSS, no CSP change.
-- **Speculation rules (optional, needs a decision):** prerendering on hover would make navigation feel instant, but an inline `<script type="speculationrules">` is blocked by the CSP. The narrow option is `script-src 'inline-speculation-rules'`, which allows speculation rules and nothing else. Check browser support and record a decision before doing it, in its own PR.
+- **Speculation rules (decided: not used, D-081):** prerendering on hover would make navigation feel instant, but an inline `<script type="speculationrules">` is blocked by the CSP. The narrow option is `script-src 'inline-speculation-rules'`, which allows speculation rules and nothing else. Check browser support and record a decision before doing it, in its own PR.
 - **HTML streaming:** send the shell before the page's queries finish where the handler allows it. This is optional and separate from the visual work.
 
 ### 4.5 Signals line
@@ -256,8 +258,8 @@ Open one issue per line and claim it before starting (rules 4–5). Each PR is m
 9. **Entry pages.** Login, Welcome, second factor, shared view.
 10. **Remaining screens** of the table in section 6, one PR per section (Behaviour, Quality, People, Product).
 11. **Motion.** The `motion` layer and view transitions (section 3.4). CSS only, plus `pathLength` on the SVG lines.
-12. **Webfont**, after its decision.
-13. **Speculation rules**, after its decision.
+12. **Webfont**: dropped, no webfont (D-080).
+13. **Speculation rules**: dropped (D-081).
 
 Separate bug issues: "Paths to value" shows a duplicate row; the Audience `<title>` lists every country; Releases' first-seen dates print the raw ISO `T`; date inputs follow the browser locale, so show the expected format next to them.
 
