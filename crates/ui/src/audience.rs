@@ -287,7 +287,7 @@ pub type CheckRow = (String, bool, Option<i64>, Option<i64>, Option<String>);
 /// Uptime (#256): the app's state, availability, response times and
 /// incidents.
 pub struct UptimeView<'a> {
-    /// `up`, `down`, `unknown` or `off`.
+    /// `up`, `down`, `maintenance`, `unknown` or `off`.
     pub state: &'a str,
     /// Since when (a time, in the reader's zone).
     pub since: Option<String>,
@@ -295,6 +295,10 @@ pub struct UptimeView<'a> {
     pub url: Option<String>,
     /// Availability over 24 h and 7 days (share of good checks).
     pub avail: (Option<f64>, Option<f64>),
+    /// Planned maintenance left out of each figure, in words (#563).
+    pub left_out: (Option<String>, Option<String>),
+    /// The planned maintenance card (#563).
+    pub maintenance: MaintenanceView,
     /// p50 and p95 response time over 24 h, ms.
     pub ms: (Option<i64>, Option<i64>),
     /// (rule, start, end, length in minutes, cause), newest first.
@@ -308,6 +312,7 @@ pub fn uptime(p: &ProjectInfo<'_>, v: &UptimeView<'_>) -> Markup {
     let (cls, word) = match v.state {
         "up" => ("good", "Up"),
         "down" => ("bad", "Down"),
+        "maintenance" => ("warn", "Under maintenance"),
         "off" => ("muted", "Not checked"),
         _ => ("muted", "Waiting for the first check"),
     };
@@ -324,12 +329,13 @@ pub fn uptime(p: &ProjectInfo<'_>, v: &UptimeView<'_>) -> Markup {
             } @else {
                 // no_detail (#409): this page is the uptime detail already.
                 section.tiles aria-label="Availability" {
-                    (tile("mint", "task", "Last 24 hours", &v.avail.0.map_or_else(|| "—".into(), |a| format!("{:.2}%", a * 100.0)), "available"))
-                    (tile("sky", "clock", "Last 7 days", &v.avail.1.map_or_else(|| "—".into(), |a| format!("{:.2}%", a * 100.0)), "available"))
+                    (tile("mint", "task", "Last 24 hours", &v.avail.0.map_or_else(|| "—".into(), |a| format!("{:.2}%", a * 100.0)), &v.left_out.0.as_ref().map_or_else(|| "available".into(), |m| format!("available · {m} of planned maintenance not counted"))))
+                    (tile("sky", "clock", "Last 7 days", &v.avail.1.map_or_else(|| "—".into(), |a| format!("{:.2}%", a * 100.0)), &v.left_out.1.as_ref().map_or_else(|| "available".into(), |m| format!("available · {m} of planned maintenance not counted"))))
                     (tile("violet", "bolt", "Response time", &v.ms.0.map_or_else(|| "—".into(), |m| format!("{m} ms")), &v.ms.1.map_or_else(|| "p50, last 24 hours".into(), |m| format!("p50 · p95 {m} ms"))))
                 }
                 p.muted.small { "Checking " span.mono { (v.url.as_deref().unwrap_or("")) } " every minute. Down after two failed checks in a row (no answer, or HTTP 5xx)." }
             }
+            (crate::maintenance::maintenance_card(p.id, &v.maintenance))
             section.card.wide {
                 h2.coral { (icon("alert")) "Incidents and alerts, last 30 days" }
                 @if v.incidents.is_empty() { p.muted { "None." } }

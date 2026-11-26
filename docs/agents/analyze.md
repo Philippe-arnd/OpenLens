@@ -31,6 +31,7 @@ Start from the summaries and drill down only where something stands out. Every t
 | How do sessions move between features? | `flows { from?, to? }` | `feature_context { key }` |
 | Who uses the app, on what? Who is on it now? | `audience` (devices, browsers, OS, countries, languages, screens), `live` (last 5 and 30 minutes) | `kpi_report` with `by` |
 | Is the app up? Will alerts reach us? | `status` around a deploy; `alerts`: uptime, incidents, settings | `alert_set { …, test: true }` |
+| A deploy or migration will take the app down | `maintenance_set { action: schedule, minutes, text }` right before, `{ action: end, id }` after: no alert during it, not counted against availability | `maintenance` |
 | Anything else | `sql` (read-only DataFusion on `events`) | prune with `date >= 'YYYY-MM-DD'` |
 | Deep, offline analysis | `openlens-cli export --from --to --out events.jsonl` (raw events, day by day) | your own tools |
 

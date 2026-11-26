@@ -12,6 +12,7 @@ mod convert;
 mod lint;
 mod mcp;
 mod mcp_commands;
+mod mcp_maintenance;
 #[cfg(test)]
 mod mcp_parity;
 
@@ -22,6 +23,7 @@ use clap::{Parser, Subcommand};
 use serde_json::{Value, json};
 
 mod commands;
+mod maintenance;
 mod release;
 mod verify;
 use commands::*;
@@ -577,6 +579,7 @@ fn run(cli: Cli) -> Result<bool, String> {
             out(&v);
             Ok(status == 200)
         }
+        Command::Maintenance { action } => maintenance::run(&client()?, action),
         Command::Status { project } => {
             let (status, v) =
                 client()?.call("GET", &format!("/api/projects/{project}/status"), None)?;

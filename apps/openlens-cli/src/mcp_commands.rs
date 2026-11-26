@@ -123,12 +123,12 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "status",
-            description: "Is the app up now: up, down, unknown or off, since when, and the open incidents. Check it around a deploy.",
+            description: "Is the app up now: up, down, maintenance (a planned window covers production), unknown or off, since when, the open incidents and the maintenance windows running or starting within 7 days. Check it around a deploy.",
             input_schema: json!({"type":"object","properties":proj()}),
         },
         ToolSpec {
             name: "alerts",
-            description: "Uptime and alerting: the status, availability over a day and a week, response times over a day (median, p95), incidents of 30 days, the last 15 checks, and the alert settings (what raises an alert, quiet hours, the probe's path, channels; a webhook or ntfy topic that is set reads '(set)').",
+            description: "Uptime and alerting: the status, availability over a day and a week (planned maintenance left out, `maintenance_left_out` in seconds), the maintenance windows, response times over a day (median, p95), incidents of 30 days, the last 15 checks, and the alert settings (what raises an alert, quiet hours, the probe's path, channels; a webhook or ntfy topic that is set reads '(set)').",
             input_schema: json!({"type":"object","properties":proj()}),
         },
         ToolSpec {
