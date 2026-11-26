@@ -34,7 +34,7 @@ nomad job run -var public_url=https://analytics.example.com openlens.nomad.hcl
 nomad alloc logs -job openlens | grep -i owner   # first start: a single-use owner link, valid 1 hour
 ```
 
-The job publishes port 8686 on that client: put your reverse proxy with HTTPS in front ([docker.md](docker.md#https-and-reverse-proxy)) and keep the port closed to the outside. The service is registered in Nomad's own service catalogue as `openlens`, for a proxy that reads it (Traefik's Nomad provider, or a `nomadService` template). The image is `linux/amd64` for now.
+The job publishes port 8686 on that client: put your reverse proxy with HTTPS in front ([docker.md](docker.md#https-and-reverse-proxy)) and keep the port closed to the outside. The service is registered in Nomad's own service catalogue as `openlens`, for a proxy that reads it (Traefik's Nomad provider, or a `nomadService` template). The platforms of the image are listed in [README.md](README.md#image-and-release-channels).
 
 What the job sets:
 
