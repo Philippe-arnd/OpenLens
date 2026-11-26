@@ -124,7 +124,7 @@ pub fn feature_page(v: &FeaturePage<'_>) -> Markup {
                         table.plain {
                             thead { tr { th { "Last use" } th { "User" } th { "Outcome" } th { span.sr-only { "Play" } } } }
                             tbody { @for r in v.replays {
-                                tr { td.mono { (r.at.get(..16).unwrap_or(&r.at)) }
+                                tr { td.mono { (local_time(&r.at, &v.filters.tz, false)) }
                                      td.mono { a href={ "/p/" (pid) "/people/" (url_enc(&r.distinct_id)) } { (r.distinct_id) } }
                                      td { @if r.succeeded { span.chip { "succeeded" } } @else if f.success.is_some() { span.muted { "did not succeed" } } @else { span.muted { "—" } } }
                                      td { a href={ "/p/" (pid) "/replays/" (url_enc(&r.session_id)) } { "Play" } } }
@@ -240,4 +240,58 @@ pub fn feature_page(v: &FeaturePage<'_>) -> Markup {
             }
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_replays_tab_prints_the_last_use_in_the_project_zone() {
+        // #566: the tab cut the timestamp cast to text at 16 characters,
+        // which could keep the ISO `T` and was always UTC.
+        let p = ProjectInfo {
+            id: "p1",
+            name: "P",
+            key: "k",
+        };
+        let feature = openlens_featuremap::Feature {
+            key: "export".into(),
+            name: "Export".into(),
+            purpose: None,
+            owner: None,
+            entry: openlens_featuremap::Entry::default(),
+            steps: vec![],
+            success: None,
+            area: None,
+            requires: vec![],
+            renamed_from: vec![],
+        };
+        let ctx = openlens_engine::FeatureContext::default();
+        let filters = Filters {
+            tz: "Europe/Paris".into(),
+            ..Filters::default()
+        };
+        let s = openlens_engine::maphealth::FeatureSession {
+            session_id: "s1".into(),
+            distinct_id: "u1".into(),
+            at: "2026-11-16T20:49:31.5".into(),
+            succeeded: false,
+        };
+        let html = feature_page(&FeaturePage {
+            p: &p,
+            feature: &feature,
+            ctx: &ctx,
+            tab: "replays",
+            filters: &filters,
+            replays: &[&s],
+            versions: &[],
+            prev: None,
+            next: None,
+        })
+        .into_string();
+        assert!(!crate::tests::has_iso_time(&html), "{html}");
+        // Paris is ahead of UTC in November.
+        assert!(html.contains("2026-11-16 21:49"), "{html}");
+    }
 }
