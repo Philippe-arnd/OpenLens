@@ -17,6 +17,7 @@ use tower::ServiceExt;
 mod access;
 mod agents;
 mod allowlist;
+mod announcements;
 mod auth;
 mod board_jobs;
 mod environments;

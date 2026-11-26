@@ -314,6 +314,8 @@ pub struct UptimeView<'a> {
     pub days: Vec<openlens_engine::commands::uptime::Day>,
     /// Availability over those days (share of good checks).
     pub days_avail: Option<f64>,
+    /// The announcements section (#562), from [`notices`].
+    pub notices: Option<Markup>,
 }
 
 /// A day bar's tooltip: the day, its availability and incidents.
@@ -376,6 +378,7 @@ pub fn uptime(p: &ProjectInfo<'_>, v: &UptimeView<'_>) -> Markup {
                 }
             }
             (crate::maintenance::maintenance_card(p.id, &v.maintenance))
+            @if let Some(n) = &v.notices { (n) }
             section.card.wide {
                 h2.coral { (icon("alert")) "Incidents and alerts" }
                 @if v.incidents.is_empty() { p.muted { @if v.paged { "No older incident." } @else { "None." } } }

@@ -1,4 +1,4 @@
-//! MCP tools over the `maintenance.*` commands (#563, D-075): list a
+//! MCP tools over the `maintenance.*` commands (#563, D-076): list a
 //! project's planned maintenance windows, and schedule, extend, end or
 //! cancel one. Like every tool, they call the REST API (D-020).
 

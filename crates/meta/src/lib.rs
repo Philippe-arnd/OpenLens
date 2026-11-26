@@ -62,6 +62,8 @@ pub struct Person {
 }
 
 mod access;
+/// Status announcements and their updates (#562).
+pub mod announcements;
 mod collab;
 mod config;
 mod forget;
@@ -70,7 +72,7 @@ pub use identity::{Identified, IdentityTables, PersonIdentity};
 pub use projects::Seen;
 /// Deploys reported by the deploy hook, and its secret (#504).
 pub mod deploys;
-/// Planned maintenance windows (#563, D-075).
+/// Planned maintenance windows (#563, D-076).
 pub mod maintenance;
 /// Read-only connections next to the writer (#344).
 mod projects;
@@ -620,6 +622,7 @@ impl Meta {
         conn.execute_batch(SCHEMA)?;
         conn.execute_batch(maintenance::SCHEMA)?;
         migrate(&conn)?;
+        conn.execute_batch(announcements::SCHEMA)?;
         let readers = (0..READERS)
             .map(|_| {
                 let r = Connection::open_with_flags(
@@ -657,6 +660,7 @@ impl Meta {
         conn.execute_batch(SCHEMA)?;
         conn.execute_batch(maintenance::SCHEMA)?;
         migrate(&conn)?;
+        conn.execute_batch(announcements::SCHEMA)?;
         Ok(Self {
             conn: Mutex::new(conn),
             readers: Vec::new(),

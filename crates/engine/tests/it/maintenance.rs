@@ -1,4 +1,4 @@
-//! Planned maintenance (#563, D-075): an outage inside a window sends no
+//! Planned maintenance (#563, D-076): an outage inside a window sends no
 //! alert and does not count against availability; the same outage
 //! lasting past the window's end is announced at the end.
 
