@@ -84,6 +84,7 @@ const NOT_COMMANDS: &[&str] = &[
     "kpi_report",
     "user_timeline",
     "board",
+    "board_job",
     "vitals",
     "errors",
     "sql",

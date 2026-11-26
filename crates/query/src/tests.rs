@@ -46,3 +46,33 @@ fn running_out_of_memory_is_said_plainly() {
         QueryError::Rejected(_)
     ));
 }
+
+/// #515: a query nobody waits for any more (a cancelled board job, a
+/// request that timed out) stops on the query runtime instead of running
+/// to its end.
+#[tokio::test]
+async fn a_query_nobody_waits_for_stops() {
+    struct Dropped(std::sync::mpsc::Sender<()>);
+    impl Drop for Dropped {
+        fn drop(&mut self) {
+            let _ = self.0.send(());
+        }
+    }
+    let (dropped, gone) = std::sync::mpsc::channel();
+    let (started, running) = std::sync::mpsc::channel();
+    let waiting = tokio::spawn(offload(async move {
+        let _guard = Dropped(dropped);
+        let _ = started.send(());
+        std::future::pending::<()>().await;
+        Ok::<(), QueryError>(())
+    }));
+    let wait = |rx: std::sync::mpsc::Receiver<()>| {
+        tokio::task::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(10)))
+    };
+    wait(running).await.unwrap().unwrap();
+    waiting.abort();
+    assert!(
+        wait(gone).await.unwrap().is_ok(),
+        "the query task was dropped, not left running"
+    );
+}

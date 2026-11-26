@@ -17,6 +17,7 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Map drift | Routes new in the latest release that no feature of the map claims |
 | Counted with | On a feature's releases: the map version in force when the release came out |
 | Period picker | On the board: the form that picks a past release or a date range for the period blocks |
+| Board job | A long period of the board computed in the background after *Run it*: its own page, progress and Cancel, kept an hour for whoever started it |
 | Feature pulse | Per feature: adoption, uses per user, active days, completion and task time |
 | Who uses what | The roles × features grid: the share of each role's users who used each feature |
 | Do they come back? | Weekly retention cohorts |

@@ -13,6 +13,7 @@ mod audience;
 mod auth;
 pub mod backup;
 mod backups;
+mod board_jobs;
 mod board_query;
 pub mod boards;
 pub mod cache;
@@ -150,6 +151,7 @@ pub fn router(state: AppState) -> Router {
         .route("/oidc/start", get(oidc::start))
         .route("/oidc/callback", get(oidc::callback))
         .merge(api::routes())
+        .merge(board_jobs::routes())
         .merge(flags::routes())
         .merge(surveys::routes())
         .merge(replay::routes())

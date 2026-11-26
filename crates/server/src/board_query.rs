@@ -2,8 +2,8 @@
 //! `GET /api/projects/{id}/board`, and the confirmation a long window
 //! needs before it runs (#514, D-061): a date range or a past release
 //! that reads more than 30 days of events answers with its estimate (a
-//! page with a "Run it" link, or a 409 from the API) until it is asked
-//! again with `confirm=1`.
+//! page whose "Run it" starts a background job (#515), or a 409 from the
+//! API) until it is asked again with `confirm=1` or run as a job.
 
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -64,7 +64,7 @@ impl BoardQuery {
     }
 
     /// The input of `board.estimate` for this query in `project`.
-    fn estimate_input(&self, project: &str) -> EstimateInput {
+    pub(crate) fn estimate_input(&self, project: &str) -> EstimateInput {
         EstimateInput {
             project: project.to_owned(),
             environment: self.f.env.clone(),
@@ -77,9 +77,10 @@ impl BoardQuery {
         }
     }
 
-    /// The board page of `project` for this query, confirmed: the "Run
-    /// it" link. Only the board's own parameters are carried.
-    pub(crate) fn confirmed_url(&self, project: &str) -> String {
+    /// The board's own parameters in this query, `confirm` left out: the
+    /// hidden fields of the confirm page's "Run it" form, which starts a
+    /// background job (#515).
+    pub(crate) fn params(&self) -> Vec<(&'static str, String)> {
         let f = &self.f;
         let pairs = [
             ("env", &f.env),
@@ -91,13 +92,13 @@ impl BoardQuery {
             ("from", &self.from),
             ("to", &self.to),
         ];
-        let mut q: Vec<(&str, &str)> = pairs
+        pairs
             .iter()
-            .filter_map(|(k, v)| Some((*k, v.as_deref().filter(|v| !v.is_empty())?)))
-            .collect();
-        q.push(("confirm", "1"));
-        let qs = serde_urlencoded::to_string(&q).unwrap_or_default();
-        format!("/p/{}?{qs}", openlens_ui::url_enc(project))
+            .filter_map(|(k, v)| {
+                let v = v.as_deref().filter(|v| !v.is_empty())?;
+                Some((*k, v.to_owned()))
+            })
+            .collect()
     }
 }
 

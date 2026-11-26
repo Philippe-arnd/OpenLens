@@ -1,7 +1,7 @@
 //! What a board window costs (#514, D-061): the line under the window a
 //! date range or past release read, and the page that asks before one
-//! reads more than 30 days of events. No JavaScript: "Run it" is a link
-//! to the same board with `confirm=1`.
+//! reads more than 30 days of events. No JavaScript: "Run it" is a form
+//! that starts the board as a background job (#515, D-063).
 
 use super::*;
 use crate::settings::bytes;
@@ -38,8 +38,9 @@ pub(crate) fn cost_line(e: &Estimate) -> Markup {
 }
 
 /// The page shown instead of the board when the window `e` must be
-/// confirmed: the estimate, a "Run it" link to `run` and a way back.
-pub fn board_confirm(p: &ProjectInfo<'_>, e: &Estimate, run: &str) -> Markup {
+/// confirmed: the estimate, a "Run it" button that starts a background
+/// job with the board's parameters `run`, and a way back.
+pub fn board_confirm(p: &ProjectInfo<'_>, e: &Estimate, run: &[(&str, String)]) -> Markup {
     layout(
         "Focus board",
         Some(p),
@@ -60,8 +61,14 @@ pub fn board_confirm(p: &ProjectInfo<'_>, e: &Estimate, run: &str) -> Markup {
                     "More than " (openlens_engine::board_cost::CONFIRM_DAYS)
                     " days of events slows the board down while it runs. The time is the bytes at the read speed measured for the board, so the real one may differ."
                 }
-                p {
-                    a.button href=(run) { "Run it" } " "
+                p.muted.small {
+                    "It runs in the background: you can leave the page, and the result stays for you alone for an hour."
+                }
+                form method="post" action={ "/p/" (url_enc(p.id)) "/board/jobs" } {
+                    @for (k, v) in run {
+                        input type="hidden" name=(k) value=(v);
+                    }
+                    button type="submit" { "Run it" } " "
                     a href={ "/p/" (p.id) } { "Back to the current release" }
                 }
             }
@@ -74,7 +81,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_confirm_page_shows_the_estimate_and_runs_with_a_link() {
+    fn the_confirm_page_shows_the_estimate_and_runs_it_as_a_job() {
         let p = ProjectInfo {
             id: "p1",
             name: "P",
@@ -92,11 +99,13 @@ mod tests {
             confirm: true,
             ..Estimate::default()
         };
-        let html = board_confirm(&p, &e, "/p/p1?from=2026-01-01&confirm=1").into_string();
+        let run = [("from", "2026-01-01".to_owned())];
+        let html = board_confirm(&p, &e, &run).into_string();
         assert!(html.contains("118 days"), "{html}");
         assert!(html.contains("about 2 s"), "{html}");
         assert!(
-            html.contains(r#"href="/p/p1?from=2026-01-01&amp;confirm=1""#),
+            html.contains(r#"action="/p/p1/board/jobs""#)
+                && html.contains(r#"name="from" value="2026-01-01""#),
             "{html}"
         );
         assert!(!html.contains("<script"), "no JavaScript");
