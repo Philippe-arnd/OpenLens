@@ -52,23 +52,37 @@ pub(super) async fn board(
     }
     let host = crate::public_url(&headers);
     let admin = auth::viewer(&state, &headers).is_some_and(|v| v.admin);
-    if crate::boards::warm(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))) {
+    let ready = crate::boards::ready(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v)));
+    // Served from the cache, or computed last time in under a second: the
+    // whole page at once, with no waiting panel (D-073).
+    if ready.hit || ready.estimate.is_some_and(|d| d < std::time::Duration::from_secs(1)) {
         return board_page(state, p, f, map, host, admin).await;
     }
     // A cold cache means seconds of computing: send the page shell at once
-    // (head, sidebar, a loading line), then the board when it is ready
-    // (#301). The loading line hides itself, in CSS, once the board follows
-    // it. Errors after the first byte show in the page (status 200).
+    // (head, sidebar, a waiting panel with the last compute time), then the
+    // board when it is ready (#301, D-073). The panel hides itself, in CSS,
+    // once the board follows it. Errors after the first byte show in the
+    // page (status 200).
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
         name: &p.name,
         key: &p.api_key,
     };
-    let shell = openlens_ui::board_shell(&info).into_string();
+    // Whole seconds, rounded up: "about 2 s" for 1.5 s.
+    let wait = ready
+        .estimate
+        .map(|d| d.as_millis().div_ceil(1000).try_into().unwrap_or(u64::MAX));
+    let shell = openlens_ui::board_shell(&info, wait).into_string();
     let Some(cut) = shell.rfind("</main>") else {
         return board_page(state, p, f, map, host, admin).await;
     };
     let (open, close) = (shell[..cut].to_owned(), shell[cut..].to_owned());
+    // What the shell's `<main>` has before the panel (breadcrumbs, tabs):
+    // the board page repeats it, so it is left out of the board sent after.
+    let before = match (shell.find("<main>"), shell.find("<div class=\"board-waiting\"")) {
+        (Some(a), Some(b)) if a + 6 <= b => shell[a + 6..b].to_owned(),
+        _ => String::new(),
+    };
     let rest = async move {
         let page = board_page(state, p, f, map, host, admin).await;
         let bytes = axum::body::to_bytes(page.into_body(), 64 * 1024 * 1024)
@@ -76,7 +90,10 @@ pub(super) async fn board(
             .unwrap_or_default();
         let full = String::from_utf8_lossy(&bytes);
         let inner = match (full.find("<main>"), full.rfind("</main>")) {
-            (Some(a), Some(b)) if a + 6 <= b => full[a + 6..b].to_owned(),
+            (Some(a), Some(b)) if a + 6 <= b => {
+                let inner = &full[a + 6..b];
+                inner.strip_prefix(before.as_str()).unwrap_or(inner).to_owned()
+            }
             _ => "<p class=\"alert\" role=\"alert\">Couldn't finish this page. Reload it.</p>"
                 .to_owned(),
         };

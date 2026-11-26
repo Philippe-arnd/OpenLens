@@ -27,6 +27,8 @@
 //!   ([`prewarm`], D-072): after startup, and after new data while its
 //!   boards were asked for in the last [`WATCHED`], so the page is served
 //!   from the cache instead of computing for seconds.
+//! - how long each key took to compute last is kept ([`ready`], D-073),
+//!   so a cold board page can say how long it will wait.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -87,6 +89,9 @@ struct Inner {
     viewed: Mutex<HashMap<String, Instant>>,
     /// Projects whose default board was computed ahead once (D-072).
     prewarmed: Mutex<std::collections::HashSet<String>>,
+    /// How long each key took to compute last (D-073): kept past its
+    /// entry, so a cold page can show the wait to expect.
+    took: Mutex<HashMap<Key, Duration>>,
 }
 
 impl Default for BoardCache {
@@ -102,6 +107,7 @@ impl Default for BoardCache {
                 closed: crate::closed_days::ClosedDays::default(),
                 viewed: Mutex::new(HashMap::new()),
                 prewarmed: Mutex::new(std::collections::HashSet::new()),
+                took: Mutex::new(HashMap::new()),
             }),
         }
     }
@@ -182,6 +188,20 @@ impl BoardCache {
             map.remove(&oldest);
         }
         map.insert(key, entry);
+    }
+
+    fn took(&self, key: &Key) -> Option<Duration> {
+        self.inner.took.lock().ok()?.get(key).copied()
+    }
+
+    fn set_took(&self, key: Key, d: Duration) {
+        let Ok(mut m) = self.inner.took.lock() else {
+            return;
+        };
+        if m.len() >= CAPACITY * 4 && !m.contains_key(&key) {
+            m.clear();
+        }
+        m.insert(key, d);
     }
 
     fn flight(&self, key: &Key) -> Arc<tokio::sync::Mutex<()>> {
@@ -285,20 +305,45 @@ pub(crate) async fn prewarm(state: &AppState) {
     }
 }
 
+/// Whether a board page is served from the cache, and if not, how long
+/// its board took to compute last time (D-073).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Ready {
+    /// Served from the cache now, without computing.
+    pub hit: bool,
+    /// The last compute time of this board, when it was computed before.
+    pub estimate: Option<Duration>,
+}
+
 /// Whether the board for these filters can be served from the cache now,
-/// without computing (#301: a cold one streams the page shell first).
+/// and the last time it took to compute (#301: a cold one streams the page
+/// shell first; D-073: with a waiting panel when it may last).
+pub(crate) fn ready(
+    state: &AppState,
+    project: &str,
+    f: &Filters,
+    map: Option<(&FeatureMap, i64)>,
+) -> Ready {
+    let key = key_of(project, f, map);
+    let generation = state.boards.generation(project);
+    Ready {
+        hit: state
+            .boards
+            .get(&key)
+            .is_some_and(|e| servable(&e, generation)),
+        estimate: state.boards.took(&key),
+    }
+}
+
+/// Whether the board for these filters can be served from the cache now,
+/// without computing.
 pub(crate) fn warm(
     state: &AppState,
     project: &str,
     f: &Filters,
     map: Option<(&FeatureMap, i64)>,
 ) -> bool {
-    let key = key_of(project, f, map);
-    let generation = state.boards.generation(project);
-    state
-        .boards
-        .get(&key)
-        .is_some_and(|e| servable(&e, generation))
+    ready(state, project, f, map).hit
 }
 
 /// The board of `project` for these filters, from the cache when possible,
@@ -415,11 +460,13 @@ async fn compute(
         revenue: Arc::new(revenue),
     };
     cache.inner.computed.fetch_add(1, Ordering::Relaxed);
+    let took = started.elapsed();
+    cache.set_took(key.clone(), took);
     // How long a board took, computed for a page or ahead (D-072): the
     // `scale` job reads it, since the page may be served from the cache.
     tracing::info!(
         project,
-        ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        ms = u64::try_from(took.as_millis()).unwrap_or(u64::MAX),
         key = ?key,
         "board computed"
     );
@@ -521,6 +568,9 @@ mod tests {
         super::prewarm(&state).await;
         assert_eq!(state.boards.computed(), 2);
         assert!(super::warm(&state, &p.id, &f, None));
+        // Its compute time is kept, for the next cold page (D-073).
+        let r = super::ready(&state, &p.id, &f, None);
+        assert!(r.hit && r.estimate.is_some(), "{r:?}");
     }
 
     #[test]
