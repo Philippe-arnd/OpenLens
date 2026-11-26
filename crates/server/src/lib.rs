@@ -322,7 +322,11 @@ async fn run_jobs(state: AppState, digest: Job, digest_first: Duration) {
     tokio::spawn(update::update_check());
     let heavy = Arc::new(tokio::sync::Mutex::new(()));
     // Identity tables filled from the files once, after an upgrade (#450).
-    tokio::spawn(identity::backfill_all(state.clone()));
+    let backfill = tokio::spawn(identity::backfill_all(state.clone()));
+    // Set once the first compaction and rollup pass are done: the default
+    // boards are computed ahead only after the start-up work, so the two
+    // do not add up in memory (D-074).
+    let (started, mut started_rx) = tokio::sync::watch::channel(false);
     let every = |first: Duration, period: Duration| {
         let mut t = interval_at(tokio::time::Instant::now() + first, period);
         t.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -356,13 +360,16 @@ async fn run_jobs(state: AppState, digest: Job, digest_first: Duration) {
                 Err(err) => tracing::error!(%err, "compaction crashed"),
             }
             roll_up(&st, chrono::Utc::now()).await;
+            started.send_replace(true);
         }
     });
-    // Default boards computed ahead (D-072): from start, every 10 s,
-    // after new data while someone looks at them.
+    // Default boards computed ahead (D-072): once the start-up work is
+    // done, then every 10 s, after new data while someone looks at them.
     let st = state.clone();
-    let mut t = every(Duration::ZERO, Duration::from_secs(10));
     tokio::spawn(async move {
+        let _ = backfill.await;
+        let _ = started_rx.wait_for(|done| *done).await;
+        let mut t = every(Duration::ZERO, Duration::from_secs(10));
         loop {
             t.tick().await;
             boards::prewarm(&st).await;
