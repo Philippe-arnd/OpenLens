@@ -107,6 +107,13 @@ import json, sys
 gen, role, disk, conc, mem, profile, cached, idles, gen_json = sys.argv[1:]
 runs = [json.loads(l) for l in open("runs.jsonl") if l.strip()]
 g = json.load(open(gen_json))
+board_ms = []
+for line in open("server.log", errors="replace"):
+    if "board computed" in line:
+        import re
+        m = re.search(r"ms=(\d+)", re.sub(r"\x1b\[[0-9;]*m", "", line))
+        if m:
+            board_ms.append(int(m.group(1)))
 # bench-gen also writes the rollups of closed days (D-046): report that
 # time apart, so generation times stay comparable. From the cache, both
 # are those of the run that generated the data, in "generator".
@@ -120,6 +127,10 @@ print(json.dumps({
     "rollup_seconds": rolled, "days_rolled": g.get("days_rolled"),
     "idle_seconds": [int(s) for s in idles.split()],
     "runs": runs, "board_role_filter_cold_s": float(role),
+    # Every board the server computed, in order, with its time (D-072): the
+    # default board may be computed ahead after start, so the page's
+    # "cold" time can be a cache hit; these are the real compute times.
+    "board_compute_ms": board_ms,
     "four_filtered_boards_max_s": float(conc), "data_dir_mb": int(disk),
 }, indent=2))
 PY
