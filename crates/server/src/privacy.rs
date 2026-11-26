@@ -103,27 +103,7 @@ pub(crate) fn forget_blocking(
 
 /// The anonymous ids that were linked to a person by `$identify`.
 async fn linked_ids(state: &AppState, project: &str, who: &str) -> Vec<String> {
-    let mut params = openlens_sqlgen::Params::new();
-    let Ok(person) = params.bind(who) else {
-        return Vec::new();
-    };
-    let sql = format!(
-        "SELECT DISTINCT regexp_match(properties, '\"\\$anon_distinct_id\":\"([^\"]+)\"')[1] AS anon \
-         FROM raw_events WHERE event = '$identify' AND distinct_id = {person}"
-    );
-    let mut ids: Vec<String> = state
-        .query
-        .with_params(&params)
-        .sql(project, &sql)
-        .await
-        .map(|r| {
-            r.rows
-                .iter()
-                .filter_map(|x| x.get("anon").and_then(|v| v.as_str()).map(str::to_owned))
-                .filter(|a| a != who)
-                .collect()
-        })
-        .unwrap_or_default();
+    let mut ids = openlens_engine::reads::linked_anonymous_ids(&state.query, project, who).await;
     // And those recorded at ingestion (#450), even if their `$identify`
     // is no longer in the files.
     let (meta, p, w) = (state.meta.clone(), project.to_owned(), who.to_owned());
@@ -257,16 +237,6 @@ pub(crate) async fn export(
     }
     let mut ids = linked_ids(&state, &project, &who).await;
     ids.push(who.clone());
-    let mut params = openlens_sqlgen::Params::new();
-    let list = ids
-        .iter()
-        .filter_map(|i| params.bind(i).ok())
-        .collect::<Vec<_>>()
-        .join(", ");
-    let sql = format!(
-        "SELECT uuid, event, distinct_id, session_id, CAST(timestamp AS VARCHAR) AS timestamp, url, path, feature, \
-         role, account, plan, environment, release, properties FROM raw_events WHERE distinct_id IN ({list}) ORDER BY timestamp"
-    );
     let engine = openlens_query::QueryEngine::new(
         &state.data_dir,
         openlens_query::Limits {
@@ -275,7 +245,7 @@ pub(crate) async fn export(
             ..openlens_query::Limits::default()
         },
     );
-    let events = match engine.with_params(&params).sql(&project, &sql).await {
+    let events = match openlens_engine::reads::person_events(&engine, &project, &ids).await {
         // A right-of-access export is all or nothing (review of v0.3.0).
         Ok(r) if r.truncated => {
             return crate::apierr::json(

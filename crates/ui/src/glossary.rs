@@ -17,15 +17,15 @@ pub(crate) const KPI: &[(&str, &str)] = &[
     ),
     (
         "Avg session",
-        "Mean session length over the last 7 days. A session ends after 30 minutes without an event. Bounce = sessions with a single page view.",
+        "Mean session length over the board's period: since the current release (90 days at most; the last 14 days without a release), or the last 7 days on a shared board. A session ends after 30 minutes without an event. Bounce = sessions with a single page view.",
     ),
     (
         "Tasks per user per day",
-        "Feature uses per active user per day, over the last 7 days.",
+        "Feature uses per active user per day, over the board's period (since the current release, or the last 7 days).",
     ),
     (
         "Sessions with errors",
-        "Share of the last 7 days' sessions with at least one captured error.",
+        "Share of the board's period's sessions (since the current release, or the last 7 days) with at least one captured error.",
     ),
     (
         "Changes that moved their metric",

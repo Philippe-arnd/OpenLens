@@ -1,6 +1,6 @@
 # Key KPIs
 
-These are the metrics OpenLens computes with no setup. **Every KPI can be split by role**, and also by **environment** and **release** (D-012), account, plan, page and feature. The default view is production, current release compared with the previous one. Definitions here are the contract: the UI, the MCP tools and the exports all use them, and a change to a definition is recorded in `docs/decisions.md`.
+These are the metrics OpenLens computes with no setup. **Every KPI can be split by role**, and also by **environment** and **release** (D-012), account, plan, page and feature. The default view is production, current release compared with the previous one: on the board pages, sessions, tasks, errors, the daily active users chart, features and roles are read since the current release (the newest live one, else the newest rolling out; 90 days at most), against the same length before it, or over the last 14 days against the 14 before when no release is sent (D-055). DAU, WAU, MAU and known users keep their windows; alerts, goals, the digest, Ask and shared boards read the fixed 7-, 14- and 30-day windows. Definitions here are the contract: the UI, the MCP tools and the exports all use them, and a change to a definition is recorded in `docs/decisions.md`.
 
 ## Roles: defined, matched, tracked
 

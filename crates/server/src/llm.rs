@@ -434,10 +434,10 @@ mod tests {
         );
         let o = parse(
             Provider::OpenAi,
-            &json!({"choices":[{"message":{"content":null,"tool_calls":[{"id":"q","function":{"name":"sql","arguments":"{\"query\":\"SELECT 1\"}"}}]}}],
+            &json!({"choices":[{"message":{"content":null,"tool_calls":[{"id":"q","function":{"name":"sql","arguments":"{\"query\":\"count users\"}"}}]}}],
                     "usage":{"prompt_tokens":50,"completion_tokens":7,"prompt_tokens_details":{"cached_tokens":40}}}),
         );
-        assert_eq!(o.calls[0].args["query"], "SELECT 1");
+        assert_eq!(o.calls[0].args["query"], "count users");
         assert_eq!((o.input_tokens, o.cached_tokens), (50, 40));
         assert!(
             build("anthropic", None, None, None, None, "env").is_none(),

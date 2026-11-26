@@ -4,6 +4,11 @@
 //! closed days with the events of the other days (D-040, D-047); success
 //! events and Web Vitals are event-filtered scans of 30 and 7 days; every
 //! other query reads its own window of days from the files.
+//!
+//! The period blocks (sessions, tasks, errors, the daily active series,
+//! features, roles, role × feature and success events) read 7, 14 or 30
+//! days, or, on the board pages, the release window and its comparison
+//! (#323, D-055, [`board_window`]).
 
 use super::*;
 
@@ -91,11 +96,31 @@ pub async fn board(
     // The sessions block and the releases table do the same with
     // `session_day` (#498, D-047).
     let now = chrono::Utc::now();
+    // The board pages read their period blocks since the current release
+    // (D-055); a board filtered on one release already reads that release,
+    // and keeps the fixed windows, as every other caller.
+    let win = match f.window {
+        Window::Release if f.release.is_none() => {
+            Some(board_window::resolve(q, project, f, now).await?)
+        }
+        _ => None,
+    };
+    // The comparison reaches up to twice the longest window back.
+    let back = win
+        .as_ref()
+        .map_or(90, |w| w.previous.start / 86_400 + 2)
+        .max(90);
     let version = map.map(|(_, v)| v);
     let (rolled_people, rolled_sessions) = futures::try_join!(
-        board_people::rolled_days(q, project, "person_day", version, now),
-        board_people::rolled_days(q, project, "session_day", version, now),
+        board_people::rolled_days_back(q, project, "person_day", version, now, back),
+        board_people::rolled_days_back(q, project, "session_day", version, now, back),
     )?;
+    // A period block's span: its fixed days, or the release window.
+    let span = |days: i64| win.as_ref().map_or(Span::days(days), |w| w.current);
+    let clause = |days: i64| match &win {
+        Some(w) => f.clause_span(w.current, now),
+        None => f.clause(days),
+    };
     let role = map.map_or_else(|| "role".to_owned(), |(m, _)| lookups(m).0);
     let people = board_people::People {
         src: &src,
@@ -107,9 +132,12 @@ pub async fn board(
         role: None,
         ..f.clone()
     };
-    let (p30, p30_roles, p90) = (
+    // MAU, known and anonymous users keep their KPI windows (docs/kpis.md);
+    // features, roles and role × feature are period blocks.
+    let (p30, p_features, p_roles, p90) = (
         people.rows(f, 30)?,
-        people.rows(&any_role, 30)?,
+        people.rows_in(f, span(30))?,
+        people.rows_in(&any_role, span(30))?,
         people.rows(f, 90)?,
     );
     // Rollup days are UTC days: a block grouped by the project's day reads
@@ -117,12 +145,12 @@ pub async fn board(
     let utc_days = |days: i64| {
         board_people::utc_days(
             &f.tz,
-            (now - Duration::days(days)).date_naive(),
+            (now - Duration::seconds(span(days).start)).date_naive(),
             now.date_naive(),
         )
     };
-    let w30 = f.clause(30)?;
-    let w14 = f.clause(14)?;
+    let w30 = clause(30)?;
+    let w14 = clause(14)?;
     // Days are the project's days (D-017).
     let day = f.day()?;
     let w7 = f.clause(7)?;
@@ -162,11 +190,11 @@ pub async fn board(
         rolled: rolled_sessions,
         now,
     };
-    let sessions_sql = sessions.sessions_sql(f)?;
+    let sessions_sql = sessions.sessions_sql(f, span(7))?;
     let dau_sql = if utc_days(14) {
         format!(
             "SELECT day AS date, count(DISTINCT distinct_id) AS n FROM {} WHERE {ident} GROUP BY 1 ORDER BY 1",
-            people.rows(f, 14)?
+            people.rows_in(f, span(14))?
         )
     } else {
         format!(
@@ -178,7 +206,7 @@ pub async fn board(
         format!(
             "SELECT feature AS key, sum(events) AS uses, count(DISTINCT distinct_id) AS users, \
              count(DISTINCT concat(distinct_id, '|', day)) AS user_days \
-             FROM {p30} WHERE feature IS NOT NULL GROUP BY feature ORDER BY users DESC, uses DESC LIMIT 12"
+             FROM {p_features} WHERE feature IS NOT NULL GROUP BY feature ORDER BY users DESC, uses DESC LIMIT 12"
         )
     } else {
         format!(
@@ -188,11 +216,11 @@ pub async fn board(
         )
     };
     let roles_sql = format!(
-        "SELECT role, count(DISTINCT distinct_id) AS users FROM {p30_roles} \
+        "SELECT role, count(DISTINCT distinct_id) AS users FROM {p_roles} \
          GROUP BY role ORDER BY users DESC LIMIT 12"
     );
     let role_features_sql = format!(
-        "SELECT role, feature, count(DISTINCT distinct_id) AS users FROM {p30_roles} \
+        "SELECT role, feature, count(DISTINCT distinct_id) AS users FROM {p_roles} \
          WHERE role IS NOT NULL AND feature IS NOT NULL GROUP BY role, feature"
     );
     let releases_sql = sessions.releases_sql(f)?;
@@ -200,14 +228,43 @@ pub async fn board(
     // what: they come from the segments, which are read once (#447), not
     // from a query.
 
-    // Success events: 30 days of the declared events only, read from
-    // their typed columns (#502).
+    // Success events: 30 days (or the release window) of the declared
+    // events only, read from their typed columns (#502).
     let success_sql = if successes.is_empty() {
         "SELECT CAST(NULL AS VARCHAR) AS event, 0 AS n, 0 AS users WHERE false".to_owned()
     } else {
         format!(
             "SELECT event, count(*) AS n, count(DISTINCT distinct_id) AS users FROM {src} WHERE {w30} AND event IN ({success_list}) GROUP BY event"
         )
+    };
+    // The release window's comparison (D-055): users of the window and of
+    // the same length before it, and the sessions block before it.
+    let compare = match &win {
+        Some(w) => {
+            let users = |s: Span| -> Result<String> {
+                Ok(format!(
+                    "SELECT count(DISTINCT distinct_id) AS n FROM {} WHERE {ident}",
+                    people.rows_in(f, s)?
+                ))
+            };
+            Some((
+                users(w.current)?,
+                users(w.previous)?,
+                sessions.sessions_sql(f, w.previous)?,
+            ))
+        }
+        None => None,
+    };
+    let compared = async {
+        let Some((now_users, before_users, before_sessions)) = &compare else {
+            return Ok::<_, EngineError>(None);
+        };
+        let (a, b, c) = futures::join!(
+            q.sql(project, now_users),
+            q.sql(project, before_users),
+            q.sql(project, before_sessions),
+        );
+        Ok(Some((a?, b?, c?)))
     };
     let (
         users,
@@ -222,6 +279,7 @@ pub async fn board(
         role_features,
         anonymous,
         known,
+        compared,
     ) = futures::join!(
         q.sql(project, &users_sql),
         q.sql(project, &sessions_sql),
@@ -235,6 +293,7 @@ pub async fn board(
         q.sql(project, &role_features_sql),
         q.sql(project, &anonymous_sql),
         q.sql(project, &known_sql),
+        compared,
     );
 
     let mut b = Board {
@@ -257,14 +316,26 @@ pub async fn board(
         };
     }
     if let Some(r) = sessions?.rows.first() {
-        let user_days = int(r, "user_days").max(1) as f64;
-        b.sessions = Sessions {
-            count: int(r, "sessions"),
-            avg_secs: float(r, "avg_secs"),
-            bounce_rate: float(r, "bounce_rate"),
-            error_rate: float(r, "error_rate"),
-            tasks_per_user_day: int(r, "tasks") as f64 / user_days,
-        };
+        b.sessions = sessions_of(r);
+    }
+    if let Some(w) = win {
+        let mut window = w.window;
+        if let Some((now_users, before_users, before_sessions)) = compared? {
+            let n = |r: Option<&Map<String, Value>>| r.map_or(0, |r| int(r, "n"));
+            window.current = Period {
+                users: n(now_users.rows.first()),
+                sessions: b.sessions.clone(),
+            };
+            window.previous = Period {
+                users: n(before_users.rows.first()),
+                sessions: before_sessions
+                    .rows
+                    .first()
+                    .map(sessions_of)
+                    .unwrap_or_default(),
+            };
+        }
+        b.window = Some(window);
     }
     b.dau_series = dau?
         .rows
@@ -427,4 +498,16 @@ pub async fn board(
     b.readiness = readiness;
     b.total_events = i64::try_from(stored.rows).unwrap_or(i64::MAX);
     Ok(b)
+}
+
+/// The sessions block from its row.
+fn sessions_of(r: &Map<String, Value>) -> Sessions {
+    let user_days = int(r, "user_days").max(1) as f64;
+    Sessions {
+        count: int(r, "sessions"),
+        avg_secs: float(r, "avg_secs"),
+        bounce_rate: float(r, "bounce_rate"),
+        error_rate: float(r, "error_rate"),
+        tasks_per_user_day: int(r, "tasks") as f64 / user_days,
+    }
 }

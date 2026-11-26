@@ -20,6 +20,7 @@ ureq.workspace = true
 
 [dev-dependencies]
 openlens-server = { path = "../../crates/server" }
+openlens-engine = { path = "../../crates/engine" }
 tempfile.workspace = true
 
 [lints]

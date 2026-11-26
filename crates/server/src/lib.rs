@@ -728,23 +728,9 @@ pub(crate) async fn load_map(
 pub(crate) async fn map_history(state: &AppState, project: &str) -> Vec<openlens_engine::MapAt> {
     let meta = state.meta.clone();
     let p = project.to_owned();
-    tokio::task::spawn_blocking(move || {
-        let versions = meta.feature_map_versions(&p).unwrap_or_default();
-        versions
-            .into_iter()
-            .filter_map(|v| {
-                let saved = chrono::DateTime::parse_from_rfc3339(&v.created_at).ok()?;
-                let yaml = meta.feature_map_version(&p, v.version).ok()??;
-                Some(openlens_engine::MapAt {
-                    version: v.version,
-                    saved: saved.with_timezone(&chrono::Utc),
-                    map: openlens_featuremap::parse(&yaml).map?,
-                })
-            })
-            .collect()
-    })
-    .await
-    .unwrap_or_default()
+    tokio::task::spawn_blocking(move || openlens_engine::inforce::history(&meta, &p))
+        .await
+        .unwrap_or_default()
 }
 
 /// Run one alert pass now (tests and tools; the server runs it every

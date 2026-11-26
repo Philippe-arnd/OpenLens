@@ -36,13 +36,19 @@ impl People<'_> {
     /// `day` (the UTC day). A person active since a time inside the window
     /// is one with a row whose `last_ts` is at or after it.
     pub(crate) fn rows(&self, f: &Filters, days: i64) -> Result<String> {
-        let (skip, rolled) = split(&self.rolled, self.now, days, f, &self.role);
+        self.rows_in(f, Span::days(days))
+    }
+
+    /// [`People::rows`] over any span of time (D-055): the release window
+    /// and the same length before it.
+    pub(crate) fn rows_in(&self, f: &Filters, span: Span) -> Result<String> {
+        let (skip, rolled) = split_span(&self.rolled, self.now, span, f, &self.role);
         let events = format!(
             "SELECT distinct_id, environment, release, role, feature, count(*) AS events, \
              max(timestamp) AS last_ts, date AS day FROM {src} WHERE {w}{skip} \
              GROUP BY distinct_id, environment, release, role, feature, date",
             src = self.src,
-            w = f.clause_at(days, self.now)?,
+            w = f.clause_span(span, self.now)?,
         );
         let Some(w) = rolled else {
             return Ok(format!("({events}) AS people"));
@@ -67,8 +73,21 @@ pub(crate) async fn rolled_days(
     version: Option<i64>,
     now: DateTime<Utc>,
 ) -> Result<Vec<NaiveDate>> {
+    rolled_days_back(q, project, table, version, now, 90).await
+}
+
+/// [`rolled_days`] over the last `back` days: the release window and its
+/// comparison reach up to 180 days back (D-055).
+pub(crate) async fn rolled_days_back(
+    q: &QueryEngine,
+    project: &str,
+    table: &'static str,
+    version: Option<i64>,
+    now: DateTime<Utc>,
+    back: i64,
+) -> Result<Vec<NaiveDate>> {
     let last = openlens_query::last_closed(now);
-    let since = (now - Duration::days(90)).date_naive();
+    let since = (now - Duration::days(back)).date_naive();
     let sql = format!(
         "SELECT date, count(*) AS n, count(map_version) AS versioned, \
          min(map_version) AS lo, max(map_version) AS hi FROM {table} \
@@ -104,10 +123,24 @@ pub(crate) fn split(
     f: &Filters,
     role: &str,
 ) -> (String, Option<String>) {
-    let cutoff = (now - Duration::days(days)).date_naive();
+    split_span(rolled, now, Span::days(days), f, role)
+}
+
+/// [`split`] for any span of time (D-055): a rolled day is read from the
+/// rollup when it lies entirely inside the span, after the day the span
+/// starts in and before the day it ends in.
+pub(crate) fn split_span(
+    rolled: &[NaiveDate],
+    now: DateTime<Utc>,
+    span: Span,
+    f: &Filters,
+    role: &str,
+) -> (String, Option<String>) {
+    let cutoff = (now - Duration::seconds(span.start)).date_naive();
+    let until = (now - Duration::seconds(span.end)).date_naive();
     let list = rolled
         .iter()
-        .filter(|d| **d > cutoff)
+        .filter(|d| **d > cutoff && **d < until)
         .map(|d| format!("'{}'", d.format("%Y-%m-%d")))
         .collect::<Vec<_>>()
         .join(", ");

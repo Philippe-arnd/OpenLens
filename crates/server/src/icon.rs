@@ -164,15 +164,8 @@ pub(crate) async fn app_origin(state: &AppState, id: &str) -> Option<String> {
 
 /// Where most pageviews of the last 7 days came from.
 pub(crate) async fn detected_origin(state: &AppState, id: &str) -> Option<String> {
-    let since = (chrono::Utc::now() - chrono::Duration::days(7)).format("%Y-%m-%d");
-    let sql = format!(
-        "SELECT split_part(url, '/', 1) || '//' || split_part(url, '/', 3) AS o, count(*) AS n \
-         FROM events WHERE date >= '{since}' AND event = '$pageview' AND url LIKE 'http%' \
-         GROUP BY 1 ORDER BY n DESC LIMIT 1"
-    );
-    let r = state.query.sql(id, &sql).await.ok()?;
-    let o = r.rows.first()?.get("o")?.as_str()?;
-    origin(o)
+    let o = openlens_engine::reads::top_page_origin(&state.query, id).await?;
+    origin(&o)
 }
 
 /// `scheme://host[:port]` of an http(s) URL, or None.
