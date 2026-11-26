@@ -88,6 +88,9 @@ const PENDING: &[&str] = &[
     // `POST /api/projects/{id}/sql`, which answers a busy engine with a 503
     // and `Retry-After` where the command only has an error text.
     "explore.sql",
+    // The sidebar's Go to… field (#541): navigation for people in the
+    // dashboard. Agents name features and people by key in every tool.
+    "goto.lookup",
 ];
 
 /// Tools that are not engine commands yet: their logic still sits behind
