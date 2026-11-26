@@ -402,3 +402,6 @@ mod diff_tests {
         assert!(super::line_diff("", "").is_empty());
     }
 }
+
+#[cfg(test)]
+mod motion_tests;
