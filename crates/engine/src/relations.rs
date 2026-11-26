@@ -121,10 +121,7 @@ pub fn counts(m: &FeatureMap, sessions: &Sessions) -> Counts {
         for (i, a) in used.iter().enumerate() {
             for b in &used[i + 1..] {
                 let (x, y) = if a.0 < b.0 { (a, b) } else { (b, a) };
-                let p = c
-                    .pairs
-                    .entry((x.0.to_owned(), y.0.to_owned()))
-                    .or_default();
+                let p = c.pairs.entry((x.0.to_owned(), y.0.to_owned())).or_default();
                 let (xf, yf) = (i64::from(x.1 <= y.1), i64::from(y.1 <= x.1));
                 p.both += 1;
                 p.x_first += xf;

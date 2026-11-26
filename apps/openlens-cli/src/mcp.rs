@@ -410,7 +410,10 @@ impl Tools for OpenLensTools {
             }
             "feature_relations" => {
                 let feature = s(args, "feature");
-                if let Some(k) = feature.as_deref().filter(|k| !openlens_featuremap::valid_key(k)) {
+                if let Some(k) = feature
+                    .as_deref()
+                    .filter(|k| !openlens_featuremap::valid_key(k))
+                {
                     return Err(format!("`{k}` is not a feature key"));
                 }
                 let (st, v) = c.call(

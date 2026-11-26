@@ -205,7 +205,8 @@ impl MapDays {
             list = declared.join(", ")
         );
         let total = format!("{with}SELECT count(DISTINCT session_id) AS n FROM r");
-        let per = format!("{with}SELECT feature, count(*) AS n, sum(ok) AS ok FROM k GROUP BY feature");
+        let per =
+            format!("{with}SELECT feature, count(*) AS n, sum(ok) AS ok FROM k GROUP BY feature");
         let pairs = format!(
             "{with}SELECT a.feature AS x, b.feature AS y, count(*) AS n, \
              sum(CASE WHEN a.t <= b.t THEN 1 ELSE 0 END) AS xf, \
@@ -262,7 +263,10 @@ fn task(m: &FeatureMap) -> Result<String> {
 }
 
 /// The keys of the map's features that pass `keep`, as SQL literals.
-fn keys(m: &FeatureMap, keep: impl Fn(&openlens_featuremap::Feature) -> bool) -> Result<Vec<String>> {
+fn keys(
+    m: &FeatureMap,
+    keep: impl Fn(&openlens_featuremap::Feature) -> bool,
+) -> Result<Vec<String>> {
     keys_of(
         m.features
             .iter()
