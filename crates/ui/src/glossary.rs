@@ -388,7 +388,12 @@ mod tests {
     #[test]
     fn every_tile_has_a_definition() {
         let sources = [
-            include_str!("board.rs"),
+            include_str!("board/mod.rs"),
+            include_str!("board/focus.rs"),
+            include_str!("board/tiles.rs"),
+            include_str!("board/charts.rs"),
+            include_str!("board/sections.rs"),
+            include_str!("events.rs"),
             include_str!("audience.rs"),
             include_str!("settings.rs"),
             include_str!("manage.rs"),
@@ -418,6 +423,20 @@ mod tests {
                     );
                 }
             }
+            // (kpi_to(&detail_url(.., "/path", f), "Label", Kpi { … }, alert)): the board (#543)
+            for call in src.split("(kpi_to(").skip(1) {
+                let label = call
+                    .split('"')
+                    .skip(1)
+                    .step_by(2)
+                    .find(|l| !l.starts_with('/'))
+                    .unwrap();
+                seen += 1;
+                assert!(
+                    super::definition(label).is_some(),
+                    "tile {label:?} has no glossary entry"
+                );
+            }
             for call in src.split("tile(").skip(1) {
                 // tile("accent", "glyph", "Label" | &format!("Label (…)", …)
                 let args: Vec<&str> = call.splitn(4, ',').collect();
@@ -442,7 +461,12 @@ mod tests {
     #[test]
     fn every_metric_column_has_a_definition() {
         let sources = [
-            include_str!("board.rs"),
+            include_str!("board/mod.rs"),
+            include_str!("board/focus.rs"),
+            include_str!("board/tiles.rs"),
+            include_str!("board/charts.rs"),
+            include_str!("board/sections.rs"),
+            include_str!("events.rs"),
             include_str!("audience.rs"),
             include_str!("settings.rs"),
             include_str!("manage.rs"),

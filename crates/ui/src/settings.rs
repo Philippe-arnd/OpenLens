@@ -510,6 +510,13 @@ pub struct AiPreset {
     pub key_url: &'static str,
 }
 
+/// How the key and the token budget are handled, under the AI form.
+fn ai_terms(budget: i64) -> Markup {
+    html! {
+        "The key is stored encrypted and never shown again; it only travels in a header to the provider. Each project may use " (compact(budget)) " tokens a day (" code { "OPENLENS_LLM_DAILY_TOKENS" } "), and each person 30 questions an hour. See docs/ai.md for LiteLLM and Ollama."
+    }
+}
+
 /// The AI settings page.
 pub fn ai_settings(v: &AiView<'_>) -> Markup {
     layout(
@@ -522,14 +529,24 @@ pub fn ai_settings(v: &AiView<'_>) -> Markup {
             } }
             @if let Some(n) = v.notice { p.notice role="status" { (n) } }
             @if let Some(e) = v.error { p.alert role="alert" { (e) } }
-            section.card.wide {
-                h2.violet { (icon("spark")) "Model" }
-                p { "Now: " strong { (v.active.as_deref().unwrap_or("off")) } }
-                @if v.from_env {
+            @if v.from_env {
+                section.card.wide {
+                    h2.violet { (icon("spark")) "Model" }
+                    p { "Now: " strong { (v.active.as_deref().unwrap_or("off")) } }
                     p.muted { "Set by the " code { "OPENLENS_LLM_*" } " environment variables, which win over this page." }
-                } @else {
-                    form.settings.ai-form method="post" action="/settings/ai" {
-                        label { "Provider "
+                    p.muted.small { (ai_terms(v.budget)) }
+                }
+            } @else {
+                // The provider stays a select: there are more presets than a
+                // segmented control holds. The key hint follows the chosen
+                // preset through :has() (no JavaScript).
+                form.card.wide.form-card.ai-form method="post" action="/settings/ai" aria-labelledby="ai-h" {
+                    div.section-head {
+                        h2 #ai-h { (icon("spark")) "Model" }
+                        p { "Now: " strong { (v.active.as_deref().unwrap_or("off")) } }
+                    }
+                    div.form-grid {
+                        label.field { "Provider"
                             select name="preset" {
                                 option value="off" selected[v.preset.is_empty()] { "off" }
                                 @for p in &v.presets {
@@ -537,38 +554,48 @@ pub fn ai_settings(v: &AiView<'_>) -> Markup {
                                 }
                                 option value="custom" selected[v.preset == "custom"] { "Custom (any OpenAI-compatible server, Azure, LiteLLM, vLLM…)" }
                             }
+                            small { "Off: Ask is turned off." }
                         }
-                        label { "API key " input type="password" name="key" autocomplete="off" placeholder=(if v.key_set { "stored (leave empty to keep it)".to_owned() } else { "paste it here".to_owned() }); }
-                        p.small.muted.key-help {
-                            @for p in &v.presets {
-                                span class={ "for-" (p.id) } { (p.label) " keys look like " code { (p.key_hint) } " · " a href=(p.key_url) rel="noopener" target="_blank" { "get one" } }
+                        label.field { "API key"
+                            input type="password" name="key" autocomplete="off" placeholder=(if v.key_set { "stored (leave empty to keep it)".to_owned() } else { "paste it here".to_owned() });
+                            small.key-help {
+                                @for p in &v.presets {
+                                    span class={ "for-" (p.id) } { (p.label) " keys look like " code { (p.key_hint) } " · " a href=(p.key_url) rel="noopener" target="_blank" { "get one" } }
+                                }
                             }
                         }
                         div.custom-only {
-                            label { "Protocol "
+                            label.field { "Protocol"
                                 select name="provider" {
                                     option value="openai-compatible" selected[v.provider != "anthropic"] { "OpenAI Chat Completions" }
                                     option value="anthropic" selected[v.provider == "anthropic"] { "Anthropic Messages" }
                                 }
+                                small { "What the server speaks." }
                             }
                         }
                         div.url-field {
-                            label { "Base URL " input type="url" name="base_url" value=(v.base_url) placeholder="empty: the preset's address · http://ollama:11434/v1 · http://litellm:4000/v1" maxlength="300"; }
-                        }
-                        details.models open[v.preset == "custom"] {
-                            summary { "Models" @if !v.model.is_empty() { " · " (v.model) " / " (if v.fast_model.is_empty() { v.model.as_str() } else { v.fast_model.as_str() }) } }
-                            datalist id="ai-models" { @for m in &v.models { option value=(m) {} } }
-                            label { "Model " input type="text" name="model" list="ai-models" value=(v.model) placeholder="picked from the provider's list" maxlength="120"; }
-                            label { "Fast model " input type="text" name="fast_model" list="ai-models" value=(v.fast_model) placeholder="for short lookups" maxlength="120"; }
-                        }
-                        div.actions {
-                            button type="submit" name="action" value="save" { "Save and check" }
-                            button.soft type="submit" name="action" value="test" { "Test" }
-                            @if v.key_set { button.ghost type="submit" name="action" value="forget" { "Remove the key" } }
+                            label.field { "Base URL"
+                                input type="url" name="base_url" value=(v.base_url) placeholder="empty: the preset's address · http://ollama:11434/v1 · http://litellm:4000/v1" maxlength="300";
+                                small { "Empty: the preset's address." }
+                            }
                         }
                     }
+                    details.models open[v.preset == "custom"] {
+                        summary { "Models" @if !v.model.is_empty() { " · " (v.model) " / " (if v.fast_model.is_empty() { v.model.as_str() } else { v.fast_model.as_str() }) } }
+                        datalist id="ai-models" { @for m in &v.models { option value=(m) {} } }
+                        div.form-grid {
+                            label.field { "Model" input type="text" name="model" list="ai-models" value=(v.model) placeholder="picked from the provider's list" maxlength="120"; small { "For questions and investigations." } }
+                            label.field { "Fast model" input type="text" name="fast_model" list="ai-models" value=(v.fast_model) placeholder="for short lookups" maxlength="120"; small { "For short lookups." } }
+                        }
+                    }
+                    p.muted.small { (ai_terms(v.budget)) }
+                    div.form-foot {
+                        button.btn.primary type="submit" name="action" value="save" { "Save and check" }
+                        button.btn type="submit" name="action" value="test" { "Test" }
+                        @if v.key_set { button.btn.ghost type="submit" name="action" value="forget" { "Remove the key" } }
+                        p { "Test sends one short request to the provider to check the key." }
+                    }
                 }
-                p.muted.small { "The key is stored encrypted and never shown again; it only travels in a header to the provider. Each project may use " (compact(v.budget)) " tokens a day (" code { "OPENLENS_LLM_DAILY_TOKENS" } "), and each person 30 questions an hour. See docs/ai.md for LiteLLM and Ollama." }
             }
         },
     )

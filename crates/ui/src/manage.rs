@@ -3,6 +3,7 @@
 //! Moved out of `lib.rs` as is (#307).
 
 use super::*;
+use crate::tables::Col;
 
 /// Feature flags: switch on/off and change the rollout. Creating flags is
 /// done by agents (API/CLI/MCP) with the code that uses them.
@@ -268,39 +269,45 @@ pub fn errors(
             @if groups.is_empty() {
                 section.card { p { (icon("task")) " No errors in the last 30 days. Nice." } }
             } @else {
-                section.card.wide {
-                    table.plain {
-                        thead { tr { th { "Error" } (th_num("Users")) (th_num("Sessions")) (th_num("Times")) th { "Roles" } th { "Releases" } th { "Where" } th { "Last seen" } th { span.sr-only { "Replay" } } } }
-                        tbody { @for (i, g) in groups.iter().enumerate() {
-                            tr {
-                                th scope="row" {
-                                    span.mono { (g.sample.get(..160).unwrap_or(&g.sample)) }
-                                    br;
-                                    a.small href={ "/p/" (p.id) "/tickets/new?kind=error&subject=" (url_enc(&g.fingerprint)) } { "Create ticket →" } br;
-                                    @if let Some(Some(o)) = original.get(i) {
-                                        span.small.mono title="Resolved with the release's source map" {
-                                            (icon("route")) " " (o.source) ":" (o.line) @if let Some(n) = &o.name { " · " (n) }
-                                        }
-                                    } @else {
-                                        @let place = g.fingerprint.rsplit(" @ ").next().unwrap_or("");
-                                        @if place != "?" { span.muted.small.mono { (place) } }
+                (crate::tables::TableCard {
+                    label: "Error groups",
+                    head: html! {},
+                    cols: &[
+                        Col::Shown("Error"), Col::Num("Users"), Col::Num("Sessions"), Col::Num("Times"),
+                        Col::Shown("Roles"), Col::Shown("Releases"), Col::Shown("Where"), Col::Shown("Last seen"),
+                        Col::Shown("Last user"), Col::Hidden("Replay"),
+                    ],
+                    body: html! { @for (i, g) in groups.iter().enumerate() {
+                        tr {
+                            th scope="row" {
+                                span.ev.ev-error title="Error" { (icon("alert")) span.sr-only { "Error: " } (g.sample.get(..160).unwrap_or(&g.sample)) }
+                                br;
+                                a.small href={ "/p/" (p.id) "/tickets/new?kind=error&subject=" (url_enc(&g.fingerprint)) } { "Create ticket →" } br;
+                                @if let Some(Some(o)) = original.get(i) {
+                                    span.small.mono title="Resolved with the release's source map" {
+                                        (icon("route")) " " (o.source) ":" (o.line) @if let Some(n) = &o.name { " · " (n) }
                                     }
+                                } @else {
+                                    @let place = g.fingerprint.rsplit(" @ ").next().unwrap_or("");
+                                    @if place != "?" { span.muted.small.mono { (place) } }
                                 }
-                                td.num { strong { (compact(g.users)) } }
-                                td.num { (compact(g.sessions)) }
-                                td.num.muted { (compact(g.count)) }
-                                td.small { (list(&g.roles)) }
-                                td.small { (list(&g.releases)) }
-                                td.small { (list(&g.places)) }
-                                td.small.muted { (local_time(&g.last_seen, &f.tz, false)) }
-                                td.small { @if let Some(u) = &g.last_user { a.mono href={ "/p/" (p.id) "/people/" (url_enc(u)) } title="Who hit it last" { (u) } } }
-                                td { @if let Some(s) = &g.last_session {
-                                    a.icon-link href={ "/p/" (p.id) "/replays/" (s) "?at=" (g.last_seen) } title="Replay the latest occurrence" aria-label="Replay the latest occurrence" { (icon("play")) }
-                                } }
                             }
-                        } }
-                    }
+                            td.num { strong { (compact(g.users)) } }
+                            td.num { (compact(g.sessions)) }
+                            td.num.muted { (compact(g.count)) }
+                            td.small { (list(&g.roles)) }
+                            td.small { (list(&g.releases)) }
+                            td.path { (list(&g.places)) }
+                            td.when.muted { (local_time(&g.last_seen, &f.tz, false)) }
+                            td { @if let Some(u) = &g.last_user { (crate::tables::user_cell(p.id, u)) } }
+                            td { @if let Some(s) = &g.last_session {
+                                a.icon-link href={ "/p/" (p.id) "/replays/" (s) "?at=" (g.last_seen) } title="Replay the latest occurrence" aria-label="Replay the latest occurrence" { (icon("play")) }
+                            } }
+                        }
+                    } },
+                    foot: html! { div.pager { span { (groups.len()) " groups · most users first · times in " (f.tz) } } },
                 }
+                .render())
             }
         },
     )

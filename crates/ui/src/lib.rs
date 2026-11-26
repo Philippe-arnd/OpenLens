@@ -18,6 +18,7 @@ mod cost;
 mod delivery;
 mod entry;
 mod environments;
+mod events;
 mod explore;
 mod feature_page;
 mod features;
@@ -25,11 +26,16 @@ mod glossary;
 mod goals;
 mod goto;
 mod icons;
+mod live;
 mod maintenance;
 mod manage;
+mod profile;
+mod project_settings;
 mod releases;
 mod settings;
 mod shell;
+mod tables;
+pub(crate) use tables::family_label;
 mod slo;
 mod status_page;
 mod team;
@@ -44,6 +50,7 @@ pub use board_job::{JobView, board_job};
 pub use components::*;
 pub use cost::board_confirm;
 pub use entry::{login, login_continue, message, message_html, welcome};
+pub use events::events;
 pub use explore::*;
 pub use feature_page::*;
 pub use features::*;
@@ -51,9 +58,12 @@ pub(crate) use glossary::{th_def, th_num, vital_info};
 pub use goals::*;
 pub use goto::{GotoPlace, goto_results, goto_sections};
 pub use icons::icon;
+pub use live::live;
 pub use maintenance::{MaintenanceRow, MaintenanceView, maintenance_card};
 pub use manage::*;
 use openlens_engine::{Board, EventRow, Filters};
+pub use profile::*;
+pub use project_settings::*;
 pub use releases::*;
 pub use settings::*;
 pub(crate) use shell::{Crumbs, NAV, Signal, layout, layout_in, layout_with, signals};
@@ -286,18 +296,33 @@ mod tests {
     /// must use `tile_to` / `to(...)`, or say `no_detail` on purpose.
     #[test]
     fn every_board_card_and_tile_leads_somewhere() {
-        let src = include_str!("board.rs");
-        let body = &src[src.find("pub fn board(").unwrap()..];
+        let src = include_str!("board/mod.rs");
+        let body = [
+            &src[src.find("pub fn board(").unwrap()..],
+            include_str!("board/focus.rs"),
+            include_str!("board/tiles.rs"),
+            include_str!("board/charts.rs"),
+            include_str!("board/sections.rs"),
+        ]
+        .concat();
         assert!(
             !body.contains("(tile(\""),
-            "a board tile without a detail: use tile_to"
+            "a board tile without a detail: use kpi_to"
         );
-        for line in body.lines().filter(|l| l.trim_start().starts_with("h2.")) {
+        // Every card title (`h2.x`, `h2 id=…`, `h2 {`) opens its page, or
+        // says why not.
+        for line in body.lines().filter(|l| {
+            let l = l.trim_start();
+            l.starts_with("h2.") || l.starts_with("h2 ") || l.starts_with("h2#")
+        }) {
             assert!(
                 line.contains("(to(") || line.contains("no_detail"),
                 "card without a detail: {line}"
             );
         }
+        // The section heads of the other cards go through `head(…)`, which
+        // is `to(…)`.
+        assert!(include_str!("board/sections.rs").contains("h2 id=(id) { (to(href, title)) }"));
         let f = Filters {
             environment: "production".into(),
             role: Some("admin".into()),
