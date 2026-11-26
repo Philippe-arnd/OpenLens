@@ -36,6 +36,7 @@ mod icon;
 pub mod identity;
 mod llm;
 mod llm_presets;
+mod maintenance;
 mod manage;
 pub mod metrics;
 mod oidc;
@@ -161,6 +162,7 @@ pub fn router(state: AppState) -> Router {
         .merge(releases::routes())
         .merge(delivery::routes())
         .merge(hooks::routes())
+        .merge(maintenance::routes())
         .layer(axum::middleware::from_fn(csrf::layer))
         .layer(axum::middleware::from_fn(trusted_headers_layer))
         // Pages, the API and Ask (a few model rounds) get two minutes.

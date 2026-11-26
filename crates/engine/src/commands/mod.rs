@@ -25,6 +25,7 @@ pub mod deploys;
 pub mod explore;
 pub mod flags;
 pub mod goals;
+pub mod maintenance;
 pub mod releases;
 pub mod tickets;
 
@@ -127,6 +128,12 @@ pub const REGISTRY: &[Spec] = &[
     spec::<board::GetEstimate>(),
     // Delivery metrics (#523).
     spec::<delivery::GetDelivery>(),
+    // Planned maintenance windows (#563).
+    spec::<maintenance::List>(),
+    spec::<maintenance::Schedule>(),
+    spec::<maintenance::Extend>(),
+    spec::<maintenance::EndNow>(),
+    spec::<maintenance::Cancel>(),
 ];
 
 /// A 12-character id from `s` (the first bytes of its SHA-256, in hex).

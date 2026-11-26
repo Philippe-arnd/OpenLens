@@ -279,12 +279,19 @@ pub(super) enum Command {
         #[arg(long, default_value = "default")]
         project: String,
     },
-    /// Is the app up? (`up`, `down`, `unknown`, `off`, with open incidents.)
-    /// Exits non-zero when down: handy right after a deploy.
+    /// Is the app up? (`up`, `down`, `maintenance`, `unknown`, `off`, with
+    /// open incidents and maintenance windows.) Exits non-zero when down:
+    /// handy right after a deploy.
     Status {
         /// Project id.
         #[arg(long, default_value = "default")]
         project: String,
+    },
+    /// Planned maintenance windows (#563): incidents during one are not
+    /// announced and its time is not counted against availability.
+    Maintenance {
+        #[command(subcommand)]
+        action: crate::maintenance::MaintenanceCmd,
     },
     /// How sessions move between features (Sankey data, last 30 days).
     Flows {
