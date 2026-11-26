@@ -131,22 +131,60 @@ pub fn heatmap_overlay(p: &ProjectInfo<'_>, path: &str, session: &str) -> Markup
     )
 }
 
-/// The weekly digest page.
+/// A week's change as the board's delta (#551): an icon, the signed
+/// change, the verdict in words for screen readers. `higher_good`: up is
+/// better (users, sessions), down is better (errors).
+fn digest_delta(x: &openlens_engine::Delta, higher_good: bool) -> Markup {
+    match x.change() {
+        None => html! { span.delta.flat title="nothing last week to compare with" { "—" } },
+        Some(c) => {
+            let flat = c.abs() < 0.005;
+            let (tone, glyph, word) = if flat {
+                ("flat", "right", "about the same")
+            } else if (c > 0.0) == higher_good {
+                ("good", if c > 0.0 { "up" } else { "down" }, "better")
+            } else {
+                ("bad", if c > 0.0 { "up" } else { "down" }, "worse")
+            };
+            let text = if flat {
+                "same".to_owned()
+            } else {
+                format!("{:+.0}%", c * 100.0).replacen('-', "−", 1)
+            };
+            html! {
+                span class={ "delta " (tone) } title=(word) {
+                    (icon(glyph)) (text) span.sr-only { " (" (word) ")" }
+                }
+            }
+        }
+    }
+}
+
+/// One read-only KPI tile of the digest: this week, and the change
+/// against last week.
+fn digest_tile(label: &str, x: &openlens_engine::Delta, higher_good: bool) -> Markup {
+    html! {
+        div.kpi-slot {
+            div.card.kpi {
+                div.kpi-head { span { (label) } }
+                div.kpi-mid { div.kpi-value { (compact(x.now)) } }
+                div.kpi-foot { (digest_delta(x, higher_good)) span { "vs " (compact(x.before)) " last week" } }
+            }
+        }
+    }
+}
+
+/// The weekly digest page (#551): the board's parts, read-only. The key
+/// numbers as tiles, completed tasks as a table, the insights as the lead
+/// card and the ranked list, then the releases and the goals.
 pub fn digest(p: &ProjectInfo<'_>, d: &openlens_engine::Digest, mailed: bool) -> Markup {
     let row = |label: &str, x: &openlens_engine::Delta| {
-        let change = x.change();
         html! {
             tr {
                 th scope="row" { (label) }
                 td.num { strong { (compact(x.now)) } }
                 td.num.muted { (compact(x.before)) }
-                td.num {
-                    @match change {
-                        Some(c) if c.abs() >= 0.005 => span class=(if c > 0.0 { "up" } else { "down" }) { (format!("{:+.0}%", c * 100.0)) },
-                        Some(_) => span.muted { "same" },
-                        None => span.muted { "—" },
-                    }
-                }
+                td.num { (digest_delta(x, true)) }
             }
         }
     };
@@ -154,40 +192,75 @@ pub fn digest(p: &ProjectInfo<'_>, d: &openlens_engine::Digest, mailed: bool) ->
         "Weekly digest",
         Some(p),
         html! {
-            div.heading { div {
-                h1 { "This week vs last" }
-                p.muted { "Last 7 days against the 7 before, production. "
-                    @if mailed { "Emailed every Monday." } @else { "Set OPENLENS_SMTP_URL and OPENLENS_DIGEST_TO to receive it by email every Monday." } }
-            } }
-            section.card.wide {
-                table.plain {
-                    thead { tr { th { span.sr-only { "Metric" } } (th_num("This week")) (th_num("Last week")) (th_num("Change")) } }
-                    tbody {
-                        (row("Active users", &d.users))
-                        (row("Sessions", &d.sessions))
-                        (row("Errors", &d.errors))
-                        @for (k, t) in &d.tasks { (row(&format!("Completed: {k}"), t)) }
+            div.board.digest {
+                div.page-head { div {
+                    h1 { "This week vs last" }
+                    p { "Last 7 days against the 7 before, production. "
+                        @if mailed { "Emailed every Monday." } @else { "Set OPENLENS_SMTP_URL and OPENLENS_DIGEST_TO to receive it by email every Monday." } }
+                } }
+                section.kpis aria-label="Key numbers" {
+                    (digest_tile("Active users", &d.users, true))
+                    (digest_tile("Sessions", &d.sessions, true))
+                    (digest_tile("Errors", &d.errors, false))
+                }
+                @if !d.tasks.is_empty() {
+                    (crate::features::table_card(
+                        "Completed tasks",
+                        html! { h2 { (icon("task")) "Completed tasks" } },
+                        html! { th scope="col" { span.sr-only { "Metric" } } (th_num("This week")) (th_num("Last week")) (th_num("Change")) },
+                        html! { @for (k, t) in &d.tasks { (row(&format!("Completed: {k}"), t)) } },
+                        html! {},
+                    ))
+                }
+                @if !d.insights.is_empty() {
+                    section.focus aria-labelledby="digest-focus-h" {
+                        h2.eyebrow #digest-focus-h { "What to focus on" " " span.count { (d.insights.len()) } }
+                        div.focus-grid {
+                            @if let Some(i) = d.insights.first() {
+                                article.card.lead {
+                                    div.lead-top { span.rank aria-hidden="true" { "01" } }
+                                    div.lead-text {
+                                        h2 { span.sr-only { "Insight 1: " } (i.title) }
+                                        p.evidence { (i.evidence) }
+                                    }
+                                    div.next { (icon("idea")) div { strong { "Next step" } p { (i.next_step) } } }
+                                }
+                            }
+                            @if d.insights.len() > 1 {
+                                div.card.ranked {
+                                    ol start="2" {
+                                        @for (n, i) in d.insights.iter().enumerate().skip(1) {
+                                            li.row {
+                                                span.rank aria-hidden="true" { (format!("{:02}", n + 1)) }
+                                                div {
+                                                    h3 { span.sr-only { "Insight " (n + 1) ": " } (i.title) }
+                                                    div.meta { span { (i.evidence) } }
+                                                    p.step { span.label { "Next step: " } (i.next_step) }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
-            }
-            @if !d.insights.is_empty() {
-                section.card.wide {
-                    h2.violet { (icon("idea")) "What to focus on" }
-                    ul { @for i in &d.insights { li { strong { (i.title) } " · " span.muted { (i.evidence) } br; span.small { "Next step: " (i.next_step) } } } }
+                @if !d.releases.is_empty() {
+                    (crate::features::table_card(
+                        "Releases this week",
+                        html! { h2 { (icon("release")) "Releases this week" } },
+                        html! { th scope="col" { "Release" } th scope="col" { "Verdict" } },
+                        html! { @for (name, line) in &d.releases { tr { th scope="row" { code { (name) } } td { (line) } } } },
+                        html! {},
+                    ))
                 }
-            }
-            @if !d.releases.is_empty() {
-                section.card.wide {
-                    h2 { "Releases this week" }
-                    ul.plain-list { @for (name, line) in &d.releases { li { code { (name) } " — " (line) } } }
-                }
-            }
-            @if !d.goals.is_empty() {
-                section.card.wide {
-                    h2.sun { (icon("star")) "Goals" }
-                    ul.plain-list {
-                        @for o in &d.objectives_at_risk { li { span.status.bad { "objective at risk" } " " (o) } }
-                        @for (line, st) in &d.goals { li { (line) " — " strong { (st) } } }
+                @if !d.goals.is_empty() {
+                    section.card.pad {
+                        h2 { (icon("star")) "Goals" }
+                        ul.plain-list {
+                            @for o in &d.objectives_at_risk { li { span.tag.tone-bad { (icon("alert")) "objective at risk" } " " (o) } }
+                            @for (line, st) in &d.goals { li { (line) " — " strong { (st) } } }
+                        }
                     }
                 }
             }
@@ -377,23 +450,36 @@ pub fn surveys(
                 a.button href={ "/p/" (p.id) "/surveys-edit" } { (icon("plus")) "New survey" }
             }
             @if list.is_empty() {
-                section.card { p.muted { "No survey yet. Ask your agent, for example: “after entry_saved, ask 10% of users how useful writing felt, 1 to 5”." } }
+                section.card.empty aria-labelledby="no-surveys" {
+                    (crate::tables::empty_art())
+                    div {
+                        h2 #no-surveys { "No survey yet" }
+                        p { "Ask your agent, in plain words, for example:" }
+                        pre.snippet { code { "After entry_saved, ask 10% of users how useful writing felt, 1 to 5." } }
+                        p { "It sets the survey up with " code { "survey_set" } ". Answers then arrive here, and in Events as " code { "$survey" } "." }
+                        div.actions { a.btn.primary href={ "/p/" (p.id) "/surveys-edit" } { (icon("plus")) "New survey" } }
+                    }
+                }
             }
             @for s in list {
                 @let r = results.iter().find(|r| r.key == s.key);
                 @let answered: i64 = r.map_or(0, |r| r.answers.iter().map(|a| a.1).sum());
                 @let max = r.map_or(1, |r| r.answers.iter().map(|a| a.1).max().unwrap_or(1)).max(1) as f64;
-                section.card.wide {
-                    h2.violet { (icon("idea")) (s.question) }
-                    p.small.muted {
-                        span.chip { (s.kind) } " after " code { (s.trigger) } " · " (s.sample) "% of "
-                        @if s.roles.is_empty() { "everyone" } @else { (s.roles.join(", ")) }
-                        " · " (compact(answered)) " answers"
-                        @if let Some(r) = r { " · " (compact(r.dismissed)) " dismissed" }
-                        " · " a href={ "/p/" (p.id) "/surveys-edit?key=" (s.key) } { "Edit" }
+                section.card.wide.survey {
+                    div.section-head {
+                        h2 { (icon("idea")) (s.question) }
+                        a href={ "/p/" (p.id) "/surveys-edit?key=" (s.key) } { "Edit" }
+                    }
+                    p.meta {
+                        @if s.enabled { span.tag.tone-good { (icon("task")) "on" } } @else { span.tag { (icon("ban")) "off" } }
+                        span.tag.tone-info { (s.kind) }
+                        span { "after " code { (s.trigger) } " · " (s.sample) "% of "
+                            @if s.roles.is_empty() { "everyone" } @else { (s.roles.join(", ")) }
+                            " · " (compact(answered)) " answers"
+                            @if let Some(r) = r { " · " (compact(r.dismissed)) " dismissed" } }
                     }
                     form.inline method="post" action={ "/p/" (p.id) "/surveys/" (s.key) } {
-                        label { input type="checkbox" name="enabled" checked[s.enabled]; " on" }
+                        label { input type="checkbox" role="switch" name="enabled" checked[s.enabled]; " on" }
                         label { "sample " input type="number" name="sample" min="0" max="100" value=(s.sample); "%" }
                         button.soft type="submit" { "Save" }
                     }
