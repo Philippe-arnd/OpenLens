@@ -177,9 +177,10 @@ async fn a_slug_belongs_to_one_project() {
         ..take()
     };
     assert!(Set::run(&h, &Caller::default(), free).await.is_ok());
-    // Turning a page on needs a slug.
+    // Turning a page on needs a slug (a project that never had one).
+    let bare = h.meta().create_project("bare", None).unwrap();
     let no_slug = SetInput {
-        project: first.id.clone(),
+        project: bare.id.clone(),
         enabled: Some(true),
         ..SetInput::default()
     };
