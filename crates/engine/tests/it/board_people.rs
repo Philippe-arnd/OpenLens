@@ -278,6 +278,7 @@ async fn uses(root: &std::path::Path, version: i64) -> i64 {
 }
 
 #[tokio::test]
+#[ignore = "heavy: rolls up every closed day; run by `cargo xtask ci --heavy` (nightly, release tags)"]
 async fn board_blocks_read_closed_days_from_the_rollups_with_the_same_numbers() {
     let dir = seed();
     let root = dir.path();
@@ -300,6 +301,7 @@ async fn board_blocks_read_closed_days_from_the_rollups_with_the_same_numbers() 
 }
 
 #[tokio::test]
+#[ignore = "heavy: rolls up every closed day; run by `cargo xtask ci --heavy` (nightly, release tags)"]
 async fn a_day_rolled_with_an_older_map_is_read_from_its_events() {
     let dir = seed();
     let root = dir.path();
