@@ -116,6 +116,7 @@ pub fn breakdown(
     by: &str,
     rows: &[openlens_engine::BreakdownRow],
 ) -> Markup {
+    use crate::tables::Col;
     let label = BREAKDOWNS
         .iter()
         .find(|(k, _)| *k == by)
@@ -132,30 +133,50 @@ pub fn breakdown(
             } }
             nav.tabs aria-label="Dimension" {
                 @for (k, l) in BREAKDOWNS {
-                    a href={ "/p/" (p.id) "/breakdown?by=" (k) "&env=" (url_enc(&f.environment)) } aria-current=[(*k == by).then_some("page")] { (l) }
+                    a href=(filtered_href(p.id, "/breakdown", f, &[("by", k)])) aria-current=[(*k == by).then_some("page")] { (l) }
                 }
             }
-            section.card.wide {
-                @if rows.is_empty() { p.muted { "No data in this window." } }
-                @else {
-                    div.table-scroll { table.plain {
-                        thead { tr { th { (label) } (th_num("Users")) th { span.sr-only { "Share" } } (th_num("Sessions")) (th_num("Tasks")) (th_num("Errors")) (th_num("Events")) } }
-                        tbody { @for r in rows {
-                            tr {
-                                th scope="row" { @match &r.value { Some(v) => span.mono { (v) }, None => span.muted { "(none)" } } }
-                                td.num { strong { (compact(r.users)) } }
-                                td.meter { (meter(r.users as f64 / max)) }
-                                td.num { (compact(r.sessions)) }
-                                td.num { (compact(r.tasks)) }
-                                td.num { (compact(r.errors)) }
-                                td.num.muted { (compact(r.events)) }
-                            }
-                        } }
-                    } }
+            @if rows.is_empty() {
+                section.card.wide { p.muted { "No data in this window." } }
+            } @else {
+                (crate::tables::TableCard {
+                    label: "Breakdown",
+                    head: html! {},
+                    cols: &[
+                        Col::Shown(label), Col::Shown("Users"), Col::Num("Sessions"),
+                        Col::Num("Tasks"), Col::Num("Errors"), Col::Num("Events"),
+                    ],
+                    body: html! { @for r in rows {
+                        tr {
+                            th scope="row" { @match &r.value { Some(v) => span.mono { (v) }, None => span.muted { "(none)" } } }
+                            td.users { (crate::board::bar_with(r.users as f64 / max, &compact(r.users))) }
+                            td.num { (compact(r.sessions)) }
+                            td.num { (compact(r.tasks)) }
+                            td.num { (compact(r.errors)) }
+                            td.num.muted { (compact(r.events)) }
+                        }
+                    } },
+                    foot: html! {},
                 }
+                .render())
             }
         },
     )
+}
+
+/// A link to `path` (after `/p/{project}`) with the page's own pairs and
+/// every current filter of the context bar, so switching a tab keeps them.
+pub(crate) fn filtered_href(pid: &str, path: &str, f: &Filters, page: &[(&str, &str)]) -> String {
+    let mut kv = kept_filters(f, Ctx::Team, page);
+    if f.internal {
+        kv.push(("internal".into(), "1".into()));
+    }
+    let q = kv
+        .iter()
+        .map(|(k, v)| format!("{}={}", url_enc(k), url_enc(v)))
+        .collect::<Vec<_>>()
+        .join("&");
+    format!("/p/{pid}{path}?{q}")
 }
 
 /// Read-only SQL for admins (#222): the schema, a query box, the result
