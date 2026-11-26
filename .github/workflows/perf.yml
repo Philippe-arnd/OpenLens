@@ -172,8 +172,26 @@ jobs:
             done
           }
           start
+          # Diagnostic (#452): which rollups exist and which map version the
+          # board will compare them with, before and after the push.
+          api() { curl -s -H "authorization: Bearer perf" "127.0.0.1:18741$1"; }
+          {
+            echo "map version before push: $(api /api/projects/default/feature-map | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version"))')"
+            R="$D/rollups/v1/project=default"
+            echo "rolled day dirs: $(ls "$R" 2>/dev/null | wc -l)"
+            for t in person_day session_day session_feature_day success_day; do
+              echo "days with $t: $(ls "$R"/*/"$t".parquet 2>/dev/null | wc -l)"
+            done
+            echo "one day: $(ls "$R/$(ls "$R" | sort | tail -3 | head -1)" | tr '\n' ' ')"
+          } > diag.txt
           OPENLENS_SERVER=http://127.0.0.1:18741 OPENLENS_TOKEN=perf ./target/perf/openlens-cli features push --project default --file map.yaml > /dev/null
+          echo "map version after push: $(api /api/projects/default/feature-map | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version"))')" >> diag.txt
           idle
+          # Days read from rollups vs events for the 30 closed days before
+          # yesterday, as the board's own estimate counts them (D-061).
+          from=$(date -u -d '32 days ago' +%F); to=$(date -u -d '3 days ago' +%F)
+          echo "estimate $from..$to: $(api "/api/projects/default/board/estimate?from=$from&to=$to")" >> diag.txt
+          cat diag.txt
           runs=()
           for run in 1 2 3; do
             [ "$run" -gt 1 ] && { kill "$PID"; wait "$PID" || true; start; idle; }
@@ -212,7 +230,7 @@ jobs:
           cat scale.json
           # The 25 slowest queries of the whole run, longest first.
           sed 's/\x1b\[[0-9;]*m//g' server.log | grep ' query ' | sed -n 's/.* ms=\([0-9]*\) sql=\(.*\)/\1\t\2/p' | sort -rn | head -25 > queries.txt || true
-          { echo "## Board at scale: $EVENTS events, cap ${MEMORY:-none}"; echo; echo '```json'; cat scale.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          { echo "## Board at scale: $EVENTS events, cap ${MEMORY:-none}"; echo; echo '```json'; cat scale.json; echo '```'; echo '```'; cat diag.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: always()
         with:
@@ -220,4 +238,5 @@ jobs:
           path: |
             scale.json
             queries.txt
+            diag.txt
             server.log
