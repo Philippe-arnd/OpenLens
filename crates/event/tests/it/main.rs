@@ -117,8 +117,13 @@ fn oversized_and_deep_input_is_rejected_not_accepted() {
 #[test]
 fn hostile_bodies_never_panic() {
     for body in openlens_testkit::hostile_capture_bodies() {
-        if let Ok(batch) = serde_json::from_slice::<CaptureBatch>(&body) {
-            let _ = normalize_batch("p", batch, Utc::now());
+        if let Ok(batch) = serde_json::from_slice::<CaptureBatch>(&body)
+            && let Ok(out) = normalize_batch("p", batch, Utc::now())
+        {
+            // What the writer then reads from each stored event (#449, #482).
+            for e in &out.events {
+                let _ = openlens_event::facts(&e.event, &e.properties);
+            }
         }
     }
 }
@@ -251,5 +256,69 @@ fn vital_facts_keep_what_the_patterns_found_and_nothing_else() {
     ] {
         let head: String = text.chars().take(40).collect();
         assert!(vital(event, &text).is_none(), "{event} {head}");
+    }
+}
+
+/// The error, acquisition and friction facts (#482) are what the engine's
+/// old expressions returned from the text, escapes included, and nothing
+/// where they found nothing; hostile text is bounded.
+#[test]
+fn error_acquisition_and_friction_facts_are_what_the_patterns_returned() {
+    use openlens_event::{Facts, facts};
+    let stored = |v: serde_json::Value| v.to_string();
+
+    // `((?:[^"\\]|\\.)*)` returns the string as spelled; `([^"]*)` stops
+    // at the first quote, the one of an escaped `\"`.
+    let e = facts(
+        "$error",
+        &stored(json!({
+            "$message": "bad \"x\"\nline",
+            "$source": "https://a.test/a\"b.js",
+            "$stack": "at f (a.js:1:2)\n",
+        })),
+    );
+    assert_eq!(e.message.as_deref(), Some(r#"bad \"x\"\nline"#));
+    assert_eq!(e.source.as_deref(), Some(r"https://a.test/a\"));
+    assert_eq!(e.stack.as_deref(), Some(r"at f (a.js:1:2)\n"));
+    let e = facts("$error", &stored(json!({"$message": 5, "$source": ""})));
+    assert_eq!((e.message, e.source.as_deref()), (None, Some("")));
+
+    // `([^"]{1,200})`: up to the first quote, 1 to 200 characters.
+    let a = |props: serde_json::Value| facts("$pageview", &stored(props)).acquisition;
+    assert_eq!(
+        a(json!({"$channel": "search", "$utm_campaign": "a\"b", "$ref_host": "é".repeat(200)}))
+            .map(|v| v.map(|s| s.chars().count())),
+        [Some(6), None, Some(2), Some(200)]
+    );
+    for bad in [String::new(), "x".repeat(201)] {
+        assert_eq!(a(json!({ "$utm_source": bad }))[1], None, "{bad:?}");
+    }
+    // A leading quote leaves its backslash, as the pattern did.
+    assert_eq!(a(json!({"$utm_source": "\"x"}))[1].as_deref(), Some("\\"));
+    assert_eq!(a(json!({"$channel": ["search"]}))[0], None);
+
+    // `LIKE '%"$rage":true%'`, on clicks only.
+    let rage = |event: &str, props: &str| facts(event, props).rage;
+    assert_eq!(rage("$click", r#"{"$rage":true}"#), Some(true));
+    for no in [r#"{"$rage":"true"}"#, r#"{"$rage":false}"#, "{}"] {
+        assert_eq!(rage("$click", no), Some(false), "{no}");
+    }
+    assert_eq!(rage("$pageview", r#"{"$rage":true}"#), None);
+
+    // `$rating` even without a valid `$name`; only on `$vital`.
+    let v = facts("$vital", r#"{"$name":"lcp","$rating":"poor"}"#);
+    assert_eq!((v.vital, v.rating.as_deref()), (None, Some("poor")));
+    assert_eq!(facts("$vital", r#"{"$rating":"POOR"}"#).rating, None);
+
+    // Another event, not an object, too large: nothing.
+    let huge = stored(json!({"$message": "a".repeat(limits::MAX_PROPERTIES_BYTES)}));
+    for (event, text) in [
+        ("$custom", stored(json!({"$message": "m", "$channel": "x"}))),
+        ("$error", "[1]".to_owned()),
+        ("$error", "{".to_owned()),
+        ("$error", huge),
+    ] {
+        let head: String = text.chars().take(40).collect();
+        assert_eq!(facts(event, &text), Facts::default(), "{event} {head}");
     }
 }

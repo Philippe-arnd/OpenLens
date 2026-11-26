@@ -1,6 +1,7 @@
-//! Typed columns derived from `properties` at write time (#449, D-037):
-//! the Web Vitals facts of `$vital` events, so readers stop parsing the
-//! JSON text with a regular expression per row.
+//! Typed columns derived from `properties` at write time: the Web Vitals
+//! facts of `$vital` events (#449, D-037), and the error, acquisition and
+//! friction facts (#482, D-039), so readers stop parsing the JSON text
+//! with a regular expression per row.
 //!
 //! They are added at the end of [`crate::event_schema`] and are nullable.
 //! Files written before them have no such columns: the query layer reads
@@ -9,45 +10,69 @@
 
 use std::sync::Arc;
 
-use arrow::array::{Array, ArrayRef, Float64Builder, RecordBatch, StringArray, StringBuilder};
+use arrow::array::{
+    Array, ArrayRef, BooleanBuilder, Float64Builder, Int32Builder, RecordBatch, StringArray,
+    StringBuilder,
+};
 use arrow::datatypes::{DataType, Field};
-use openlens_event::{Vital, vital::PARTS};
+use openlens_event::{Facts, facts::VERSION, vital::PARTS};
 
 use crate::{Result, event_schema};
 
 /// Reads one text fact.
-type Getter = fn(&Vital) -> Option<&str>;
+type Getter = fn(&Facts) -> Option<&str>;
 
-/// The text columns, in schema order, and how each is read from a fact.
-const TEXT: [(&str, Getter); 5] = [
-    ("vital_name", |v| Some(&v.name)),
-    ("vital_device", |v| v.device.as_deref()),
-    ("vital_el", |v| v.el.as_deref()),
-    ("vital_kind", |v| v.kind.as_deref()),
-    ("vital_res", |v| v.res.as_deref()),
+/// The Web Vitals text columns (#449), in schema order.
+const VITAL_TEXT: [(&str, Getter); 5] = [
+    ("vital_name", |f| f.vital.as_ref().map(|v| v.name.as_str())),
+    ("vital_device", |f| {
+        f.vital.as_ref().and_then(|v| v.device.as_deref())
+    }),
+    ("vital_el", |f| {
+        f.vital.as_ref().and_then(|v| v.el.as_deref())
+    }),
+    ("vital_kind", |f| {
+        f.vital.as_ref().and_then(|v| v.kind.as_deref())
+    }),
+    ("vital_res", |f| {
+        f.vital.as_ref().and_then(|v| v.res.as_deref())
+    }),
 ];
+
+/// The text columns of #482, in schema order, after the Web Vitals ones.
+const FACT_TEXT: [(&str, Getter); 8] = [
+    ("vital_rating", |f| f.rating.as_deref()),
+    ("error_message", |f| f.message.as_deref()),
+    ("error_source", |f| f.source.as_deref()),
+    ("error_stack", |f| f.stack.as_deref()),
+    ("acq_channel", |f| f.acquisition[0].as_deref()),
+    ("acq_utm_source", |f| f.acquisition[1].as_deref()),
+    ("acq_utm_campaign", |f| f.acquisition[2].as_deref()),
+    ("acq_ref_host", |f| f.acquisition[3].as_deref()),
+];
+
+/// Whether a `$click` was a rage click (#482).
+const RAGE: &str = "click_rage";
+
+/// The version of the facts, on every row written since #482.
+const VERSION_COLUMN: &str = "facts_version";
 
 /// The typed columns' names, in schema order.
 pub fn names() -> Vec<String> {
-    let mut v: Vec<String> = TEXT.iter().map(|(n, _)| (*n).to_owned()).collect();
-    v.push("vital_value".to_owned());
-    v.extend(PARTS.iter().map(|p| format!("vital_{p}")));
-    v
+    fields().into_iter().map(|f| f.name().clone()).collect()
 }
 
 /// The fields appended to the event schema.
 pub(crate) fn fields() -> Vec<Field> {
-    names()
-        .into_iter()
-        .map(|n| {
-            let t = if TEXT.iter().any(|(t, _)| *t == n) {
-                DataType::Utf8
-            } else {
-                DataType::Float64
-            };
-            Field::new(n, t, true)
-        })
-        .collect()
+    let text = |n: &str| Field::new(n, DataType::Utf8, true);
+    let number = |n: &str| Field::new(n, DataType::Float64, true);
+    let mut v: Vec<Field> = VITAL_TEXT.iter().map(|(n, _)| text(n)).collect();
+    v.push(number("vital_value"));
+    v.extend(PARTS.iter().map(|p| number(&format!("vital_{p}"))));
+    v.extend(FACT_TEXT.iter().map(|(n, _)| text(n)));
+    v.push(Field::new(RAGE, DataType::Boolean, true));
+    v.push(Field::new(VERSION_COLUMN, DataType::Int32, true));
+    v
 }
 
 /// The typed columns, in schema order, for rows given as
@@ -55,27 +80,42 @@ pub(crate) fn fields() -> Vec<Field> {
 pub(crate) fn columns<'a>(
     rows: impl ExactSizeIterator<Item = (&'a str, &'a str)>,
 ) -> Vec<ArrayRef> {
-    let facts: Vec<Option<Vital>> = rows.map(|(e, p)| openlens_event::vital(e, p)).collect();
+    let facts: Vec<Facts> = rows.map(|(e, p)| openlens_event::facts(e, p)).collect();
     let n = facts.len();
-    let mut out: Vec<ArrayRef> = Vec::with_capacity(TEXT.len() + 1 + PARTS.len());
-    for (_, get) in TEXT {
+    let mut out: Vec<ArrayRef> =
+        Vec::with_capacity(VITAL_TEXT.len() + 1 + PARTS.len() + FACT_TEXT.len() + 2);
+    let text = |get: Getter| -> ArrayRef {
         let mut b = StringBuilder::with_capacity(n, 0);
         for f in &facts {
-            b.append_option(f.as_ref().and_then(get));
-        }
-        out.push(Arc::new(b.finish()));
-    }
-    let number = |get: &dyn Fn(&Vital) -> Option<f64>| -> ArrayRef {
-        let mut b = Float64Builder::with_capacity(n);
-        for f in &facts {
-            b.append_option(f.as_ref().and_then(get));
+            b.append_option(get(f));
         }
         Arc::new(b.finish())
     };
-    out.push(number(&|v| v.value));
+    let number = |get: &dyn Fn(&Facts) -> Option<f64>| -> ArrayRef {
+        let mut b = Float64Builder::with_capacity(n);
+        for f in &facts {
+            b.append_option(get(f));
+        }
+        Arc::new(b.finish())
+    };
+    out.extend(VITAL_TEXT.iter().map(|(_, get)| text(*get)));
+    out.push(number(&|f| f.vital.as_ref().and_then(|v| v.value)));
     for i in 0..PARTS.len() {
-        out.push(number(&|v| v.parts.get(i).copied().flatten()));
+        out.push(number(&|f| {
+            f.vital
+                .as_ref()
+                .and_then(|v| v.parts.get(i).copied().flatten())
+        }));
     }
+    out.extend(FACT_TEXT.iter().map(|(_, get)| text(*get)));
+    let mut rage = BooleanBuilder::with_capacity(n);
+    let mut version = Int32Builder::with_capacity(n);
+    for f in &facts {
+        rage.append_option(f.rage);
+        version.append_value(VERSION);
+    }
+    out.push(Arc::new(rage.finish()));
+    out.push(Arc::new(version.finish()));
     out
 }
 

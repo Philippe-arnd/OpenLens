@@ -117,7 +117,7 @@ fn a_day_of_mixed_segments_compacts_sorted_once_per_uuid() {
     assert!(keys.windows(2).all(|k| k[0] <= k[1]));
 }
 
-/// A segment written before the typed columns (#449) has none: compaction
+/// A segment written before the typed columns (#449, #482) has none: compaction
 /// merges it with new segments and fills them in from `properties`, the
 /// same values a new segment gets at write time.
 #[test]
@@ -129,7 +129,7 @@ fn a_segment_without_typed_columns_merges_and_gets_them() {
         let mut e = ev("p", t + Duration::seconds(i));
         e.event = "$vital".into();
         e.properties =
-            r#"{"$name":"LCP","$value":4200,"$el":"main > img","$el_type":"image","$ttfb":300}"#
+            r#"{"$name":"LCP","$value":4200,"$el":"main > img","$el_type":"image","$ttfb":300,"$rating":"poor"}"#
                 .into();
         e
     };
@@ -139,7 +139,8 @@ fn a_segment_without_typed_columns_merges_and_gets_them() {
     w.flush().unwrap();
     let day = dir.path().join("events/project=p/date=2026-11-20");
 
-    // Rewrite one segment as an old one: without the `vital_*` columns.
+    // Rewrite one segment as an old one: without any typed column.
+    let typed = openlens_storage::typed_columns();
     let seg = std::fs::read_dir(&day)
         .unwrap()
         .map(|f| f.unwrap().path())
@@ -153,7 +154,7 @@ fn a_segment_without_typed_columns_merges_and_gets_them() {
         .map(|b| {
             let b = b.unwrap();
             let keep: Vec<usize> = (0..b.num_columns())
-                .filter(|&i| !b.schema().field(i).name().starts_with("vital_"))
+                .filter(|&i| !typed.contains(b.schema().field(i).name()))
                 .collect();
             b.project(&keep).unwrap()
         })
@@ -179,24 +180,26 @@ fn a_segment_without_typed_columns_merges_and_gets_them() {
             .unwrap()
             .clone()
     };
-    let (event, name, el, kind) = (
+    let (event, name, el, kind, rating) = (
         col("event"),
         col("vital_name"),
         col("vital_el"),
         col("vital_kind"),
+        col("vital_rating"),
     );
     let vitals: Vec<usize> = (0..b.num_rows())
         .filter(|&i| event.value(i) == "$vital")
         .collect();
     assert_eq!(vitals.len(), 2);
     for &i in &vitals {
-        assert!(!name.is_null(i) && !el.is_null(i) && !kind.is_null(i));
+        assert!(!name.is_null(i) && !el.is_null(i) && !kind.is_null(i) && !rating.is_null(i));
         assert_eq!(
-            (name.value(i), el.value(i), kind.value(i)),
+            (name.value(i), el.value(i), kind.value(i), rating.value(i)),
             (
                 name.value(vitals[0]),
                 el.value(vitals[0]),
-                kind.value(vitals[0])
+                kind.value(vitals[0]),
+                rating.value(vitals[0])
             ),
             "an old row gets the values a new row has"
         );
@@ -205,4 +208,6 @@ fn a_segment_without_typed_columns_merges_and_gets_them() {
         .find(|&i| event.value(i) != "$vital")
         .unwrap();
     assert!(name.is_null(other), "only a $vital has facts");
+    // Every row now says it carries the facts of #482, the old ones too.
+    assert_eq!(b.column_by_name("facts_version").unwrap().null_count(), 0);
 }

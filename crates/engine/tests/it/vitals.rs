@@ -116,7 +116,7 @@ async fn a_late_hero_image_is_named_with_preload_first() {
 }
 
 /// Rewrite every stored file of `dir` through `f`.
-fn rewrite(
+pub(crate) fn rewrite(
     dir: &std::path::Path,
     f: impl Fn(&arrow::array::RecordBatch) -> arrow::array::RecordBatch,
 ) {
@@ -206,7 +206,7 @@ async fn old_files_without_typed_columns_and_new_ones_say_the_same() {
     assert_eq!(told(&q).await, new, "the text alone");
 }
 
-fn copy(from: &std::path::Path, to: &std::path::Path) {
+pub(crate) fn copy(from: &std::path::Path, to: &std::path::Path) {
     for e in std::fs::read_dir(from).unwrap() {
         let p = e.unwrap().path();
         let dst = to.join(p.file_name().unwrap());
