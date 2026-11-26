@@ -340,14 +340,12 @@ fn pages_sql(src: &str, w7: &str) -> String {
     format!(
         "WITH g AS (SELECT name, path, approx_percentile_cont(v, 0.75) AS p75, count(*) AS samples \
            FROM ({}) x WHERE name IN ('LCP', 'INP', 'CLS', 'TTFB') AND v IS NOT NULL AND path IS NOT NULL \
-           GROUP BY name, path HAVING count(*) >= {min}), \
-         r AS (SELECT name, path, p75, samples, \
-           row_number() OVER (PARTITION BY name ORDER BY p75 DESC, path) AS rn \
-           FROM g WHERE name <> 'TTFB') \
-         SELECT name, path, p75, samples FROM r WHERE rn <= {WORST_PAGES} \
-         UNION ALL \
-         SELECT g.name, g.path, g.p75, g.samples FROM g JOIN r ON g.path = r.path \
-           WHERE g.name = 'TTFB' AND r.name = 'LCP' AND r.rn <= {WORST_PAGES}",
+           GROUP BY name, path HAVING count(*) >= {min}) \
+         SELECT * FROM (SELECT name, path, p75, samples FROM g WHERE name = 'LCP' ORDER BY p75 DESC, path LIMIT {WORST_PAGES}) l \
+         UNION ALL SELECT * FROM (SELECT name, path, p75, samples FROM g WHERE name = 'INP' ORDER BY p75 DESC, path LIMIT {WORST_PAGES}) i \
+         UNION ALL SELECT * FROM (SELECT name, path, p75, samples FROM g WHERE name = 'CLS' ORDER BY p75 DESC, path LIMIT {WORST_PAGES}) c \
+         UNION ALL SELECT name, path, p75, samples FROM g WHERE name = 'TTFB' AND path IN \
+           (SELECT path FROM g WHERE name = 'LCP' ORDER BY p75 DESC, path LIMIT {WORST_PAGES})",
         values(src, w7)
     )
 }
@@ -383,9 +381,15 @@ fn dominant(g: &VitalGuide, pages: &[PageVital]) -> Option<Dominant> {
     if g.name != "LCP" {
         return None;
     }
-    let shares: Vec<f64> = pages
+    // The pages that make LCP slow decide; a fast page with a relatively
+    // large TTFB share must not dilute them. Without such a page, all count.
+    let lcp: Vec<&PageVital> = pages
         .iter()
         .filter(|p| p.name == "LCP" && p.p75 > 0.0)
+        .collect();
+    let slow: Vec<&PageVital> = lcp.iter().copied().filter(|p| p.rating != "good").collect();
+    let shares: Vec<f64> = if slow.is_empty() { lcp } else { slow }
+        .into_iter()
         .filter_map(|lcp| {
             let ttfb = pages
                 .iter()
