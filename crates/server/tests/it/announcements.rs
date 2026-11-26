@@ -101,7 +101,7 @@ async fn a_write_token_posts_updates_in_order_and_readers_only_read() {
     // A viewer reads them on Uptime, as text, and cannot post.
     let viewer = invite(
         &h,
-        serde_json::json!({"email": "[EMAIL_REDACTED]", "role": "viewer", "projects": ["default"]}),
+        serde_json::json!({"email": "viewer@example.com", "role": "viewer", "projects": ["default"]}),
     )
     .await;
     let page = body_text(get(&h, "/p/default/uptime", Some(&viewer), false).await).await;
