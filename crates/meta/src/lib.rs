@@ -78,6 +78,9 @@ pub mod release_maps;
 pub mod releases;
 mod totp;
 mod uptime;
+/// Uptime history: daily rows, and checks kept around incidents (#559).
+pub mod uptime_history;
+pub use uptime_history::{IncidentRow, Probe, UptimeDay};
 mod users;
 pub use totp::Totp;
 
@@ -328,6 +331,8 @@ fn migrate(c: &Connection) -> rusqlite::Result<()> {
             c.execute_batch(ddl)?;
         }
     }
+    // Uptime history (#559): daily rows, environments and kept checks.
+    uptime_history::migrate(c)?;
     // Deploys: the first commit of a release's range, for a release
     // recorded by `openlens-cli release` (#521, D-066).
     let has_from: bool = c

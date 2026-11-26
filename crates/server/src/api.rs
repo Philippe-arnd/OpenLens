@@ -16,6 +16,7 @@ use crate::{AppState, auth};
 mod actions;
 mod tokens;
 mod transfer;
+mod uptime;
 use tokens::*;
 pub(crate) use transfer::*;
 
@@ -121,6 +122,7 @@ pub(crate) fn routes() -> Router<AppState> {
             axum::routing::delete(delete_user).patch(update_user),
         )
         .merge(actions::routes())
+        .merge(uptime::routes())
 }
 
 /// Largest import chunk, in bytes (the CLI sends ~5,000 lines per chunk).

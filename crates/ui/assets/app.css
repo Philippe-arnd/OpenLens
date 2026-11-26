@@ -566,3 +566,9 @@ a.stretch:focus-visible { outline: none; }
 .tile .label a.stretch { min-width: 0; overflow-wrap: anywhere; }
 .kpi-def { max-width: min(260px, 72vw); }
 @media (max-width: 640px) { a.stretch .details { display: none; } }
+/* Uptime: 90 daily bars (#559), CSS only; a tooltip from the title. */
+.uptime-days { display: flex; gap: 2px; align-items: stretch; height: 34px; margin: 4px 0 8px; }
+.uptime-day { flex: 1 1 0; min-width: 2px; border-radius: 2px; background: color-mix(in srgb, var(--muted) 28%, transparent); }
+.uptime-day.up { background: var(--good); } .uptime-day.partial { background: var(--warn); } .uptime-day.down { background: var(--bad); }
+.uptime-day:hover { opacity: .75; }
+@media (max-width: 480px) { .uptime-days { gap: 1px; } }

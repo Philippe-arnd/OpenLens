@@ -7,6 +7,8 @@
 use chrono::{Duration, Utc};
 use openlens_meta::{Meta, slug};
 
+mod uptime_history;
+
 #[test]
 fn capture_keys_resolve_to_their_project_and_unknown_keys_do_not() {
     let m = Meta::in_memory().unwrap();

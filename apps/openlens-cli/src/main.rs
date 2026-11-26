@@ -583,6 +583,37 @@ fn run(cli: Cli) -> Result<bool, String> {
             out(&v);
             Ok(status == 200 && v["state"] != "down")
         }
+        Command::Uptime {
+            project,
+            from,
+            to,
+            env,
+        } => {
+            let q: Vec<String> = [("from", from), ("to", to), ("env", env)]
+                .into_iter()
+                .filter_map(|(k, v)| v.as_ref().map(|v| format!("{k}={}", query_value(v))))
+                .collect();
+            let (status, v) = client()?.call(
+                "GET",
+                &format!("/api/projects/{project}/uptime/days?{}", q.join("&")),
+                None,
+            )?;
+            out(&v);
+            Ok(status == 200)
+        }
+        Command::Incidents {
+            project,
+            before,
+            limit,
+        } => {
+            let mut path = format!("/api/projects/{project}/incidents?limit={limit}");
+            if let Some(b) = before {
+                path.push_str(&format!("&before={b}"));
+            }
+            let (status, v) = client()?.call("GET", &path, None)?;
+            out(&v);
+            Ok(status == 200)
+        }
         Command::Flows {
             project,
             from,

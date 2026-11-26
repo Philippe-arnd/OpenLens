@@ -286,6 +286,36 @@ pub(super) enum Command {
         #[arg(long, default_value = "default")]
         project: String,
     },
+    /// Uptime history, one row per UTC day (default: the last 90 days of
+    /// production): state, availability, seconds up and measured, checks,
+    /// incidents and response times.
+    Uptime {
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+        /// First day, YYYY-MM-DD (at most 400 days before --to).
+        #[arg(long)]
+        from: Option<String>,
+        /// Last day, YYYY-MM-DD (default: today).
+        #[arg(long)]
+        to: Option<String>,
+        /// Environment (default: production).
+        #[arg(long)]
+        env: Option<String>,
+    },
+    /// Every incident, newest first, page by page: pass the `next` it
+    /// prints as --before for the next page.
+    Incidents {
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+        /// Only incidents older than this id (the previous page's `next`).
+        #[arg(long)]
+        before: Option<i64>,
+        /// Page size, 1 to 100.
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+    },
     /// How sessions move between features (Sankey data, last 30 days).
     Flows {
         /// Project id.
