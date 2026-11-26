@@ -18,6 +18,7 @@ mod access;
 mod agents;
 mod allowlist;
 mod auth;
+mod board_jobs;
 mod environments;
 mod features;
 mod hooks;

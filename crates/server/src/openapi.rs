@@ -77,6 +77,24 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "What the board's window would read, with the board's parameters: days from the daily rollups and from the events, bytes, rows, a rough time, and whether it needs `confirm=1` (`null` for the fixed windows).",
     ),
     (
+        "POST",
+        "/api/projects/{project}/board/jobs",
+        "read",
+        "Compute the board in the background, with the board's parameters in the query (`from`/`to`, `since`, filters): 202 with the job's `id` and `url`. 429 when the caller already has a job queued or running (its id in `job`) or the server runs as many as it takes (2 at once, 8 queued or running). A job is its starter's alone and kept an hour once finished.",
+    ),
+    (
+        "GET",
+        "/api/projects/{project}/board/jobs/{job}",
+        "read",
+        "A board job: `state` (queued, running, done, failed, cancelled), `progress` (0 to 1; while running, the time spent against the estimate), `elapsed_secs`, `estimate_secs`, `error`, and once done the `board` (as `GET …/board` answers it) and its `revenue`. 404 for another caller's job.",
+    ),
+    (
+        "DELETE",
+        "/api/projects/{project}/board/jobs/{job}",
+        "read",
+        "Cancel a board job: its queries stop. A finished job is left as it is. Answers the job.",
+    ),
+    (
         "GET",
         "/api/projects/{project}/errors",
         "read",

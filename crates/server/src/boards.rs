@@ -38,7 +38,7 @@ const CAPACITY: usize = 64;
 type Key = (String, String, i64);
 
 /// The revenue of the same filters, or why it could not be computed.
-type RevenueResult = Result<Option<Revenue>, String>;
+pub(crate) type RevenueResult = Result<Option<Revenue>, String>;
 
 #[derive(Clone)]
 struct Entry {

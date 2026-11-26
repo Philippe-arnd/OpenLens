@@ -147,6 +147,9 @@ const ROUTES: &[(&str, &str, Access)] = &[
     ("POST", "/api/projects/{project}/sql", Api),
     ("GET", "/api/projects/{project}/board", Api),
     ("GET", "/api/projects/{project}/board/estimate", Api),
+    ("POST", "/api/projects/{project}/board/jobs", Api),
+    ("GET", "/api/projects/{project}/board/jobs/{job}", Api),
+    ("DELETE", "/api/projects/{project}/board/jobs/{job}", Api),
     ("GET", "/api/projects/{project}/errors", Api),
     ("GET", "/api/projects/{project}/breakdown", Api),
     ("GET", "/api/projects/{project}/people/{distinct_id}", Api),
@@ -248,6 +251,11 @@ const ROUTES: &[(&str, &str, Access)] = &[
     ("GET", "/l/{token}", Public),
     ("POST", "/l/{token}", Public),
     ("GET", "/p/{project}", Read),
+    // A long board in the background (#515): any role may run one, and
+    // only its starter sees it.
+    ("POST", "/p/{project}/board/jobs", Shared),
+    ("GET", "/p/{project}/board/jobs/{job}", Read),
+    ("POST", "/p/{project}/board/jobs/{job}/cancel", Shared),
     ("GET", "/p/{project}/events", Read),
     ("GET", "/p/{project}/errors", Read),
     ("GET", "/p/{project}/pages", Read),
