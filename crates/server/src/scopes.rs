@@ -77,12 +77,13 @@ pub(crate) fn required(method: &Method, path: &str) -> Scope {
     let project_itself = path
         .strip_prefix("/api/projects/")
         .is_some_and(|rest| !rest.contains('/'));
-    // Re-labelling rewrites stored events, like changing the rules (#484).
+    // Re-labelling rewrites stored events, like changing the rules (#484);
+    // the allow-list decides what is stored at all (#485).
     let relabel = *method == Method::POST
         && path
             .strip_prefix("/api/projects/")
             .and_then(|rest| rest.split_once('/'))
-            .is_some_and(|(_, tail)| tail == "environments");
+            .is_some_and(|(_, tail)| tail == "environments" || tail == "environments/allow");
     if admin_area
         || (path == "/api/projects" && *method != Method::GET)
         || (project_itself && *method != Method::GET)
@@ -196,6 +197,10 @@ mod tests {
         );
         assert_eq!(
             required(&Method::POST, "/api/projects/a/environments"),
+            Scope::Admin
+        );
+        assert_eq!(
+            required(&Method::POST, "/api/projects/a/environments/allow"),
             Scope::Admin
         );
     }

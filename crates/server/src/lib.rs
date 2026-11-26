@@ -5,6 +5,7 @@
 
 mod access;
 mod alerts;
+mod allowlist;
 mod api;
 mod apierr;
 mod ask;

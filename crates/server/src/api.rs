@@ -27,6 +27,10 @@ pub(crate) fn routes() -> Router<AppState> {
             "/api/projects/{project}/environments",
             get(crate::environments::api_list).post(crate::environments::api_relabel),
         )
+        .route(
+            "/api/projects/{project}/environments/allow",
+            post(crate::allowlist::api_allow),
+        )
         .route("/api/projects/{project}/board", get(board))
         .route("/api/projects/{project}/errors", get(errors))
         .route("/api/projects/{project}/breakdown", get(breakdown))
