@@ -140,7 +140,7 @@ pub fn breakdown(
                     a href={ "/p/" (p.id) "/breakdown?by=" (k) "&env=" (url_enc(&f.environment)) } aria-current=[(*k == by).then_some("page")] { (l) }
                 }
             }
-            (filter_bar(p.id, b, f, &format!("/breakdown?by={by}")))
+            (context_bar(p.id, b, f, &format!("/breakdown?by={by}"), false))
             section.card.wide {
                 @if rows.is_empty() { p.muted { "No data in this window." } }
                 @else {

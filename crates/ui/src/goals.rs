@@ -257,7 +257,7 @@ pub fn forms(
                 h1 { "Forms" }
                 p.muted { "Last 30 days, " strong { (f.environment) } ". A form starts when someone leaves one of its fields, and is abandoned when the session ends without sending it. Field values are never sent; passwords and masked fields send nothing." }
             } }
-            (filter_bar(p.id, b, f, "/forms"))
+            (context_bar(p.id, b, f, "/forms", false))
             @if list.is_empty() { section.card.wide { p.muted { "No form filled yet (SDK builds from 2026-11-23 on send field events)." } } }
             @for fm in list {
                 section.card.wide {
