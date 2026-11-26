@@ -85,9 +85,10 @@ pub fn board(
         (None, None) => "everyone".into(),
     };
     let period = |fixed: &str| period(b, fixed);
-    layout(
+    layout_in(
         "Focus board",
         Some(p),
+        context_bar(p.id, b, f, "", true),
         html! {
             div.heading {
                 h1 { "Focus board" }
@@ -99,7 +100,6 @@ pub fn board(
                 @if let Some(e) = &w.estimate { (crate::cost::cost_line(e)) }
             }
             (crate::cost::unavailable_note(&b.unavailable_days))
-            (context_bar(p.id, b, f, "", true))
             (insight_cards(p.id, b, plain))
             section.tiles aria-label="Key numbers" {
                 (tile_to(&detail_url(p.id, "/audience", f), "violet", "users", "Daily active users", &{
