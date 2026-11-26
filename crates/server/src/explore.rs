@@ -3,7 +3,7 @@
 //! engine's `explore.*` commands (#507, D-042), which hold the logic and
 //! the SQL (`openlens_engine::commands::explore`).
 
-use axum::extract::{Form, Path, State};
+use axum::extract::{Form, Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use openlens_engine::commands::explore::{self as cmd, FilteredInput};
@@ -42,12 +42,28 @@ fn not_found(what: &str) -> Response {
     )
 }
 
-/// `GET /p/{id}/people/{distinct_id}`.
+/// `?confirm=<action>`: the destructive action whose dialog the page
+/// opens (#545). Only the known names count; anything else is ignored.
+#[derive(Deserialize, Default)]
+pub(crate) struct ConfirmQuery {
+    #[serde(default)]
+    confirm: Option<String>,
+}
+
+impl ConfirmQuery {
+    pub(crate) fn action(&self) -> Option<openlens_ui::Confirm> {
+        openlens_ui::Confirm::parse(self.confirm.as_deref())
+    }
+}
+
+/// `GET /p/{id}/people/{distinct_id}` (`?confirm=forget`: the dialog that
+/// forgets them; the POST still checks the typed id).
 pub(crate) async fn person(
     _: crate::access::Session,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((id, who)): Path<(String, String)>,
+    Query(q): Query<ConfirmQuery>,
 ) -> Response {
     let Some(p) = project(&state, &id).await else {
         return not_found("No such project.");
@@ -78,6 +94,7 @@ pub(crate) async fn person(
             &prof.events,
             &tz,
             auth::viewer(&state, &headers).is_some_and(|v| v.admin),
+            q.action(),
         ),
     )
 }

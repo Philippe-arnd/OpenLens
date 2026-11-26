@@ -4,7 +4,7 @@
 
 use std::sync::atomic::Ordering;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 
@@ -17,6 +17,17 @@ async fn render(
     created: Option<String>,
     notice: Option<&str>,
     error: Option<&str>,
+) -> Response {
+    render_with(state, created, notice, error, None).await
+}
+
+/// [`render`], with the dialog of a destructive action open (#545).
+async fn render_with(
+    state: &AppState,
+    created: Option<String>,
+    notice: Option<&str>,
+    error: Option<&str>,
+    confirm: Option<openlens_ui::Confirm>,
 ) -> Response {
     let meta = state.meta.clone();
     let loaded = tokio::task::spawn_blocking(move || {
@@ -45,6 +56,7 @@ async fn render(
         created,
         notice: notice.map(str::to_owned),
         error: error.map(str::to_owned),
+        confirm,
     };
     let mut r = html_page(StatusCode::OK, openlens_ui::tokens(&view));
     // The page can carry a fresh token: never cache it.
@@ -55,9 +67,14 @@ async fn render(
     r
 }
 
-/// `GET /settings/tokens`.
-pub(crate) async fn page(_: crate::access::Admin, State(state): State<AppState>) -> Response {
-    render(&state, None, None, None).await
+/// `GET /settings/tokens` (`?confirm=sign-out`: the dialog of *Sign out
+/// everywhere*, whose POST is unchanged).
+pub(crate) async fn page(
+    _: crate::access::Admin,
+    State(state): State<AppState>,
+    Query(q): Query<crate::explore::ConfirmQuery>,
+) -> Response {
+    render_with(&state, None, None, None, q.action()).await
 }
 
 /// `POST /settings/tokens`: create one; its value is shown once.

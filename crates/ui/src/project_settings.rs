@@ -89,6 +89,9 @@ pub struct SettingsView<'a> {
     pub allow_preview: Option<Result<openlens_engine::environments::AllowPreview, String>>,
     /// The public status page's card (#561), on the *Sharing* tab.
     pub status_page: Option<Markup>,
+    /// The destructive action to confirm in a dialog (`?confirm=`, #545):
+    /// the project's deletion, on the *Data* tab.
+    pub confirm: Option<Confirm>,
 }
 
 /// A project's alert settings as the page shows them (#256).
@@ -469,13 +472,14 @@ fn data(p: &ProjectInfo<'_>, v: &SettingsView<'_>, base: &str) -> Markup {
             (form_foot("Download NDJSON", html! { "One line per event of that day, up to 500,000." }))
         }
         @if v.admin {
-            section.card.wide.danger {
-                h2.coral { (icon("alert")) "Delete the project" }
-                p { "Removes its events, replays, source maps, people, flags, surveys and feature map. There is no undo (backups excepted)." }
-                form.inline method="post" action={ (base) "/delete" } {
-                    label { "Type " code { (p.name) } " to confirm " input type="text" name="confirm" required autocomplete="off"; }
-                    button.danger type="submit" { "Delete forever" }
-                }
+            @let page = format!("{base}/data");
+            @let what = "Removes its events, replays, source maps, people, flags, surveys and feature map. There is no undo (backups excepted).";
+            (crate::detail::danger_zone("data-danger", "Danger zone", crate::detail::danger_item("Delete the project",
+                html! { (what) },
+                html! { a.btn.danger-btn href=(crate::detail::confirm_href(&page, Confirm::Delete)) { "Delete the project…" } })))
+            @if v.confirm == Some(Confirm::Delete) {
+                (crate::detail::confirm_dialog(&format!("Delete {}?", p.name), html! { (what) },
+                    crate::detail::typed_form(&format!("{base}/delete"), p.name, "Delete forever", &page)))
             }
         }
     }
@@ -560,6 +564,7 @@ pub(crate) mod tests {
             allow: None,
             allow_preview: None,
             status_page: None,
+            confirm: None,
         }
     }
 
