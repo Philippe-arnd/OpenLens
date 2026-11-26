@@ -9,6 +9,7 @@ on:
   pull_request:
   push:
     branches: [main]
+    tags: ["v*"]
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
@@ -105,7 +106,9 @@ jobs:
   browser:
     name: browser e2e (one script tag, real server)
     needs: changes
-    if: needs.changes.outputs.browser == 'true' || needs.changes.outputs.ui == 'true'
+    # Heavy: release tags, nightly and on demand only, so a pull request
+    # waits for the gate alone (about 5 minutes).
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -181,19 +184,64 @@ jobs:
         run: cat $RUNNER_TEMP/ol.log $RUNNER_TEMP/demo.log $RUNNER_TEMP/notes-ssr.log $RUNNER_TEMP/tasks-spa.log 2>/dev/null || true
 
   report:
+    # One `main-broken` issue at a time (#200): opened when a job fails on
+    # main (push, nightly, on demand), a comment on the open one when it
+    # fails again, closed once every job it lists has passed again. The
+    # failed jobs are listed in a marker in the issue body, so a push that
+    # skips the browser e2e does not close an issue about it.
+    # A first attempt that fails is re-run once by flaky.yml: the issue
+    # waits for that second attempt, so a flaky job files `flaky` instead.
     name: open an issue when main breaks
-    needs: [gate, sdk, browser]
-    if: failure() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [changes, gate, sdk, browser]
+    if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       issues: write
     steps:
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+          ATTEMPT: ${{ github.run_attempt }}
+          RESULTS: |
+            changes ${{ needs.changes.result }}
+            gate ${{ needs.gate.result }}
+            sdk ${{ needs.sdk.result }}
+            browser ${{ needs.browser.result }}
         run: |
-          gh issue create -R "$GITHUB_REPOSITORY" --title "main is broken: CI failed on ${GITHUB_SHA::7}" \
-            --body "CI failed on main ($GITHUB_EVENT_NAME). Run: $RUN. Fix before merging new work."
+          failed=$(awk '$2 == "failure" { print $1 }' <<< "$RESULTS" | xargs)
+          passed=$(awk '$2 == "success" { print $1 }' <<< "$RESULTS" | xargs)
+          if [ -n "$failed" ] && [ "$ATTEMPT" = 1 ]; then
+            echo "failed: $failed; flaky.yml re-runs it once, the second attempt reports"; exit 0
+          fi
+          gh label create main-broken -R "$GITHUB_REPOSITORY" --color B60205 --description "CI failed on main" 2>/dev/null || true
+          open=$(gh issue list -R "$GITHUB_REPOSITORY" --label main-broken --state open --json number -q '.[0].number')
+          if [ -z "$open" ]; then
+            # Issues opened before the label existed.
+            open=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search 'in:title "main is broken"' --json number -q '.[0].number')
+            if [ -n "$open" ]; then gh issue edit "$open" -R "$GITHUB_REPOSITORY" --add-label main-broken; fi
+          fi
+          listed=""
+          if [ -n "$open" ]; then
+            listed=$(gh issue view "$open" -R "$GITHUB_REPOSITORY" --json body -q .body | sed -n 's/^<!-- failed-jobs: \(.*\) -->$/\1/p' | head -n 1)
+          fi
+          if [ -n "$failed" ]; then
+            marker="<!-- failed-jobs: $(tr ' ' '\n' <<< "$listed $failed" | grep . | sort -u | xargs) -->"
+            if [ -n "$open" ]; then
+              body=$(gh issue view "$open" -R "$GITHUB_REPOSITORY" --json body -q .body | grep -v '^<!-- failed-jobs: ' || true)
+              gh issue edit "$open" -R "$GITHUB_REPOSITORY" --body "$body"$'\n'"$marker"
+              gh issue comment "$open" -R "$GITHUB_REPOSITORY" --body "Still failing on ${GITHUB_SHA::7} ($GITHUB_EVENT_NAME): $failed. Run: $RUN"
+            else
+              gh issue create -R "$GITHUB_REPOSITORY" --label main-broken \
+                --title "main is broken: CI failed on ${GITHUB_SHA::7}" \
+                --body "CI failed on main ($GITHUB_EVENT_NAME), twice on the same commit: $failed. Run: $RUN. Fix before merging new work. This issue is closed by CI once these jobs pass on main again."$'\n'"$marker"
+            fi
+          elif [ -n "$open" ]; then
+            # Close only when every job the issue lists ran and passed.
+            for job in ${listed:-gate sdk}; do
+              case " $passed " in *" $job "*) ;; *) echo "$job did not run in this run: keeping #$open open"; exit 0 ;; esac
+            done
+            gh issue close "$open" -R "$GITHUB_REPOSITORY" --comment "Green again on ${GITHUB_SHA::7}: $RUN"
+          fi
 
   advisory-report:
     # One issue per open advisory state (label security-advisory): opened or

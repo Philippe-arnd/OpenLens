@@ -1,0 +1,263 @@
+name: Self-hosting recipes
+
+# The self-hosting recipes of #238 run for real (#486), on the published
+# `edge` image (main, built nightly by release.yml) or the binaries in it:
+# - systemd: the hardened unit in Debian 12 with systemd as PID 1, started
+#   the way docs/deploy/systemd.md installs it, answering /healthz, and
+#   restarted by systemd after a crash;
+# - Compose: the compose file of docs/deploy/docker.md and
+#   openlens-compose-update against a local registry: no-op, update, and a
+#   crashing image rolled back;
+# - Swarm: deploy/swarm/openlens.yaml in a one-node swarm: deploy, update,
+#   and a crashing image rolled back by Swarm.
+# Not covered here: openlens-update between two signed releases (it needs
+# GitHub releases with provenance, from 0.6.0 on) and a Swarm task that runs
+# but never turns healthy (its start period is 15 minutes).
+on:
+  pull_request:
+    paths:
+      - deploy/systemd/**
+      - deploy/docker/**
+      - deploy/swarm/**
+      - docs/deploy/docker.md
+      - .github/workflows/deploy-recipes.yml
+  push:
+    tags: ["v*"]
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-recipes-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  IMAGE: ghcr.io/philippe-arnd/openlens:edge
+  # The update channel the systemd timer is enabled for.
+  CH: "0.6"
+  # A channel-shaped tag in a local registry, so the updaters see a tag move.
+  LOCAL: localhost:5000/openlens:0.9
+
+jobs:
+  lint:
+    name: shellcheck and stack file
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - run: shellcheck deploy/systemd/openlens-update deploy/docker/openlens-compose-update
+      - run: docker compose -f deploy/swarm/openlens.yaml config -q
+
+  systemd:
+    name: systemd unit in a systemd container
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: the binaries, from the image
+        run: |
+          docker pull -q "$IMAGE"
+          id=$(docker create "$IMAGE")
+          mkdir -p "$RUNNER_TEMP/release"
+          docker cp "$id:/usr/local/bin/openlens" "$RUNNER_TEMP/release/"
+          docker cp "$id:/usr/local/bin/openlens-cli" "$RUNNER_TEMP/release/"
+          docker rm "$id"
+      - name: Debian 12 with systemd as PID 1
+        run: |
+          printf '%s\n' 'FROM debian:12' \
+            'RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends systemd systemd-sysv dbus > /dev/null && rm -rf /var/lib/apt/lists/*' \
+            'STOPSIGNAL SIGRTMIN+3' 'CMD ["/sbin/init"]' | docker build -q -t openlens-systemd -
+          docker run -d --name sd --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+            --tmpfs /run --tmpfs /run/lock \
+            -v "$PWD/deploy/systemd:/deploy:ro" -v "$RUNNER_TEMP/release:/release:ro" openlens-systemd
+          for _ in $(seq 1 30); do
+            docker exec sd systemctl is-system-running 2> /dev/null | grep -qE '^(running|degraded)$' && exit 0
+            sleep 1
+          done
+          docker exec sd systemctl is-system-running || true
+      - name: install as docs/deploy/systemd.md does, verify the units
+        run: |
+          docker exec -e CH sd bash -euxc '
+            install -m 755 /deploy/openlens-update /usr/local/sbin/openlens-update
+            for f in openlens.service openlens-update@.service openlens-update@.timer; do
+              install -m 644 "/deploy/$f" "/etc/systemd/system/$f"
+            done
+            useradd --system --home-dir /var/lib/openlens --shell /usr/sbin/nologin openlens
+            # What openlens-update lays out on a first install.
+            install -d -m 755 /opt/openlens/v0.0.0-ci
+            install -m 755 /release/openlens /release/openlens-cli /opt/openlens/v0.0.0-ci/
+            ln -sfn /opt/openlens/v0.0.0-ci /opt/openlens/current
+            ln -sfn /opt/openlens/current/openlens /usr/local/bin/openlens
+            systemctl daemon-reload
+            systemd-analyze verify /etc/systemd/system/openlens.service
+            systemctl enable --now openlens openlens-update@"$CH".timer
+            # systemd 252 cannot verify a template instance: check it loads.
+            for u in openlens-update@"$CH".service openlens-update@"$CH".timer; do
+              [ "$(systemctl show -p LoadState --value "$u")" = loaded ]
+            done
+          '
+      - name: the sandboxed server starts and answers /healthz
+        run: |
+          # `openlens healthcheck` probes /healthz on the unit's port.
+          for _ in $(seq 1 60); do docker exec sd openlens healthcheck && break; sleep 1; done
+          docker exec sd openlens healthcheck
+          docker exec sd systemctl is-active openlens
+          [ "$(docker exec sd stat -c '%U %a' /var/lib/openlens)" = "openlens 750" ]
+          [ "$(docker exec sd systemctl show -p MemoryMax --value openlens)" = 1073741824 ]
+          docker exec sd journalctl -u openlens --no-pager | grep -qi owner \
+            || { echo "::error::no owner link in the first start's log"; exit 1; }
+          docker exec sd systemctl list-timers --all --no-pager | grep -q "openlens-update@$CH.timer"
+      - name: openlens-update refuses what is not a channel
+        run: |
+          for bad in edge v0.6.0 0.6.0; do
+            if docker exec sd openlens-update "$bad"; then echo "::error::openlens-update accepted $bad"; exit 1; fi
+          done
+      - name: a crash is restarted by systemd
+        run: |
+          docker exec sd systemctl kill -s KILL openlens
+          sleep 8
+          for _ in $(seq 1 30); do docker exec sd openlens healthcheck && break; sleep 1; done
+          docker exec sd openlens healthcheck
+          [ "$(docker exec sd systemctl show -p NRestarts --value openlens)" -ge 1 ]
+      - if: failure()
+        run: docker exec sd journalctl --no-pager -n 200 || true
+
+  compose:
+    name: Compose file and openlens-compose-update
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DIR: /tmp/openlens
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: a local registry with the image under a channel tag
+        run: |
+          docker run -d -p 5000:5000 --name registry registry:2
+          docker pull -q "$IMAGE"
+          docker tag "$IMAGE" "$LOCAL"
+          docker push -q "$LOCAL"
+      - name: the compose file of docs/deploy/docker.md
+        run: |
+          mkdir -p "$DIR"
+          # The first YAML block of the guide is the compose file.
+          awk '/^```yaml$/ { on = 1; next } on && /^```$/ { exit } on' docs/deploy/docker.md \
+            | sed -E "s#image: ghcr.io/philippe-arnd/openlens:.*#image: $LOCAL#" > "$DIR/compose.yaml"
+          cat "$DIR/compose.yaml"
+          grep -q "image: $LOCAL" "$DIR/compose.yaml"
+          docker compose -f "$DIR/compose.yaml" up -d --wait --wait-timeout 120
+          curl -fsS --max-time 5 localhost:8686/healthz
+      - name: nothing new, nothing done
+        run: deploy/docker/openlens-compose-update "$DIR"
+      - name: a new image in the channel is pulled and runs
+        run: |
+          old=$(docker image inspect -f '{{.Id}}' "$LOCAL")
+          printf 'FROM %s\nLABEL ci.revision=2\n' "$LOCAL" | docker build -q -t "$LOCAL" -
+          new=$(docker image inspect -f '{{.Id}}' "$LOCAL")
+          docker push -q "$LOCAL"
+          docker tag "$old" "$LOCAL"   # the host still has the old one
+          deploy/docker/openlens-compose-update "$DIR"
+          running=$(docker inspect -f '{{.Image}}' "$(docker compose -f "$DIR/compose.yaml" ps -q openlens)")
+          [ "$running" = "$new" ] || { echo "::error::still on $running, expected $new"; exit 1; }
+          curl -fsS --max-time 5 localhost:8686/healthz
+      - name: a crashing image is rolled back and remembered
+        run: |
+          good=$(docker image inspect -f '{{.Id}}' "$LOCAL")
+          # Keep the good image under its own tag: once the build below takes
+          # "$LOCAL", an untagged image can be removed by the image store.
+          docker tag "$LOCAL" openlens-good:ci
+          printf 'FROM %s\nENTRYPOINT ["/usr/local/bin/openlens", "backup"]\n' "$LOCAL" | docker build -q -t "$LOCAL" -
+          bad=$(docker image inspect -f '{{.Id}}' "$LOCAL")
+          docker push -q "$LOCAL"
+          docker tag openlens-good:ci "$LOCAL"
+          if deploy/docker/openlens-compose-update "$DIR"; then echo "::error::a crashing image must fail the update"; exit 1; fi
+          running=$(docker inspect -f '{{.Image}}' "$(docker compose -f "$DIR/compose.yaml" ps -q openlens)")
+          [ "$running" = "$good" ] || { echo "::error::not rolled back: $running"; exit 1; }
+          curl -fsS --max-time 5 localhost:8686/healthz
+          grep -qxF "$bad" "$DIR/.openlens-failed-images"
+          # The next run waits for another image instead of trying it again.
+          deploy/docker/openlens-compose-update "$DIR"
+          [ "$(docker inspect -f '{{.Image}}' "$(docker compose -f "$DIR/compose.yaml" ps -q openlens)")" = "$good" ]
+      - if: failure()
+        run: docker compose -f "$DIR/compose.yaml" logs --tail 100 || true
+
+  swarm:
+    name: Swarm stack, update and rollback
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SVC: openlens_openlens
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: a one-node swarm and a local registry
+        run: |
+          docker swarm init > /dev/null
+          docker node update --label-add openlens=data "$(docker node ls -q)"
+          docker run -d -p 5000:5000 --name registry registry:2
+          docker pull -q "$IMAGE"
+          docker tag "$IMAGE" "$LOCAL"
+          docker push -q "$LOCAL"
+      - name: deploy the stack
+        run: |
+          sed -E "s#image: ghcr.io/philippe-arnd/openlens:.*#image: $LOCAL#" deploy/swarm/openlens.yaml > "$RUNNER_TEMP/stack.yaml"
+          grep -q "image: $LOCAL" "$RUNNER_TEMP/stack.yaml"
+          docker stack deploy -c "$RUNNER_TEMP/stack.yaml" openlens
+          for _ in $(seq 1 90); do curl -fsS --max-time 5 localhost:8686/healthz && break; sleep 2; done
+          curl -fsS --max-time 5 localhost:8686/healthz
+      - name: the cron line of docs/deploy/swarm.md brings a new image
+        run: |
+          before=$(docker service inspect "$SVC" -f '{{.Spec.TaskTemplate.ContainerSpec.Image}}')
+          printf 'FROM %s\nLABEL ci.revision=2\n' "$LOCAL" | docker build -q -t "$LOCAL" -
+          docker push -q "$LOCAL"
+          docker service update --quiet --image "$LOCAL" "$SVC"
+          after=$(docker service inspect "$SVC" -f '{{.Spec.TaskTemplate.ContainerSpec.Image}}')
+          echo "$before -> $after"
+          [ "$before" != "$after" ]
+          [ "$(docker service inspect "$SVC" -f '{{.UpdateStatus.State}}')" = completed ]
+          for _ in $(seq 1 60); do curl -fsS --max-time 5 localhost:8686/healthz && break; sleep 2; done
+          curl -fsS --max-time 5 localhost:8686/healthz
+          echo "$after" > "$RUNNER_TEMP/good"
+      - name: a crashing image is rolled back by Swarm
+        run: |
+          printf 'FROM %s\nENTRYPOINT ["/usr/local/bin/openlens", "backup"]\n' "$LOCAL" | docker build -q -t "$LOCAL" -
+          docker push -q "$LOCAL"
+          docker service update --quiet --image "$LOCAL" "$SVC" || true
+          for _ in $(seq 1 90); do
+            state=$(docker service inspect "$SVC" -f '{{.UpdateStatus.State}}')
+            [ "$state" = rollback_completed ] && break
+            sleep 2
+          done
+          echo "update state: $state"
+          [ "$state" = rollback_completed ]
+          [ "$(docker service inspect "$SVC" -f '{{.Spec.TaskTemplate.ContainerSpec.Image}}')" = "$(cat "$RUNNER_TEMP/good")" ]
+          for _ in $(seq 1 60); do curl -fsS --max-time 5 localhost:8686/healthz && break; sleep 2; done
+          curl -fsS --max-time 5 localhost:8686/healthz
+      - if: failure() || cancelled()
+        run: |
+          docker service ps --no-trunc "$SVC" || true
+          docker service logs --tail 100 "$SVC" || true
+
+  report:
+    name: open an issue when a recipe breaks
+    needs: [lint, systemd, compose, swarm]
+    if: failure() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # One issue per break, not one per failing run (as k8s.yml).
+          open=$(gh issue list -R "$GITHUB_REPOSITORY" --search 'in:title "Self-hosting recipes broken"' --state open --json number -q '.[0].number')
+          if [ -n "$open" ]; then
+            gh issue comment "$open" -R "$GITHUB_REPOSITORY" --body "Failed again ($GITHUB_EVENT_NAME, ${GITHUB_SHA::7}): $RUN"
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" --title "Self-hosting recipes broken on main ($(date -u +%F))" \
+              --body "A recipe of deploy/ (systemd, Compose updater or Swarm) failed its test: $RUN"
+          fi
