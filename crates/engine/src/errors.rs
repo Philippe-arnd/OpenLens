@@ -40,6 +40,14 @@ pub struct ErrorGroup {
     pub last_release: Option<String>,
 }
 
+/// An error's group (#522 shares it): its message with numbers, ids and
+/// quoted values masked, `@`, and its source file without query, line and
+/// column. Reads the columns `msg` and `source`.
+pub(crate) const FINGERPRINT: &str = "concat( \
+     regexp_replace(regexp_replace(coalesce(msg, '(no message)'), '0x[0-9a-fA-F]+|[0-9a-fA-F-]{12,}|[0-9]+', 'N', 'g'), \
+                    '''[^'']*''|\\\\\"[^\\\\]*\\\\\"', '…', 'g'), \
+     ' @ ', coalesce(regexp_replace(regexp_replace(source, '[?#].*$', ''), ':[0-9]+:[0-9]+$', ''), '?'))";
+
 /// The top 20 error groups of the last 30 days, most users first.
 pub async fn error_groups(
     q: &QueryEngine,
@@ -53,10 +61,7 @@ pub async fn error_groups(
         "WITH e AS (SELECT distinct_id, session_id, timestamp, role, release, coalesce(feature, path) AS place, \
            error_message AS msg, error_source AS source, error_stack AS stack \
            FROM {src} WHERE {w} AND event = '$error'), \
-         g AS (SELECT *, concat( \
-             regexp_replace(regexp_replace(coalesce(msg, '(no message)'), '0x[0-9a-fA-F]+|[0-9a-fA-F-]{{12,}}|[0-9]+', 'N', 'g'), \
-                            '''[^'']*''|\\\\\"[^\\\\]*\\\\\"', '…', 'g'), \
-             ' @ ', coalesce(regexp_replace(regexp_replace(source, '[?#].*$', ''), ':[0-9]+:[0-9]+$', ''), '?')) AS fp FROM e)"
+         g AS (SELECT *, {FINGERPRINT} AS fp FROM e)"
     );
     let groups_sql = format!(
         "{base} SELECT fp, min(msg) AS sample, count(*) AS n, count(DISTINCT distinct_id) AS users, \

@@ -8,6 +8,7 @@ use super::*;
 use crate::components::detail_url;
 use openlens_engine::deploys::Status;
 use openlens_engine::releases::{Releases, State};
+use openlens_engine::verdict::Verdict;
 
 /// The deploy hook part of the Releases page.
 pub struct HookView<'a> {
@@ -37,6 +38,14 @@ fn state_class(s: State) -> &'static str {
         State::Superseded => "status muted",
         State::Failed => "status bad",
         State::Deploying => "status warn",
+    }
+}
+
+fn verdict_class(v: Verdict) -> &'static str {
+    match v {
+        Verdict::Healthy => "status good",
+        Verdict::Regressed => "status bad",
+        Verdict::Inconclusive => "status muted",
     }
 }
 
@@ -99,7 +108,9 @@ pub fn releases(p: &ProjectInfo<'_>, r: &Releases, hook: &HookView<'_>) -> Marku
                     strong { "Superseded" } ": a newer release took the majority. "
                     strong { "Rolled back" } ": it had the majority, then an older release took it back. "
                     strong { "Failed" } " and " strong { "deploying" } ": a deploy the hook reported, with no traffic. "
-                    "Time in staging runs from the build's first event in staging to its first in production." }
+                    "Time in staging runs from the build's first event in staging to its first in production. "
+                    strong { "Verdict" } ": once a release has 30 sessions and 8 users, or is a day old, it is compared with the release before it in the environment (errors, new error groups, bounce, tasks, Web Vitals, features with a success event, guardrails): "
+                    strong { "healthy" } " when nothing got worse, " strong { "regressed" } " when something did, " strong { "inconclusive" } " with too little traffic or nothing to compare with. Production is judged unless one environment is picked." }
             } }
             section.card.wide {
                 @if r.releases.is_empty() {
@@ -109,7 +120,7 @@ pub fn releases(p: &ProjectInfo<'_>, r: &Releases, hook: &HookView<'_>) -> Marku
                         thead { tr {
                             th scope="col" { "Release" } th scope="col" { "Environment" } th scope="col" { "State" }
                             th.num scope="col" { "Share" } th scope="col" { "First seen" } th scope="col" { "Last seen" }
-                            th.num scope="col" { "Users" } th scope="col" { "Deployed" } th scope="col" { "Time in staging" } th scope="col" { "Board" }
+                            th.num scope="col" { "Users" } th scope="col" { "Verdict" } th scope="col" { "Deployed" } th scope="col" { "Time in staging" } th scope="col" { "Board" }
                         } }
                         tbody { @for x in &r.releases {
                             tr {
@@ -120,6 +131,16 @@ pub fn releases(p: &ProjectInfo<'_>, r: &Releases, hook: &HookView<'_>) -> Marku
                                 td.small.mono { (x.first_seen) }
                                 td.small.mono { (x.last_seen) }
                                 td.num { (x.users) }
+                                td.small {
+                                    @match x.verdict {
+                                        Some(v) => { span class=(verdict_class(v)) { (v.label()) } }
+                                        None if x.reasons.iter().any(|r| r.starts_with("Waiting")) => { span.muted { "waiting" } }
+                                        None => { span.muted { "—" } }
+                                    }
+                                    @for reason in x.reasons.iter().take(3) {
+                                        br; span.muted { (reason) }
+                                    }
+                                }
                                 td.small {
                                     @match (&x.deployed_at, x.deploy) {
                                         (Some(t), Some(Status::Succeeded) | None) => { span.mono { (t) } }
@@ -181,6 +202,8 @@ mod tests {
             staged_as: Some("2026-11-19.1".into()),
             deployed_at: Some("2026-11-20 09:58".into()),
             deploy: Some(Status::Succeeded),
+            verdict: Some(Verdict::Regressed),
+            reasons: vec!["New error: TypeError <x> (3 users, 5 times)".into()],
         };
         let failed = Release {
             release: "v3".into(),
@@ -216,5 +239,7 @@ mod tests {
             "no board link for a deploy with no traffic"
         );
         assert!(html.contains("Make the URL"));
+        assert!(html.contains("regressed"), "the verdict");
+        assert!(html.contains("TypeError &lt;x&gt;"), "its reason, escaped");
     }
 }

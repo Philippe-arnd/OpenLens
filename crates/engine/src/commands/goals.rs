@@ -11,7 +11,7 @@ use super::{Access, Caller, Change, Command, Error, Host, short_hash};
 use crate::Filters;
 use crate::goals::{self, Goal, Move, Objective, Status};
 
-fn load(meta: &Meta, project: &str) -> Vec<Goal> {
+pub(crate) fn load(meta: &Meta, project: &str) -> Vec<Goal> {
     meta.project_setting(project, "goals")
         .ok()
         .flatten()
