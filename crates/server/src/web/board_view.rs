@@ -55,7 +55,11 @@ pub(super) async fn board(
     let ready = crate::boards::ready(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v)));
     // Served from the cache, or computed last time in under a second: the
     // whole page at once, with no waiting panel (D-073).
-    if ready.hit || ready.estimate.is_some_and(|d| d < std::time::Duration::from_secs(1)) {
+    if ready.hit
+        || ready
+            .estimate
+            .is_some_and(|d| d < std::time::Duration::from_secs(1))
+    {
         return board_page(state, p, f, map, host, admin).await;
     }
     // A cold cache means seconds of computing: send the page shell at once
@@ -79,7 +83,10 @@ pub(super) async fn board(
     let (open, close) = (shell[..cut].to_owned(), shell[cut..].to_owned());
     // What the shell's `<main>` has before the panel (breadcrumbs, tabs):
     // the board page repeats it, so it is left out of the board sent after.
-    let before = match (shell.find("<main>"), shell.find("<div class=\"board-waiting\"")) {
+    let before = match (
+        shell.find("<main>"),
+        shell.find("<div class=\"board-waiting\""),
+    ) {
         (Some(a), Some(b)) if a + 6 <= b => shell[a + 6..b].to_owned(),
         _ => String::new(),
     };
@@ -92,7 +99,10 @@ pub(super) async fn board(
         let inner = match (full.find("<main>"), full.rfind("</main>")) {
             (Some(a), Some(b)) if a + 6 <= b => {
                 let inner = &full[a + 6..b];
-                inner.strip_prefix(before.as_str()).unwrap_or(inner).to_owned()
+                inner
+                    .strip_prefix(before.as_str())
+                    .unwrap_or(inner)
+                    .to_owned()
             }
             _ => "<p class=\"alert\" role=\"alert\">Couldn't finish this page. Reload it.</p>"
                 .to_owned(),
