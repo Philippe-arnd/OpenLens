@@ -297,7 +297,7 @@ const R: &str = "delete from t";
         .unwrap();
         std::fs::write(
             src.join("web/bad.rs"),
-            "fn f() {}\nconst Q: &str = \"SELECT a FROM b\";\n",
+            "fn f() {}\nconst Q: &str = \"SELECT n FROM b\";\n",
         )
         .unwrap();
         assert_eq!(offenders(root, &[]), ["  crates/server/src/web/bad.rs:2"]);
