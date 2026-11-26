@@ -67,6 +67,8 @@ mod config;
 mod forget;
 mod identity;
 pub use identity::{Identified, IdentityTables, PersonIdentity};
+/// Deploys reported by the deploy hook, and its secret (#504).
+pub mod deploys;
 /// Read-only connections next to the writer (#344).
 mod projects;
 /// Automatic release names per build fingerprint (#495).
@@ -255,6 +257,22 @@ CREATE TABLE IF NOT EXISTS release_builds (
   PRIMARY KEY (project, environment, build)
 );
 CREATE INDEX IF NOT EXISTS release_builds_day ON release_builds (project, day);
+CREATE TABLE IF NOT EXISTS deploy_hooks (
+  project TEXT PRIMARY KEY,
+  hash TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS deploys (
+  project TEXT NOT NULL,
+  environment TEXT NOT NULL,
+  release TEXT,
+  sha TEXT,
+  status TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  source TEXT NOT NULL,
+  received_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS deploys_project ON deploys (project, at);
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   email TEXT NOT NULL UNIQUE,

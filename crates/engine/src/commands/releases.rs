@@ -1,7 +1,7 @@
 //! Releases as commands (#500, D-049): each release per environment with
 //! its state (rolling out, live, superseded, rolled back), first and last
-//! seen, users and time in staging. The rules are in
-//! [`crate::releases`].
+//! seen, users and time in staging, and the deploys the deploy hook
+//! recorded (#504). The rules are in [`crate::releases`].
 
 use serde::{Deserialize, Serialize};
 
@@ -39,11 +39,22 @@ impl Command for List {
             .as_deref()
             .map(str::trim)
             .filter(|e| !e.is_empty());
-        releases::releases(host.query(), &p.id, &tz, env, &builds)
+        let since = chrono::Utc::now().timestamp() - (releases::WINDOW_DAYS + 1) * 86_400;
+        let deploys = host
+            .meta()
+            .deploys(&p.id, since)
+            .map_err(|e| Error::Unavailable(e.to_string()))?;
+        let hook = host
+            .meta()
+            .deploy_hook_since(&p.id)
+            .map_err(|e| Error::Unavailable(e.to_string()))?;
+        let mut r = releases::releases(host.query(), &p.id, &tz, env, &builds, &deploys)
             .await
             .map_err(|e| match e {
                 crate::EngineError::InvalidFilter(_) => Error::Invalid(e.to_string()),
                 _ => Error::Unavailable(e.to_string()),
-            })
+            })?;
+        r.deploy_hook = hook.map(|t| releases::local(t as f64, &tz));
+        Ok(r)
     }
 }

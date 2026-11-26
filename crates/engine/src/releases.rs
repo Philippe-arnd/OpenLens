@@ -17,14 +17,21 @@
 //! - none: **live** when its share on the latest day is at least 95 %, or
 //!   when it reached 95 % before and still holds the majority (a canary of
 //!   the next release does not demote it); otherwise **rolling out**.
+//!
+//! Deploys reported by the deploy hook (#504, D-053) add each release's
+//! deploy time and last deploy status; a deploy tied to no release with
+//! traffic is listed on its own: **failed**, **rolled back**, or
+//! **deploying** (started or succeeded, no traffic yet).
 
 use std::collections::{BTreeMap, HashMap};
 
 use chrono::{DateTime, Utc};
+use openlens_meta::deploys::Deploy;
 use openlens_meta::releases::ReleaseBuild;
 use openlens_query::QueryEngine;
 use serde::{Deserialize, Serialize};
 
+use crate::deploys::{self, DeployRow, Seen, Status};
 use crate::{EngineError, Filters, Result, float, int, text};
 
 /// Days read.
@@ -50,8 +57,13 @@ pub enum State {
     Live,
     /// A newer release took the majority.
     Superseded,
-    /// It had the majority, then an older release took it back.
+    /// It had the majority, then an older release took it back; or, with
+    /// no traffic, the deploy hook said it was rolled back.
     RolledBack,
+    /// No traffic, and its last deploy failed (deploy hook).
+    Failed,
+    /// No traffic yet, deploying or deployed (deploy hook).
+    Deploying,
 }
 
 impl State {
@@ -63,6 +75,8 @@ impl State {
             Self::Live => "live",
             Self::Superseded => "superseded",
             Self::RolledBack => "rolled back",
+            Self::Failed => "failed",
+            Self::Deploying => "deploying",
         }
     }
 }
@@ -92,6 +106,10 @@ pub struct Release {
     pub staging_secs: Option<i64>,
     /// The name it had in staging, when it was staged.
     pub staged_as: Option<String>,
+    /// Its latest succeeded deploy in the environment (deploy hook).
+    pub deployed_at: Option<String>,
+    /// The status of its latest deploy in the environment (deploy hook).
+    pub deploy: Option<Status>,
 }
 
 /// The releases of a project.
@@ -106,6 +124,10 @@ pub struct Releases {
     /// Production first, then staging, then the others by name; newest
     /// first within one.
     pub releases: Vec<Release>,
+    /// Deploys reported by the deploy hook in the window, newest first.
+    pub deploys: Vec<DeployRow>,
+    /// When the project's deploy hook URL was made, if it has one.
+    pub deploy_hook: Option<String>,
 }
 
 /// Users of one release on one day of one environment.
@@ -220,7 +242,7 @@ fn staging(
     out
 }
 
-fn local(secs: f64, tz: &str) -> String {
+pub(crate) fn local(secs: f64, tz: &str) -> String {
     let tz = tz.parse::<chrono_tz::Tz>().unwrap_or(chrono_tz::UTC);
     DateTime::<Utc>::from_timestamp(secs as i64, 0)
         .map(|t| t.with_timezone(&tz).format("%Y-%m-%d %H:%M").to_string())
@@ -238,7 +260,9 @@ fn env_rank(e: &str) -> (u8, &str) {
 /// The releases of `project` over the last [`WINDOW_DAYS`] days, days
 /// counted in `tz`, in every environment or in `environment` only
 /// (engine command `releases.list`). `builds` are the project's build
-/// fingerprints ([`openlens_meta::Meta::release_builds`]).
+/// fingerprints ([`openlens_meta::Meta::release_builds`]); `deploys` the
+/// deploys the hook recorded ([`openlens_meta::Meta::deploys`]), oldest
+/// first.
 ///
 /// # Errors
 /// An invalid time zone or environment, or a failed query.
@@ -248,6 +272,7 @@ pub async fn releases(
     tz: &str,
     environment: Option<&str>,
     builds: &[ReleaseBuild],
+    deploys: &[Deploy],
 ) -> Result<Releases> {
     let f = Filters {
         tz: tz.to_owned(),
@@ -359,9 +384,20 @@ pub async fn releases(
                 events: t.events,
                 staging_secs: promo.map(|p| p.0),
                 staged_as: promo.map(|p| p.1.clone()),
+                deployed_at: None,
+                deploy: None,
             }
         })
         .collect();
+    let seen: Vec<Seen> = totals
+        .iter()
+        .map(|t| Seen {
+            environment: t.environment.clone(),
+            release: t.release.clone(),
+            first: t.first as i64,
+        })
+        .collect();
+    let rows = with_deploys(&mut releases, deploys, &seen, environment, tz);
     releases.sort_by(|a, b| {
         env_rank(&a.environment)
             .cmp(&env_rank(&b.environment))
@@ -373,7 +409,109 @@ pub async fn releases(
         timezone: tz.to_owned(),
         measure: "distinct users per day",
         releases,
+        deploys: rows,
+        deploy_hook: None,
     })
+}
+
+/// Add the deploys to the releases: each release's deploy time and last
+/// status, and a row for the deploys tied to no release with traffic
+/// (each failed or rolled-back one; of those that name nothing, only the
+/// environment's latest when it started or succeeded, so a start and its
+/// end are one row). Returns the deploys as listed, newest first.
+fn with_deploys(
+    releases: &mut Vec<Release>,
+    deploys: &[Deploy],
+    seen: &[Seen],
+    environment: Option<&str>,
+    tz: &str,
+) -> Vec<DeployRow> {
+    let ds: Vec<Deploy> = deploys
+        .iter()
+        .filter(|d| environment.is_none_or(|e| d.environment == e))
+        .filter(|d| Status::parse(&d.status).is_some())
+        .cloned()
+        .collect();
+    let tied = deploys::link(&ds, seen);
+    type Key = (String, String);
+    let mut last: HashMap<Key, Status> = HashMap::new();
+    let mut ok_at: HashMap<Key, i64> = HashMap::new();
+    let mut alone: Vec<(Key, Status, i64, bool)> = Vec::new();
+    let mut rows = Vec::with_capacity(ds.len());
+    for (d, t) in ds.iter().zip(&tied) {
+        let Some(st) = Status::parse(&d.status) else {
+            continue;
+        };
+        let at = local(d.at as f64, tz);
+        rows.push(DeployRow {
+            environment: d.environment.clone(),
+            release: t.clone(),
+            reported_release: d.release.clone(),
+            commit: d.commit.clone(),
+            status: st,
+            at: at.clone(),
+            source: d.source.clone(),
+        });
+        match t {
+            Some(r) => {
+                let k = (d.environment.clone(), r.clone());
+                if st == Status::Succeeded {
+                    ok_at.insert(k.clone(), d.at);
+                }
+                last.insert(k, st);
+            }
+            None => {
+                let named = d.release.is_some() || d.commit.is_some();
+                let k = (d.environment.clone(), deploys::label(d, &at));
+                if named {
+                    alone.retain(|(x, ..)| *x != k);
+                }
+                alone.push((k, st, d.at, named));
+            }
+        }
+    }
+    for r in releases.iter_mut() {
+        let k = (r.environment.clone(), r.release.clone());
+        r.deploy = last.get(&k).copied();
+        r.deployed_at = ok_at.get(&k).map(|t| local(*t as f64, tz));
+    }
+    // Of the unnamed deploys still deploying, the environment's latest only.
+    let mut latest_unnamed: HashMap<String, i64> = HashMap::new();
+    for ((env, _), _, at, named) in &alone {
+        if !named {
+            let e = latest_unnamed.entry(env.clone()).or_insert(*at);
+            *e = (*e).max(*at);
+        }
+    }
+    for ((env, label), st, at, named) in alone {
+        let state = match st {
+            Status::Failed => State::Failed,
+            Status::RolledBack => State::RolledBack,
+            Status::Started | Status::Succeeded => {
+                if !named && latest_unnamed.get(&env) != Some(&at) {
+                    continue;
+                }
+                State::Deploying
+            }
+        };
+        let when = local(at as f64, tz);
+        releases.push(Release {
+            release: label,
+            environment: env,
+            state,
+            share: 0.0,
+            first_seen: when.clone(),
+            last_seen: when.clone(),
+            users: 0,
+            events: 0,
+            staging_secs: None,
+            staged_as: None,
+            deployed_at: (st == Status::Succeeded).then_some(when),
+            deploy: Some(st),
+        });
+    }
+    rows.reverse();
+    rows
 }
 
 #[cfg(test)]
@@ -471,6 +609,61 @@ mod tests {
         let s = states(&days(&[&[("v1", 100)], &[("v1", 1), ("v2", 3)]]), &o);
         assert!(s["v2"].1 > s["v1"].1);
         assert!((s["v1"].1 + s["v2"].1 - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn deploys_give_the_deploy_time_and_list_failed_deploys_with_no_traffic() {
+        let row = |name: &str| Release {
+            release: name.into(),
+            environment: PRODUCTION.into(),
+            state: State::Live,
+            share: 1.0,
+            first_seen: String::new(),
+            last_seen: String::new(),
+            users: 3,
+            events: 3,
+            staging_secs: None,
+            staged_as: None,
+            deployed_at: None,
+            deploy: None,
+        };
+        let dep = |release: Option<&str>, status: Status, at: i64| Deploy {
+            environment: PRODUCTION.into(),
+            release: release.map(str::to_owned),
+            commit: None,
+            status: status.as_str().into(),
+            at,
+            source: "plain".into(),
+        };
+        let mut rs = vec![row("v1")];
+        let seen = [Seen {
+            environment: PRODUCTION.into(),
+            release: "v1".into(),
+            first: 1_000,
+        }];
+        let deploys = [
+            dep(Some("v1"), Status::Started, 900),
+            dep(Some("v1"), Status::Succeeded, 950),
+            dep(Some("v2"), Status::Started, 2_000),
+            dep(Some("v2"), Status::Failed, 2_100),
+            // Unnamed: only the latest one still deploying is listed.
+            dep(None, Status::Started, 3_000),
+            dep(None, Status::Succeeded, 3_100),
+        ];
+        let listed = with_deploys(&mut rs, &deploys, &seen, None, "UTC");
+        assert_eq!(listed.len(), deploys.len());
+        assert_eq!(listed[0].status, Status::Succeeded, "newest first");
+        assert_eq!(rs[0].deploy, Some(Status::Succeeded));
+        assert!(rs[0].deployed_at.is_some());
+        let v2: Vec<_> = rs.iter().filter(|r| r.release == "v2").collect();
+        assert_eq!(v2.len(), 1, "a start and its failure are one row");
+        assert_eq!((v2[0].state, v2[0].users), (State::Failed, 0));
+        let unnamed: Vec<_> = rs
+            .iter()
+            .filter(|r| r.release.starts_with("deploy "))
+            .collect();
+        assert_eq!(unnamed.len(), 1);
+        assert_eq!(unnamed[0].state, State::Deploying);
     }
 
     #[test]

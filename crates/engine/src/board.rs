@@ -1,30 +1,11 @@
-//! The board (#452): its snapshot, the numbers of every block, and the
-//! filter bar's options.
+//! The board (#452): the numbers of every block, and the filter bar's
+//! options. No block reads a projection held in memory (#502, D-051): the
+//! people, sessions and releases blocks combine the daily rollups of
+//! closed days with the events of the other days (D-040, D-047); success
+//! events and Web Vitals are event-filtered scans of 30 and 7 days; every
+//! other query reads its own window of days from the files.
 
 use super::*;
-
-/// Largest 90-day window the board keeps in memory; beyond it, each query
-/// reads the files. The snapshot holds only the columns the board reads,
-/// and no `properties` (#449), so a row costs less than 160 bytes: 4 M rows
-/// stay under ~650 MB (#190). The snapshot also reserves its bytes in the
-/// query memory pool (768 MB, shared with every query): when the pool
-/// cannot hold it, the board reads the files instead (#329).
-const BOARD_SNAPSHOT_ROWS: usize = 4_000_000;
-
-/// The columns of the board snapshot. `uuid`, `url`, `received_at`,
-/// `account` and `plan` are not read by any board query, and `properties`
-/// (most of an event's bytes) by none since Web Vitals have their own
-/// columns and snapshot (#449).
-const BOARD_COLUMNS: &str = "event, distinct_id, session_id, timestamp, path, feature, role, \
-     environment, release, flags, date";
-
-/// The columns of the board's Web Vitals snapshot: what the 7-day filters
-/// read, the page, and the typed facts.
-fn vital_snapshot_columns() -> String {
-    format!(
-        "event, distinct_id, timestamp, path, role, environment, release, date, {VITAL_COLUMNS}"
-    )
-}
 
 /// What the filter bar of a page needs, without the board (#329): the
 /// environments, the roles (with the unmatched ones apart, as on the
@@ -96,82 +77,14 @@ pub async fn board(
     f: &Filters,
     map: Option<(&FeatureMap, i64)>,
 ) -> Result<Board> {
-    board_with(q, project, f, map, None).await
-}
-
-/// [`board`], sharing its 90-day snapshot with the boards computed at the
-/// same time for other roles or releases of the same data `generation`
-/// (#418): four filtered boards build one snapshot, not four.
-pub async fn board_shared(
-    q: &QueryEngine,
-    project: &str,
-    f: &Filters,
-    map: Option<(&FeatureMap, i64)>,
-    generation: u64,
-) -> Result<Board> {
-    board_with(q, project, f, map, Some(generation)).await
-}
-
-async fn board_with(
-    q: &QueryEngine,
-    project: &str,
-    f: &Filters,
-    map: Option<(&FeatureMap, i64)>,
-    share: Option<u64>,
-) -> Result<Board> {
     let q = &q.with_params(&f.params()?);
-    // Every board query reads the same projection (roles and features
-    // resolved from the map) over at most 90 days: compute it once, in
-    // memory, unless it is too large, then each query only filters it.
-    let window = Filters {
-        role: None,
-        release: None,
-        ..f.clone()
-    }
-    .clause(90)?;
-    let projected = source(map.map(|(m, _)| m));
-    let snap_sql = format!("SELECT {BOARD_COLUMNS} FROM {projected} WHERE {window}");
-    let snap = match share {
-        Some(g) => {
-            q.shared_snapshot(project, "board_events", &snap_sql, BOARD_SNAPSHOT_ROWS, g)
-                .await?
-        }
-        None => {
-            q.snapshot(project, "board_events", &snap_sql, BOARD_SNAPSHOT_ROWS)
-                .await?
-        }
-    };
-    let (q, src) = match &snap {
-        Some(s) => (s, "board_events".to_owned()),
-        None => (q, projected.clone()),
-    };
-    // Web Vitals look at 7 days of `$vital` rows only: their own small
-    // snapshot of the typed columns, so the 90-day one carries no
-    // `properties` (#449).
-    let vital_window = Filters {
-        role: None,
-        release: None,
-        ..f.clone()
-    }
-    .clause(7)?;
-    let vital_sql = format!(
-        "SELECT {} FROM {projected} WHERE {vital_window} AND event = '$vital'",
-        vital_snapshot_columns()
-    );
-    let vsnap = match share {
-        Some(g) => {
-            q.shared_snapshot(project, "board_vitals", &vital_sql, BOARD_SNAPSHOT_ROWS, g)
-                .await?
-        }
-        None => {
-            q.snapshot(project, "board_vitals", &vital_sql, BOARD_SNAPSHOT_ROWS)
-                .await?
-        }
-    };
-    let (q, vsrc) = match &vsnap {
-        Some(s) => (s, "board_vitals".to_owned()),
-        None => (q, projected),
-    };
+    // Every query reads the events with roles and features resolved from
+    // the map, cut to its own window of days (partition pruning on
+    // `date`), and only the columns it names: no 90-day copy is held in
+    // memory (#502, D-051). Web Vitals are a 7-day scan of `$vital` rows
+    // and their typed columns (#449), success events a 30-day scan of the
+    // declared success events.
+    let src = source(map.map(|(m, _)| m));
     let ident = identified(any_person(q, project).await?);
     // The people blocks read `person_day` for the closed days rolled up
     // with the map in force, the events for the rest (#492, D-040).
@@ -260,7 +173,7 @@ async fn board_with(
             "SELECT {day} AS date, count(DISTINCT distinct_id) AS n FROM {src} WHERE {w14} AND {ident} GROUP BY 1 ORDER BY 1"
         )
     };
-    let vitals_sql = vitals::p75_sql(&vsrc, &w7);
+    let vitals_sql = vitals::p75_sql(&src, &w7);
     let features_sql = if utc_days(30) {
         format!(
             "SELECT feature AS key, sum(events) AS uses, count(DISTINCT distinct_id) AS users, \
@@ -283,9 +196,12 @@ async fn board_with(
          WHERE role IS NOT NULL AND feature IS NOT NULL GROUP BY role, feature"
     );
     let releases_sql = sessions.releases_sql(f)?;
-    // Neither depends on who did what: they come from the segments, which
-    // are read once (#447), not from a query.
+    // The environments and the stored row count do not depend on who did
+    // what: they come from the segments, which are read once (#447), not
+    // from a query.
 
+    // Success events: 30 days of the declared events only, read from
+    // their typed columns (#502).
     let success_sql = if successes.is_empty() {
         "SELECT CAST(NULL AS VARCHAR) AS event, 0 AS n, 0 AS users WHERE false".to_owned()
     } else {
@@ -495,8 +411,8 @@ async fn board_with(
         .any(|v| v.rating != "good" && vitals_guide(&v.name).is_some_and(|g| g.pages))
     {
         let (pages, attr) = futures::join!(
-            vitals::pages(q, project, &vsrc, f),
-            vital_parts::attribution(q, project, &vsrc, f)
+            vitals::pages(q, project, &src, f),
+            vital_parts::attribution(q, project, &src, f)
         );
         b.vitals_why = vitals::explain(&b.vitals, &pages?, &attr?, true);
     } else {

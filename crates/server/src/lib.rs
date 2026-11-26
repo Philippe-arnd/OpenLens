@@ -27,6 +27,7 @@ mod explore;
 mod features;
 mod flags;
 mod goals;
+mod hooks;
 mod icon;
 pub mod identity;
 mod llm;
@@ -153,6 +154,7 @@ pub fn router(state: AppState) -> Router {
         .merge(replay::routes())
         .merge(web::routes())
         .merge(releases::routes())
+        .merge(hooks::routes())
         .layer(axum::middleware::from_fn(csrf::layer))
         .layer(axum::middleware::from_fn(trusted_headers_layer))
         // Pages, the API and Ask (a few model rounds) get two minutes.
@@ -178,7 +180,8 @@ pub fn router(state: AppState) -> Router {
         ))
         .layer(axum::middleware::from_fn(web::theme_layer))
         // One span per request, tagged with its id; the id is returned in
-        // `x-request-id` (kept from the proxy when it sent one) (#296).
+        // `x-request-id` (kept from the proxy when it sent one) (#296). A
+        // deploy hook's secret is not logged (#504).
         .layer(
             tower_http::trace::TraceLayer::new_for_http().make_span_with(
                 |req: &axum::http::Request<axum::body::Body>| {
@@ -187,7 +190,7 @@ pub fn router(state: AppState) -> Router {
                         .get("x-request-id")
                         .and_then(|v| v.to_str().ok())
                         .unwrap_or("");
-                    tracing::info_span!("request", method = %req.method(), path = %req.uri().path(), id)
+                    tracing::info_span!("request", method = %req.method(), path = %hooks::log_path(req.uri().path()), id)
                 },
             ),
         )
