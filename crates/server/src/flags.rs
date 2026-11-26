@@ -42,24 +42,17 @@ fn err(status: StatusCode, msg: &str) -> Response {
 pub(crate) async fn load(state: &AppState, project: &str) -> Vec<Flag> {
     let meta = state.meta.clone();
     let p = project.to_owned();
-    match tokio::task::spawn_blocking(move || meta.flags(&p)).await {
-        Ok(Ok(rows)) => rows
-            .iter()
-            .filter_map(|j| serde_json::from_str(j).ok())
-            .collect(),
-        _ => Vec::new(),
-    }
+    tokio::task::spawn_blocking(move || openlens_engine::commands::flags::load(&meta, &p))
+        .await
+        .unwrap_or_default()
 }
 
 pub(crate) async fn save(state: &AppState, project: &str, f: &Flag) -> Result<(), String> {
-    f.validate()?;
-    let json = serde_json::to_string(f).map_err(|e| e.to_string())?;
     let meta = state.meta.clone();
-    let (p, k) = (project.to_owned(), f.key.clone());
-    tokio::task::spawn_blocking(move || meta.save_flag(&p, &k, &json))
+    let (p, f) = (project.to_owned(), f.clone());
+    tokio::task::spawn_blocking(move || openlens_engine::commands::flags::save(&meta, &p, &f))
         .await
         .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
 }
 
 /// Properties for flag rules (#279), from `p.<key>=<value>` in the query

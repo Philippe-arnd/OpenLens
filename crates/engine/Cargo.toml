@@ -14,6 +14,7 @@ openlens-sqlgen = { path = "../sqlgen" }
 openlens-featuremap = { path = "../featuremap" }
 openlens-event = { path = "../event" }
 openlens-meta = { path = "../meta" }
+openlens-flags = { path = "../flags" }
 sha2.workspace = true
 hex.workspace = true
 serde.workspace = true

@@ -2453,6 +2453,7 @@ dependencies = [
  "hex",
  "openlens-event",
  "openlens-featuremap",
+ "openlens-flags",
  "openlens-meta",
  "openlens-query",
  "openlens-sqlgen",

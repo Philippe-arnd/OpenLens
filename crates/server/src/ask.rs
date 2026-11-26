@@ -20,6 +20,10 @@ use axum::response::{IntoResponse, Redirect, Response};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
+use openlens_engine::commands::ask as ask_cmd;
+use openlens_engine::commands::flags as flags_cmd;
+use openlens_engine::commands::{Caller, Command, Error as CommandError};
+
 use crate::AppState;
 use crate::auth;
 use crate::llm::{self, Call, Msg, Tool};
@@ -165,65 +169,6 @@ pub(crate) fn tsv(rows: &[Map<String, Value>]) -> String {
     out
 }
 
-/// A readable first check. Without person-level detail, the query then
-/// runs on an aggregate-only view ([`openlens_query::QueryEngine::sql_aggregate`]),
-/// which is what actually keeps people out.
-pub(crate) fn sql_allowed(query: &str, person_level: bool) -> Result<(), String> {
-    let q = query
-        .to_lowercase()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    if !q.starts_with("select") && !q.starts_with("with") {
-        return Err("only SELECT queries".into());
-    }
-    if person_level {
-        return Ok(());
-    }
-    for banned in ["distinct_id", "properties", "url", "account", "session_id"] {
-        if q.contains(banned) {
-            return Err(format!(
-                "`{banned}` is person-level: count people with count(DISTINCT user_key) instead, or ask an admin to allow person-level detail for this project"
-            ));
-        }
-    }
-    if !(q.contains("group by")
-        || ["count(", "sum(", "avg(", "min(", "max("]
-            .iter()
-            .any(|a| q.contains(a)))
-    {
-        return Err("aggregate the rows (GROUP BY, count, sum, avg)".into());
-    }
-    Ok(())
-}
-
-/// The project's secret for `user_key` (never shown, never sent).
-fn pseudonym_key(state: &AppState, project: &str) -> String {
-    state
-        .meta
-        .setting_or_init(&format!("project:{project}:ask_key"), || {
-            crate::cookieless::random_hex(32)
-        })
-        .unwrap_or_else(|_| crate::cookieless::random_hex(32))
-}
-
-fn person_level(state: &AppState, project: &str) -> bool {
-    state
-        .meta
-        .project_setting(project, "ai_person_level")
-        .ok()
-        .flatten()
-        .as_deref()
-        == Some("on")
-}
-
-fn filters(p: &openlens_meta::Project) -> openlens_engine::Filters {
-    openlens_engine::Filters {
-        tz: p.timezone.clone(),
-        ..openlens_engine::Filters::default()
-    }
-}
-
 /// The project brief (about 1.5k tokens), rebuilt daily and when the map
 /// changes: it sits in the cached prefix.
 async fn brief(state: &AppState, p: &openlens_meta::Project) -> String {
@@ -234,7 +179,6 @@ async fn brief(state: &AppState, p: &openlens_meta::Project) -> String {
     {
         return b;
     }
-    let f = filters(p);
     let mut s = format!(
         "# Project {} (id {}), time zone {}\n",
         p.name, p.id, p.timezone
@@ -261,8 +205,11 @@ async fn brief(state: &AppState, p: &openlens_meta::Project) -> String {
                 .join(", ")
         ));
     }
-    if let Ok(b) = crate::boards::board(state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))).await
-    {
+    let input = ask_cmd::BoardInput {
+        project: p.id.clone(),
+        role: None,
+    };
+    if let Ok(b) = ask_cmd::Board::run(state, &Caller::default(), input).await {
         s.push_str(&format!(
             "\n## Last 30 days (production)\nDAU {} · WAU {} · MAU {} · stickiness {:.2} · sessions {} · bounce {:.1}% · sessions with errors {:.1}%\n",
             b.users.dau, b.users.wau, b.users.mau, b.users.stickiness, b.sessions.count,
@@ -284,7 +231,7 @@ async fn brief(state: &AppState, p: &openlens_meta::Project) -> String {
             }
         }
     }
-    let (at_risk, goals) = crate::goals::snapshot(state, &p.id);
+    let ask_cmd::GoalsStatus { at_risk, goals } = goals_status(state, &p.id).await;
     if !goals.is_empty() {
         s.push_str("\n## Goals\n");
         for (line, st) in goals.iter().take(10) {
@@ -301,7 +248,27 @@ async fn brief(state: &AppState, p: &openlens_meta::Project) -> String {
     s
 }
 
-/// Run one tool: (result text, evidence).
+/// What a command's refusal or failure reads as in a tool result: a
+/// refusal's own words, else `error: …`.
+fn failed(e: &CommandError) -> String {
+    match e {
+        CommandError::Invalid(m) => m.clone(),
+        e => format!("error: {e}"),
+    }
+}
+
+/// The goals' status (`ask.goals`); none when it cannot be read.
+async fn goals_status(state: &AppState, project: &str) -> ask_cmd::GoalsStatus {
+    let input = ask_cmd::ProjectInput {
+        project: project.to_owned(),
+    };
+    ask_cmd::Goals::run(state, &Caller::default(), input)
+        .await
+        .unwrap_or_default()
+}
+
+/// Run one tool: (result text, evidence). Each tool is an engine command
+/// (`ask.*`, `flags.list`, #508); this writes its output for the model.
 async fn run_tool(
     state: &AppState,
     p: &openlens_meta::Project,
@@ -309,15 +276,20 @@ async fn run_tool(
     admin: bool,
     c: &Call,
 ) -> (String, Option<(String, String)>) {
-    let f = filters(p);
-    let map = crate::load_map(state, &p.id).await;
+    // Ask counts in the project's time zone (D-020), whoever asks.
+    let caller = Caller::default();
     let arg = |k: &str| c.args.get(k).and_then(Value::as_str).map(str::to_owned);
+    let project = ask_cmd::ProjectInput {
+        project: p.id.clone(),
+    };
     let base = format!("/p/{}", p.id);
     match c.name.as_str() {
         "kpi" => {
-            let mut f = f;
-            f.role = arg("role").filter(|r| r.len() <= 64);
-            match crate::boards::board(state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))).await {
+            let input = ask_cmd::BoardInput {
+                project: p.id.clone(),
+                role: arg("role"),
+            };
+            match ask_cmd::Board::run(state, &caller, input).await {
                 Ok(b) => {
                     let mut t = format!(
                         "dau\twau\tmau\tstickiness\tsessions\tbounce\terror_rate\tavg_secs\n{}\t{}\t{}\t{:.3}\t{}\t{:.3}\t{:.3}\t{:.0}\n\nrelease\tfirst_seen\tusers\tsessions\terror_rate\tbounce\ttasks_per_session",
@@ -351,11 +323,15 @@ async fn run_tool(
                     }
                     (t, Some(("Focus board".into(), base)))
                 }
-                Err(e) => (format!("error: {e}"), None),
+                Err(e) => (failed(&e), None),
             }
         }
         "insights" => {
-            match crate::boards::board(state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))).await {
+            let input = ask_cmd::BoardInput {
+                project: p.id.clone(),
+                role: None,
+            };
+            match ask_cmd::Board::run(state, &caller, input).await {
                 Ok(b) => {
                     let mut t = String::from("title\tevidence\tnext step");
                     for i in &b.insights {
@@ -363,15 +339,18 @@ async fn run_tool(
                     }
                     (t, Some(("Insight cards".into(), base)))
                 }
-                Err(e) => (format!("error: {e}"), None),
+                Err(e) => (failed(&e), None),
             }
         }
         "feature_context" => {
-            let (Some((m, _)), Some(k)) = (&map, arg("key")) else {
+            let Some(k) = arg("key") else {
                 return ("no feature map, or no key".into(), None);
             };
-            let history = crate::map_history(state, &p.id).await;
-            match openlens_engine::feature_context(&state.query, &p.id, m, &history, &f, &k).await {
+            let input = ask_cmd::FeatureInput {
+                project: p.id.clone(),
+                key: k.clone(),
+            };
+            match ask_cmd::Feature::run(state, &caller, input).await {
                 Ok(Some(ctx)) => {
                     let mut v = serde_json::to_value(&ctx).unwrap_or_default();
                     let key = ctx.definition.as_ref().map_or(k.clone(), |d| d.key.clone());
@@ -389,76 +368,53 @@ async fn run_tool(
                     )
                 }
                 Ok(None) => (format!("no feature `{k}`"), None),
-                Err(e) => (format!("error: {e}"), None),
+                Err(e) => (failed(&e), None),
             }
         }
-        "errors" => {
-            let src = openlens_engine::source(map.as_ref().map(|(m, _)| m));
-            match openlens_engine::error_groups(&state.query, &p.id, &src, &f).await {
-                Ok(g) => {
-                    let mut t =
-                        String::from("error\tcount\tusers\tsessions\tlast_seen\ttop_release");
-                    for e in g.iter().take(MAX_ROWS) {
-                        t.push_str(&format!(
-                            "\n{}\t{}\t{}\t{}\t{}\t{}",
-                            e.sample
-                                .chars()
-                                .take(100)
-                                .collect::<String>()
-                                .replace(['\t', '\n'], " "),
-                            e.count,
-                            e.users,
-                            e.sessions,
-                            e.last_seen,
-                            e.releases.first().map_or("", |r| r.0.as_str())
-                        ));
-                    }
-                    (t, Some(("Errors".into(), format!("{base}/errors"))))
+        "errors" => match ask_cmd::Errors::run(state, &caller, project).await {
+            Ok(g) => {
+                let mut t = String::from("error\tcount\tusers\tsessions\tlast_seen\ttop_release");
+                for e in g.iter().take(MAX_ROWS) {
+                    t.push_str(&format!(
+                        "\n{}\t{}\t{}\t{}\t{}\t{}",
+                        e.sample
+                            .chars()
+                            .take(100)
+                            .collect::<String>()
+                            .replace(['\t', '\n'], " "),
+                        e.count,
+                        e.users,
+                        e.sessions,
+                        e.last_seen,
+                        e.releases.first().map_or("", |r| r.0.as_str())
+                    ));
                 }
-                Err(e) => (format!("error: {e}"), None),
+                (t, Some(("Errors".into(), format!("{base}/errors"))))
             }
-        }
+            Err(e) => (failed(&e), None),
+        },
         "sql" => {
-            let Some(q) = arg("query").filter(|q| q.len() <= 4000) else {
+            let Some(q) = arg("query") else {
                 return ("a query is required".into(), None);
             };
-            if let Err(e) = sql_allowed(&q, person_level(state, &p.id)) {
-                return (format!("refused: {e}"), None);
-            }
-            let src = openlens_engine::source(map.as_ref().map(|(m, _)| m));
-            let run = if person_level(state, &p.id) {
-                let full = format!(
-                    "(SELECT *, distinct_id AS user_key, session_id AS session_key FROM {src}) AS events"
-                );
-                Box::pin(state.query.cold().sql_over(&p.id, &full, &q)).await
-            } else {
-                let key = pseudonym_key(state, &p.id);
-                Box::pin(
-                    state
-                        .query
-                        .cold()
-                        .sql_aggregate(&p.id, &src, key.as_bytes(), &q),
-                )
-                .await
+            let input = ask_cmd::SqlInput {
+                project: p.id.clone(),
+                query: q.clone(),
             };
-            match run {
-                Ok(r) => (tsv(&r.rows), Some(("SQL".into(), q))),
-                Err(e) => (format!("error: {e}"), None),
+            match Box::pin(ask_cmd::Sql::run(state, &caller, input)).await {
+                Ok(rows) => (tsv(&rows), Some(("SQL".into(), q))),
+                Err(e) => (failed(&e), None),
             }
         }
-        "vitals" => {
-            match openlens_engine::vitals(&state.query, &p.id, &f, map.as_ref().map(|(m, _)| m))
-                .await
-            {
-                Ok(v) => (
-                    json!(v).to_string().chars().take(6000).collect(),
-                    Some(("Web Vitals".into(), base)),
-                ),
-                Err(e) => (format!("error: {e}"), None),
-            }
-        }
+        "vitals" => match ask_cmd::Vitals::run(state, &caller, project).await {
+            Ok(v) => (
+                json!(v).to_string().chars().take(6000).collect(),
+                Some(("Web Vitals".into(), base)),
+            ),
+            Err(e) => (failed(&e), None),
+        },
         "goals" => {
-            let (at_risk, goals) = crate::goals::snapshot(state, &p.id);
+            let ask_cmd::GoalsStatus { at_risk, goals } = goals_status(state, &p.id).await;
             let mut t = String::from("goal\tstatus");
             for (l, s) in goals {
                 t.push_str(&format!("\n{l}\t{s}"));
@@ -488,7 +444,12 @@ async fn run_tool(
                 let Some(key) = arg("key") else {
                     return ("key is required".into(), None);
                 };
-                let flags = crate::flags::load(state, &p.id).await;
+                let input = flags_cmd::ListInput {
+                    project: p.id.clone(),
+                };
+                let flags = flags_cmd::List::run(state, &caller, input)
+                    .await
+                    .unwrap_or_default();
                 let Some(old) = flags.iter().find(|x| x.key == key) else {
                     return (format!("no flag `{key}`"), None);
                 };
@@ -825,18 +786,15 @@ pub(crate) async fn apply(
         }
         Some("flag") => {
             let key = a["key"].as_str().unwrap_or("");
-            let mut flags = crate::flags::load(state, project).await;
-            let f = flags
-                .iter_mut()
-                .find(|x| x.key == key)
-                .ok_or("The flag is gone.")?;
-            f.enabled = a["enabled"].as_bool().unwrap_or(f.enabled);
-            f.rollout = a["rollout"]
-                .as_u64()
-                .and_then(|r| u8::try_from(r).ok())
-                .unwrap_or(f.rollout);
-            let f = f.clone();
-            crate::flags::save(state, project, &f).await?;
+            let input = flags_cmd::UpdateInput {
+                project: project.to_owned(),
+                key: key.to_owned(),
+                enabled: a["enabled"].as_bool(),
+                rollout: a["rollout"].as_u64().and_then(|r| u8::try_from(r).ok()),
+            };
+            flags_cmd::Update::run(state, &Caller::default(), input)
+                .await
+                .map_err(|e| e.to_string())?;
             Ok(format!("Flag {key} updated."))
         }
         _ => Err("Unknown change.".into()),
@@ -954,25 +912,6 @@ pub(crate) async fn export(
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
-
-    #[test]
-    fn sql_without_person_level_counts_but_does_not_list() {
-        assert!(
-            sql_allowed(
-                "SELECT feature, count(DISTINCT user_key) FROM events GROUP BY 1",
-                false
-            )
-            .is_ok()
-        );
-        assert!(sql_allowed("SELECT distinct_id FROM events", false).is_err());
-        assert!(sql_allowed("SELECT properties FROM events GROUP BY 1", false).is_err());
-        assert!(
-            sql_allowed("SELECT event FROM events", false).is_err(),
-            "not aggregated"
-        );
-        assert!(sql_allowed("DELETE FROM events", true).is_err());
-        assert!(sql_allowed("select distinct_id from events", true).is_ok());
-    }
 
     #[test]
     fn tool_results_are_compact_tsv() {
