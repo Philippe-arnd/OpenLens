@@ -22,6 +22,7 @@ mod commands;
 mod comments;
 mod cookieless;
 mod csrf;
+mod delivery;
 mod digest;
 mod environments;
 mod explore;
@@ -155,6 +156,7 @@ pub fn router(state: AppState) -> Router {
         .merge(replay::routes())
         .merge(web::routes())
         .merge(releases::routes())
+        .merge(delivery::routes())
         .merge(hooks::routes())
         .layer(axum::middleware::from_fn(csrf::layer))
         .layer(axum::middleware::from_fn(trusted_headers_layer))

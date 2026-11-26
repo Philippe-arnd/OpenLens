@@ -17,6 +17,7 @@ const TOOL_OF: &[(&str, &str)] = &[
     ("goals.list", "goals"),
     ("goals.set", "set_goal"),
     ("releases.list", "releases"),
+    ("releases.delivery", "delivery"),
     ("tickets.list", "tickets"),
     ("tickets.draft", "create_ticket"),
     ("tickets.file", "create_ticket"),

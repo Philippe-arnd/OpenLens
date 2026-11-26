@@ -205,6 +205,11 @@ impl Tools for OpenLensTools {
                 input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"}}))}),
             },
             ToolSpec {
+                name: "delivery",
+                description: "The app's delivery metrics per environment over the last `days` (1 to 90, default 90): deploy frequency (succeeded deploys from the deploy hook, else releases reaching live), lead time from first commit to live (median; 'unknown' with why until a commit range is recorded), change failure rate (failed deploys, rollbacks seen by the hook or in traffic, regressed verdicts) and time to restore (median from a failure to the rollback or the next good change, with failures not restored yet). Optional env for one environment.",
+                input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"days":{"type":"integer","minimum":1,"maximum":90}}))}),
+            },
+            ToolSpec {
                 name: "deploy_hook",
                 description: "Make or rotate the app's deploy hook URL (/hooks/deploy/SECRET), shown in this result only: the previous URL stops working at once. Paste it in the platform's deploy notifications (Coolify, Vercel, Netlify, Render, GitHub deployment_status, Argo CD, Flux), or post {status: started|succeeded|failed|rolled_back, release?, commit?, environment?, at?} to it from a deploy step; add ?env=NAME when the platform does not say the environment. Deploys then show in `releases`.",
                 input_schema: json!({"type":"object","properties":proj}),
@@ -449,6 +454,32 @@ impl Tools for OpenLensTools {
                         })
                         .collect();
                     path.push_str(&format!("?env={enc}"));
+                }
+                let (st, v) = c.call("GET", &path, None)?;
+                ok_or(st, v)
+            }
+            "delivery" => {
+                let mut q = Vec::new();
+                if let Some(e) = s(args, "env") {
+                    let enc: String = e
+                        .bytes()
+                        .map(|b| {
+                            if b.is_ascii_alphanumeric() || b"-_.".contains(&b) {
+                                (b as char).to_string()
+                            } else {
+                                format!("%{b:02X}")
+                            }
+                        })
+                        .collect();
+                    q.push(format!("env={enc}"));
+                }
+                if let Some(d) = args.get("days").and_then(Value::as_i64) {
+                    q.push(format!("days={d}"));
+                }
+                let mut path = format!("/api/projects/{}/delivery", project(args));
+                if !q.is_empty() {
+                    path.push('?');
+                    path.push_str(&q.join("&"));
                 }
                 let (st, v) = c.call("GET", &path, None)?;
                 ok_or(st, v)

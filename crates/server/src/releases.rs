@@ -12,6 +12,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use openlens_engine::commands::delivery::{DeliveryInput, GetDelivery};
 use openlens_engine::commands::deploys::{ProjectInput, RotateHook};
 use openlens_engine::commands::releases::{List, ListInput};
 use openlens_engine::commands::{Caller, Command, Error, Host};
@@ -64,9 +65,21 @@ async fn render(
     let caller = crate::commands::caller(state, headers);
     let input = ListInput {
         project: p.id.clone(),
-        environment: env,
+        environment: env.clone(),
     };
-    match List::run(state, &caller, input).await {
+    // The delivery card (#523), read alongside: left out when it cannot
+    // be computed.
+    let delivery = DeliveryInput {
+        project: p.id.clone(),
+        environment: env,
+        days: None,
+    };
+    let (listed, delivery) = tokio::join!(
+        List::run(state, &caller, input),
+        GetDelivery::run(state, &caller, delivery)
+    );
+    let delivery = delivery.ok();
+    match listed {
         Ok(r) => {
             let info = openlens_ui::ProjectInfo {
                 id: &p.id,
@@ -74,7 +87,10 @@ async fn render(
                 key: &p.api_key,
             };
             let hook = openlens_ui::HookView { admin, new_url };
-            html_page(StatusCode::OK, openlens_ui::releases(&info, &r, &hook))
+            html_page(
+                StatusCode::OK,
+                openlens_ui::releases(&info, &r, delivery.as_ref(), &hook),
+            )
         }
         Err(e) => html_page(
             StatusCode::BAD_REQUEST,
