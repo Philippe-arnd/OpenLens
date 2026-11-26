@@ -366,7 +366,12 @@ async fn board(
             openlens_ui::message("Not found", "No such project."),
         );
     };
-    let f = q.filters(&auth::tz_for(&state, &headers, &p.timezone));
+    // The board page reads its period blocks since the current release
+    // (D-055).
+    let f = openlens_engine::Filters {
+        window: openlens_engine::Window::Release,
+        ..q.filters(&auth::tz_for(&state, &headers, &p.timezone))
+    };
     let map = crate::load_map(&state, &p.id).await;
     let host = crate::public_url(&headers);
     let admin = auth::viewer(&state, &headers).is_some_and(|v| v.admin);
@@ -462,7 +467,13 @@ async fn board_page(
                 .collect()
         })
         .unwrap_or_default();
-    let marks = crate::timeline::collect(&state, &p.id, &releases, 14);
+    // The marks cover the active-users chart: the window's days (D-055).
+    let days = board
+        .as_ref()
+        .ok()
+        .and_then(|b| b.window.as_ref())
+        .map_or(14, |w| w.days);
+    let marks = crate::timeline::collect(&state, &p.id, &releases, days);
     match board {
         Ok(b) => html(
             StatusCode::OK,

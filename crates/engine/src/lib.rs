@@ -16,6 +16,7 @@ mod acquisition;
 mod board;
 mod board_people;
 mod board_sessions;
+mod board_window;
 pub mod churn;
 pub mod commands;
 pub mod deploys;
@@ -48,6 +49,7 @@ pub mod vital_parts;
 pub mod vitals;
 pub use acquisition::{AcquisitionRow, Touch, acquisition};
 pub use board::{board, filter_options};
+pub use board_window::{BoardWindow, Period};
 pub use churn::{AtRisk, ChurnReport, churn};
 pub use digest::{Delta, Digest, digest, digest_markdown};
 pub use errors::{ErrorGroup, error_groups};
@@ -85,6 +87,20 @@ pub enum EngineError {
 /// Result alias.
 pub type Result<T> = std::result::Result<T, EngineError>;
 
+/// The time window of the board's period blocks (D-055).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Window {
+    /// Each block keeps its fixed window (7, 14 or 30 days): what alerts,
+    /// goals, the digest, Ask and shared boards read.
+    #[default]
+    Fixed,
+    /// Since the current release of the environment (90 days at most),
+    /// against the same length before it; the last 14 days against the 14
+    /// before when the environment has no release: the board pages.
+    Release,
+}
+
 /// Filters every board number honours. No other knobs (D-014).
 #[derive(Debug, Clone, Serialize)]
 pub struct Filters {
@@ -100,6 +116,9 @@ pub struct Filters {
     /// The project's time zone (IANA name): where a day and a week start
     /// (D-017). Set from the project, not from the request.
     pub tz: String,
+    /// The window of the board's period blocks (D-055): fixed unless a
+    /// board page asks for the release window.
+    pub window: Window,
 }
 
 impl Default for Filters {
@@ -110,6 +129,7 @@ impl Default for Filters {
             release: None,
             internal: false,
             tz: "UTC".into(),
+            window: Window::Fixed,
         }
     }
 }
@@ -179,12 +199,27 @@ impl Filters {
 
     /// [`Filters::clause`], with the window's first day taken at `now`.
     fn clause_at(&self, days: i64, now: chrono::DateTime<Utc>) -> Result<String> {
-        let since = (now - Duration::days(days)).format("%Y-%m-%d").to_string();
+        self.clause_span(Span::days(days), now)
+    }
+
+    /// WHERE clause for these filters over the span `s`, its days taken
+    /// at `now` (D-055).
+    fn clause_span(&self, s: Span, now: chrono::DateTime<Utc>) -> Result<String> {
+        let since = (now - Duration::seconds(s.start)).format("%Y-%m-%d");
         // The values are placeholders, filled from `params()` (#310): the
         // engine runs every query of a function on `q.with_params`.
         let mut w = format!(
-            "date >= '{since}' AND timestamp >= now() - INTERVAL '{days} days' AND environment = $env"
+            "date >= '{since}' AND timestamp >= now() - INTERVAL '{}'",
+            interval(s.start)
         );
+        if s.end > 0 {
+            let until = (now - Duration::seconds(s.end)).format("%Y-%m-%d");
+            w.push_str(&format!(
+                " AND date <= '{until}' AND timestamp < now() - INTERVAL '{}'",
+                interval(s.end)
+            ));
+        }
+        w.push_str(" AND environment = $env");
         if self.role.is_some() {
             w.push_str(" AND role = $role");
         }
@@ -197,6 +232,37 @@ impl Filters {
             w.push_str(" AND NOT is_internal(distinct_id)");
         }
         Ok(w)
+    }
+}
+
+/// A span of time before now: from `start` seconds ago to `end` seconds
+/// ago (`end` 0: until now). The fixed windows are spans of whole days
+/// ending now; the release window and its comparison are any span (D-055).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Span {
+    /// Seconds before now the span starts.
+    pub start: i64,
+    /// Seconds before now the span ends.
+    pub end: i64,
+}
+
+impl Span {
+    /// The last `days` days.
+    pub(crate) fn days(days: i64) -> Self {
+        Self {
+            start: days * 86_400,
+            end: 0,
+        }
+    }
+}
+
+/// An SQL interval of `secs` seconds, in days when it is whole days (the
+/// fixed windows' clause is unchanged).
+fn interval(secs: i64) -> String {
+    if secs % 86_400 == 0 {
+        format!("{} days", secs / 86_400)
+    } else {
+        format!("{secs} seconds")
     }
 }
 
@@ -383,6 +449,9 @@ pub struct Board {
     pub flag_cohorts: Vec<FlagCohort>,
     /// Funnels from the feature map's declared steps.
     pub funnels: Vec<Funnel>,
+    /// The release window of the period blocks and its comparison, when
+    /// the board was asked for it (D-055); none: the fixed windows.
+    pub window: Option<BoardWindow>,
 }
 
 fn int(row: &Map<String, Value>, k: &str) -> i64 {

@@ -31,11 +31,11 @@ pub(crate) struct SessionRows<'a> {
 }
 
 impl SessionRows<'_> {
-    /// A table of per-session-day rows for the filters `f` over the last
-    /// `days` days: `session_id`, `distinct_id`, `release`, `first_ts`,
+    /// A table of per-session-day rows for the filters `f` over the span
+    /// `span`: `session_id`, `distinct_id`, `release`, `first_ts`,
     /// `last_ts`, `n` (interactions), `errors` and `tasks`.
-    fn rows(&self, f: &Filters, days: i64) -> Result<String> {
-        let (skip, rolled) = board_people::split(&self.rolled, self.now, days, f, &self.role);
+    fn rows(&self, f: &Filters, span: Span) -> Result<String> {
+        let (skip, rolled) = board_people::split_span(&self.rolled, self.now, span, f, &self.role);
         let events = format!(
             "SELECT session_id, distinct_id, release, min(timestamp) AS first_ts, \
              max(timestamp) AS last_ts, sum(CASE WHEN {INTERACTION} THEN 1 ELSE 0 END) AS n, \
@@ -45,7 +45,7 @@ impl SessionRows<'_> {
              GROUP BY session_id, distinct_id, release, date",
             task = self.task,
             src = self.src,
-            w = f.clause_at(days, self.now)?,
+            w = f.clause_span(span, self.now)?,
         );
         let Some(w) = rolled else {
             return Ok(format!("({events}) AS d"));
@@ -56,10 +56,11 @@ impl SessionRows<'_> {
         ))
     }
 
-    /// The sessions block over 7 days: per session (by `session_id`
-    /// alone), its first person, its day in the project's zone, its
-    /// interactions, length, errors and tasks.
-    pub(crate) fn sessions_sql(&self, f: &Filters) -> Result<String> {
+    /// The sessions block over `span` (7 days, or the release window and
+    /// its comparison, D-055): per session (by `session_id` alone), its
+    /// first person, its day in the project's zone, its interactions,
+    /// length, errors and tasks.
+    pub(crate) fn sessions_sql(&self, f: &Filters, span: Span) -> Result<String> {
         // The day of the session's first event, in the project's zone:
         // exact from `first_ts` in any zone (D-041).
         let day = format!(
@@ -76,7 +77,7 @@ impl SessionRows<'_> {
                    date_part('epoch', max(last_ts)) - date_part('epoch', min(first_ts)) AS secs, \
                    sum(errors) AS errors, sum(tasks) AS tasks \
                    FROM {rows} GROUP BY session_id) s",
-            rows = self.rows(f, 7)?
+            rows = self.rows(f, span)?
         ))
     }
 
@@ -99,7 +100,7 @@ impl SessionRows<'_> {
                    sum(errors) AS errors, sum(tasks) AS tasks \
                    FROM {rows} WHERE release IS NOT NULL GROUP BY release, session_id) s \
              GROUP BY release ORDER BY min(first) DESC LIMIT 5",
-            rows = self.rows(&any_release, 90)?
+            rows = self.rows(&any_release, Span::days(90))?
         ))
     }
 }
