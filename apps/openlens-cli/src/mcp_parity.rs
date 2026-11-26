@@ -54,6 +54,12 @@ const TOOL_OF: &[(&str, &str)] = &[
     // Uptime history (#559).
     ("uptime.days", "uptime_days"),
     ("uptime.incidents", "incidents"),
+    // Planned maintenance (#563).
+    ("maintenance.list", "maintenance"),
+    ("maintenance.schedule", "maintenance_set"),
+    ("maintenance.extend", "maintenance_set"),
+    ("maintenance.end_now", "maintenance_set"),
+    ("maintenance.cancel", "maintenance_set"),
 ];
 
 /// Commands deliberately without an MCP tool, each with its reason.

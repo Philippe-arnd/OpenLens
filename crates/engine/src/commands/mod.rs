@@ -25,6 +25,7 @@ pub mod deploys;
 pub mod explore;
 pub mod flags;
 pub mod goals;
+pub mod maintenance;
 pub mod releases;
 pub mod tickets;
 pub mod uptime;
@@ -131,6 +132,12 @@ pub const REGISTRY: &[Spec] = &[
     // Uptime history (#559).
     spec::<uptime::GetDays>(),
     spec::<uptime::GetIncidents>(),
+    // Planned maintenance windows (#563).
+    spec::<maintenance::List>(),
+    spec::<maintenance::Schedule>(),
+    spec::<maintenance::Extend>(),
+    spec::<maintenance::EndNow>(),
+    spec::<maintenance::Cancel>(),
 ];
 
 /// A 12-character id from `s` (the first bytes of its SHA-256, in hex).

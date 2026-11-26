@@ -282,6 +282,9 @@ pub struct PagedIncident {
     pub minutes: i64,
     /// What happened.
     pub cause: String,
+    /// It started during planned maintenance of its component (#563): it
+    /// was not announced while the window ran.
+    pub planned: bool,
 }
 
 /// One page of incidents.
@@ -323,11 +326,23 @@ pub fn incidents(
         .map_err(storage)?;
     let full = rows.len() == usize::try_from(limit).unwrap_or(usize::MAX);
     let next = rows.last().map(|r| r.id).filter(|_| full);
+    // The windows that may cover these incidents' starts (#563).
+    let windows = rows
+        .iter()
+        .map(|r| r.started_at)
+        .min()
+        .map_or_else(Vec::new, |first| {
+            meta.maintenance_windows(project, first, now.max(first + 1))
+                .unwrap_or_default()
+        });
     Ok(IncidentPage {
         incidents: rows
             .into_iter()
             .map(|r| PagedIncident {
                 minutes: (r.ended_at.unwrap_or(now) - r.started_at).max(0) / 60,
+                planned: crate::maintenance::held_component(&r.rule).is_some_and(|c| {
+                    crate::maintenance::running_at(&windows, c, r.started_at).is_some()
+                }),
                 id: r.id,
                 rule: r.rule,
                 start: r.started_at,

@@ -70,6 +70,8 @@ pub use identity::{Identified, IdentityTables, PersonIdentity};
 pub use projects::Seen;
 /// Deploys reported by the deploy hook, and its secret (#504).
 pub mod deploys;
+/// Planned maintenance windows (#563, D-075).
+pub mod maintenance;
 /// Read-only connections next to the writer (#344).
 mod projects;
 /// The feature map version each release shipped with (#483).
@@ -616,6 +618,7 @@ impl Meta {
         conn.set_transaction_behavior(TransactionBehavior::Immediate);
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
         conn.execute_batch(SCHEMA)?;
+        conn.execute_batch(maintenance::SCHEMA)?;
         migrate(&conn)?;
         let readers = (0..READERS)
             .map(|_| {
@@ -652,6 +655,7 @@ impl Meta {
         let mut conn = Connection::open_in_memory()?;
         conn.set_transaction_behavior(TransactionBehavior::Immediate);
         conn.execute_batch(SCHEMA)?;
+        conn.execute_batch(maintenance::SCHEMA)?;
         migrate(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),

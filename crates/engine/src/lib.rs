@@ -36,6 +36,8 @@ pub mod forms;
 pub mod goals;
 pub mod inforce;
 mod insights;
+/// Planned maintenance windows (#563, D-075).
+pub mod maintenance;
 mod mapdays;
 pub mod maphealth;
 pub mod mapsessions;
