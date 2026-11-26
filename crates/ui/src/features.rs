@@ -147,6 +147,33 @@ pub(crate) fn map_health(pid: &str, h: &openlens_engine::MapHealth) -> Markup {
                 p.muted.small { "From the map's " code { "requires" } ": of the users of a feature, the share who went on to the one that requires it. Where most skip it, the requirement is probably wrong." }
             }
         }
+        @if !h.relations.is_empty() { (relations(pid, &h.relations)) }
+    }
+}
+
+/// The relations inferred between features (#283, #483): a wide card.
+pub(crate) fn relations(pid: &str, rels: &[openlens_engine::Relation]) -> Markup {
+    html! {
+        section.card.wide {
+            h2.violet { (icon("route")) "Used with" }
+            div.table-scroll { table.plain {
+                thead { tr { th { "Before" } th { "After" } (th_num("Sessions together")) (th_num("Lift")) (th_num("Comes first")) th { "Leads to value" } } }
+                tbody { @for r in rels {
+                    tr {
+                        td { a href={ "/p/" (pid) "/features/" (r.first) } { code { (r.first) } } }
+                        td { a href={ "/p/" (pid) "/features/" (r.then) } { code { (r.then) } } }
+                        td.num { (compact(r.together)) }
+                        td.num { (format!("×{:.1}", r.lift)) }
+                        td.num { (pct(r.first_share)) }
+                        td.small { @match (r.success_after, r.success_without) {
+                            (Some(a), Some(w)) => { @if r.leads_to_value { span.status.good { "yes" } " " } (pct(a)) " after vs " (pct(w)) " without" },
+                            _ => span.muted { "—" },
+                        } }
+                    }
+                } }
+            } }
+            p.muted.small { "From every session of the last 30 days (with the filters above). Lift: how many times more often the two are used in the same session than chance. Leads to value: the second one succeeds more often after the first, and the difference is significant." }
+        }
     }
 }
 

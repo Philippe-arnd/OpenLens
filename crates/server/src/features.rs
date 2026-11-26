@@ -132,7 +132,9 @@ pub(crate) async fn page(
                 tz: p.timezone.clone(),
                 ..openlens_engine::Filters::default()
             };
-            openlens_engine::map_health(&state.query, &p.id, m, &f)
+            // The version shown: its rolled-up days come from the rollups.
+            let version = shown.as_ref().map(|(n, _)| *n);
+            openlens_engine::map_health_in(&state.query, &p.id, m, version, &f)
                 .await
                 .ok()
         }
@@ -487,7 +489,7 @@ async fn api_guard(
     state: &AppState,
     headers: &HeaderMap,
     id: &str,
-) -> Result<(openlens_meta::Project, openlens_featuremap::FeatureMap), Box<Response>> {
+) -> Result<(openlens_meta::Project, openlens_featuremap::FeatureMap, i64), Box<Response>> {
     let bad = |s: StatusCode, m: &str| Box::new(crate::apierr::json(s, m));
     if !auth::has_bearer(state, headers) {
         return Err(bad(StatusCode::UNAUTHORIZED, "admin bearer token required"));
@@ -496,7 +498,7 @@ async fn api_guard(
         return Err(bad(StatusCode::NOT_FOUND, "unknown project"));
     };
     match crate::load_map(state, &p.id).await {
-        Some((m, _)) => Ok((p, m)),
+        Some((m, version)) => Ok((p, m, version)),
         None => Err(bad(
             StatusCode::NOT_FOUND,
             "no feature map yet: push one (openlens-cli features push)",
@@ -512,12 +514,32 @@ pub(crate) async fn api_health(
     Path(id): Path<String>,
     Query(q): Query<crate::api::FilterQuery>,
 ) -> Response {
-    let (p, m) = match api_guard(&state, &headers, &id).await {
+    let (p, m, version) = match api_guard(&state, &headers, &id).await {
         Ok(x) => x,
         Err(r) => return *r,
     };
-    match openlens_engine::map_health(&state.query, &p.id, &m, &q.filters(&p.timezone)).await {
+    let f = q.filters(&p.timezone);
+    match openlens_engine::map_health_in(&state.query, &p.id, &m, Some(version), &f).await {
         Ok(h) => axum::Json(h).into_response(),
+        Err(e) => crate::apierr::json(StatusCode::BAD_REQUEST, e.to_string()),
+    }
+}
+
+/// `GET /api/projects/{id}/feature-map/relations`: the relations inferred
+/// between features from 30 days of sessions (#483), on their own.
+pub(crate) async fn api_relations(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(q): Query<crate::api::FilterQuery>,
+) -> Response {
+    let (p, m, version) = match api_guard(&state, &headers, &id).await {
+        Ok(x) => x,
+        Err(r) => return *r,
+    };
+    let f = q.filters(&p.timezone);
+    match openlens_engine::feature_relations(&state.query, &p.id, &m, Some(version), &f).await {
+        Ok(r) => axum::Json(serde_json::json!({ "relations": r })).into_response(),
         Err(e) => crate::apierr::json(StatusCode::BAD_REQUEST, e.to_string()),
     }
 }
@@ -530,7 +552,7 @@ pub(crate) async fn api_feature(
     Path((id, key)): Path<(String, String)>,
     Query(q): Query<crate::api::FilterQuery>,
 ) -> Response {
-    let (p, m) = match api_guard(&state, &headers, &id).await {
+    let (p, m, _) = match api_guard(&state, &headers, &id).await {
         Ok(x) => x,
         Err(r) => return *r,
     };

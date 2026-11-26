@@ -114,6 +114,12 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
     ),
     (
         "GET",
+        "/api/projects/{project}/feature-map/relations",
+        "read",
+        "Relations inferred between features from 30 days of sessions: lift, which comes first, leads to value.",
+    ),
+    (
+        "GET",
         "/api/projects/{project}/feature-map/versions",
         "read",
         "Saved versions of the map.",
