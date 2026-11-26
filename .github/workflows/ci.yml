@@ -67,8 +67,9 @@ jobs:
         with:
           tool: cargo-deny
       # Pull requests: the fast gate (5 minutes at most). Nightly, release
-      # tags and on demand: also the heavy tests (`--heavy`).
-      - run: cargo xtask ci ${{ github.event_name == 'pull_request' && '' || '--heavy' }}
+      # tags and on demand: also the heavy tests (`--heavy`). An empty string
+      # is falsy in `a && '' || b`, so the condition names the non-empty case.
+      - run: cargo xtask ci ${{ github.event_name != 'pull_request' && '--heavy' || '' }}
 
   advisories:
     # Known vulnerabilities in dependencies (RustSec). Separate from the
