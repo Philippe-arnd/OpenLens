@@ -50,8 +50,6 @@ fn rows(
     Ok(r?.rows)
 }
 
-/// Compute all insights. `src` is the event source (raw or map-resolved),
-/// `w90` the filter clause over the analysis window, `churn` the window in days.
 /// Events of the last 90 days and the cohort judged for retention:
 /// identified users first seen inside the window but before the churn
 /// window, `retained` = seen within it. "First seen" is the first
@@ -70,78 +68,96 @@ pub(crate) fn cohort_base(src: &str, w: &str, ident: &str, churn: i64) -> String
     )
 }
 
+/// The tables the board's insight cards read (#452, D-059): the board's
+/// people rows (`person_day` for the closed days, the events for the rest,
+/// D-040) and its per-session-day rows (`session_day`, D-047), so no card
+/// scans 90 days of events.
+pub(crate) struct CardRows {
+    /// People rows of the last 90 days.
+    pub people90: String,
+    /// People rows of the last 30 days.
+    pub people30: String,
+    /// People rows of the last 30 days, whatever the role filter.
+    pub roles30: String,
+    /// Per-session-day rows of the last 90 days, whatever the release filter.
+    pub sessions90: String,
+}
+
+/// [`cohort_base`] on the board's people rows (#452, D-059): `ev` has one
+/// row per person, feature and UTC day (with `events`, `first_ts` and
+/// `last_ts`), and a person's first and last seen are those of its rows.
+fn rolled_cohort_base(people: &str, ident: &str, churn: i64) -> String {
+    format!(
+        "WITH ev AS (SELECT distinct_id, feature, events, first_ts, last_ts FROM {people} WHERE {ident}), \
+         users AS (SELECT ev.distinct_id, least(min(ev.first_ts), min(p.first_seen)) AS first_seen, max(ev.last_ts) AS last_seen \
+                   FROM ev LEFT JOIN persons p ON ev.distinct_id = p.person GROUP BY ev.distinct_id), \
+         cohort AS (SELECT distinct_id, first_seen, last_seen, \
+                    CASE WHEN last_seen >= now() - INTERVAL '{churn} days' THEN 1 ELSE 0 END AS retained \
+                    FROM users WHERE first_seen <= now() - INTERVAL '{churn} days' \
+                    AND first_seen > now() - INTERVAL '89 days')"
+    )
+}
+
+/// Compute the board's insight cards from its rollup-backed rows (#452,
+/// D-059). Places are features: a person's first week counts the uses of
+/// the days whose first use of the feature falls within 7 days of their
+/// first visit, and a churned user's last place is the feature of their
+/// last event.
 pub(crate) async fn compute(
     q: &QueryEngine,
     project: &str,
-    src: &str,
+    tables: &CardRows,
     f: &Filters,
     ident: &str,
     churn: i64,
     successes: &[(String, String)],
 ) -> Result<(Vec<Insight>, Readiness)> {
     let q = &q.with_params(&f.params()?);
-    let w = f.clause(90)?;
-    let base = cohort_base(src, &w, ident, churn);
+    let base = rolled_cohort_base(&tables.people90, ident, churn);
     let totals_sql = format!("{base} SELECT count(*) AS n, sum(retained) AS kept FROM cohort");
     let early_sql = format!(
-        "{base}, early AS (SELECT e.distinct_id, e.feature, count(*) AS uses FROM ev e JOIN cohort c ON e.distinct_id = c.distinct_id \
-           WHERE e.feature IS NOT NULL AND e.timestamp <= c.first_seen + INTERVAL '7 days' GROUP BY e.distinct_id, e.feature) \
+        "{base}, early AS (SELECT e.distinct_id, e.feature, sum(e.events) AS uses FROM ev e JOIN cohort c ON e.distinct_id = c.distinct_id \
+           WHERE e.feature IS NOT NULL AND e.first_ts <= c.first_seen + INTERVAL '7 days' GROUP BY e.distinct_id, e.feature) \
          SELECT early.feature AS feature, least(early.uses, 10) AS bucket, count(*) AS users, sum(c.retained) AS kept \
          FROM early JOIN cohort c ON early.distinct_id = c.distinct_id GROUP BY early.feature, least(early.uses, 10)"
     );
     let churn_sql = format!(
         "{base}, churned AS (SELECT distinct_id, last_seen FROM cohort WHERE retained = 0) \
-         SELECT coalesce(e.feature, e.path) AS place, count(DISTINCT e.distinct_id) AS users \
-         FROM ev e JOIN churned ch ON e.distinct_id = ch.distinct_id AND e.timestamp = ch.last_seen \
-         GROUP BY coalesce(e.feature, e.path) ORDER BY users DESC LIMIT 5"
+         SELECT e.feature AS place, count(DISTINCT e.distinct_id) AS users \
+         FROM ev e JOIN churned ch ON e.distinct_id = ch.distinct_id AND e.last_ts = ch.last_seen \
+         WHERE e.feature IS NOT NULL GROUP BY e.feature ORDER BY users DESC LIMIT 5"
     );
     let reach_sql = format!(
-        "{base} SELECT coalesce(feature, path) AS place, count(DISTINCT distinct_id) AS users FROM ev GROUP BY coalesce(feature, path)"
+        "{base} SELECT r.place, r.users, t.everyone FROM \
+         (SELECT feature AS place, count(DISTINCT distinct_id) AS users FROM ev WHERE feature IS NOT NULL GROUP BY feature) r \
+         CROSS JOIN (SELECT count(DISTINCT distinct_id) AS everyone FROM ev) t"
     );
-    let w_roles = Filters {
-        role: None,
-        ..f.clone()
-    }
-    .clause(30)?;
     let roles_sql = format!(
-        "SELECT role, feature, count(DISTINCT distinct_id) AS users FROM {src} WHERE {w_roles} \
-         AND role IS NOT NULL AND feature IS NOT NULL GROUP BY role, feature"
+        "SELECT role, feature, count(DISTINCT distinct_id) AS users FROM {} \
+         WHERE role IS NOT NULL AND feature IS NOT NULL GROUP BY role, feature",
+        tables.roles30
     );
     let role_totals_sql = format!(
-        "SELECT role, count(DISTINCT distinct_id) AS users FROM {src} WHERE {w_roles} \
-         AND role IS NOT NULL GROUP BY role"
+        "SELECT role, count(DISTINCT distinct_id) AS users FROM {} \
+         WHERE role IS NOT NULL GROUP BY role",
+        tables.roles30
     );
     let release_sql = format!(
         "SELECT release, count(DISTINCT session_id) AS sessions, \
-         count(DISTINCT CASE WHEN event = '$error' THEN session_id END) AS bad, min(timestamp) AS first \
-         FROM {src} WHERE {} AND release IS NOT NULL GROUP BY release ORDER BY first DESC LIMIT 2",
-        Filters {
-            release: None,
-            ..f.clone()
-        }
-        .clause(90)?
+         count(DISTINCT CASE WHEN errors > 0 THEN session_id END) AS bad, min(first_ts) AS first \
+         FROM {} WHERE release IS NOT NULL GROUP BY release ORDER BY first DESC LIMIT 2",
+        tables.sessions90
     );
-    let friction_sql = if successes.is_empty() {
-        None
-    } else {
-        let cond = successes
-            .iter()
-            .map(|(k, e)| {
-                format!(
-                    "(feature = {} AND event = {})",
-                    openlens_sqlgen::quote(k),
-                    openlens_sqlgen::quote(e)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(" OR ");
-        Some(format!(
+    // A feature's success: one of the map's success events resolving to it,
+    // as the board counts tasks (D-038, D-054).
+    let friction_sql = (!successes.is_empty()).then(|| {
+        format!(
             "SELECT feature, count(DISTINCT distinct_id) AS started, \
-             count(DISTINCT CASE WHEN {cond} THEN distinct_id END) AS succeeded \
-             FROM {src} WHERE {} AND feature IS NOT NULL GROUP BY feature",
-            f.clause(30)?
-        ))
-    };
+             count(DISTINCT CASE WHEN successes > 0 THEN distinct_id END) AS succeeded \
+             FROM {} WHERE feature IS NOT NULL GROUP BY feature",
+            tables.people30
+        )
+    });
 
     let friction_fut = async {
         match &friction_sql {
@@ -255,12 +271,7 @@ pub(crate) async fn compute(
     let churned = rows(churned)?;
     let reach = rows(reach)?;
     let n_churned = n_all - kept_all;
-    let n_users: i64 = reach
-        .iter()
-        .map(|r| int(r, "users"))
-        .max()
-        .unwrap_or(0)
-        .max(1);
+    let n_users: i64 = reach.first().map_or(0, |r| int(r, "everyone")).max(1);
     if n_churned >= MIN_GROUP
         && let Some(top) = churned.first()
     {
@@ -442,7 +453,7 @@ pub struct Journey {
     pub success: String,
     /// The feature this success belongs to.
     pub feature: String,
-    /// Up to 3 places (feature, else page path) before the first success, oldest first.
+    /// Up to 3 features used before the first success, oldest first (D-059).
     pub path: Vec<String>,
     /// Users who took this path.
     pub users: i64,
@@ -451,12 +462,17 @@ pub struct Journey {
 }
 
 /// Top 3 paths into the first success of each feature (at most 4 features):
-/// the last three distinct places a user visited in the day before reaching
-/// it for the first time.
+/// the last three distinct features a user started in the day before
+/// reaching it for the first time. `sf` is the first use of each feature in
+/// each session over the last 30 days ([`crate::board_sessions::feature_rows`]):
+/// `session_feature_day` for the closed days, the events for the rest
+/// (#452, D-059). The first success is read from the events, filtered on
+/// the success event alone.
 pub(crate) async fn journeys(
     q: &QueryEngine,
     project: &str,
     src: &str,
+    sf: &str,
     f: &Filters,
     successes: &[(String, String)],
 ) -> Result<Vec<Journey>> {
@@ -466,22 +482,22 @@ pub(crate) async fn journeys(
     let runs = successes.iter().take(4).map(|(feature, ev)| {
         let ev_lit = openlens_sqlgen::quote(ev);
         let sql = format!(
-            "WITH ev AS (SELECT distinct_id, timestamp, event, coalesce(feature, path) AS place FROM {src} WHERE {w}), \
-             firsts AS (SELECT distinct_id, min(timestamp) AS t FROM ev WHERE event = {ev_lit} GROUP BY distinct_id), \
-             before AS (SELECT e.distinct_id, e.timestamp, e.place FROM ev e JOIN firsts f ON e.distinct_id = f.distinct_id \
-                        WHERE e.timestamp < f.t AND e.timestamp >= f.t - INTERVAL '1 day' AND e.place IS NOT NULL \
-                        AND e.event <> {ev_lit}), \
+            "WITH firsts AS (SELECT distinct_id, min(timestamp) AS t FROM {src} WHERE {w} AND event = {ev_lit} \
+                             GROUP BY distinct_id), \
+             before AS (SELECT sf.distinct_id, sf.first_ts AS timestamp, sf.feature AS place FROM {sf} \
+                        JOIN firsts f ON sf.distinct_id = f.distinct_id \
+                        WHERE sf.first_ts < f.t AND sf.first_ts >= f.t - INTERVAL '1 day'), \
              dedup AS (SELECT distinct_id, timestamp, place, \
-                       lag(place) OVER (PARTITION BY distinct_id ORDER BY timestamp) AS prev FROM before), \
+                       lag(place) OVER (PARTITION BY distinct_id ORDER BY timestamp, place) AS prev FROM before), \
              ranked AS (SELECT distinct_id, place, \
-                        row_number() OVER (PARTITION BY distinct_id ORDER BY timestamp DESC) AS rn \
+                        row_number() OVER (PARTITION BY distinct_id ORDER BY timestamp DESC, place DESC) AS rn \
                         FROM dedup WHERE prev IS NULL OR prev <> place) \
              SELECT p3.place AS a, p2.place AS b, p1.place AS c, count(*) AS users, \
                     (SELECT count(*) FROM firsts) AS reached \
              FROM ranked p1 \
              LEFT JOIN ranked p2 ON p1.distinct_id = p2.distinct_id AND p2.rn = 2 \
              LEFT JOIN ranked p3 ON p1.distinct_id = p3.distinct_id AND p3.rn = 3 \
-             WHERE p1.rn = 1 GROUP BY p3.place, p2.place, p1.place ORDER BY users DESC LIMIT 3"
+             WHERE p1.rn = 1 GROUP BY p3.place, p2.place, p1.place ORDER BY users DESC, c, b, a LIMIT 3"
         );
         async move { (feature.clone(), ev.clone(), q.sql(project, &sql).await) }
     });
