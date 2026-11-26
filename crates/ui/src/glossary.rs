@@ -437,6 +437,15 @@ mod tests {
                     "tile {label:?} has no glossary entry"
                 );
             }
+            // detail::kpi("Label", value, foot): the detail pages (#545)
+            for call in src.split("detail::kpi(").skip(1) {
+                let label = call.split('"').nth(1).unwrap();
+                seen += 1;
+                assert!(
+                    super::definition(label).is_some(),
+                    "tile {label:?} has no glossary entry"
+                );
+            }
             for call in src.split("tile(").skip(1) {
                 // tile("accent", "glyph", "Label" | &format!("Label (…)", …)
                 let args: Vec<&str> = call.splitn(4, ',').collect();

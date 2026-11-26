@@ -32,6 +32,9 @@ async fn project(state: &AppState, id: &str) -> Option<openlens_meta::Project> {
 pub(crate) struct KeyQuery {
     #[serde(default)]
     key: Option<String>,
+    /// `?confirm=delete` opens the deletion's dialog (#545).
+    #[serde(default)]
+    confirm: Option<String>,
 }
 
 fn not_found() -> Response {
@@ -82,7 +85,13 @@ pub(crate) async fn flag_page(
     };
     html_page(
         StatusCode::OK,
-        openlens_ui::flag_edit(&info, current, None, &readout),
+        openlens_ui::flag_edit(
+            &info,
+            current,
+            None,
+            &readout,
+            openlens_ui::Confirm::parse(q.confirm.as_deref()),
+        ),
     )
 }
 
@@ -197,13 +206,13 @@ pub(crate) async fn flag_save(
     if let Some(e) = err {
         return html_page(
             StatusCode::BAD_REQUEST,
-            openlens_ui::flag_edit(&info, Some(&flag), Some(&e), &[]),
+            openlens_ui::flag_edit(&info, Some(&flag), Some(&e), &[], None),
         );
     }
     if let Err(e) = crate::flags::save(&state, &p.id, &flag).await {
         return html_page(
             StatusCode::BAD_REQUEST,
-            openlens_ui::flag_edit(&info, Some(&flag), Some(&e), &[]),
+            openlens_ui::flag_edit(&info, Some(&flag), Some(&e), &[], None),
         );
     }
     if renamed {
