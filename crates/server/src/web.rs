@@ -358,7 +358,7 @@ async fn board(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
-    Query(q): Query<crate::api::BoardQuery>,
+    Query(q): Query<crate::board_query::BoardQuery>,
 ) -> Response {
     let Some(p) = project(&state, id).await else {
         return html(
@@ -379,6 +379,26 @@ async fn board(
         }
     };
     let map = crate::load_map(&state, &p.id).await;
+    // A long date range or past release shows its cost first (D-061).
+    let m = map.as_ref().map(|(m, v)| (m, *v));
+    match crate::board_query::unconfirmed(&state, &p.id, &q, &f, m).await {
+        Ok(None) => {}
+        Ok(Some(e)) => {
+            let info = openlens_ui::ProjectInfo {
+                id: &p.id,
+                name: &p.name,
+                key: &p.api_key,
+            };
+            let run = q.confirmed_url(&p.id);
+            return html(StatusCode::OK, openlens_ui::board_confirm(&info, &e, &run));
+        }
+        Err(e) => {
+            return html(
+                StatusCode::BAD_REQUEST,
+                openlens_ui::message("Can't show that", &e),
+            );
+        }
+    }
     let host = crate::public_url(&headers);
     let admin = auth::viewer(&state, &headers).is_some_and(|v| v.admin);
     if crate::boards::warm(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))) {

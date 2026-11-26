@@ -118,6 +118,20 @@ pub async fn board(
         board_people::rolled_days_back(q, project, "session_day", version, now, back),
         board_people::rolled_days(q, project, "session_feature_day", version, now),
     )?;
+    // A date range or a past release says what it read (D-061).
+    let costed = match &win {
+        Some(w) if matches!(f.window, Window::Range { .. } | Window::Since { .. }) => {
+            let sessions: std::collections::BTreeSet<_> = rolled_sessions.iter().collect();
+            let rolled: std::collections::BTreeSet<chrono::NaiveDate> = rolled_people
+                .iter()
+                .filter(|d| sessions.contains(d))
+                .copied()
+                .collect();
+            let first = (now - Duration::seconds(w.previous.start)).date_naive();
+            Some((rolled, first))
+        }
+        _ => None,
+    };
     // A period block's span: its fixed days, or the release window.
     let span = |days: i64| win.as_ref().map_or(Span::days(days), |w| w.current);
     let clause = |days: i64| match &win {
@@ -338,7 +352,18 @@ pub async fn board(
         b.sessions = sessions_of(r);
     }
     if let Some(w) = win {
+        let estimate = match &costed {
+            Some((rolled, first)) => {
+                let sizes = q.day_sizes(project, *first, now.date_naive()).await?;
+                let mut e = crate::board_cost::cost(&w, f, rolled, &sizes, now);
+                // It ran: confirmed, or under the threshold.
+                e.confirm = false;
+                Some(e)
+            }
+            None => None,
+        };
         let mut window = w.window;
+        window.estimate = estimate;
         if let Some((now_users, before_users, before_sessions)) = compared? {
             let n = |r: Option<&Map<String, Value>>| r.map_or(0, |r| int(r, "n"));
             window.current = Period {

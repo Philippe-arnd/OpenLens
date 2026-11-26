@@ -825,3 +825,94 @@ async fn api_errors_carry_a_stable_code() {
     assert_eq!(v["message"], v["error"]);
     assert!(v["message"].as_str().is_some_and(|m| !m.is_empty()));
 }
+
+/// A date range that reads more than 30 days of events shows its cost
+/// before it runs (#514, D-061): the page shows the estimate and a "Run
+/// it" link, the API answers 409 with it, and both run with `confirm=1`;
+/// a short range runs at once.
+#[tokio::test]
+async fn a_long_range_shows_its_cost_and_runs_once_confirmed() {
+    let h = harness();
+    let now = chrono::Utc::now();
+    // One event a day for the last 40 days, none rolled up.
+    {
+        let evs: Vec<_> = (1..=40)
+            .map(|d| openlens_event::Event {
+                uuid: format!("cost-{d}"),
+                project: "default".into(),
+                event: "$pageview".into(),
+                distinct_id: "u1".into(),
+                session_id: Some(format!("s{d}")),
+                timestamp: now - chrono::Duration::days(d),
+                received_at: now,
+                url: None,
+                path: Some("/".into()),
+                feature: None,
+                role: None,
+                account: None,
+                plan: None,
+                environment: "production".into(),
+                release: None,
+                flags: None,
+                properties: "{}".into(),
+            })
+            .collect();
+        let mut w = h.state.writer.lock().unwrap();
+        w.append(&evs).unwrap();
+        w.flush().unwrap();
+    }
+    let from = |days: i64| (now - chrono::Duration::days(days)).format("%Y-%m-%d");
+    // 21 days against the 21 before: 40 stored days, none rolled up.
+    let long = format!("from={}", from(20));
+    let api = format!("/api/projects/default/board?{long}");
+    let r = get(&h, &api, None, true).await;
+    assert_eq!(r.status(), StatusCode::CONFLICT);
+    let v: serde_json::Value = serde_json::from_str(&body_text(r).await).unwrap();
+    assert_eq!(v["code"], "conflict");
+    assert!(v["estimate"]["raw_days"].as_u64().unwrap() > 30, "{v}");
+    assert_eq!(v["estimate"]["confirm"], true);
+    // The page asks too, with a link that runs it.
+    let cookie = login_cookie(&h).await;
+    let page = get(&h, &format!("/p/default?{long}"), Some(&cookie), false).await;
+    assert_eq!(page.status(), StatusCode::OK);
+    let html = body_text(page).await;
+    assert!(html.contains("Run it"), "{html}");
+    assert!(html.contains("confirm=1"), "{html}");
+    assert!(
+        !html.contains("Daily active users"),
+        "the board did not run"
+    );
+    // Confirmed, it runs, and says what it read.
+    let r = get(&h, &format!("{api}&confirm=1"), None, true).await;
+    assert_eq!(r.status(), StatusCode::OK);
+    let b: serde_json::Value = serde_json::from_str(&body_text(r).await).unwrap();
+    assert!(b["window"]["estimate"]["raw_days"].as_u64().unwrap() > 30);
+    let page = get(
+        &h,
+        &format!("/p/default?{long}&confirm=1"),
+        Some(&cookie),
+        false,
+    )
+    .await;
+    assert!(body_text(page).await.contains("Daily active users"));
+    // A short range runs at once, and its estimate says it needs nothing.
+    let short = format!("from={}", from(5));
+    let r = get(
+        &h,
+        &format!("/api/projects/default/board/estimate?{short}"),
+        None,
+        true,
+    )
+    .await;
+    assert_eq!(r.status(), StatusCode::OK);
+    let e: serde_json::Value = serde_json::from_str(&body_text(r).await).unwrap();
+    assert_eq!(e["confirm"], false, "{e}");
+    let r = get(
+        &h,
+        &format!("/api/projects/default/board?{short}"),
+        None,
+        true,
+    )
+    .await;
+    assert_eq!(r.status(), StatusCode::OK);
+}
