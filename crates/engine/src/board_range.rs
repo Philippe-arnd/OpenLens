@@ -77,6 +77,33 @@ impl Window {
     }
 }
 
+impl Window {
+    /// The UTC days, first and last, that a date range and its comparison
+    /// read, when the range ends before today in the zone `tz` at `now`:
+    /// every day it covers is over, so its period blocks change only when
+    /// something is written to one of those days (#516, D-064). None for
+    /// any other window, a range that reaches today, or one the board
+    /// would refuse to start with.
+    #[must_use]
+    pub fn closed_utc_days(&self, tz: &str, now: DateTime<Utc>) -> Option<(NaiveDate, NaiveDate)> {
+        let Self::Range { from, to } = self else {
+            return None;
+        };
+        let zone = zone(tz).ok()?;
+        if from > to || *to >= now.with_timezone(&zone).date_naive() {
+            return None;
+        }
+        let start = start_of(zone, *from);
+        let end = start_of(zone, to.succ_opt()?);
+        // The comparison is the same length just before (`spans`).
+        let len = end - start;
+        Some((
+            (start - len).date_naive(),
+            (end - Duration::microseconds(1)).date_naive(),
+        ))
+    }
+}
+
 fn zone(tz: &str) -> Result<chrono_tz::Tz> {
     tz.parse::<chrono_tz::Tz>()
         .map_err(|_| EngineError::InvalidFilter("timezone"))
@@ -306,6 +333,33 @@ mod tests {
         // The same two days in UTC are 48 hours.
         let u = range("UTC", day("2026-10-24"), day("2026-10-25"), now);
         assert!(u.is_ok_and(|u| u.current.start - u.current.end == 48 * 3600));
+    }
+
+    #[test]
+    fn only_a_range_before_today_has_closed_days() {
+        let now = at("2026-11-26T12:00:00Z");
+        let range = |tz: &str, from: &str, to: &str| {
+            Window::Range {
+                from: day(from),
+                to: day(to),
+            }
+            .closed_utc_days(tz, now)
+        };
+        // Two UTC days, compared with the two before.
+        assert_eq!(
+            range("UTC", "2026-11-20", "2026-11-21"),
+            Some((day("2026-11-18"), day("2026-11-21")))
+        );
+        // Yesterday is closed; today is not, nor anything but a range.
+        assert!(range("UTC", "2026-11-25", "2026-11-25").is_some());
+        assert!(range("UTC", "2026-11-20", "2026-11-26").is_none());
+        assert!(Window::Release.closed_utc_days("UTC", now).is_none());
+        // It is already the 27th in Kiritimati (UTC+14): its 26th is over,
+        // at 10:00 UTC today, so it reaches today's UTC day.
+        assert!(
+            range("Pacific/Kiritimati", "2026-11-26", "2026-11-26")
+                .is_some_and(|(_, last)| last == day("2026-11-26"))
+        );
     }
 
     #[test]

@@ -150,3 +150,53 @@ pub fn day_sizes(
     out.sort_by_key(|s| s.day);
     Ok(out)
 }
+
+/// The `date=` day of a partition directory's name.
+fn day_of(dir: &Path) -> Option<chrono::NaiveDate> {
+    dir.file_name()
+        .and_then(|s| s.to_str())
+        .and_then(|n| n.strip_prefix("date="))
+        .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+}
+
+/// Whether `dir` holds a Parquet file.
+fn has_parquet(dir: &Path) -> bool {
+    fs::read_dir(dir).is_ok_and(|entries| {
+        entries
+            .filter_map(|e| e.ok())
+            .any(|e| e.path().extension().is_some_and(|x| x == "parquet"))
+    })
+}
+
+/// The UTC days of `project` from `from` to `to` (both included) that have
+/// a rollup but no events on disk, oldest first (#489): their events went
+/// to the cold tier (D-031) or past the retention (D-015), and rollups are
+/// written only from events, so a day without either never had any. Only
+/// directories are listed; no file is opened.
+pub fn days_without_events(
+    root: &Path,
+    project: &str,
+    from: chrono::NaiveDate,
+    to: chrono::NaiveDate,
+) -> Result<Vec<chrono::NaiveDate>> {
+    let rdir = crate::rollup::rollups_dir(root, project)?;
+    let pdir = project_dir(root, project)?;
+    if !rdir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for entry in fs::read_dir(&rdir)? {
+        let dir = entry?.path();
+        let Some(day) = day_of(&dir) else {
+            continue;
+        };
+        if day < from || day > to || !has_parquet(&dir) {
+            continue;
+        }
+        if !has_parquet(&pdir.join(format!("date={}", day.format("%Y-%m-%d")))) {
+            out.push(day);
+        }
+    }
+    out.sort_unstable();
+    Ok(out)
+}

@@ -15,6 +15,7 @@ use serde_json::{Map, Value};
 mod acquisition;
 mod board;
 pub mod board_cost;
+mod board_kept;
 mod board_people;
 mod board_range;
 mod board_sessions;
@@ -22,6 +23,7 @@ mod board_success;
 mod board_window;
 pub mod churn;
 pub mod commands;
+pub mod delivery;
 pub mod deploys;
 mod digest;
 mod drift;
@@ -48,20 +50,24 @@ mod revenue;
 pub mod rollups;
 pub mod stats;
 mod tasks;
+mod unavailable;
 mod variants;
+pub mod verdict;
+mod verdict_read;
 pub mod vital_parts;
 pub mod vitals;
 pub use acquisition::{AcquisitionRow, Touch, acquisition};
-pub use board::{board, filter_options};
+pub use board::{board, board_reusing, filter_options};
 pub use board_cost::{Estimate, estimate};
+pub use board_kept::PeriodBlocks;
 pub use board_window::{BoardWindow, Period};
 pub use churn::{AtRisk, ChurnReport, churn};
-pub use digest::{Delta, Digest, digest, digest_markdown};
+pub use digest::{Delta, Digest, digest, digest_markdown, release_lines};
 pub use errors::{ErrorGroup, error_groups};
 pub use events::*;
 pub use explore::*;
 pub use flows::{Flow, FlowLink, FlowQuery, flows};
-pub use inforce::MapAt;
+pub use inforce::{History, MapAt};
 pub use insights::{CohortStats, FlagCohort, Funnel, FunnelStep, Insight, Journey, Readiness};
 pub use mapdays::feature_relations;
 pub use maphealth::{FeatureContext, MapHealth, feature_context, map_health, map_health_in};
@@ -474,6 +480,10 @@ pub struct Board {
     /// The release window of the period blocks and its comparison, when
     /// the board was asked for it (D-055); none: the fixed windows.
     pub window: Option<BoardWindow>,
+    /// Closed UTC days the board reads that it cannot count (#489, D-070):
+    /// their events are gone (cold tier, retention) and their rollups were
+    /// not made with the map in force, so they count nobody. Oldest first.
+    pub unavailable_days: Vec<String>,
 }
 
 fn int(row: &Map<String, Value>, k: &str) -> i64 {

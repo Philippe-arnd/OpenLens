@@ -41,6 +41,43 @@ pub struct Digest {
     pub goals: Vec<(String, String)>,
     /// Objectives at risk or off track (#272).
     pub objectives_at_risk: Vec<String>,
+    /// The production releases first seen in the last 7 days, newest
+    /// first: (release, its verdict and first reason) (#522, D-067; set by
+    /// the server from `releases.list`).
+    pub releases: Vec<(String, String)>,
+}
+
+/// The digest's release lines from `releases.list` (#522): the
+/// production releases with traffic first seen in the 7 days before
+/// `now`, newest first, at most 5, each with its verdict (or *waiting*)
+/// and its first reason.
+#[must_use]
+pub fn release_lines(
+    r: &crate::releases::Releases,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Vec<(String, String)> {
+    let since = now - chrono::Duration::days(7);
+    let mut rows: Vec<(chrono::DateTime<chrono::Utc>, &crate::releases::Release)> = r
+        .releases
+        .iter()
+        .filter(|x| x.environment == crate::releases::PRODUCTION && x.users > 0)
+        .filter_map(|x| {
+            let at = crate::board_window::parse_local(&x.first_seen, &r.timezone)?;
+            (at >= since).then_some((at, x))
+        })
+        .collect();
+    rows.sort_by_key(|a| std::cmp::Reverse(a.0));
+    rows.into_iter()
+        .take(5)
+        .map(|(_, x)| {
+            let v = x.verdict.map_or("waiting", |v| v.label());
+            let line = match x.reasons.first() {
+                Some(why) => format!("{v}: {why}"),
+                None => v.to_owned(),
+            };
+            (x.release.clone(), line)
+        })
+        .collect()
 }
 
 /// Compute the digest (production environment, all roles).
@@ -167,6 +204,12 @@ pub fn digest_markdown(project_name: &str, board_url: &str, d: &Digest) -> Strin
                 "- **{}** ({}). Next step: {}\n",
                 i.title, i.evidence, i.next_step
             ));
+        }
+    }
+    if !d.releases.is_empty() {
+        s.push_str("\n## Releases\n\n");
+        for (name, line) in &d.releases {
+            s.push_str(&format!("- **{name}:** {line}\n"));
         }
     }
     if !d.goals.is_empty() {

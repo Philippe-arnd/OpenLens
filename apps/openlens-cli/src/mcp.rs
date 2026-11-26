@@ -126,7 +126,7 @@ impl Tools for OpenLensTools {
             }
             p
         };
-        vec![
+        let mut tools = vec![
             ToolSpec {
                 name: "guide",
                 description: "The wiring guide: how to connect an app to OpenLens so the PM's first login shows a populated board. Read this first.",
@@ -201,13 +201,28 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "releases",
-                description: "The app's releases per environment over 90 days: state (rolling out, live at 95 % or more of the latest day's users, superseded by a newer release, rolled back when an older release took the majority back), share of the latest day, first and last seen, users, events, and for production the time in staging (from the same name or build fingerprint first seen in staging). With the deploy hook: each release's deploy time and last deploy status, the deploys recorded, and releases with no traffic whose deploy failed ('failed'), was rolled back, or is under way ('deploying'). Optional env for one environment.",
+                description: "The app's releases per environment over 90 days: state (rolling out, live at 95 % or more of the latest day's users, superseded by a newer release, rolled back when an older release took the majority back), share of the latest day, first and last seen, users, events, and for production the time in staging (from the same name or build fingerprint first seen in staging). With the deploy hook: each release's deploy time and last deploy status, the deploys recorded, and releases with no traffic whose deploy failed ('failed'), was rolled back, or is under way ('deploying'). Each release of production (or of env when given) also has its verdict against the release before it: healthy, regressed or inconclusive (null until 30 sessions and 8 users or 24 h), with its reasons; `release_report` gives the whole comparison. Optional env for one environment.",
                 input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"}}))}),
+            },
+            ToolSpec {
+                name: "release_report",
+                description: "One release compared with the release before it in its environment (production unless env): the verdict (healthy, regressed or inconclusive; null until 30 sessions and 8 users or 24 h) and its reasons, both releases' numbers, and every check with its outcome (worse, better, same, too_few, info): sessions with errors, bounce rate, sessions with a completed task, sessions per user, error groups first seen in the release (2 users or more), LCP/INP/CLS p75 ratings, success rate of each feature with a success event, goal guardrails (breached by this release and not the one before) and goals (shown, not judged). Read it after each deploy and act on a regressed verdict.",
+                input_schema: json!({"type":"object","properties":with(json!({"release":{"type":"string"},"env":{"type":"string"}})),"required":["release"]}),
+            },
+            ToolSpec {
+                name: "delivery",
+                description: "The app's delivery metrics per environment over the last `days` (1 to 90, default 90): deploy frequency (succeeded deploys from the deploy hook, else releases reaching live), lead time from first commit to live (median; 'unknown' with why until a commit range is recorded), change failure rate (failed deploys, rollbacks seen by the hook or in traffic, regressed verdicts) and time to restore (median from a failure to the rollback or the next good change, with failures not restored yet). Optional env for one environment.",
+                input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"days":{"type":"integer","minimum":1,"maximum":90}}))}),
             },
             ToolSpec {
                 name: "deploy_hook",
                 description: "Make or rotate the app's deploy hook URL (/hooks/deploy/SECRET), shown in this result only: the previous URL stops working at once. Paste it in the platform's deploy notifications (Coolify, Vercel, Netlify, Render, GitHub deployment_status, Argo CD, Flux), or post {status: started|succeeded|failed|rolled_back, release?, commit?, environment?, at?} to it from a deploy step; add ?env=NAME when the platform does not say the environment. Deploys then show in `releases`.",
                 input_schema: json!({"type":"object","properties":proj}),
+            },
+            ToolSpec {
+                name: "record_release",
+                description: "Record a release from the deploy step, after the deploy: its name (the one the SDK sends), the commit deployed and the commit its range starts after (default: the environment's previous deployed commit). It shows in `releases` as a succeeded deploy. In CI prefer `openlens-cli release` or the openlens-release GitHub Action, which also upload the source maps.",
+                input_schema: json!({"type":"object","properties":with(json!({"release":{"type":"string"},"commit":{"type":"string","description":"7 to 64 hex digits"},"from":{"type":"string","description":"7 to 64 hex digits"},"environment":{"type":"string","default":"production"}})),"required":["release"]}),
             },
             ToolSpec {
                 name: "create_ticket",
@@ -226,7 +241,7 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "verify",
-                description: "Wiring checklist: events arrive, users identified with a role, release tagged, map pushed, events per feature. Each failing check carries its fix.",
+                description: "Wiring checklist: events arrive, users identified with a role, release tagged, map pushed, events per feature. Each failing check carries its fix. Also `release_layers`: which release layers are active (build fingerprint seen, deploy hook configured, releases recorded, verdicts present), each with how to turn it on.",
                 input_schema: json!({"type":"object","properties":proj}),
             },
             ToolSpec {
@@ -253,6 +268,11 @@ impl Tools for OpenLensTools {
                 name: "board",
                 description: "The Focus board numbers (KPIs by role/environment/release, features, roles, role gaps, releases, vitals). Period blocks read since the current release by default; `since` (a release) or `from`/`to` (YYYY-MM-DD, project days, at most 400 days, none in the future) pick another period, compared in `window` with the same length before. A period reading more than 30 days of events fails with its estimate (days, bytes, rough time) until called again with `confirm: \"1\"`.",
                 input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"},"since":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"},"confirm":{"type":"string"}}))}),
+            },
+            ToolSpec {
+                name: "board_job",
+                description: "A long board period (a date range or past release that reads more than 30 days of events) computed in the background instead of in one call. `action: start` with the `board` tool's parameters returns the job's `id` (refused while you already have one queued or running; the error names it); `action: status` with `job` returns `state` (queued, running, done, failed, cancelled), `progress` (0 to 1, time against the estimate) and, once done, the `board`; `action: cancel` with `job` stops it. Jobs are kept an hour, for whoever started them.",
+                input_schema: json!({"type":"object","properties":with(json!({"action":{"type":"string","enum":["start","status","cancel"]},"job":{"type":"string"},"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"},"since":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"}})),"required":["action"]}),
             },
             ToolSpec {
                 name: "vitals",
@@ -311,7 +331,11 @@ impl Tools for OpenLensTools {
                 description: "A one-time login link. Without email: an owner link for the PM (valid 24 hours). With email (+ role viewer|admin, optional projects): invites that person with that access (valid 7 days).",
                 input_schema: json!({"type":"object","properties":{"email":{"type":"string"},"role":{"type":"string","enum":["viewer","admin"]},"projects":{"type":"array","items":{"type":"string"}}}}),
             },
-        ]
+        ];
+        // Tools over the commands only a page ran before (#525).
+        tools.extend(crate::mcp_commands::specs());
+        tools.extend(crate::agent_kit::specs(&proj));
+        tools
     }
 
     fn call(&self, name: &str, args: &Value) -> Result<Value, String> {
@@ -453,6 +477,58 @@ impl Tools for OpenLensTools {
                 let (st, v) = c.call("GET", &path, None)?;
                 ok_or(st, v)
             }
+            "release_report" => {
+                let enc = |v: &str| -> String {
+                    v.bytes()
+                        .map(|b| {
+                            if b.is_ascii_alphanumeric() || b"-_.".contains(&b) {
+                                (b as char).to_string()
+                            } else {
+                                format!("%{b:02X}")
+                            }
+                        })
+                        .collect()
+                };
+                let Some(release) = s(args, "release") else {
+                    return Err("release is required".into());
+                };
+                let mut path = format!(
+                    "/api/projects/{}/releases/{}/report",
+                    project(args),
+                    enc(&release)
+                );
+                if let Some(e) = s(args, "env") {
+                    path.push_str(&format!("?env={}", enc(&e)));
+                }
+                let (st, v) = c.call("GET", &path, None)?;
+                ok_or(st, v)
+            }
+            "delivery" => {
+                let mut q = Vec::new();
+                if let Some(e) = s(args, "env") {
+                    let enc: String = e
+                        .bytes()
+                        .map(|b| {
+                            if b.is_ascii_alphanumeric() || b"-_.".contains(&b) {
+                                (b as char).to_string()
+                            } else {
+                                format!("%{b:02X}")
+                            }
+                        })
+                        .collect();
+                    q.push(format!("env={enc}"));
+                }
+                if let Some(d) = args.get("days").and_then(Value::as_i64) {
+                    q.push(format!("days={d}"));
+                }
+                let mut path = format!("/api/projects/{}/delivery", project(args));
+                if !q.is_empty() {
+                    path.push('?');
+                    path.push_str(&q.join("&"));
+                }
+                let (st, v) = c.call("GET", &path, None)?;
+                ok_or(st, v)
+            }
             "set_goal" => {
                 let mut body = args.clone();
                 if let Some(o) = body.as_object_mut() {
@@ -473,6 +549,18 @@ impl Tools for OpenLensTools {
                 let (st, v) = c.call(
                     "POST",
                     &format!("/api/projects/{}/tickets", project(args)),
+                    Some(Body::Json(body)),
+                )?;
+                ok_or(st, v)
+            }
+            "record_release" => {
+                let mut body = args.clone();
+                if let Some(o) = body.as_object_mut() {
+                    o.remove("project");
+                }
+                let (st, v) = c.call(
+                    "POST",
+                    &format!("/api/projects/{}/releases", project(args)),
                     Some(Body::Json(body)),
                 )?;
                 ok_or(st, v)
@@ -551,6 +639,9 @@ impl Tools for OpenLensTools {
                 Ok(v)
             }
             "verify" => crate::verify_report(c, &project(args)),
+            "suggested_features" | "set_feature" | "stale_flags" => {
+                crate::agent_kit::tool(c, name, args)
+            }
             "insights" | "kpi_report" | "board" => {
                 let mut q = Vec::new();
                 let keys: &[&str] = if name == "board" {
@@ -613,6 +704,39 @@ impl Tools for OpenLensTools {
                     }
                     _ => v,
                 })
+            }
+            "board_job" => {
+                let base = format!("/api/projects/{}/board/jobs", project(args));
+                let job = || -> Result<String, String> {
+                    let id: String = s(args, "job")
+                        .ok_or("job is required")?
+                        .chars()
+                        .filter(char::is_ascii_alphanumeric)
+                        .collect();
+                    Ok(format!("{base}/{id}"))
+                };
+                let (st, v) = match s(args, "action").as_deref() {
+                    Some("start") => {
+                        let q: Vec<String> = ["env", "role", "release", "since", "from", "to"]
+                            .iter()
+                            .filter_map(|k| {
+                                s(args, k)
+                                    .map(|v| format!("{k}={}", v.replace(['&', '#', '?', ' '], "")))
+                            })
+                            .collect();
+                        c.call("POST", &format!("{base}?{}", q.join("&")), None)?
+                    }
+                    Some("status") => c.call("GET", &job()?, None)?,
+                    Some("cancel") => c.call("DELETE", &job()?, None)?,
+                    _ => return Err("action is start, status or cancel".into()),
+                };
+                match v.get("job").and_then(Value::as_str) {
+                    Some(running) if st == 429 => Err(format!(
+                        "{} (your job: {running})",
+                        crate::api_error(st, &v)
+                    )),
+                    _ => ok_or(st, v),
+                }
             }
             "vitals" => {
                 let mut q = Vec::new();
@@ -743,7 +867,9 @@ impl Tools for OpenLensTools {
                 let (st, v) = c.call("POST", "/api/login-links", body)?;
                 ok_or(st, v)
             }
-            _ => Err(format!("unknown tool {name}")),
+            // Tools over the commands only a page ran before (#525).
+            _ => crate::mcp_commands::call(c, name, args)
+                .unwrap_or_else(|| Err(format!("unknown tool {name}"))),
         }
     }
 }

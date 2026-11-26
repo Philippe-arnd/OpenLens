@@ -391,6 +391,24 @@ impl QueryEngine {
         .map_err(|e| QueryError::Storage(format!("day sizes task: {e}")))?
     }
 
+    /// The UTC days of `project` from `from` to `to` with a rollup but no
+    /// events on disk (#489, `openlens_storage::days_without_events`):
+    /// listings only.
+    pub async fn days_without_events(
+        &self,
+        project: &str,
+        from: chrono::NaiveDate,
+        to: chrono::NaiveDate,
+    ) -> Result<Vec<chrono::NaiveDate>, QueryError> {
+        let (root, project) = (self.root.clone(), project.to_owned());
+        tokio::task::spawn_blocking(move || {
+            openlens_storage::days_without_events(&root, &project, from, to)
+                .map_err(|e| QueryError::Storage(e.to_string()))
+        })
+        .await
+        .map_err(|e| QueryError::Storage(format!("stored days task: {e}")))?
+    }
+
     /// Segments read by [`QueryEngine::raw_summary`] since the start: the
     /// others came from its cache.
     pub fn segments_read(&self) -> u64 {
@@ -582,15 +600,29 @@ fn query_runtime() -> Option<&'static tokio::runtime::Runtime> {
     .as_ref()
 }
 
-/// Run a query future on [`query_runtime`] and wait for it here.
+/// A query task that stops when nobody waits for it any more (#515): a
+/// cancelled board job, a request that timed out or a client gone.
+struct AbortOnDrop<T>(tokio::task::JoinHandle<T>);
+
+impl<T> Drop for AbortOnDrop<T> {
+    fn drop(&mut self) {
+        // A no-op once the task is done.
+        self.0.abort();
+    }
+}
+
+/// Run a query future on [`query_runtime`] and wait for it here. Dropping
+/// the returned future stops the query.
 async fn offload<T: Send + 'static>(
     fut: impl std::future::Future<Output = Result<T, QueryError>> + Send + 'static,
 ) -> Result<T, QueryError> {
     match query_runtime() {
-        Some(rt) => rt
-            .spawn(fut)
-            .await
-            .map_err(|e| QueryError::Storage(format!("query task: {e}")))?,
+        Some(rt) => {
+            let mut task = AbortOnDrop(rt.spawn(fut));
+            (&mut task.0)
+                .await
+                .map_err(|e| QueryError::Storage(format!("query task: {e}")))?
+        }
         None => fut.await,
     }
 }

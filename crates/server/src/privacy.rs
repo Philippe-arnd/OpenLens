@@ -98,6 +98,7 @@ pub(crate) fn forget_blocking(
             openlens_replay::erase(&state.data_dir, project, id).map_err(|e| e.to_string())?;
     }
     state.boards.bump(project);
+    state.boards.closed().project_changed(project);
     Ok((ids.len(), events, replays))
 }
 
@@ -228,6 +229,8 @@ pub(crate) async fn export(
             crate::cold::restore_project(&cfg, &root, &p)
         })
         .await;
+        // Cold days are back on the disk until the next pass (#516).
+        state.boards.closed().project_changed(&project);
         if !matches!(back, Ok(Ok(_))) {
             return crate::apierr::json(
                 StatusCode::SERVICE_UNAVAILABLE,

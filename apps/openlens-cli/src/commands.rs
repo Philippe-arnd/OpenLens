@@ -175,7 +175,9 @@ pub(super) enum UsersCmd {
 
 #[derive(Subcommand)]
 pub(super) enum Command {
-    /// Create a project; prints its capture key and the snippet to add.
+    /// Create a project; prints its capture key, the snippet to add and
+    /// the steps that keep it running (deploy hook URL, release step,
+    /// rules).
     Init {
         /// Project name (usually the app's name).
         #[arg(long)]
@@ -206,7 +208,8 @@ pub(super) enum Command {
         #[command(subcommand)]
         action: FeaturesCmd,
     },
-    /// Check the wiring: events arrive, roles resolve, features fire.
+    /// Check the wiring: events arrive, roles resolve, features fire; and
+    /// list the release layers that are active.
     Verify {
         /// Project id.
         #[arg(long, default_value = "default")]
@@ -341,8 +344,38 @@ pub(super) enum Command {
         /// Build output directory; every `*.map` file under it is uploaded.
         dir: PathBuf,
     },
-    /// Print the rule to add to the app's AGENTS.md / CLAUDE.md so its agents
-    /// keep the feature map current.
+    /// Record a release from the deploy step, after the deploy: its
+    /// commit range (from `--from`, else the environment's previous
+    /// deployed commit, to `--commit`), its source maps with
+    /// `--sourcemaps`, and with `--wait` its verdict (polled for 30
+    /// minutes). The release shows on the Releases page like a succeeded
+    /// deploy.
+    Release {
+        /// Release name, the same the SDK sends.
+        name: String,
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+        /// The commit deployed (7 to 64 hex digits).
+        #[arg(long)]
+        commit: Option<String>,
+        /// The commit the range starts after.
+        #[arg(long)]
+        from: Option<String>,
+        /// Environment deployed to.
+        #[arg(long, default_value = "production")]
+        env: String,
+        /// Build output directory; every `*.map` file under it is
+        /// uploaded for this release.
+        #[arg(long)]
+        sourcemaps: Option<PathBuf>,
+        /// Wait for the release's verdict; exits non-zero when it is
+        /// regressed or does not come in time.
+        #[arg(long)]
+        wait: bool,
+    },
+    /// Print the block to add to the app's AGENTS.md / CLAUDE.md so its
+    /// agents keep the feature map current and every release measured.
     Rules,
     /// Create a one-time login link for the PM (valid 24 hours; invites: 7 days).
     LoginLink {

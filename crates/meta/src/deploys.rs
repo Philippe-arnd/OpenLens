@@ -3,7 +3,9 @@
 //!
 //! The secret is shown once, when it is made; only its SHA-256 is kept,
 //! like API tokens and share links. Deploys are a small table, at most
-//! [`MAX_DEPLOYS`] per project (oldest first out).
+//! [`MAX_DEPLOYS`] per project (oldest first out). A release recorded by
+//! its deploy step (`openlens-cli release`, #521, D-066) is a succeeded
+//! deploy that also keeps the first commit of its range.
 
 use super::*;
 
@@ -86,14 +88,36 @@ impl Meta {
 
     /// Record a deploy, then cut the project back to [`MAX_DEPLOYS`].
     pub fn record_deploy(&self, project: &str, d: &Deploy, received_at: i64) -> Result<()> {
+        self.insert_deploy(project, d, None, received_at)
+    }
+
+    /// Record a release named by its deploy step (`openlens-cli release`,
+    /// #521): a deploy whose commit range starts after `from`.
+    pub fn record_release(
+        &self,
+        project: &str,
+        d: &Deploy,
+        from: Option<&str>,
+        received_at: i64,
+    ) -> Result<()> {
+        self.insert_deploy(project, d, from, received_at)
+    }
+
+    fn insert_deploy(
+        &self,
+        project: &str,
+        d: &Deploy,
+        from: Option<&str>,
+        received_at: i64,
+    ) -> Result<()> {
         if d.environment.is_empty() || d.status.is_empty() {
             return Err(MetaError::Invalid("empty environment or status"));
         }
         self.with(|c| {
             let tx = c.unchecked_transaction()?;
             tx.execute(
-                "INSERT INTO deploys (project, environment, release, sha, status, at, source, received_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                "INSERT INTO deploys (project, environment, release, sha, status, at, source, received_at, from_sha) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     project,
                     d.environment,
@@ -102,7 +126,8 @@ impl Meta {
                     d.status,
                     d.at,
                     d.source,
-                    received_at
+                    received_at,
+                    from
                 ],
             )?;
             tx.execute(
@@ -112,6 +137,45 @@ impl Meta {
             )?;
             tx.commit()?;
             Ok(())
+        })
+    }
+
+    /// The commit of the environment's latest succeeded deploy that has
+    /// one other than `commit`: where the next release's range starts.
+    pub fn previous_commit(
+        &self,
+        project: &str,
+        environment: &str,
+        commit: Option<&str>,
+    ) -> Result<Option<String>> {
+        self.read(|c| {
+            Ok(c.query_row(
+                "SELECT sha FROM deploys WHERE project = ?1 AND environment = ?2 \
+                 AND status = 'succeeded' AND sha IS NOT NULL AND sha <> coalesce(?3, '') \
+                 ORDER BY at DESC, rowid DESC LIMIT 1",
+                params![project, environment, commit],
+                |r| r.get(0),
+            )
+            .optional()?)
+        })
+    }
+
+    /// The commit range recorded for a release in an environment, as
+    /// `(from, to)`: its latest recorded deploy that names a commit.
+    pub fn release_range(
+        &self,
+        project: &str,
+        environment: &str,
+        release: &str,
+    ) -> Result<Option<(Option<String>, String)>> {
+        self.read(|c| {
+            Ok(c.query_row(
+                "SELECT from_sha, sha FROM deploys WHERE project = ?1 AND environment = ?2 \
+                 AND release = ?3 AND sha IS NOT NULL ORDER BY at DESC, rowid DESC LIMIT 1",
+                params![project, environment, release],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?)
         })
     }
 

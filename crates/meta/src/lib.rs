@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 use rand::Rng;
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 /// Metadata errors.
 #[derive(Debug, thiserror::Error)]
@@ -67,10 +67,13 @@ mod config;
 mod forget;
 mod identity;
 pub use identity::{Identified, IdentityTables, PersonIdentity};
+pub use projects::Seen;
 /// Deploys reported by the deploy hook, and its secret (#504).
 pub mod deploys;
 /// Read-only connections next to the writer (#344).
 mod projects;
+/// The feature map version each release shipped with (#483).
+pub mod release_maps;
 /// Automatic release names per build fingerprint (#495).
 pub mod releases;
 mod totp;
@@ -257,6 +260,15 @@ CREATE TABLE IF NOT EXISTS release_builds (
   PRIMARY KEY (project, environment, build)
 );
 CREATE INDEX IF NOT EXISTS release_builds_day ON release_builds (project, day);
+CREATE TABLE IF NOT EXISTS release_maps (
+  project TEXT NOT NULL,
+  environment TEXT NOT NULL,
+  release TEXT NOT NULL,
+  first_seen TEXT NOT NULL,
+  map_version INTEGER NOT NULL,
+  before_first_map INTEGER NOT NULL,
+  PRIMARY KEY (project, environment, release)
+);
 CREATE TABLE IF NOT EXISTS deploy_hooks (
   project TEXT PRIMARY KEY,
   hash TEXT NOT NULL UNIQUE,
@@ -270,7 +282,8 @@ CREATE TABLE IF NOT EXISTS deploys (
   status TEXT NOT NULL,
   at INTEGER NOT NULL,
   source TEXT NOT NULL,
-  received_at INTEGER NOT NULL
+  received_at INTEGER NOT NULL,
+  from_sha TEXT
 );
 CREATE INDEX IF NOT EXISTS deploys_project ON deploys (project, at);
 CREATE TABLE IF NOT EXISTS users (
@@ -314,6 +327,14 @@ fn migrate(c: &Connection) -> rusqlite::Result<()> {
         if !has {
             c.execute_batch(ddl)?;
         }
+    }
+    // Deploys: the first commit of a release's range, for a release
+    // recorded by `openlens-cli release` (#521, D-066).
+    let has_from: bool = c
+        .prepare("SELECT 1 FROM pragma_table_info('deploys') WHERE name = 'from_sha'")?
+        .exists([])?;
+    if !has_from {
+        c.execute_batch("ALTER TABLE deploys ADD COLUMN from_sha TEXT")?;
     }
     // Users: name, time zone, disabled, last sign-in (#215, #216).
     for (col, ddl) in [
@@ -581,7 +602,13 @@ pub fn slug(name: &str) -> String {
 impl Meta {
     /// Open (or create) the store at `path`.
     pub fn open(path: &Path) -> Result<Self> {
-        let conn = Connection::open(path)?;
+        let mut conn = Connection::open(path)?;
+        // Write transactions take the write lock when they begin (#510): a
+        // deferred one that read first and then has to wait for the lock
+        // fails at once with "database is locked" (SQLite does not call the
+        // busy handler for a transaction that already reads), while
+        // `BEGIN IMMEDIATE` waits for it like any single statement does.
+        conn.set_transaction_behavior(TransactionBehavior::Immediate);
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
         conn.execute_batch(SCHEMA)?;
         migrate(&conn)?;
@@ -617,7 +644,8 @@ impl Meta {
 
     /// In-memory store, for tests.
     pub fn in_memory() -> Result<Self> {
-        let conn = Connection::open_in_memory()?;
+        let mut conn = Connection::open_in_memory()?;
+        conn.set_transaction_behavior(TransactionBehavior::Immediate);
         conn.execute_batch(SCHEMA)?;
         migrate(&conn)?;
         Ok(Self {

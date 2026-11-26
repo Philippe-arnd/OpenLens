@@ -22,7 +22,9 @@ mod segments;
 mod typed;
 pub use pending::Pending;
 use pending::projects_of;
-pub use segments::{DaySize, SegmentFacts, count_rows, day_sizes, segment_facts, segment_files};
+pub use segments::{
+    DaySize, SegmentFacts, count_rows, day_sizes, days_without_events, segment_facts, segment_files,
+};
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Write};
@@ -375,6 +377,13 @@ impl Writer {
         projects_of(&self.buffer)
     }
 
+    /// The UTC days of the events buffered now, per project (#516).
+    pub fn buffered_days(
+        &self,
+    ) -> std::collections::BTreeMap<String, std::collections::BTreeSet<chrono::NaiveDate>> {
+        pending::days_of(&self.buffer)
+    }
+
     /// Write buffered events to Parquet and start a fresh WAL. Returns the
     /// number of events flushed.
     pub fn flush(&mut self) -> Result<usize> {
@@ -596,12 +605,22 @@ fn to_batch(events: &[&Event]) -> Result<RecordBatch> {
 /// have more than one segment, the current day once it has more than
 /// [`TODAY_MAX_SEGMENTS`]. Returns the number of days compacted.
 pub fn compact(root: &Path, project: &str, now: DateTime<Utc>) -> Result<usize> {
+    Ok(compact_days(root, project, now)?.len())
+}
+
+/// [`compact`], returning the days compacted (#516: the results kept for
+/// those days are dropped).
+pub fn compact_days(
+    root: &Path,
+    project: &str,
+    now: DateTime<Utc>,
+) -> Result<Vec<chrono::NaiveDate>> {
     let pdir = project_dir(root, project)?;
     if !pdir.is_dir() {
-        return Ok(0);
+        return Ok(Vec::new());
     }
     let today = format!("date={}", now.format("%Y-%m-%d"));
-    let mut compacted = 0;
+    let mut compacted = Vec::new();
     for date in fs::read_dir(&pdir)? {
         let date = date?.path();
         if !date.is_dir() {
@@ -612,8 +631,14 @@ pub fn compact(root: &Path, project: &str, now: DateTime<Utc>) -> Result<usize> 
         } else {
             2
         };
-        if compaction::compact_dir(&date, min)? {
-            compacted += 1;
+        if compaction::compact_dir(&date, min)?
+            && let Some(day) = date
+                .file_name()
+                .and_then(|s| s.to_str())
+                .and_then(|n| n.strip_prefix("date="))
+                .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+        {
+            compacted.push(day);
         }
     }
     Ok(compacted)

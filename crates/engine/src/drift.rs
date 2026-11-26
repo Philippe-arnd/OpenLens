@@ -1,8 +1,11 @@
 //! Drift between the pushed map and what the app does (#283): routes that
-//! appear with the newest release and that no feature claims. The newest
-//! release is the one whose first event is the latest, in the last 90
-//! days; a route is new when no page of it was seen before that first
-//! event. A map health finding (`drift`) with the feature to add.
+//! appear with the current release and that no feature claims. The
+//! current release is the one the release states give (D-049, #483 item 3,
+//! D-070), as the board's window takes it (D-055): the environment's newest
+//! live release, or its newest rolling out when none is live, so a canary,
+//! a release rolled back or one already superseded is not the one drift
+//! reads. A route is new when no page of it was seen before that release's
+//! first event. A map health finding (`drift`) with the feature to add.
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -21,10 +24,10 @@ const MAX_FINDINGS: usize = 10;
 /// A route must weigh this share of the release's pages and clicks.
 const MIN_SHARE: f64 = 0.01;
 
-/// What was observed for the newest release.
+/// What was observed for the current release.
 #[derive(Debug, Clone, Default)]
 pub struct Observed {
-    /// The newest release, if any was tagged.
+    /// The current release, if the environment has one.
     pub release: Option<String>,
     /// Its pages and clicks: (path, events, claimed by a feature).
     pub paths: Vec<(String, i64, bool)>,
@@ -33,34 +36,33 @@ pub struct Observed {
     pub earlier: Option<HashSet<String>>,
 }
 
-/// Read the newest release's paths and the routes seen before it.
+/// Read the current release's paths and the routes seen before it.
 pub(crate) async fn load(
     q: &QueryEngine,
     project: &str,
     m: &FeatureMap,
     f: &Filters,
 ) -> Result<Observed> {
-    // The newest release is a project fact: a release filter does not apply.
+    // The current release is a project fact: a release filter does not apply.
     let all = Filters {
         release: None,
         ..f.clone()
     };
     let w90 = all.clause(90)?;
     let src = source(Some(m));
-    let newest = format!(
-        "SELECT release, date_part('epoch', min(timestamp)) AS t FROM {src} \
-         WHERE {w90} AND release IS NOT NULL GROUP BY release ORDER BY t DESC LIMIT 1"
-    );
-    let rows = q.sql(project, &newest).await?.rows;
-    let Some(row) = rows.first() else {
+    let rs = crate::releases::releases(q, project, &f.tz, Some(&f.environment), &[], &[]).await?;
+    let Some((release, first)) =
+        crate::board_window::current_release(&rs.releases, &f.environment, &f.tz)
+    else {
         return Ok(Observed::default());
     };
-    let (Some(release), Some(t)) = (
-        text(row, "release"),
-        row.get("t").and_then(serde_json::Value::as_f64),
-    ) else {
+    // A release first seen on the first day the states read may be older:
+    // what came before it is unknown, so nothing is called new.
+    if first < chrono::Utc::now() - chrono::Duration::days(crate::releases::WINDOW_DAYS - 1) {
         return Ok(Observed::default());
-    };
+    }
+    // Its first event, to the minute the release states give it.
+    let t = first.timestamp();
     let Ok(rel) = crate::lit(&release) else {
         return Ok(Observed::default());
     };

@@ -20,6 +20,7 @@ use crate::{Board, Filters};
 pub mod alerts;
 pub mod ask;
 pub mod board;
+pub mod delivery;
 pub mod deploys;
 pub mod explore;
 pub mod flags;
@@ -91,12 +92,15 @@ pub const REGISTRY: &[Spec] = &[
     spec::<alerts::SetSettings>(),
     spec::<alerts::Test>(),
     spec::<releases::List>(),
+    spec::<releases::ReleaseReport>(),
     spec::<tickets::List>(),
     spec::<tickets::DraftTicket>(),
     spec::<tickets::File>(),
     spec::<tickets::SetTarget>(),
     spec::<deploys::RotateHook>(),
     spec::<deploys::Record>(),
+    // A release recorded by its deploy step (#521).
+    spec::<deploys::RecordRelease>(),
     // Ask's lookups and its confirmed flag change (#508).
     spec::<ask::Board>(),
     spec::<ask::Feature>(),
@@ -121,6 +125,8 @@ pub const REGISTRY: &[Spec] = &[
     spec::<explore::GetLive>(),
     // The board's cost estimate (#514).
     spec::<board::GetEstimate>(),
+    // Delivery metrics (#523).
+    spec::<delivery::GetDelivery>(),
 ];
 
 /// A 12-character id from `s` (the first bytes of its SHA-256, in hex).

@@ -4,11 +4,17 @@
 //! pushing a new map does not change the numbers of earlier releases: they
 //! keep the routes and success event they shipped with. A release older
 //! than every stored version is counted with the oldest one, and says so.
+//!
+//! The version found the first time a release is counted is recorded
+//! (`release_maps`, #483 item 2, D-070) and read from then on, so it does
+//! not move when the release's first event leaves the 90 days or its
+//! version leaves the newest 50.
 
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
 use openlens_featuremap::{Feature, FeatureMap};
+use openlens_meta::release_maps::ReleaseMap;
 use openlens_query::QueryEngine;
 use serde::Serialize;
 
@@ -48,6 +54,104 @@ pub fn history(meta: &openlens_meta::Meta, project: &str) -> Vec<MapAt> {
         .collect()
 }
 
+/// What the numbers per release are counted with: the stored versions
+/// of the map and the releases already recorded (D-070).
+#[derive(Debug, Clone, Default)]
+pub struct History {
+    /// The newest 50 stored versions, with when each was saved.
+    pub versions: Vec<MapAt>,
+    /// The releases of one environment whose version is recorded.
+    pub recorded: Vec<ReleaseMap>,
+    /// Recorded versions that are not among the newest 50.
+    pub older: Vec<(i64, FeatureMap)>,
+}
+
+impl From<Vec<MapAt>> for History {
+    fn from(versions: Vec<MapAt>) -> Self {
+        Self {
+            versions,
+            ..Self::default()
+        }
+    }
+}
+
+impl History {
+    /// The stored versions of `project`'s map and the releases of
+    /// `environment` recorded with one. Unreadable rows are left out.
+    #[must_use]
+    pub fn load(meta: &openlens_meta::Meta, project: &str, environment: &str) -> Self {
+        let versions = history(meta, project);
+        let recorded = meta.release_maps(project, environment).unwrap_or_default();
+        let mut older: Vec<(i64, FeatureMap)> = Vec::new();
+        for r in &recorded {
+            let n = r.map_version;
+            if versions.iter().any(|v| v.version == n) || older.iter().any(|o| o.0 == n) {
+                continue;
+            }
+            let map = meta
+                .feature_map_version(project, n)
+                .ok()
+                .flatten()
+                .and_then(|y| openlens_featuremap::parse(&y).map);
+            if let Some(m) = map {
+                older.push((n, m));
+            }
+        }
+        Self {
+            versions,
+            recorded,
+            older,
+        }
+    }
+
+    /// The stored map `version`.
+    fn map(&self, version: i64) -> Option<&FeatureMap> {
+        self.versions
+            .iter()
+            .find(|v| v.version == version)
+            .map(|v| &v.map)
+            .or_else(|| self.older.iter().find(|o| o.0 == version).map(|o| &o.1))
+    }
+}
+
+/// The releases of `counted` to record (D-070): those counted with a
+/// stored version that is not recorded yet, under the filters every view
+/// starts from (no role or release filter, the team's own users left out),
+/// so a record is what that view derives. Events with no release are not
+/// a release.
+#[must_use]
+pub fn to_record(f: &Filters, counted: &[FeatureRelease]) -> Vec<ReleaseMap> {
+    if f.role.is_some() || f.release.is_some() || f.internal {
+        return Vec::new();
+    }
+    counted
+        .iter()
+        .filter(|r| !r.recorded && r.release != "untagged")
+        .filter_map(|r| {
+            Some(ReleaseMap {
+                environment: f.environment.clone(),
+                release: r.release.clone(),
+                first_seen: r.first_seen.clone(),
+                map_version: r.map_version?,
+                before_first_map: r.before_first_map,
+            })
+        })
+        .collect()
+}
+
+/// Record the versions [`to_record`] picks from a feature's releases.
+///
+/// # Errors
+/// The metadata store could not be written.
+pub fn record(
+    meta: &openlens_meta::Meta,
+    project: &str,
+    f: &Filters,
+    counted: &[FeatureRelease],
+) -> std::result::Result<usize, openlens_meta::MetaError> {
+    meta.record_release_maps(project, &to_record(f, counted))
+}
+
 /// One release's use of a feature.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct FeatureRelease {
@@ -69,6 +173,9 @@ pub struct FeatureRelease {
     pub before_first_map: bool,
     /// The feature was not in that version (the numbers are zero).
     pub not_in_map: bool,
+    /// The version is the one recorded when the release was first counted
+    /// (D-070); otherwise it was derived now.
+    pub recorded: bool,
 }
 
 /// The version in force at `t` (seconds since the epoch): the latest saved
@@ -99,12 +206,13 @@ fn key_in<'a>(old: &'a FeatureMap, key: &str, def: Option<&Feature>) -> Option<&
 }
 
 /// `key`'s use in the newest releases of the last 90 days, each with the
-/// map version in force. `current` is used when `history` is empty.
+/// map version recorded for it, else the one in force. `current` is used
+/// when no version is stored.
 pub(crate) async fn releases(
     q: &QueryEngine,
     project: &str,
     current: &FeatureMap,
-    history: &[MapAt],
+    history: &History,
     f: &Filters,
     key: &str,
 ) -> Result<Vec<FeatureRelease>> {
@@ -127,23 +235,34 @@ pub(crate) async fn releases(
             .get("t")
             .and_then(serde_json::Value::as_f64)
             .unwrap_or(0.0);
-        let (version, before) = match in_force(history, t) {
-            Some((v, b)) => (Some(v.version), b),
-            None => (None, false),
+        let kept = history.recorded.iter().find(|k| k.release == release);
+        let (version, before, first_seen) = match (kept, in_force(&history.versions, t)) {
+            (Some(k), _) => (
+                Some(k.map_version),
+                k.before_first_map,
+                k.first_seen.clone(),
+            ),
+            (None, Some((v, b))) => (
+                Some(v.version),
+                b,
+                text(r, "first_seen").unwrap_or_default(),
+            ),
+            (None, None) => (None, false, text(r, "first_seen").unwrap_or_default()),
         };
         by_version.entry(version).or_default().push(out.len());
         out.push(FeatureRelease {
             release,
-            first_seen: text(r, "first_seen").unwrap_or_default(),
+            first_seen,
             map_version: version,
             before_first_map: before,
+            recorded: kept.is_some(),
             ..FeatureRelease::default()
         });
     }
     for (version, idx) in by_version {
         let map = match version {
-            Some(n) => match history.iter().find(|v| v.version == n) {
-                Some(v) => &v.map,
+            Some(n) => match history.map(n) {
+                Some(m) => m,
                 None => continue,
             },
             None => current,

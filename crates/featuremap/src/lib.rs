@@ -172,6 +172,11 @@ pub fn valid_key(k: &str) -> bool {
         && k.bytes().next().is_some_and(|b| b.is_ascii_alphanumeric())
 }
 
+/// A map as YAML, the format [`parse`] reads (comments are not kept).
+pub fn to_yaml(m: &FeatureMap) -> Result<String, String> {
+    serde_norway::to_string(m).map_err(|e| e.to_string())
+}
+
 /// Parse and validate a map. Never panics on any input.
 pub fn parse(src: &str) -> Parsed {
     if src.len() > MAX_BYTES {

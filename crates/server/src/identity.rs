@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use openlens_event::Event;
-use openlens_meta::{Identified, Meta};
+use openlens_meta::{Identified, Meta, Seen};
 
 use crate::AppState;
 
@@ -49,10 +49,32 @@ fn identified(e: &Event) -> Identified {
     )
 }
 
-/// Record the `$identify` events of `events` (blocking). Called before the
-/// events are written, by capture and import alike. A change is seen by
-/// the next query, not 30 s later.
-pub(crate) fn record(state: &AppState, project: &str, events: &[Event]) -> Result<(), String> {
+/// The people of a captured batch's `$identify` events, with their traits
+/// (D-009), for [`record`].
+pub(crate) fn seen_of<'a>(project: &str, events: &'a [Event]) -> Vec<Seen<'a>> {
+    events
+        .iter()
+        .filter(|e| e.event == openlens_event::names::IDENTIFY && e.project == project)
+        .map(|e| Seen {
+            distinct_id: &e.distinct_id,
+            role: e.role.as_deref(),
+            account: e.account.as_deref(),
+            plan: e.plan.as_deref(),
+            at: e.timestamp,
+        })
+        .collect()
+}
+
+/// Record the `$identify` events of `events` and the people `seen`
+/// (blocking), in one metadata write (#510); none when there are neither.
+/// Called before the events are written, by capture and import alike. A
+/// change is seen by the next query, not 30 s later.
+pub(crate) fn record(
+    state: &AppState,
+    project: &str,
+    events: &[Event],
+    seen: &[Seen<'_>],
+) -> Result<(), String> {
     let rows: Vec<Identified> = events
         .iter()
         .filter(|e| e.event == openlens_event::names::IDENTIFY && e.project == project)
@@ -60,7 +82,7 @@ pub(crate) fn record(state: &AppState, project: &str, events: &[Event]) -> Resul
         .collect();
     let changed = state
         .meta
-        .record_identities(project, &rows)
+        .record_identify(project, seen, &rows)
         .map_err(|e| e.to_string())?;
     if changed {
         state.query.identity_changed(project);
