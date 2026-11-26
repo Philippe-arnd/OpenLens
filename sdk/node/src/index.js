@@ -4,6 +4,32 @@
 
 /** @typedef {{ role?: string, account?: string, plan?: string }} Dimensions */
 
+/** Variables hosts set to the deployed commit, in order of preference (#495). */
+const COMMIT_VARS = [
+  "SOURCE_COMMIT",
+  "GITHUB_SHA",
+  "VERCEL_GIT_COMMIT_SHA",
+  "CF_PAGES_COMMIT_SHA",
+  "RENDER_GIT_COMMIT",
+  "HEROKU_SLUG_COMMIT",
+];
+
+/**
+ * The release the host exposes: the deployed commit (shortened to 12
+ * characters when it is a full hash), else the package version npm or a
+ * script runner sets. `undefined` when the host says nothing.
+ * @param {Record<string, string | undefined>} env
+ * @returns {string | undefined}
+ */
+export function detectRelease(env) {
+  for (const name of COMMIT_VARS) {
+    const v = (env[name] || "").trim();
+    if (v) return /^[0-9a-f]{13,64}$/i.test(v) ? v.slice(0, 12).toLowerCase() : v.slice(0, 200);
+  }
+  const version = (env.npm_package_version || "").trim();
+  return version ? version.slice(0, 200) : undefined;
+}
+
 export class OpenLens {
   /**
    * @param {{ host: string, key: string, release?: string, environment?: string,
@@ -14,7 +40,8 @@ export class OpenLens {
     if (!opts || !opts.host || !opts.key) throw new Error("OpenLens: host and key are required");
     this.host = opts.host.replace(/\/$/, "");
     this.key = opts.key;
-    this.release = opts.release;
+    // An explicit release wins; else what the host exposes (#495).
+    this.release = opts.release || detectRelease(process.env);
     this.environment = opts.environment ?? process.env.NODE_ENV ?? "production";
     this.flushAt = opts.flushAt ?? 50;
     this.onError = opts.onError ?? (() => {});

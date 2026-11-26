@@ -24,6 +24,7 @@ mod ingest;
 mod manage;
 mod pages;
 mod privacy;
+mod releases;
 mod team;
 mod totp;
 

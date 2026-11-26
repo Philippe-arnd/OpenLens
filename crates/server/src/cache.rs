@@ -161,6 +161,11 @@ pub struct Caches {
     pub(crate) replay_rates: Bounded<String, crate::replay::RateEntry>,
     /// Projects whose identity backfill (#450) ran or is running.
     pub(crate) identity_checked: Bounded<String, ()>,
+    /// Release name per build fingerprint (#495), keyed `project|env|build`.
+    pub(crate) release_builds: Bounded<String, String>,
+    /// Project days that recorded all the new fingerprints they may (#495),
+    /// keyed `project|day`.
+    pub(crate) release_days_full: Bounded<String, ()>,
 }
 
 impl Default for Caches {
@@ -186,6 +191,8 @@ impl Default for Caches {
             env_checks: Bounded::new(10_000, 10 * MIN),
             replay_rates: Bounded::new(10_000, 25 * 60 * MIN),
             identity_checked: Bounded::new(10_000, 10 * MIN),
+            release_builds: Bounded::new(10_000, 60 * MIN),
+            release_days_full: Bounded::new(10_000, 10 * MIN),
         }
     }
 }
@@ -212,6 +219,7 @@ impl Caches {
             ("env_allow", n(self.env_allow.len())),
             ("env_checks", n(self.env_checks.len())),
             ("replay_rates", n(self.replay_rates.len())),
+            ("release_builds", n(self.release_builds.len())),
         ]
     }
 }

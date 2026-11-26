@@ -69,6 +69,8 @@ mod identity;
 pub use identity::{Identified, IdentityTables, PersonIdentity};
 /// Read-only connections next to the writer (#344).
 mod projects;
+/// Automatic release names per build fingerprint (#495).
+pub mod releases;
 mod totp;
 mod uptime;
 mod users;
@@ -242,6 +244,17 @@ CREATE TABLE IF NOT EXISTS notes (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS notes_project ON notes (project, day);
+CREATE TABLE IF NOT EXISTS release_builds (
+  project TEXT NOT NULL,
+  environment TEXT NOT NULL,
+  build TEXT NOT NULL,
+  name TEXT NOT NULL,
+  day TEXT NOT NULL,
+  seq INTEGER,
+  first_seen INTEGER NOT NULL,
+  PRIMARY KEY (project, environment, build)
+);
+CREATE INDEX IF NOT EXISTS release_builds_day ON release_builds (project, day);
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   email TEXT NOT NULL UNIQUE,
