@@ -666,6 +666,8 @@
   }
   @media (pointer: coarse) { .side-nav kbd { display: none; } }
 
+}
+
 /* Entry pages (#547) */
 @layer components {
   .auth { flex: 1; min-height: 100vh; display: grid; place-items: center; align-content: center; gap: 20px; padding: 32px 16px;
@@ -697,6 +699,8 @@
   .shared-banner .pill { margin-left: auto; padding: 2px 10px; border-radius: var(--r-pill); font-size: 12px; font-weight: 500;
     color: var(--accent); background: color-mix(in oklab, var(--accent) var(--tint), transparent);
     border: 1px solid color-mix(in oklab, var(--accent) 30%, var(--line)); }
+
+}
 
 /* Context bar (#542) */
 @layer components {
