@@ -15,6 +15,7 @@ mod board_job;
 mod components;
 mod cost;
 mod delivery;
+mod entry;
 mod environments;
 mod explore;
 mod feature_page;
@@ -34,6 +35,7 @@ pub use board::*;
 pub use board_job::{JobView, board_job};
 pub use components::*;
 pub use cost::board_confirm;
+pub use entry::{login, login_continue, message, message_html, welcome};
 pub use explore::*;
 pub use feature_page::*;
 pub use features::*;
@@ -493,7 +495,12 @@ fn shared_layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -
             body.shared {
                 (icons::sprite())
                 div.content {
-                    p.shared-banner { span.blob aria-hidden="true" {} " Read-only view" @if let Some(p) = project { " of " strong { (p.name) } } " · OpenLens" }
+                    header.shared-banner {
+                        span.brand-mark aria-hidden="true" {}
+                        strong { "OpenLens" }
+                        @if let Some(p) = project { span.muted { (p.name) } }
+                        span.pill { "Read-only view" }
+                    }
                     main { (body) }
                 }
             }
@@ -596,121 +603,6 @@ fn layout_with(
             }
         }
     }
-}
-
-/// Login page.
-pub fn login(failed: bool, sso: bool, email: bool, password: bool) -> Markup {
-    let token_form = html! {
-        form method="post" action="/login" {
-            label for="token" { "Admin token" }
-            input #token name="token" type="password" autocomplete="off" required autofocus[!password];
-            button type="submit" { "Open my board" }
-        }
-    };
-    layout(
-        "Log in",
-        None,
-        html! {
-            section.login {
-                h1 { "Hello again " span.wave aria-hidden="true" { "👋" } }
-                @if password {
-                    p.muted { "Sign in with your email and password." }
-                    @if failed { p.alert role="alert" { "That didn't work. Check and try again; after a few failed tries, wait 15 minutes." } }
-                    form method="post" action="/login/password" {
-                        label for="pw-email" { "Email" }
-                        input #pw-email name="email" type="email" autocomplete="username" required autofocus;
-                        label for="pw" { "Password" }
-                        input #pw name="password" type="password" autocomplete="current-password" required;
-                        button type="submit" { "Log in" }
-                    }
-                    // The way back in, always (#428): a lost password, a locked account.
-                    details.token-login {
-                        summary { "Use the admin token" }
-                        (token_form)
-                    }
-                } @else {
-                    p.muted { "Paste the admin token, or open the login link your agent sent you." }
-                    @if failed { p.alert role="alert" { "That token didn't work. Try again?" } }
-                    (token_form)
-                }
-                @if sso {
-                    p.muted.small { "or" }
-                    p { a.button href="/oidc/start" { (icon("shield")) "Sign in with your company account" } }
-                }
-                @if email {
-                    p.muted.small { "or, if you were invited" }
-                    form method="post" action="/login/email" {
-                        label for="login-email" { "Your email" }
-                        input #login-email name="email" type="email" autocomplete="email" required;
-                        button type="submit" { "Email me a login link" }
-                    }
-                }
-            }
-        },
-    )
-}
-
-/// The page a login link opens: a button that uses the link. A GET never
-/// uses it, so a link preview (Slack, Teams, Outlook Safe Links) leaves it
-/// valid for the person it was sent to (#315).
-pub fn login_continue(action: &str) -> Markup {
-    layout(
-        "Log in",
-        None,
-        html! {
-            section.login {
-                h1 { "Hello " span.wave aria-hidden="true" { "👋" } }
-                p.muted { "This link opens your board once. Continue to log in." }
-                form method="post" action=(action) {
-                    button type="submit" autofocus { "Continue to my board" }
-                }
-            }
-        },
-    )
-}
-
-/// First login with the admin token or the agent's link: create your own
-/// admin account (named in the team list, and the one SSO signs in to).
-pub fn welcome(sso: bool, error: Option<&str>) -> Markup {
-    layout(
-        "Welcome",
-        None,
-        html! {
-            section.login {
-                h1 { "Welcome to OpenLens " span.wave aria-hidden="true" { "🔭" } }
-                p.muted { "You are in with the admin token. Create your own admin account, so the team list knows who you are and you can invite others." }
-                @if let Some(e) = error { p.alert role="alert" { (e) } }
-                form method="post" action="/welcome" {
-                    label for="email" { "Your email" }
-                    input #email name="email" type="email" autocomplete="email" required autofocus;
-                    button type="submit" { "Create my admin account" }
-                }
-                p.muted.small {
-                    @if sso { "Next time, sign in with your company account. " }
-                    @else { "Next time, use a login link from your agent (" code { "openlens-cli login-link --email you@… --role admin" } ") or the admin token. " }
-                    a href="/" { "Skip for now" }
-                }
-            }
-        },
-    )
-}
-
-/// Generic message page (errors, not found).
-pub fn message(title: &str, text: &str) -> Markup {
-    layout(
-        title,
-        None,
-        html! { section.login { h1 { (title) } p { (text) } p { a href="/" { "Back to the board" } } } },
-    )
-}
-
-/// [`message`] with markup (a link back, for instance).
-pub fn message_html(title: &str, body: Markup) -> Markup {
-    layout(
-        title,
-        None,
-        html! { section.login { h1 { (title) } p { (body) } } },
-    )
 }
 
 /// Raw HTML escape hatch for tests.
