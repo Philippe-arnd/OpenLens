@@ -656,8 +656,11 @@ pub(crate) fn window_picker(project: &str, b: &Board, f: &Filters) -> Markup {
                     }
                 }
             }
-            label { "Or from " input type="date" name="from" value=[from]; }
-            label { "To " input type="date" name="to" value=[to]; }
+            // The browser shows a date field in its own locale; the hint
+            // gives the format the rest of the UI prints (#557).
+            label { "Or from " input type="date" name="from" value=[from] aria-describedby="period-date-format"; }
+            label { "To " input type="date" name="to" value=[to] aria-describedby="period-date-format"; }
+            span.muted.small #period-date-format { "Dates as YYYY-MM-DD" }
             button type="submit" { "Show" }
         }
         p.muted.small { "Filled dates win over the release: clear them to pick one. A range covers at most 400 days, none before the 400 days kept; an empty end is today. It is compared with the same length just before." }
@@ -723,6 +726,16 @@ mod tests {
             "{html}"
         );
         assert!(!html.contains("<script"), "no JavaScript");
+        // Both date fields point at the format hint (#557), which exists.
+        assert_eq!(
+            html.matches(r#"type="date""#).count(),
+            html.matches(r#"aria-describedby="period-date-format""#).count(),
+            "{html}"
+        );
+        assert!(
+            html.contains(r#"id="period-date-format">Dates as YYYY-MM-DD<"#),
+            "{html}"
+        );
         // A past release is selected, and the dates are left empty.
         let f = Filters {
             window: openlens_engine::Window::Since {
