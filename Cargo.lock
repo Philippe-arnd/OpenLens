@@ -4011,12 +4011,16 @@ name = "xtask"
 version = "0.6.0"
 dependencies = [
  "chrono",
+ "openlens-engine",
  "openlens-event",
+ "openlens-featuremap",
  "openlens-meta",
+ "openlens-query",
  "openlens-storage",
  "openlens-testkit",
  "serde_json",
  "tempfile",
+ "tokio",
  "ureq",
 ]
 
