@@ -36,10 +36,11 @@ fn env_names(id: &str, e: &Environments, ignore: bool) -> Markup {
     }
 }
 
-/// The tab's content.
+/// The tab's content. `tz`: the project's time zone, for the times shown.
 pub(crate) fn tab(
     base: &str,
     admin: bool,
+    tz: &str,
     e: &Environments,
     relabel: Option<&Result<Relabelled, String>>,
     allow: Option<&AllowReport>,
@@ -94,7 +95,7 @@ pub(crate) fn tab(
                             td { (h.environment) }
                             td.mono { @if h.host.is_empty() { span.muted { "(no page address)" } } @else { (h.host) } }
                             td.num { (compact(h.events)) }
-                            td.small { (h.last_seen) }
+                            td.small { (local_time(&h.last_seen, tz, false)) }
                             td.small { (h.rule.as_deref().unwrap_or("—")) }
                         }
                     } }
@@ -102,7 +103,7 @@ pub(crate) fn tab(
             }
         }
         @if admin { (relabel_card(base, e, relabel)) }
-        @if let Some(a) = allow { (allow_card(base, admin, a, allow_preview)) }
+        @if let Some(a) = allow { (allow_card(base, admin, tz, a, allow_preview)) }
         section.card.wide #env-aliases {
             h2.sky { (icon("route")) "Aliases and visibility" }
             p.small { "An alias stores an environment the app sends under another name (" code { "live-eu" } " → " code { "production" } "), on top of the usual ones (" code { "prod" } ", " code { "stage" } ", " code { "dev" } "); " code { "ignore" } " drops its events. A hidden environment keeps its events and stays readable by name (" code { "?env=" } "), but leaves the environment selector. Production is never aliased or hidden." }
@@ -229,9 +230,11 @@ fn relabel_card(
 fn allow_card(
     base: &str,
     admin: bool,
+    tz: &str,
     a: &AllowReport,
     preview: Option<&Result<AllowPreview, String>>,
 ) -> Markup {
+    let since = local_time(&a.dropped_since, tz, false);
     let draft = match preview {
         Some(Ok(p)) => p.hosts.join(" "),
         _ => a.hosts.join(" "),
@@ -246,14 +249,14 @@ fn allow_card(
                     p.notice role="status" { "Pending: no host on the list has sent events in the last " (ACTIVE_DAYS) " days, so nothing is dropped. Check the list for a typo." }
                 }
                 AllowStatus::Active => {
-                    p.small { "Active: events of other hosts are dropped." @if let Some(t) = &a.last_listed { " A listed host last sent events at " (t) "." } }
+                    p.small { "Active: events of other hosts are dropped." @if let Some(t) = &a.last_listed { " A listed host last sent events at " (local_time(t, tz, false)) "." } }
                 }
             }
             @if !a.hosts.is_empty() {
                 p { @for (i, h) in a.hosts.iter().enumerate() { @if i > 0 { ", " } span.mono { (h) } } }
             }
             @if !a.dropped.is_empty() || a.dropped_other > 0 {
-                h3 { "Dropped since " (a.dropped_since) }
+                h3 { "Dropped since " (since) }
                 div.table-scroll { table.plain {
                     thead { tr { th { "Host" } (crate::glossary::th_num("Events")) } }
                     tbody {
@@ -262,7 +265,7 @@ fn allow_card(
                     }
                 } }
             } @else if a.status == AllowStatus::Active {
-                p.muted.small { "Nothing dropped since " (a.dropped_since) "." }
+                p.muted.small { "Nothing dropped since " (since) "." }
             }
             @if admin {
                 form.settings method="get" action={ (base) "/environments" } {
@@ -308,5 +311,45 @@ fn allow_preview_block(base: &str, p: &AllowPreview) -> Markup {
             input type="hidden" name="hosts" value=(hosts);
             button type="submit" { @if p.hosts.is_empty() { "Turn off" } @else { "Save the list" } }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use openlens_engine::environments::HostRow;
+
+    #[test]
+    fn the_times_are_read_in_the_project_zone_not_as_iso_strings() {
+        // #556: the tab printed `2026-11-26T01:54:22.935195Z` as it came.
+        let e = Environments {
+            days: 30,
+            hosts: vec![HostRow {
+                environment: "production".into(),
+                host: "app.example.com".into(),
+                events: 5,
+                last_seen: "2026-11-26T01:54:22.935195Z".into(),
+                rule: None,
+            }],
+            rules: vec![],
+            unclassified: vec![],
+            aliases: vec![],
+            hidden: vec![],
+            monitors: vec![],
+        };
+        let a = AllowReport {
+            hosts: vec!["app.example.com".into()],
+            status: AllowStatus::Active,
+            last_listed: Some("2026-11-26T01:54:22.935195+00:00".into()),
+            dropped_since: "2026-11-25T08:00:00+00:00".into(),
+            dropped: vec![],
+            dropped_other: 0,
+        };
+        let html =
+            tab("/p/p1/settings", true, "Europe/Paris", &e, None, Some(&a), None).into_string();
+        assert!(!crate::tests::has_iso_time(&html), "{html}");
+        // Shown in the project's zone (Paris is ahead of UTC in November).
+        assert!(html.contains("2026-11-26 02:54"), "{html}");
+        assert!(html.contains("2026-11-25 09:00"), "{html}");
     }
 }

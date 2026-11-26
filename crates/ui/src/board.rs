@@ -260,7 +260,7 @@ pub fn board(
                                     td.num { (pct(r.bounce_rate)) }
                                     td.num { (format!("{:.2}", r.tasks_per_session)) }
                                     td.num { (pct(r.error_rate)) }
-                                    td.muted { (r.first_seen.get(..16).unwrap_or(&r.first_seen)) }
+                                    td.muted { (local_time(&r.first_seen, &f.tz, false)) }
                                 }
                             } }
                         }
@@ -765,5 +765,29 @@ mod tests {
         assert!(line.contains("Since v2.1 (4 days)"), "{line}");
         assert!(line.contains("against the 4 days before"), "{line}");
         assert!(line.contains("users (+"), "more users than before: {line}");
+    }
+
+    #[test]
+    fn the_release_table_prints_first_seen_as_the_other_screens_do() {
+        // #556: the table printed the engine's ISO string (`…T20:49`).
+        let p = ProjectInfo {
+            id: "p1",
+            name: "P",
+            key: "k",
+        };
+        let b = Board {
+            total_events: 1,
+            releases: vec![openlens_engine::ReleaseRow {
+                release: "v2".into(),
+                first_seen: "2026-11-16T20:49:31.5Z".into(),
+                users: 3,
+                sessions: 4,
+                ..openlens_engine::ReleaseRow::default()
+            }],
+            ..Board::default()
+        };
+        let html = board(&p, &b, &Filters::default(), "h", &[], None, &[]).into_string();
+        assert!(html.contains("2026-11-16 20:49"), "{html}");
+        assert!(!crate::tests::has_iso_time(&html), "{html}");
     }
 }
