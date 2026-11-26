@@ -49,20 +49,7 @@ impl Default for DayFeatures {
 /// `person_day` of one UTC day (#451): per person, environment, release,
 /// role and feature, from the `events` view (people already merged).
 fn person_day_sql(day: &str, f: &DayFeatures) -> Result<String, QueryError> {
-    let task = if f.successes.is_empty() {
-        "feature IS NOT NULL".to_owned()
-    } else {
-        let list = f
-            .successes
-            .iter()
-            .map(|e| openlens_sqlgen::lit(e))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| QueryError::Rejected("not a valid success event".into()))?;
-        format!("event IN ({})", list.join(", "))
-    };
-    let version = f
-        .map_version
-        .map_or_else(|| "NULL".to_owned(), |v| v.to_string());
+    let (task, version) = (task_sql(f)?, version_sql(f));
     Ok(format!(
         "SELECT person, environment, release, role, feature, count(*) AS events, \
          count(DISTINCT session_id) AS sessions, \
@@ -73,6 +60,54 @@ fn person_day_sql(day: &str, f: &DayFeatures) -> Result<String, QueryError> {
          FROM (SELECT distinct_id AS person, environment, release, role, \
                {feature} AS feature, event, session_id, timestamp \
                FROM events WHERE date = '{day}') e \
+         GROUP BY 1, 2, 3, 4, 5",
+        feature = f.feature
+    ))
+}
+
+/// Whether an event (with its `feature` already resolved) is a task, as
+/// the board counts them: the map's success events, or any event with a
+/// feature when the map declares none.
+fn task_sql(f: &DayFeatures) -> Result<String, QueryError> {
+    if f.successes.is_empty() {
+        return Ok("feature IS NOT NULL".to_owned());
+    }
+    let list = f
+        .successes
+        .iter()
+        .map(|e| openlens_sqlgen::lit(e))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| QueryError::Rejected("not a valid success event".into()))?;
+    Ok(format!("event IN ({})", list.join(", ")))
+}
+
+/// The map's version as a SQL literal (`NULL` without a map).
+fn version_sql(f: &DayFeatures) -> String {
+    f.map_version
+        .map_or_else(|| "NULL".to_owned(), |v| v.to_string())
+}
+
+/// Events a person does on purpose. A session with one of them at most is
+/// a bounce; `$scroll`, `$vital`, `$identify` or `$error` alone are not
+/// activity. The board's sessions use the same rule (`openlens-engine`
+/// checks that its copy is this one).
+pub const INTERACTION: &str =
+    "(event IN ('$pageview', '$click', '$submit', '$feature', '$survey') OR event NOT LIKE '$%')";
+
+/// `session_day` of one UTC day (#493): per session, person, environment,
+/// release and role, from the `events` view (people already merged).
+fn session_day_sql(day: &str, f: &DayFeatures) -> Result<String, QueryError> {
+    let (task, version) = (task_sql(f)?, version_sql(f));
+    Ok(format!(
+        "SELECT session_id, person, environment, release, role, \
+         min(timestamp) AS first_ts, max(timestamp) AS last_ts, \
+         sum(CASE WHEN {INTERACTION} THEN 1 ELSE 0 END) AS interactions, \
+         sum(CASE WHEN event = '$error' THEN 1 ELSE 0 END) AS errors, \
+         sum(CASE WHEN {task} THEN 1 ELSE 0 END) AS tasks, \
+         CAST({version} AS BIGINT) AS map_version \
+         FROM (SELECT session_id, distinct_id AS person, environment, release, role, \
+               {feature} AS feature, event, timestamp \
+               FROM events WHERE date = '{day}' AND session_id IS NOT NULL) e \
          GROUP BY 1, 2, 3, 4, 5",
         feature = f.feature
     ))
@@ -166,7 +201,8 @@ impl QueryEngine {
     /// The rollup tables named in `wanted` (all of them when it is
     /// `None`) of `project` for the UTC `day` (`YYYY-MM-DD`), as
     /// `(name, batch)` pairs in the schemas of `openlens_storage::rollup`.
-    /// `features` resolves the features of `person_day`.
+    /// `features` resolves the features of `person_day` and the tasks of
+    /// `person_day` and `session_day`.
     pub async fn rollup_day(
         &self,
         project: &str,
@@ -209,6 +245,7 @@ impl QueryEngine {
             let sql = match name {
                 "person_q" => person_sql(day),
                 "person_day" => person_day_sql(day, features)?,
+                "session_day" => session_day_sql(day, features)?,
                 "metric_q" => metric_sql(day),
                 "click_q" => click_sql(day),
                 "label_q" => label_sql(day),
