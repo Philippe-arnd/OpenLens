@@ -60,48 +60,178 @@ pub fn projects(list: &[ProjectSummary], admin: bool) -> Markup {
     )
 }
 
-/// A page's click heatmap: density drawn in SVG (no script), plus a link to
-/// see it over the real page when a recording of that page exists.
+/// What the heatmap page shows around the map (#548).
+pub struct HeatmapView<'a> {
+    /// The asked mode: `clicks` (the default), `rage` or `scroll`.
+    pub mode: &'a str,
+    /// The most viewed pages: the picker's suggestions, and this page's
+    /// most clicked labels and scroll depth when it is one of them.
+    pub pages: &'a [openlens_engine::PageStats],
+}
+
+/// The click map as SVG dots, every click or the rage clicks only.
+fn click_svg(map: &openlens_engine::ClickMap, rage_only: bool) -> Markup {
+    let cols = openlens_engine::MAP_COLUMNS;
+    let row = openlens_engine::MAP_ROW;
+    let vw = if map.viewport > 0 { map.viewport } else { 1280 };
+    let cells: Vec<(i64, i64, i64, i64)> = map
+        .cells
+        .iter()
+        .copied()
+        .filter(|c| !rage_only || c.3 > 0)
+        .collect();
+    let rows = cells.iter().map(|c| c.1).max().unwrap_or(0) + 2;
+    let height = (rows * row).max(400);
+    let weight = |c: (i64, i64, i64, i64)| if rage_only { c.3 } else { c.2 };
+    let max = cells.iter().map(|c| weight(*c)).max().unwrap_or(1).max(1) as f64;
+    let cw = vw as f64 / cols as f64;
+    let what = if rage_only {
+        "Rage clicks"
+    } else {
+        "Click density"
+    };
+    html! {
+        svg.heatmap viewBox={ "0 0 " (vw) " " (height) } role="img" aria-label={ (what) " on " (map.path) } {
+            rect.page x="0" y="0" width=(vw) height=(height) {}
+            @for c in &cells {
+                @let (cx, cy, n, rage) = *c;
+                @let o = format!("{:.2}", (0.15 + 0.85 * (weight(*c) as f64 / max)).min(1.0));
+                circle class=(if rage > 0 { "dot rage" } else { "dot" })
+                    cx=(format!("{:.0}", (cx as f64 + 0.5) * cw)) cy=((cy * row) + row / 2)
+                    r=(format!("{:.0}", (cw * 0.9).max(8.0))) fill-opacity=(o) {
+                    title { (n) " clicks" @if rage > 0 { ", " (rage) " rage" } }
+                }
+            }
+        }
+    }
+}
+
+/// The most clicked labels (or the most rage-clicked), busiest first, as
+/// a ranked list of bars.
+fn ranked_labels(list: &[openlens_engine::Hotspot], rage: bool) -> Markup {
+    let n = |h: &openlens_engine::Hotspot| if rage { h.rage } else { h.clicks };
+    let mut v: Vec<&openlens_engine::Hotspot> = list.iter().filter(|h| n(*h) > 0).collect();
+    v.sort_by_key(|h| std::cmp::Reverse(n(*h)));
+    let max = v.first().map_or(1, |h| n(*h)).max(1) as f64;
+    let unit = if rage { " rage" } else { " clicks" };
+    html! {
+        @if v.is_empty() { p.muted.small { "No clicked element on this page in this window." } }
+        @else {
+            ol.ranked-bars aria-label=(if rage { "Most rage-clicked elements" } else { "Most clicked elements" }) {
+                @for (i, h) in v.iter().enumerate() {
+                    li {
+                        span.rank { (format!("{:02}", i + 1)) }
+                        span.label { (h.label) }
+                        (crate::board::bar_with(n(*h) as f64 / max, &format!("{}{unit}", compact(n(*h)))))
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// How far visits of the page scroll, as bars.
+fn scroll_bars(pg: &openlens_engine::PageStats) -> Markup {
+    html! {
+        ol.ranked-bars aria-label="Scroll depth" {
+            li { span.label { "Reach half the page" } (crate::board::bar_with(pg.reach_half, &pct(pg.reach_half))) }
+            li { span.label { "Reach the end" } (crate::board::bar_with(pg.reach_end, &pct(pg.reach_end))) }
+        }
+        p.muted.small { "Median deepest scroll: " (format!("{:.0}", pg.median_scroll)) "% of the page." }
+    }
+}
+
+/// A page's heatmap (#548): a page picker, one tab per mode the data has
+/// (clicks, rage clicks, scroll depth), the click map drawn in SVG (no
+/// script), and a link to see it over the real page when a recording of
+/// that page exists. Without one, the most clicked elements and the scroll
+/// depth stand in for the page.
 pub fn heatmap(
     p: &ProjectInfo<'_>,
     map: &openlens_engine::ClickMap,
     overlay: Option<&str>,
+    v: &HeatmapView<'_>,
 ) -> Markup {
-    let cols = openlens_engine::MAP_COLUMNS;
-    let row = openlens_engine::MAP_ROW;
     let vw = if map.viewport > 0 { map.viewport } else { 1280 };
-    let rows = map.cells.iter().map(|c| c.1).max().unwrap_or(0) + 2;
-    let height = (rows * row).max(400);
-    let max = map.cells.iter().map(|c| c.2).max().unwrap_or(1).max(1) as f64;
-    let cw = vw as f64 / cols as f64;
+    let page = v.pages.iter().find(|x| x.path == map.path);
+    let has_rage = map.cells.iter().any(|c| c.3 > 0)
+        || page.is_some_and(|pg| pg.hotspots.iter().any(|h| h.rage > 0));
+    let has_scroll = page.is_some_and(|pg| pg.median_scroll >= 0.0);
+    let mode = match v.mode {
+        "rage" if has_rage => "rage",
+        "scroll" if has_scroll => "scroll",
+        _ => "clicks",
+    };
+    let base = crate::manage::heatmap_href(p.id, &map.path);
+    let mut modes = vec![("clicks", "Clicks")];
+    if has_rage {
+        modes.push(("rage", "Rage clicks"));
+    }
+    if has_scroll {
+        modes.push(("scroll", "Scroll depth"));
+    }
+    let no_labels = html! { p.muted.small { "Clicked elements and scroll depth are kept for the most viewed pages; this page is not one of them." } };
     layout(
         "Heatmap",
         Some(p),
         html! {
             div.heading { div {
-                h1 { "Click heatmap" }
+                h1 { "Heatmap" }
                 p.muted { span.mono { (map.path) } " · " (compact(map.clicks)) " clicks with a position, last 30 days · median screen " (vw) " px wide" }
             } }
+            form.card.refine method="get" action={ "/p/" (p.id) "/heatmap" } aria-label="Pick a page" {
+                label { "Page"
+                    input type="text" name="path" value=(map.path) list="heat-pages" required spellcheck="false";
+                }
+                datalist #heat-pages { @for pg in v.pages { option value=(pg.path) {} } }
+                @if mode != "clicks" { input type="hidden" name="mode" value=(mode); }
+                button.primary type="submit" { "Show" }
+            }
+            @if modes.len() > 1 {
+                nav.tabs aria-label="Mode" {
+                    @for (k, l) in &modes {
+                        a href=(if *k == "clicks" { base.clone() } else { format!("{base}&mode={k}") }) aria-current=[(*k == mode).then_some("page")] { (l) }
+                    }
+                }
+            }
             @if let Some(href) = overlay {
                 p { a.button href=(href) { (icon("play")) "See it over the real page" } }
-            }
-            @if map.cells.is_empty() {
-                section.card { p.muted { "No clicks with a position on this page yet (positions are recorded by SDK 0.1 builds from 2026-11-22 on)." } }
             } @else {
-                section.card.wide {
-                    svg.heatmap viewBox={ "0 0 " (vw) " " (height) } role="img" aria-label={ "Click density on " (map.path) } {
-                        rect.page x="0" y="0" width=(vw) height=(height) {}
-                        @for (cx, cy, n, rage) in &map.cells {
-                            @let o = format!("{:.2}", (0.15 + 0.85 * (*n as f64 / max)).min(1.0));
-                            circle class=(if *rage > 0 { "dot rage" } else { "dot" })
-                                cx=(format!("{:.0}", (*cx as f64 + 0.5) * cw)) cy=((cy * row) + row / 2)
-                                r=(format!("{:.0}", (cw * 0.9).max(8.0))) fill-opacity=(o) {
-                                title { (n) " clicks" @if *rage > 0 { ", " (rage) " rage" } }
+                p.muted.small.no-replay { (icon("play")) " No recorded visit of this page yet: with session replays on, the map is also drawn over the page as it was recorded." }
+            }
+            @match mode {
+                "scroll" => {
+                    section.card.wide aria-label="Scroll depth" {
+                        h2 { "How far people scroll" }
+                        @if let Some(pg) = page { (scroll_bars(pg)) }
+                    }
+                },
+                _ => {
+                    @let rage = mode == "rage";
+                    @if !map.cells.iter().any(|c| !rage || c.3 > 0) {
+                        section.card { p.muted { @if rage { "No rage click with a position on this page." } @else { "No clicks with a position on this page yet (positions are recorded by SDK 0.1 builds from 2026-11-22 on)." } } }
+                    } @else {
+                        section.card.wide {
+                            (click_svg(map, rage))
+                            p.muted.small { "Each dot is a 2% × 20 px area; darker means more " (if rage { "rage clicks" } else { "clicks" }) ". Red marks rage clicks. Clicks from every screen width are drawn together at the median width: the engine keeps one width per page, not per click, so there is no Mobile, Tablet or Desktop view." }
+                        }
+                    }
+                    div.grid {
+                        section.card aria-label="Most clicked" {
+                            h2 { (if rage { "Most rage-clicked" } else { "Most clicked" }) }
+                            @match page { Some(pg) => (ranked_labels(&pg.hotspots, rage)), None => (no_labels) }
+                        }
+                        @if overlay.is_none() && !rage {
+                            section.card aria-label="Scroll depth" {
+                                h2 { "How far people scroll" }
+                                @match page.filter(|_| has_scroll) {
+                                    Some(pg) => (scroll_bars(pg)),
+                                    None => p.muted.small { "No scroll measured on this page." },
+                                }
                             }
                         }
                     }
-                    p.muted.small { "Each dot is a 2% × 20 px area; darker means more clicks. Red marks rage clicks. The page is drawn at its median screen width." }
-                }
+                },
             }
         },
     )
