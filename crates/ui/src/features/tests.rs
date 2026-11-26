@@ -157,6 +157,7 @@ fn the_instance_forms_post_the_same_fields() {
         created: None,
         notice: None,
         error: None,
+        confirm: None,
     })
     .into_string();
     csp_clean(&tokens);
