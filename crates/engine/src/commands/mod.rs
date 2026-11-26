@@ -17,6 +17,7 @@ use serde::de::DeserializeOwned;
 
 use crate::{Board, Filters};
 
+pub mod goals;
 
 /// Who may run a command, in the terms of the server's access policy
 /// (`crates/server/src/access.rs`, #294).
@@ -70,7 +71,13 @@ pub const fn spec<C: Command>() -> Spec {
 }
 
 /// Every command.
-pub const REGISTRY: &[Spec] = &[];
+pub const REGISTRY: &[Spec] = &[
+    spec::<goals::List>(),
+    spec::<goals::Set>(),
+    spec::<goals::Delete>(),
+    spec::<goals::SetObjective>(),
+    spec::<goals::DeleteObjective>(),
+];
 
 /// Who runs a command, beyond the access level the adapter checked.
 #[derive(Debug, Clone, Default)]
