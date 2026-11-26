@@ -163,7 +163,7 @@ pub(crate) async fn tick(state: &AppState, minute: u64) {
             Box::pin(crate::goals::hourly(state, &p, s.regressions)).await;
         }
         if minute % 60 == 4 {
-            Box::pin(crate::tickets::hourly(state, &p)).await;
+            Box::pin(openlens_engine::commands::tickets::hourly(state, &p)).await;
         }
         if s.cert
             && minute % 60 == 2

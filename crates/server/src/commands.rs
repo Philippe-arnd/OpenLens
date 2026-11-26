@@ -2,6 +2,7 @@
 //! and the cached board and timeline the commands read.
 
 use openlens_engine::commands::alerts::Delivery;
+use openlens_engine::commands::tickets::GitHub;
 use openlens_engine::commands::{Caller, Change, Host};
 use openlens_featuremap::FeatureMap;
 use openlens_meta::{Meta, Project};
@@ -67,6 +68,29 @@ impl Host for AppState {
         resolved: bool,
     ) -> Vec<Delivery> {
         crate::alerts::deliver(self, project, title, body, rule, resolved).await
+    }
+
+    fn github(&self, project: &str) -> Option<GitHub> {
+        crate::tickets::github(self, project).map(|(api, repo, token)| GitHub { api, repo, token })
+    }
+
+    async fn github_call(
+        &self,
+        method: &str,
+        url: &str,
+        token: &str,
+        body: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value, String> {
+        let (method, url, token) = (method.to_owned(), url.to_owned(), token.to_owned());
+        tokio::task::spawn_blocking(move || crate::tickets::gh(&method, &url, &token, body))
+            .await
+            .map_err(|e| e.to_string())?
+    }
+
+    fn set_github_token(&self, token: &str) -> Result<(), String> {
+        let s = crate::secrets::seal(&self.data_dir, token)?;
+        let _ = self.meta.set_setting("github_token", &s);
+        Ok(())
     }
 }
 
