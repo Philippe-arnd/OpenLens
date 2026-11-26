@@ -51,6 +51,14 @@ const TOOL_OF: &[(&str, &str)] = &[
     // release before reading the board.
     ("board.estimate", "board"),
     ("releases.record", "record_release"),
+    // Status announcements (#562).
+    ("announcements.list", "announcements"),
+    ("announcements.create", "announce"),
+    ("announcements.add_update", "announcement_update"),
+    ("announcements.update", "announcement_edit"),
+    ("announcements.close", "announcement_close"),
+    ("announcements.delete", "announcement_delete"),
+    ("announcements.send", "announcement_send"),
 ];
 
 /// Commands deliberately without an MCP tool, each with its reason.
