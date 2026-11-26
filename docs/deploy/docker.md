@@ -8,7 +8,7 @@ The general guide is [README.md](README.md): requirements, release channels, upd
 docker run -d --name openlens --restart unless-stopped \
   -p 127.0.0.1:8686:8686 -v openlens-data:/data \
   -e OPENLENS_PUBLIC_URL=https://analytics.example.com \
-  ghcr.io/philippe-arnd/openlens:0.2
+  ghcr.io/philippe-arnd/openlens:0.6
 docker logs openlens   # first start: a single-use owner link, valid 1 hour
 ```
 
@@ -17,7 +17,7 @@ Or with Compose (`compose.yaml`):
 ```yaml
 services:
   openlens:
-    image: ghcr.io/philippe-arnd/openlens:0.2
+    image: ghcr.io/philippe-arnd/openlens:0.6
     restart: unless-stopped
     ports: ["127.0.0.1:8686:8686"]
     environment:
@@ -74,7 +74,7 @@ server {
 
 ## Updates
 
-Follow a channel: a minor (`:0.2` above; patches only, no behaviour change) or `:latest`. Never `:edge`, which follows `main`. On start, a new version backs up the data (`backups/upgrade/`) and refuses data from a newer release ([README.md](README.md#updates-without-anyone)).
+Follow a channel: a minor (`:0.6` above; patches only, no behaviour change) or `:latest`. Never `:edge`, which follows `main`. On start, a new version backs up the data (`backups/upgrade/`) and refuses data from a newer release ([README.md](README.md#updates-without-anyone)).
 
 **Hands-off, with a rollback:** [`deploy/docker/openlens-compose-update`](../../deploy/docker/openlens-compose-update) pulls the channel tag of the `openlens` service, recreates it, and waits up to 15 minutes for the healthcheck (the upgrade backup comes first). If the new image exits, restarts or never gets healthy, it goes back to the image that ran before and remembers the failed one, so later runs wait for the next image. With [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) installed, it checks the image signature before the switch ([Verify what you run](README.md#verify-what-you-run)). It needs the healthcheck of the Compose file above, and exits with an error when it rolled back, so cron mails you.
 
@@ -90,7 +90,7 @@ Plain `docker compose pull -q && docker compose up -d` from cron also works, wit
 
 ### Roll back
 
-`openlens-compose-update` goes back to the previous image on its own. By hand: put the previous release in `image:` (for example `:v0.2.1`), then `docker compose up -d`.
+`openlens-compose-update` goes back to the previous image on its own. By hand: put the previous release in `image:` (for example `:v0.6.0`), then `docker compose up -d`.
 
 If the log then says *this data was written by OpenLens X (data format N)*, the newer release changed the data format: put back the copy it made before it started. The image has no shell, so a throwaway BusyBox container does it; what the backup replaces goes to `/data/.newer`, and the keys, icons and other backups stay:
 

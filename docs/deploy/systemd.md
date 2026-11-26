@@ -9,6 +9,24 @@ The binaries are built for Linux `x86_64` and `aarch64` with glibc 2.35 or newer
 | `openlens.service` | the server, as a dedicated user, sandboxed, with a memory cap |
 | `openlens-update` | installs or updates to the newest release of a channel, verified, and rolls back if it is not healthy |
 | `openlens-update@.service`, `openlens-update@.timer` | run `openlens-update` once a day for the channel in the unit name |
+| `install.sh` | does the steps of [Install](#install) below in one go, and enables the daily updates |
+
+## Install in one command
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Philippe-arnd/OpenLens/main/deploy/systemd/install.sh \
+  | sudo OPENLENS_PUBLIC_URL=https://analytics.example.com sh -s -- 0.6
+```
+
+`install.sh` (POSIX `sh`) takes the channel (`latest`, or a minor such as `0.6`; without it, the minor of the newest stable release) and:
+
+1. checks the machine: root, systemd, Linux `x86_64` or `aarch64` with glibc, and the tools of [Install](#install) (`curl`, `jq`, `gh` 2.49 or newer). It installs no package: it says what is missing;
+2. finds the newest stable release of the channel and downloads the four files of the table above **from that release's tag**, so they match the binary. Releases before 0.6.0 are refused, since they are not signed;
+3. creates the `openlens` user and `/etc/openlens/openlens.env` (root only) with `OPENLENS_PUBLIC_URL` when you set it, as above. An existing file is kept;
+4. runs `openlens-update <channel>`, which downloads the release and checks `SHA256SUMS` and the build provenance before it installs anything ([Updates](#updates));
+5. enables `openlens.service` and the daily `openlens-update@<channel>.timer` ([Hands-off updates](#hands-off-updates)), waits for `/healthz` and says where the first start's owner link is.
+
+Running it again updates the systemd files and the release (with the rollback of `openlens-update`); the data, the env file and the user stay. It also moves the older install described below. The script itself comes from `main` over HTTPS: read it first if you prefer, it is short. The step-by-step install follows.
 
 ## Install
 
