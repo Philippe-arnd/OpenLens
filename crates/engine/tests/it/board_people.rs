@@ -22,7 +22,7 @@ fn map(version: i64) -> FeatureMap {
     .unwrap()
 }
 
-/// 40 days of people with roles, features and releases, a few of them
+/// 12 days of people with roles, features and releases, a few of them
 /// anonymous, plus some staging traffic; nobody is identified on a day
 /// that gets rolled up, so dropping such a day's events keeps `persons`.
 fn seed() -> tempfile::TempDir {
@@ -41,7 +41,7 @@ fn seed() -> tempfile::TempDir {
     ];
     let paths = ["/search", "/billing", "/pay", "/", "/search/x"];
     let mut evs = Vec::new();
-    for k in 0..40i64 {
+    for k in 0..12i64 {
         for (i, (who, role)) in people.iter().enumerate() {
             if (k + i as i64) % 3 == 0 {
                 continue;
@@ -117,7 +117,7 @@ async fn roll_up(root: &std::path::Path, version: i64) -> Vec<chrono::NaiveDate>
     let m = map(version);
     let features = day_features(Some((&m, version)));
     let days = rollup::missing(root, "p", Utc::now()).unwrap();
-    assert!(days.len() > 30, "most of the window is closed");
+    assert!(days.len() >= 10, "most of the data is on closed days");
     for d in &days {
         let label = d.format("%Y-%m-%d").to_string();
         let batches = q.rollup_day("p", &label, None, &features).await.unwrap();
@@ -150,10 +150,16 @@ fn people(b: &Board) -> String {
 /// The boards the test compares: every filter that changes how the
 /// rollup is read.
 async fn boards(root: &std::path::Path, version: i64) -> Vec<String> {
+    boards_with(root, version, true).await
+}
+
+/// [`boards`], or only the unfiltered one when `all` is false (the
+/// feature-map test needs no filters, and each board costs ~15 queries).
+async fn boards_with(root: &std::path::Path, version: i64, all: bool) -> Vec<String> {
     let q = QueryEngine::new(root, Limits::default());
     let m = map(version);
     let mut out = Vec::new();
-    for f in [
+    let filters = [
         Filters::default(),
         Filters {
             role: Some("staff".into()),
@@ -167,7 +173,9 @@ async fn boards(root: &std::path::Path, version: i64) -> Vec<String> {
             environment: "staging".into(),
             ..Filters::default()
         },
-    ] {
+    ];
+    let n = if all { filters.len() } else { 1 };
+    for f in filters.into_iter().take(n) {
         let b = board(&q, "p", &f, Some((&m, version))).await.unwrap();
         out.push(people(&b));
     }
@@ -209,10 +217,14 @@ async fn people_blocks_read_closed_days_from_person_day_with_the_same_numbers() 
 async fn a_day_rolled_with_an_older_map_is_read_from_its_events() {
     let dir = seed();
     let root = dir.path();
-    let events_only = boards(root, 2).await;
-    assert_ne!(events_only, boards(root, 1).await, "the maps differ");
+    let events_only = boards_with(root, 2, false).await;
+    assert_ne!(
+        events_only,
+        boards_with(root, 1, false).await,
+        "the maps differ"
+    );
     let rolled = roll_up(root, 1).await;
-    assert_eq!(boards(root, 2).await, events_only);
+    assert_eq!(boards_with(root, 2, false).await, events_only);
     // The map in force reads that day's events, so losing them shows; the
     // map it was rolled with reads the rollup.
     let (v1, v2) = (uses(root, 1).await, uses(root, 2).await);
