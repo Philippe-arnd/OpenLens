@@ -151,7 +151,7 @@ pub(crate) fn cost(
     // A day read both ways (raw for one block) is read from the events.
     let rollup_days = from_rollups
         .iter()
-        .filter(|d| !raw.contains(*d) && size(*d).is_some())
+        .filter(|d| !raw.contains(*d) && size(d).is_some())
         .count();
     let raw: Vec<&DaySize> = raw.iter().filter_map(size).collect();
     let bytes = raw.iter().map(|s| s.bytes).sum::<u64>();
