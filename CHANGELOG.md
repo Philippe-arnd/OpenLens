@@ -37,6 +37,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- **Backups include the project icons** (#488): `openlens backup` (and scheduled backups) now copy `icons/`, so a restored server shows the icons at once instead of fetching them again. The session and secret key files stay out of backups on purpose; `docs/deploy/README.md` now says what a backup holds and what to do about the keys when restoring.
 - **A cached board page is served from the cache as a whole** (#480): the revenue block of the board (and of the Revenue page) queried 30 days of event properties again on every load, so with a feature map that declares success events a board loaded twice took as long the second time as the first. The revenue is now computed with the board and cached with it, and follows new data the same way.
 
 ## [0.5.0] - 2026-11-24
