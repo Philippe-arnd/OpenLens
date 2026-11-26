@@ -21,14 +21,3 @@ pub fn day_features(map: Option<(&FeatureMap, i64)>) -> DayFeatures {
         map_version: Some(version),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    /// `session_day` counts interactions with the query crate's rule; the
-    /// board's sessions must use the same one, or a session rolled up and
-    /// the same session read from the events disagree on bounces.
-    #[test]
-    fn the_board_and_session_day_agree_on_interactions() {
-        assert_eq!(crate::INTERACTION, openlens_query::INTERACTION);
-    }
-}

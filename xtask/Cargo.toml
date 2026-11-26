@@ -15,6 +15,10 @@ openlens-testkit = { path = "../crates/testkit" }
 openlens-event = { path = "../crates/event" }
 openlens-storage = { path = "../crates/storage" }
 openlens-meta = { path = "../crates/meta" }
+openlens-query = { path = "../crates/query" }
+openlens-engine = { path = "../crates/engine" }
+openlens-featuremap = { path = "../crates/featuremap" }
+tokio.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

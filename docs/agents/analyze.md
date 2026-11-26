@@ -8,6 +8,7 @@ Start from the summaries and drill down only where something stands out. Every t
 | Headline KPIs by role, environment or release | `kpi_report` (optional `role`, `env`, `release`) | `board` (everything) |
 | Split by account, plan, page or feature | `kpi_report` with `by` (`role`, `account`, `plan`, `page`, `feature`) | `sql` |
 | Did the last release move the numbers? | `kpi_report`: `releases` holds the latest two | `kpi_report --release <name>` |
+| Is the new release live, still rolling out, or rolled back? | `releases` (optional `env`): state per environment from the share of daily users, first and last seen, users, time in staging | `kpi_report --release <name>` |
 | What did this user do (before churning, before an error)? | `user_timeline { distinct_id }`: role history, recordings, latest events | the replay link it returns |
 | What breaks, for whom? | `errors`: groups with users, roles, releases, places and the original source line | `user_timeline` of an affected user |
 | Are pages slow, and what do we fix first? | `vitals`: each Web Vital explained, p75, rating, thresholds, worst pages and ranked actions | `sql` on `$vital` events |

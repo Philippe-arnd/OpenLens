@@ -7,7 +7,7 @@ use openlens_meta::{Meta, Project};
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::json;
 
-use super::{Access, Caller, Change, Command, Error, Host};
+use super::{Access, Caller, Change, Command, Error, Host, short_hash};
 use crate::Filters;
 use crate::goals::{self, Goal, Move, Objective, Status};
 
@@ -37,13 +37,6 @@ fn save_objectives(meta: &Meta, project: &str, o: &[Objective]) -> Result<(), Er
     let j = serde_json::to_string(o).map_err(|e| Error::Storage(e.to_string()))?;
     meta.set_project_setting(project, "objectives", &j)
         .map_err(|e| Error::Storage(e.to_string()))
-}
-
-/// A 12-character id from `s` (the first bytes of its SHA-256, in hex).
-fn short_hash(s: &str) -> String {
-    use sha2::Digest;
-    let h = hex::encode(sha2::Sha256::digest(s.as_bytes()));
-    h.get(..12).unwrap_or(&h).to_owned()
 }
 
 async fn project<H: Host>(host: &H, id: &str) -> Result<Project, Error> {

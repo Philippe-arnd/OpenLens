@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<!-- OpenLens as an Unraid Docker template. Guide: docs/deploy/panels.md#unraid.
+     Copy it to /boot/config/plugins/dockerMan/templates-user/my-openlens.xml,
+     then Docker → Add Container → Template: openlens. -->
+<Container version="2">
+  <Name>openlens</Name>
+  <!-- A channel: a minor such as :0.6 (patches only) or :latest; never :edge. -->
+  <Repository>ghcr.io/philippe-arnd/openlens:0.6</Repository>
+  <Registry>https://github.com/Philippe-arnd/OpenLens/pkgs/container/openlens</Registry>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/Philippe-arnd/OpenLens/issues</Support>
+  <Project>https://github.com/Philippe-arnd/OpenLens</Project>
+  <Overview>Self-hosted product analytics, wired by agents. One container, one data folder, no setup. The first start prints a single-use owner link (valid one hour) in the container's log.</Overview>
+  <Category>Tools: Network:Web</Category>
+  <WebUI>http://[IP]:[PORT:8686]/</WebUI>
+  <TemplateURL/>
+  <Icon/>
+  <!-- appdata belongs to nobody:users (99:100); the image's own user is 65532. -->
+  <ExtraParams>--user 99:100</ExtraParams>
+  <Config Name="Web UI" Target="8686" Default="8686" Mode="tcp" Description="Port of the dashboard and of the capture API. Put a reverse proxy with HTTPS in front." Type="Port" Display="always" Required="true" Mask="false">8686</Config>
+  <Config Name="Data" Target="/data" Default="/mnt/user/appdata/openlens" Mode="rw" Description="Events, replays, settings and backups." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/openlens</Config>
+  <Config Name="Public URL" Target="OPENLENS_PUBLIC_URL" Default="" Mode="" Description="The public HTTPS URL of your reverse proxy, for login links and emails (for example https://analytics.example.com)." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="Admin token" Target="OPENLENS_ADMIN_TOKEN" Default="" Mode="" Description="Optional. Empty: generated on first start and printed in the log." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+</Container>
