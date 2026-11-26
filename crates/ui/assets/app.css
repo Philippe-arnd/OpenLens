@@ -632,7 +632,7 @@
   .topbar .bar, .subnav .section-tabs { width: min(1200px, 100% - 40px); margin-inline: auto; }
   .topbar .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; min-height: 52px; padding-block: 8px; font-size: var(--step-0); }
   .topbar .crumbs ol { margin: 0; font-size: 13px; }
-  .topbar .context { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto; }
+  .topbar .context { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 0 auto; }
 
   /* Section tabs, under the top bar: an underline on the current one. */
   .subnav { border-bottom: 1px solid var(--line); }

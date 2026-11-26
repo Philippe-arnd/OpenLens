@@ -48,7 +48,7 @@ pub use manage::*;
 use openlens_engine::{Board, EventRow, Filters};
 pub use releases::*;
 pub use settings::*;
-pub(crate) use shell::{Crumbs, NAV, Signal, layout, layout_with, signals};
+pub(crate) use shell::{Crumbs, NAV, Signal, layout, layout_in, layout_with, signals};
 pub use shell::{NavProject, set_admin_source, set_icon_source, set_nav_project_source};
 pub use team::*;
 pub use totp::{TotpCard, login_code, totp_recovery_codes};

@@ -49,15 +49,15 @@ pub fn audience(
             }
         }
     };
-    layout(
+    layout_in(
         "Audience",
         Some(p),
+        context_bar(p.id, b, f, "/audience", false),
         html! {
             div.heading { div {
                 h1 { "Audience" }
                 p.muted { (compact(a.users)) " users with a page view in the last 30 days, in " strong { (f.environment) } ". IP addresses are used for the country and never stored." }
             } }
-            (context_bar(p.id, b, f, "/audience", false))
             section.card.wide {
                 h2.violet { (icon("globe")) "Where they are" }
                 @if !geo { p.small.muted { "The country database is not installed on this server (it ships in the Docker image; see the deploy guide), so countries are unknown." } }
@@ -165,9 +165,10 @@ pub fn flows(
         ribbons.push((d, l.from.clone(), l.to.clone(), l.sessions, l.to == EXIT));
     }
     let base = format!("/p/{}/flows", p.id);
-    layout(
+    layout_in(
         "Feature flow",
         Some(p),
+        context_bar(p.id, b, f, "/flows", false),
         html! {
             div.heading { div {
                 h1 { "Feature flow" }
@@ -188,7 +189,6 @@ pub fn flows(
                 input type="hidden" name="env" value=(f.environment);
                 button type="submit" { "Show" }
             }
-            (context_bar(p.id, b, f, "/flows", false))
             section.card.wide {
                 @if flow.sessions == 0 { p.muted { "No session used a feature in this window. Features come from the feature map and " code { "data-feature" } "." } }
                 @else {
@@ -386,9 +386,19 @@ pub fn acquisition(
         ("referrer", "Referrer"),
     ];
     let total: i64 = rows.iter().map(|r| r.users).sum();
-    layout(
+    layout_in(
         "Acquisition",
         Some(p),
+        context_bar(
+            p.id,
+            b,
+            f,
+            &format!(
+                "/acquisition?by={by}&touch={}",
+                if last { "last" } else { "first" }
+            ),
+            false,
+        ),
         html! {
             div.heading { div {
                 h1 { "Where users come from" }
@@ -402,7 +412,6 @@ pub fn acquisition(
                 a href={ (base) "?by=" (by) "&touch=first&env=" (env) } aria-current=[(!last).then_some("page")] { "First touch" }
                 a href={ (base) "?by=" (by) "&touch=last&env=" (env) } aria-current=[last.then_some("page")] { "Last touch" }
             }
-            (context_bar(p.id, b, f, &format!("/acquisition?by={by}&touch={}", if last { "last" } else { "first" }), false))
             section.card.wide {
                 @if rows.is_empty() { p.muted { "No landing with a channel yet. The SDK sends the referrer and the campaign parameters on the first page view of a visit (SDK builds from 2026-11-23 on)." } }
                 @else {
@@ -467,9 +476,10 @@ pub fn churn(
     let rate = c.churned_recent as f64 / c.active_at_start.max(1) as f64;
     let net = c.new_recent + c.resurrected - c.churned_recent;
     let leave_max = c.leave_week.iter().map(|x| x.1).max().unwrap_or(1).max(1) as f64;
-    layout(
+    layout_in(
         "Churn",
         Some(p),
+        context_bar(p.id, b, f, "/churn", false),
         html! {
             div.heading { div {
                 h1 { "Churn" }
@@ -480,7 +490,6 @@ pub fn churn(
                     p.notice { "Your users usually come back within " strong { (s) " days" } " (9 gaps out of 10 between active days are shorter): " code { "churn_after_days: " (s) } " would fit this app better. Nothing changes until the feature map says so." }
                 }
             }
-            (context_bar(p.id, b, f, "/churn", false))
             // The churn page is the detail (#409): only "At risk now" opens
             // its list below; the others stay plain on purpose (no_detail).
             section.tiles aria-label="How many" {
@@ -692,15 +701,15 @@ pub fn revenue(
             }
         }
     };
-    layout(
+    layout_in(
         "Revenue",
         Some(p),
+        context_bar(p.id, b, f, "/revenue", false),
         html! {
             div.heading { div {
                 h1 { "Revenue" }
                 p.muted { "Amounts carried by success events (" code { "revenue" } " or " code { "value" } ", with an optional " code { "currency" } "), last 30 days, " strong { (f.environment) } "." }
             } }
-            (context_bar(p.id, b, f, "/revenue", false))
             @match r {
                 None => section.card.wide { p { "No success event carries an amount yet. Send one with the event, for example " code { "openlens.track(\"order_paid\", { revenue: 49, currency: \"EUR\" })" } ", and declare it as a feature's success event." } },
                 Some(r) => {

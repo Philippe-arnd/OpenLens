@@ -502,7 +502,7 @@ fn page(
                             header.topbar {
                                 div.bar {
                                     (trail)
-                                    @if !context.0.is_empty() { div.context { (context) } }
+                                    (context)
                                 }
                             }
                         }

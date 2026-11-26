@@ -3,6 +3,7 @@
 //! with the brand, a heading, one line of text and the form.
 
 use super::*;
+use maud::DOCTYPE;
 
 /// A page outside the shell: one card in the middle of the screen.
 pub(crate) fn auth_page(title: &str, body: Markup) -> Markup {
