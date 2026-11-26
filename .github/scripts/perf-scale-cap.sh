@@ -36,7 +36,8 @@ start() {
   # Each query with its time (the query layer logs it at debug), so a slow
   # board says which block is slow: see queries.txt.
   (
-    if [ -n "$MEMORY" ]; then echo "$BASHPID" | sudo tee "$CG/cgroup.procs" > /dev/null; fi
+    # $BASHPID read before the pipe: inside it, it names the pipe's own subshell.
+    if [ -n "$MEMORY" ]; then self=$BASHPID; echo "$self" | sudo tee "$CG/cgroup.procs" > /dev/null; fi
     exec env RUST_LOG=info,openlens_query=debug OPENLENS_DATA_DIR="$D" OPENLENS_ADDR=127.0.0.1:18741 OPENLENS_ADMIN_TOKEN=perf "$BIN/openlens"
   ) >> server.log 2>&1 &
   PID=$!
