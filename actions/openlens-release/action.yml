@@ -1,0 +1,102 @@
+# The openlens-release action (#521, part 4 of #237, D-066): record an app
+# release in OpenLens from the deploy step, with its commit range, upload
+# its source maps, and optionally wait for its verdict. It is for the
+# repositories of monitored apps, not this repository's CI.
+#
+#   - uses: Philippe-arnd/OpenLens/actions/openlens-release@<OpenLens tag>
+#     with:
+#       server: ${{ vars.OPENLENS_SERVER }}
+#       token: ${{ secrets.OPENLENS_TOKEN }}
+#       release: ${{ github.sha }}
+#
+# It downloads `openlens-cli` from the OpenLens release named by the ref the
+# action is used at (the latest release when that ref is not a version
+# tag), checks it against the release's SHA256SUMS, and runs
+# `openlens-cli release`. Linux runners only.
+name: OpenLens release
+description: Record an app release in OpenLens with its commit range, upload its source maps, and optionally wait for its verdict.
+branding:
+  icon: activity
+  color: blue
+inputs:
+  server:
+    description: The OpenLens server URL (https).
+    required: true
+  token:
+    description: An OpenLens API token with the write scope. Pass it from a secret.
+    required: true
+  release:
+    description: The release name, the same the SDK sends.
+    required: true
+  project:
+    description: The OpenLens project id.
+    required: false
+    default: default
+  sourcemaps:
+    description: A build output directory whose *.map files are uploaded for this release. Empty uploads nothing.
+    required: false
+    default: ""
+  environment:
+    description: The environment deployed to.
+    required: false
+    default: production
+  wait:
+    description: Wait up to 30 minutes for the release's verdict, and fail the step when it is regressed or does not come.
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Download openlens-cli
+      shell: bash
+      env:
+        ACTION_REF: ${{ github.action_ref }}
+        REPO: Philippe-arnd/OpenLens
+      run: |
+        set -euo pipefail
+        if [ "$RUNNER_OS" != Linux ]; then
+          echo "::error::openlens-release runs on Linux runners only"; exit 1
+        fi
+        case "$(uname -m)" in
+          x86_64|amd64) arch=x86_64 ;;
+          aarch64|arm64) arch=aarch64 ;;
+          *) echo "::error::no openlens-cli build for $(uname -m)"; exit 1 ;;
+        esac
+        case "$ACTION_REF" in
+          v[0-9]*) tag="$ACTION_REF" ;;
+          *)
+            # The latest release: GitHub redirects to its tag.
+            url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest")
+            tag="${url##*/}"
+            ;;
+        esac
+        case "$tag" in
+          v[0-9]*) ;;
+          *) echo "::error::cannot find the OpenLens release to download ($tag)"; exit 1 ;;
+        esac
+        dir="$RUNNER_TEMP/openlens-cli"
+        mkdir -p "$dir"
+        asset="openlens-$tag-$arch-linux.tar.gz"
+        base="https://github.com/$REPO/releases/download/$tag"
+        curl -fsSL -o "$dir/$asset" "$base/$asset"
+        curl -fsSL -o "$dir/SHA256SUMS" "$base/SHA256SUMS"
+        (cd "$dir" && grep -F "  $asset" SHA256SUMS | sha256sum -c -)
+        tar -xzf "$dir/$asset" -C "$dir" --strip-components=1 "openlens-$tag-$arch-linux/openlens-cli"
+        echo "OPENLENS_CLI=$dir/openlens-cli" >> "$GITHUB_ENV"
+    - name: Record the release
+      shell: bash
+      env:
+        OPENLENS_SERVER: ${{ inputs.server }}
+        OPENLENS_TOKEN: ${{ inputs.token }}
+        RELEASE: ${{ inputs.release }}
+        PROJECT: ${{ inputs.project }}
+        SOURCEMAPS: ${{ inputs.sourcemaps }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        WAIT: ${{ inputs.wait }}
+        COMMIT: ${{ github.sha }}
+      run: |
+        set -euo pipefail
+        args=(release "$RELEASE" --project "$PROJECT" --env "$ENVIRONMENT" --commit "$COMMIT")
+        if [ -n "$SOURCEMAPS" ]; then args+=(--sourcemaps "$SOURCEMAPS"); fi
+        if [ "$WAIT" = true ]; then args+=(--wait); fi
+        "$OPENLENS_CLI" "${args[@]}"

@@ -332,6 +332,26 @@ fn run(cli: Cli) -> Result<bool, String> {
             release,
             dir,
         } => release::sourcemaps(&client()?, project, release, dir),
+        Command::Release {
+            name,
+            project,
+            commit,
+            from,
+            env,
+            sourcemaps,
+            wait,
+        } => release::release(
+            &client()?,
+            &release::Args {
+                project,
+                name,
+                commit: commit.as_deref(),
+                from: from.as_deref(),
+                env,
+                sourcemaps: sourcemaps.as_deref(),
+                wait: *wait,
+            },
+        ),
         Command::Import {
             project,
             file,

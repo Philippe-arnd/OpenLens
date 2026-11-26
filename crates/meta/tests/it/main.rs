@@ -480,3 +480,63 @@ fn a_deploy_hook_secret_is_kept_hashed_and_deploys_stay_bounded() {
     assert!(m.deploys("default", 0).unwrap().is_empty());
     assert_eq!(m.deploy_hook_project(&second).unwrap(), None);
 }
+
+#[test]
+fn a_recorded_release_starts_its_range_after_the_previous_one() {
+    use openlens_meta::deploys::Deploy;
+    let m = Meta::in_memory().unwrap();
+    m.ensure_default_project(None).unwrap();
+    let d = |release: &str, commit: &str, status: &str, at: i64| Deploy {
+        environment: "production".into(),
+        release: Some(release.into()),
+        commit: Some(commit.into()),
+        status: status.into(),
+        at,
+        source: "cli".into(),
+    };
+    assert_eq!(
+        m.previous_commit("default", "production", None).unwrap(),
+        None
+    );
+    m.record_release("default", &d("v1", "aaaaaaa", "succeeded", 10), None, 10)
+        .unwrap();
+    m.record_deploy("default", &d("v2", "bbbbbbb", "failed", 20), 20)
+        .unwrap();
+    // A failed deploy is not where the next range starts, and a release
+    // recorded again with the same commit does not start after itself.
+    let from = m
+        .previous_commit("default", "production", Some("ccccccc"))
+        .unwrap();
+    assert_eq!(from.as_deref(), Some("aaaaaaa"));
+    assert_eq!(
+        m.previous_commit("default", "production", Some("aaaaaaa"))
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        m.previous_commit("default", "staging", Some("ccccccc"))
+            .unwrap(),
+        None,
+        "another environment's deploys are not this one's range"
+    );
+    m.record_release(
+        "default",
+        &d("v3", "ccccccc", "succeeded", 30),
+        from.as_deref(),
+        30,
+    )
+    .unwrap();
+    let (start, end) = m
+        .release_range("default", "production", "v3")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (start.as_deref(), end.as_str()),
+        (Some("aaaaaaa"), "ccccccc")
+    );
+    assert_eq!(
+        m.deploys("default", 0).unwrap().len(),
+        3,
+        "a release is a deploy"
+    );
+}

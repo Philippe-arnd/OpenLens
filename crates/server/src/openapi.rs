@@ -198,6 +198,12 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
     ),
     (
         "POST",
+        "/api/projects/{project}/releases",
+        "write",
+        "Record a release from the deploy step (`{release, commit?, from?, environment?}`; `openlens-cli release`): a succeeded deploy with its commit range, from `from` or the environment's previous deployed commit to `commit`.",
+    ),
+    (
+        "POST",
         "/api/projects/{project}/deploy-hook",
         "write",
         "Make or rotate the project's deploy hook URL (`/hooks/deploy/<secret>`, shown in this response only; the previous URL stops working). The hook takes Coolify, Vercel, Netlify, Render, GitHub deployment_status, Argo CD, Flux and Fly notifications, or `{status, release?, commit?, environment?, at?}`.",

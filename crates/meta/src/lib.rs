@@ -270,7 +270,8 @@ CREATE TABLE IF NOT EXISTS deploys (
   status TEXT NOT NULL,
   at INTEGER NOT NULL,
   source TEXT NOT NULL,
-  received_at INTEGER NOT NULL
+  received_at INTEGER NOT NULL,
+  from_sha TEXT
 );
 CREATE INDEX IF NOT EXISTS deploys_project ON deploys (project, at);
 CREATE TABLE IF NOT EXISTS users (
@@ -314,6 +315,14 @@ fn migrate(c: &Connection) -> rusqlite::Result<()> {
         if !has {
             c.execute_batch(ddl)?;
         }
+    }
+    // Deploys: the first commit of a release's range, for a release
+    // recorded by `openlens-cli release` (#521, D-066).
+    let has_from: bool = c
+        .prepare("SELECT 1 FROM pragma_table_info('deploys') WHERE name = 'from_sha'")?
+        .exists([])?;
+    if !has_from {
+        c.execute_batch("ALTER TABLE deploys ADD COLUMN from_sha TEXT")?;
     }
     // Users: name, time zone, disabled, last sign-in (#215, #216).
     for (col, ddl) in [

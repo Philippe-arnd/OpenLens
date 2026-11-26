@@ -110,10 +110,7 @@ pub fn finish(n: Notice, env: Option<&str>, now: i64) -> Result<Deploy, &'static
         .release
         .map(|r| r.trim().to_owned())
         .filter(|r| !r.is_empty() && r.len() <= MAX_RELEASE && !r.chars().any(char::is_control));
-    let commit = n
-        .commit
-        .map(|c| c.trim().to_ascii_lowercase())
-        .filter(|c| (7..=64).contains(&c.len()) && c.chars().all(|x| x.is_ascii_hexdigit()));
+    let commit = n.commit.as_deref().and_then(commit);
     let at =
         n.at.filter(|t| *t > 0 && *t <= now + MAX_SKEW_SECS)
             .unwrap_or(now);
@@ -125,6 +122,14 @@ pub fn finish(n: Notice, env: Option<&str>, now: i64) -> Result<Deploy, &'static
         at,
         source: n.source.to_owned(),
     })
+}
+
+/// A commit as kept: 7 to 64 hex digits, lowercased; anything else is
+/// `None`.
+#[must_use]
+pub fn commit(raw: &str) -> Option<String> {
+    let c = raw.trim().to_ascii_lowercase();
+    ((7..=64).contains(&c.len()) && c.chars().all(|x| x.is_ascii_hexdigit())).then_some(c)
 }
 
 /// Whether a release name and a commit name the same build: one is a
