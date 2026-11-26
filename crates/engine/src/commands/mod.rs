@@ -20,6 +20,7 @@ use crate::{Board, Filters};
 pub mod alerts;
 pub mod ask;
 pub mod board;
+pub mod delivery;
 pub mod deploys;
 pub mod explore;
 pub mod flags;
@@ -124,6 +125,8 @@ pub const REGISTRY: &[Spec] = &[
     spec::<explore::GetLive>(),
     // The board's cost estimate (#514).
     spec::<board::GetEstimate>(),
+    // Delivery metrics (#523).
+    spec::<delivery::GetDelivery>(),
 ];
 
 /// A 12-character id from `s` (the first bytes of its SHA-256, in hex).

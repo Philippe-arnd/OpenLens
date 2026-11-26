@@ -103,6 +103,17 @@ A **feature** is declared in the feature map. A **task** is one use of a feature
 | **Task completion rate** | Completed tasks divided by started tasks. For abandoned tasks, the last step reached is recorded. |
 | **Frequency** | Completed tasks per adopting user per week. |
 
+## Delivery
+
+How a project ships, per environment, over a period (the last 90 days by default, 1 to 90 on request; D-068). Shown on the *Releases* page, and returned by `GET /api/projects/{id}/delivery` and the MCP `delivery` tool. A **change** is a succeeded or failed deploy from the deploy hook (D-053) when the environment has one in the period; otherwise a release that reached live (95 % of a day's users, D-049) or was rolled back, shipped on its first day with the majority of the users.
+
+| KPI | Definition |
+| --- | --- |
+| **Deploy frequency** | Changes shipped per week: succeeded deploys, or releases that reached live or were rolled back. |
+| **Lead time** | Median time from a release's first commit to live (its succeeded deploy, or its first day at 95 %). Needs the commit range `openlens-cli release` records; until it is recorded, lead time is reported *unknown*, with why. |
+| **Change failure rate** | Failed changes ÷ changes. A change fails when its deploy fails, a later deploy reports a rollback, an older release takes the users back (rolled back), or its release's verdict is *regressed*. |
+| **Time to restore** | Median time from a failed change to the rollback that put the previous release back, else to the next shipped change that did not fail. Failures with neither are counted as *not restored yet*. |
+
 ## Where they show up
 - **Focus board** (home screen): ranked insight cards, then a KPI strip (DAU/WAU/MAU and users who came back, stickiness, average session, tasks per user per day, sessions with errors) and Web Vitals at p75. A filter bar sets role, release and environment.
 - **Focus board sections:** feature pulse (adoption, uses per user, active days, completion, task time), *Who uses what* (roles × features), weekly retention cohorts, journeys, funnels, flag cohorts and release comparison.

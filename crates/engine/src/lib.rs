@@ -23,6 +23,7 @@ mod board_success;
 mod board_window;
 pub mod churn;
 pub mod commands;
+pub mod delivery;
 pub mod deploys;
 mod digest;
 mod drift;

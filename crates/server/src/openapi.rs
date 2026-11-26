@@ -227,6 +227,12 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "Record a release from the deploy step (`{release, commit?, from?, environment?}`; `openlens-cli release`): a succeeded deploy with its commit range, from `from` or the environment's previous deployed commit to `commit`.",
     ),
     (
+        "GET",
+        "/api/projects/{project}/delivery",
+        "read",
+        "Delivery metrics per environment over `days` (1 to 90, default 90; `env` for one): deploy frequency (succeeded deploys from the deploy hook, else releases reaching live), lead time from first commit to live (unknown until a commit range is recorded), change failure rate (failed or rolled-back deploys and releases, and regressed verdicts) and time to restore, as medians in seconds.",
+    ),
+    (
         "POST",
         "/api/projects/{project}/deploy-hook",
         "write",
