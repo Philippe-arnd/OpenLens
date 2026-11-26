@@ -21,6 +21,7 @@ mod feature_page;
 mod features;
 mod glossary;
 mod goals;
+mod goto;
 mod icons;
 mod manage;
 mod releases;
@@ -38,6 +39,7 @@ pub use feature_page::*;
 pub use features::*;
 pub(crate) use glossary::{th_def, th_num, vital_info};
 pub use goals::*;
+pub use goto::{GotoPlace, goto_results, goto_sections};
 pub use icons::icon;
 pub use manage::*;
 use openlens_engine::{Board, EventRow, Filters};
@@ -552,6 +554,7 @@ fn layout_with(
                                 img.picon src={ "/p/" (p.id) "/icon" } alt="" width="24" height="24";
                                 span.label { (p.name) }
                             }
+                            (goto::goto_form(p))
                             nav.side-nav aria-label="Project" {
                                 @for g in NAV {
                                     a href={ "/p/" (p.id) (g.tabs[0].0) } title=(g.label) aria-current=[group_of(title, p.name).is_some_and(|c| c.label == g.label).then_some("page")] {

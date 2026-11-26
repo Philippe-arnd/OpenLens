@@ -25,6 +25,7 @@ pub mod deploys;
 pub mod explore;
 pub mod flags;
 pub mod goals;
+pub mod goto;
 pub mod releases;
 pub mod tickets;
 
@@ -127,6 +128,8 @@ pub const REGISTRY: &[Spec] = &[
     spec::<board::GetEstimate>(),
     // Delivery metrics (#523).
     spec::<delivery::GetDelivery>(),
+    // The sidebar's Go to… field (#541).
+    spec::<goto::Lookup>(),
 ];
 
 /// A 12-character id from `s` (the first bytes of its SHA-256, in hex).

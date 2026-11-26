@@ -21,6 +21,7 @@ mod auth;
 mod board_jobs;
 mod environments;
 mod features;
+mod goto;
 mod hooks;
 mod ingest;
 mod manage;
