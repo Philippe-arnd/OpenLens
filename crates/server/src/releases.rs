@@ -6,13 +6,19 @@
 //! the page (`POST /p/{id}/releases/hook`) and the API (`POST
 //! /api/projects/{id}/deploy-hook`): the engine's `deploys.rotate_hook`.
 //! The URL is shown once, in the response, never in a redirect.
+//!
+//! A deploy step records its release with its commit range (#521, D-066)
+//! through `POST /api/projects/{id}/releases`: the engine's
+//! `releases.record`.
 
 use axum::extract::{Form, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use openlens_engine::commands::deploys::{ProjectInput, RotateHook};
+use openlens_engine::commands::deploys::{
+    ProjectInput, RecordRelease, RecordReleaseInput, RotateHook,
+};
 use openlens_engine::commands::releases::{List, ListInput};
 use openlens_engine::commands::{Caller, Command, Error, Host};
 use serde::Deserialize;
@@ -23,7 +29,10 @@ use crate::{AppState, auth};
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
         .route("/p/{project}/releases", get(page))
-        .route("/api/projects/{project}/releases", get(api))
+        .route(
+            "/api/projects/{project}/releases",
+            get(api).post(record_api),
+        )
         .route("/p/{project}/releases/hook", post(rotate_page))
         .route("/api/projects/{project}/deploy-hook", post(rotate_api))
 }
@@ -185,6 +194,33 @@ pub(crate) async fn rotate_api(
             .into_response()
         }
         Err(Error::NotFound) => crate::apierr::json(StatusCode::NOT_FOUND, "unknown project"),
+        Err(e) => crate::apierr::json(StatusCode::SERVICE_UNAVAILABLE, e.to_string()),
+    }
+}
+
+/// `POST /api/projects/{id}/releases` (bearer, write): record a release
+/// named by the deploy step, `{release, commit?, from?, environment?}`,
+/// as a succeeded deploy with its commit range (`releases.record`).
+pub(crate) async fn record_api(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    body: Result<Json<RecordReleaseInput>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    if !auth::has_bearer(&state, &headers) {
+        return crate::apierr::json(StatusCode::UNAUTHORIZED, "admin bearer token required");
+    }
+    let Ok(Json(mut input)) = body else {
+        return crate::apierr::json(
+            StatusCode::BAD_REQUEST,
+            "send JSON: {release, commit?, from?, environment?}",
+        );
+    };
+    input.project = id;
+    match RecordRelease::run(&state, &Caller::default(), input).await {
+        Ok(r) => Json(r).into_response(),
+        Err(Error::NotFound) => crate::apierr::json(StatusCode::NOT_FOUND, "unknown project"),
+        Err(Error::Invalid(m)) => crate::apierr::json(StatusCode::BAD_REQUEST, m),
         Err(e) => crate::apierr::json(StatusCode::SERVICE_UNAVAILABLE, e.to_string()),
     }
 }

@@ -97,6 +97,8 @@ pub const REGISTRY: &[Spec] = &[
     spec::<tickets::SetTarget>(),
     spec::<deploys::RotateHook>(),
     spec::<deploys::Record>(),
+    // A release recorded by its deploy step (#521).
+    spec::<deploys::RecordRelease>(),
     // Ask's lookups and its confirmed flag change (#508).
     spec::<ask::Board>(),
     spec::<ask::Feature>(),
