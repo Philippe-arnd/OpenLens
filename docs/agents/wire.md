@@ -77,7 +77,7 @@ Older servers refuse maps with these fields (the format is strict): upgrade the 
 
 Three rules hold in every framework:
 - **Init in the browser, once.** Importing `@openlens/web` on the server is harmless (`init` does nothing without `window`), but call `init` from client-only code.
-- **Release at build time.** Inject the commit or version into a public build variable: for example `GITHUB_SHA`, `VERCEL_GIT_COMMIT_SHA`, `CF_PAGES_COMMIT_SHA`, Coolify's `SOURCE_COMMIT`, or `git rev-parse --short HEAD`. Use the same value for `openlens-cli sourcemaps --release`.
+- **Release at build time.** Inject the commit or version into a public build variable: for example `GITHUB_SHA`, `VERCEL_GIT_COMMIT_SHA`, `CF_PAGES_COMMIT_SHA`, Coolify's `SOURCE_COMMIT`, or `git rev-parse --short HEAD`. Use the same value for `openlens-cli sourcemaps --release`. Without one, the server still tells builds apart by their script and stylesheet names and calls each new one `YYYY-MM-DD.N`; the Node SDK reads the host's commit variable by itself.
 - **Identify on every load where the user is known, and reset on logout.** `reset()` while nobody is identified does nothing, so it is safe to call whenever there is no session.
 
 Route changes are picked up on their own (History API and `#/` routes), so no router hook is needed.
