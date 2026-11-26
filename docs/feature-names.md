@@ -25,3 +25,4 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Do they come back? | Weekly retention cohorts |
 | Came back | Resurrected users: active again after a gap longer than the churn window |
 | Why and what to do | Under a Web Vital that is not good: its worst pages, the likely cause and what to fix first |
+| Go to… | The sidebar field that opens a section, a feature or a person by typing its name |

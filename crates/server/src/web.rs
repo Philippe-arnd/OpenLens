@@ -14,6 +14,7 @@ use crate::{AppState, auth};
 
 mod appearance;
 mod board_view;
+mod goto;
 mod heatmap;
 mod login;
 mod replays;
@@ -63,6 +64,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/logout", post(logout))
         .route("/l/{token}", get(login_link_page).post(login_link))
         .route("/p/{project}", get(board))
+        .route("/p/{project}/go", get(goto::go))
         .route("/p/{project}/events", get(events))
         .route("/p/{project}/errors", get(errors_page))
         .route("/p/{project}/pages", get(pages_page))
