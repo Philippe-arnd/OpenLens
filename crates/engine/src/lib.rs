@@ -503,14 +503,22 @@ use vitals::rating;
 /// route-matched features. Every query reads from this, so the map applies
 /// everywhere without rewriting stored data.
 pub fn source(map: Option<&FeatureMap>) -> String {
+    source_from(map, "events")
+}
+
+/// [`source`] over `from` (a table or CTE with the columns of `events`)
+/// instead of `events`: a query resolves the map only on the rows it
+/// kept (D-072).
+pub(crate) fn source_from(map: Option<&FeatureMap>, from: &str) -> String {
     match map {
-        None => "events".into(),
+        None if from == "events" => "events".into(),
+        None => format!("(SELECT * FROM {from}) AS events"),
         Some(m) => {
             let (role, feature) = lookups(m);
             format!(
                 "(SELECT uuid, event, distinct_id, session_id, timestamp, received_at, url, path, \
                  account, plan, environment, release, flags, properties, date, {VITAL_COLUMNS}, {FACT_COLUMNS}, \
-                 {role} AS role, {feature} AS feature FROM events) AS events"
+                 {role} AS role, {feature} AS feature FROM {from}) AS events"
             )
         }
     }
