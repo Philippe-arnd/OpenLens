@@ -729,7 +729,8 @@ mod tests {
         // Both date fields point at the format hint (#557), which exists.
         assert_eq!(
             html.matches(r#"type="date""#).count(),
-            html.matches(r#"aria-describedby="period-date-format""#).count(),
+            html.matches(r#"aria-describedby="period-date-format""#)
+                .count(),
             "{html}"
         );
         assert!(

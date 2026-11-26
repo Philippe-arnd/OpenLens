@@ -345,8 +345,16 @@ mod tests {
             dropped: vec![],
             dropped_other: 0,
         };
-        let html =
-            tab("/p/p1/settings", true, "Europe/Paris", &e, None, Some(&a), None).into_string();
+        let html = tab(
+            "/p/p1/settings",
+            true,
+            "Europe/Paris",
+            &e,
+            None,
+            Some(&a),
+            None,
+        )
+        .into_string();
         assert!(!crate::tests::has_iso_time(&html), "{html}");
         // Shown in the project's zone (Paris is ahead of UTC in November).
         assert!(html.contains("2026-11-26 02:54"), "{html}");
