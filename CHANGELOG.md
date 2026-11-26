@@ -5,6 +5,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 ## [Unreleased]
 
 ### Changed
+- The board reads the closed days of its rollups once, into memory, instead of once per query, within a quarter of the query pool (falling back to the files when they do not fit); task times resolve the feature map only for events within 30 minutes before a success; the default board page of each project is computed ahead in the background after startup and after new data while it is being looked at (#452, D-072). The numbers are unchanged.
 - Map health's `drift` reads the current release from the release states (#483 item 3, D-070): the environment's newest live release, or its newest rolling out when none is live, as the board's window does, instead of the release first seen last. A canary next to a live release, or a release rolled back, no longer reports its routes as new.
 - CI: the four equivalence tests that roll up every closed day run with `cargo xtask ci --heavy` (nightly, release tags), not on every pull request, which went over 5 minutes.
 
