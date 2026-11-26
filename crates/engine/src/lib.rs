@@ -90,7 +90,7 @@ pub enum EngineError {
 pub type Result<T> = std::result::Result<T, EngineError>;
 
 /// The time window of the board's period blocks (D-055).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Window {
     /// Each block keeps its fixed window (7, 14 or 30 days): what alerts,
@@ -120,6 +120,7 @@ pub struct Filters {
     pub tz: String,
     /// The window of the board's period blocks (D-055): fixed unless a
     /// board page asks for the release window.
+    #[serde(default)]
     pub window: Window,
 }
 
