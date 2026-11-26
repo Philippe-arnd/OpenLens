@@ -37,6 +37,28 @@ const PENDING: &[&str] = &[
     // Run by the deploy hook (`/hooks/deploy/<secret>`), which a platform
     // calls, not an agent.
     "deploys.record",
+    // Ask's lookups and the flags commands (#508), explore (#507): the
+    // MCP tools still call the REST routes these commands back.
+    "ask.board",
+    "ask.feature",
+    "ask.errors",
+    "ask.vitals",
+    "ask.goals",
+    "ask.sql",
+    "flags.list",
+    "flags.update",
+    "explore.person",
+    "explore.breakdown",
+    "explore.sql",
+    "explore.acquisition",
+    "explore.forms",
+    "explore.churn",
+    "explore.flag_audiences",
+    "explore.make_audience",
+    "explore.vitals",
+    "explore.audience",
+    "explore.flows",
+    "explore.live",
 ];
 
 /// Tools that are not engine commands yet: their logic still sits behind
