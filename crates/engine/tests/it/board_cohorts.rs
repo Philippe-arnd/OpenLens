@@ -2,7 +2,9 @@
 //! read the people rows (`person_day`), the per-session rows
 //! (`session_day`) and the first use of each feature per session
 //! (`session_feature_day`) for closed days, and the events for the rest
-//! (#452, D-059): the numbers are the same as from the events alone, in
+//! (#452, D-059); success events and the first success of each journey
+//! read `success_day` the same way (D-062): the numbers are the same as
+//! from the events alone, in
 //! UTC and in a zone off UTC, and a closed day without its events still
 //! counts.
 
@@ -149,8 +151,14 @@ fn cohorts(b: &Board) -> String {
         .map(|c| format!("{} {} | {} | {}", c.kind, c.subject, c.title, c.evidence))
         .collect();
     cards.sort();
+    let mut completed: Vec<_> = b
+        .features
+        .iter()
+        .map(|x| (x.key.clone(), x.completed, x.completed_users))
+        .collect();
+    completed.sort();
     format!(
-        "readiness {}\nresurrected {}\nretention {:?}\njourneys {:?}\ncards {cards:?}",
+        "readiness {}\nresurrected {}\nretention {:?}\njourneys {:?}\ncards {cards:?}\ncompleted {completed:?}",
         b.readiness.judged_users, b.users.resurrected, b.retention, b.journeys
     )
 }
@@ -181,6 +189,9 @@ async fn cohort_blocks_read_closed_days_from_the_rollups_with_the_same_numbers()
     assert!(utc.contains("journeys [Journey"), "{utc}");
     assert!(!utc.contains("readiness 0"), "{utc}");
     assert!(utc.contains("retention [RetentionRow"), "{utc}");
+    // Payments in the last 30 days, all on closed days.
+    assert!(utc.contains("completed [(\"billing\""), "{utc}");
+    assert!(!utc.contains("(\"billing\", 0, 0)"), "{utc}");
     let rolled = roll_up(root).await;
     assert_eq!(boards(root).await, events_only);
     // A closed day without its events counts the same (nobody pays or
