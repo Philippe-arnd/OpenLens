@@ -36,6 +36,7 @@ mod internal;
 mod rebatch;
 mod retry;
 mod rollup;
+pub use rollup::DayFeatures;
 mod typed;
 pub use aggregate::MIN_USERS;
 use serde::Serialize;

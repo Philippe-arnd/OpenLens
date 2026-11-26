@@ -1,4 +1,4 @@
-//! Rollups of closed days (#322): two small Parquet files per project and
+//! Rollups of closed days (#322): a few small Parquet files per project and
 //! UTC day, written once the day is closed. The query crate computes them;
 //! this module owns where they live and how people are erased from them.
 //!
@@ -10,8 +10,8 @@
 //!
 //! Erasing someone removes them from every rollup: a day whose events are
 //! still stored is rolled up again without them, and an older day loses
-//! that person's `person_q` rows (its `metric_q` keeps only counts, with no
-//! one in them).
+//! that person's rows in every per-person table ([`PERSON_TABLES`]); the
+//! other tables keep only counts, with no one in them.
 
 use std::collections::HashSet;
 use std::fs;
@@ -86,6 +86,34 @@ pub fn metric_schema() -> SchemaRef {
     ]))
 }
 
+/// `person_day` (#451, D-038): one row per person, environment, release,
+/// role and feature of the UTC day (the day is the `date=` directory),
+/// so active people per feature, role, week or month add up across days.
+/// The role is the one the event carried (the map applies to it on
+/// reading, as for the other tables); the feature is resolved with the
+/// feature map in force when the day was rolled up, whose version is
+/// `map_version` (null without a map). `events`, `errors` and `successes`
+/// (task events: the map's success events, or any event with a feature
+/// when it declares none) add up over any rows; `sessions` counts the
+/// sessions with an event in the row, so it adds up across days for the
+/// same dimensions, not across features.
+pub fn person_day_schema() -> SchemaRef {
+    Arc::new(Schema::new(vec![
+        Field::new("person", DataType::Utf8, true),
+        Field::new("environment", DataType::Utf8, true),
+        Field::new("release", DataType::Utf8, true),
+        Field::new("role", DataType::Utf8, true),
+        Field::new("feature", DataType::Utf8, true),
+        Field::new("events", DataType::Int64, true),
+        Field::new("sessions", DataType::Int64, true),
+        Field::new("errors", DataType::Int64, true),
+        Field::new("successes", DataType::Int64, true),
+        Field::new("first_ts", ts(), true),
+        Field::new("last_ts", ts(), true),
+        Field::new("map_version", DataType::Int64, true),
+    ]))
+}
+
 /// The dimensions every page rollup is split by.
 fn page_dims() -> Vec<Field> {
     vec![
@@ -138,10 +166,15 @@ pub fn scroll_schema() -> SchemaRef {
 /// Labels kept per page and day in `label_q`.
 pub const TOP_LABELS: usize = 20;
 
+/// The tables with a row per person: erasing someone removes their rows
+/// from them (D-026).
+pub const PERSON_TABLES: [&str; 2] = ["person_q", "person_day"];
+
 /// The rollup tables: name and schema.
-pub fn tables() -> [(&'static str, SchemaRef); 5] {
+pub fn tables() -> [(&'static str, SchemaRef); 6] {
     [
         ("person_q", person_schema()),
+        ("person_day", person_day_schema()),
         ("metric_q", metric_schema()),
         ("click_q", click_schema()),
         ("label_q", label_schema()),
@@ -173,7 +206,7 @@ fn day_dir(root: &Path, project: &str, day: NaiveDate) -> Result<PathBuf> {
     Ok(rollups_dir(root, project)?.join(format!("date={}", day.format("%Y-%m-%d"))))
 }
 
-/// Whether `day` has both rollup files.
+/// Whether `day` has every rollup table.
 pub fn has(root: &Path, project: &str, day: NaiveDate) -> Result<bool> {
     let dir = day_dir(root, project, day)?;
     Ok(tables()
@@ -181,7 +214,31 @@ pub fn has(root: &Path, project: &str, day: NaiveDate) -> Result<bool> {
         .all(|(name, _)| dir.join(format!("{name}.parquet")).is_file()))
 }
 
-/// Closed days that have events but no rollup yet, oldest first.
+/// The tables `day` lacks, in [`tables`] order: all of them for a day
+/// never rolled up, only the newer ones for a day rolled up by an older
+/// release (#451), so the pass computes just those.
+pub fn lacking(root: &Path, project: &str, day: NaiveDate) -> Vec<&'static str> {
+    let dir = day_dir(root, project, day).ok();
+    tables()
+        .into_iter()
+        .map(|(name, _)| name)
+        .filter(|name| {
+            dir.as_ref()
+                .is_none_or(|d| !d.join(format!("{name}.parquet")).is_file())
+        })
+        .collect()
+}
+
+/// The schema of the rollup table `name`.
+fn schema_of(name: &str) -> Option<SchemaRef> {
+    tables()
+        .into_iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, s)| s)
+}
+
+/// Closed days that still have their events and lack a rollup table
+/// (never rolled up, or rolled up before a table was added), oldest first.
 pub fn missing(root: &Path, project: &str, now: DateTime<Utc>) -> Result<Vec<NaiveDate>> {
     let pdir = project_dir(root, project)?;
     if !pdir.is_dir() {
@@ -243,8 +300,8 @@ pub fn drop_project(root: &Path, project: &str) -> Result<()> {
 
 /// Remove `ids` from the project's rollups. A day that still has its
 /// events is deleted, to be rolled up again from them; an older day keeps
-/// its rollup without those people's `person_q` rows. Returns the days
-/// changed. The caller holds the maintenance lock.
+/// its rollup without those people's rows in [`PERSON_TABLES`]. Returns
+/// the days changed. The caller holds the maintenance lock.
 pub(crate) fn erase(root: &Path, project: &str, ids: &HashSet<String>) -> Result<usize> {
     let dir = rollups_dir(root, project)?;
     if ids.is_empty() || !dir.is_dir() {
@@ -254,28 +311,13 @@ pub(crate) fn erase(root: &Path, project: &str, ids: &HashSet<String>) -> Result
     let mut changed = 0;
     for entry in fs::read_dir(&dir)? {
         let day = entry?.path();
-        let file = day.join("person_q.parquet");
-        if !file.is_file() {
-            continue;
+        let mut trimmed = Vec::new();
+        for name in PERSON_TABLES {
+            if let Some(t) = without(&day, name, ids)? {
+                trimmed.push(t);
+            }
         }
-        let mut kept = Vec::new();
-        let mut gone = 0;
-        for b in ParquetRecordBatchReaderBuilder::try_new(fs::File::open(&file)?)?.build()? {
-            let b = b?;
-            let Some(col) = b
-                .column_by_name("person")
-                .and_then(|c| c.as_any().downcast_ref::<StringArray>())
-            else {
-                kept.push(b);
-                continue;
-            };
-            let keep: BooleanArray = (0..col.len())
-                .map(|i| Some(col.is_null(i) || !ids.contains(col.value(i))))
-                .collect();
-            gone += b.num_rows() - keep.true_count();
-            kept.push(arrow::compute::filter_record_batch(&b, &keep)?);
-        }
-        if gone == 0 {
+        if trimmed.is_empty() {
             continue;
         }
         changed += 1;
@@ -284,11 +326,47 @@ pub(crate) fn erase(root: &Path, project: &str, ids: &HashSet<String>) -> Result
             fs::remove_dir_all(&day)?;
             sync_dir(&dir)?;
         } else {
-            let merged = arrow::compute::concat_batches(&person_schema(), &kept)?;
-            write_parquet_as(&day, "person_q", &merged)?;
+            for (name, batch) in trimmed {
+                write_parquet_as(&day, name, &batch)?;
+            }
         }
     }
     Ok(changed)
+}
+
+/// The table `name` of a day's directory without the rows of `ids`, or
+/// `None` when it holds none of them (or does not exist).
+fn without(
+    day: &Path,
+    name: &'static str,
+    ids: &HashSet<String>,
+) -> Result<Option<(&'static str, RecordBatch)>> {
+    let file = day.join(format!("{name}.parquet"));
+    let Some(schema) = schema_of(name).filter(|_| file.is_file()) else {
+        return Ok(None);
+    };
+    let mut kept = Vec::new();
+    let mut gone = 0;
+    for b in ParquetRecordBatchReaderBuilder::try_new(fs::File::open(&file)?)?.build()? {
+        let b = b?;
+        let Some(col) = b
+            .column_by_name("person")
+            .and_then(|c| c.as_any().downcast_ref::<StringArray>())
+        else {
+            kept.push(b);
+            continue;
+        };
+        let keep: BooleanArray = (0..col.len())
+            .map(|i| Some(col.is_null(i) || !ids.contains(col.value(i))))
+            .collect();
+        gone += b.num_rows() - keep.true_count();
+        kept.push(arrow::compute::filter_record_batch(&b, &keep)?);
+    }
+    if gone == 0 {
+        return Ok(None);
+    }
+    let merged = arrow::compute::concat_batches(&schema, &kept)?;
+    Ok(Some((name, merged)))
 }
 
 #[cfg(test)]

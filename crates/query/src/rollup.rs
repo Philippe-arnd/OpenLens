@@ -20,6 +20,64 @@ fn person_sql(day: &str) -> String {
     )
 }
 
+/// How `person_day` resolves features and tasks (#451): the feature map in
+/// force when the day is rolled up, written out by the engine.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DayFeatures {
+    /// SQL expression over the `events` view giving an event's feature
+    /// (the map's lookup, or plain `feature` without a map). Trusted SQL
+    /// built by the engine, never user text.
+    pub feature: String,
+    /// The map's success events; empty means "every event with a feature
+    /// is a task", as on the board.
+    pub successes: Vec<String>,
+    /// The version of the map, `None` without one.
+    pub map_version: Option<i64>,
+}
+
+impl Default for DayFeatures {
+    /// No feature map: the feature the event carried.
+    fn default() -> Self {
+        Self {
+            feature: "feature".into(),
+            successes: Vec::new(),
+            map_version: None,
+        }
+    }
+}
+
+/// `person_day` of one UTC day (#451): per person, environment, release,
+/// role and feature, from the `events` view (people already merged).
+fn person_day_sql(day: &str, f: &DayFeatures) -> Result<String, QueryError> {
+    let task = if f.successes.is_empty() {
+        "feature IS NOT NULL".to_owned()
+    } else {
+        let list = f
+            .successes
+            .iter()
+            .map(|e| openlens_sqlgen::lit(e))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| QueryError::Rejected("not a valid success event".into()))?;
+        format!("event IN ({})", list.join(", "))
+    };
+    let version = f
+        .map_version
+        .map_or_else(|| "NULL".to_owned(), |v| v.to_string());
+    Ok(format!(
+        "SELECT person, environment, release, role, feature, count(*) AS events, \
+         count(DISTINCT session_id) AS sessions, \
+         sum(CASE WHEN event = '$error' THEN 1 ELSE 0 END) AS errors, \
+         sum(CASE WHEN {task} THEN 1 ELSE 0 END) AS successes, \
+         min(timestamp) AS first_ts, max(timestamp) AS last_ts, \
+         CAST({version} AS BIGINT) AS map_version \
+         FROM (SELECT distinct_id AS person, environment, release, role, \
+               {feature} AS feature, event, session_id, timestamp \
+               FROM events WHERE date = '{day}') e \
+         GROUP BY 1, 2, 3, 4, 5",
+        feature = f.feature
+    ))
+}
+
 /// `metric_q` of one UTC day.
 fn metric_sql(day: &str) -> String {
     format!(
@@ -105,21 +163,29 @@ fn valid_day(day: &str) -> bool {
 }
 
 impl QueryEngine {
-    /// The rollup tables of `project` for the UTC `day` (`YYYY-MM-DD`), as
+    /// The rollup tables named in `wanted` (all of them when it is
+    /// `None`) of `project` for the UTC `day` (`YYYY-MM-DD`), as
     /// `(name, batch)` pairs in the schemas of `openlens_storage::rollup`.
+    /// `features` resolves the features of `person_day`.
     pub async fn rollup_day(
         &self,
         project: &str,
         day: &str,
+        wanted: Option<&[&str]>,
+        features: &DayFeatures,
     ) -> Result<Vec<(&'static str, RecordBatch)>, QueryError> {
         if !valid_day(day) {
             return Err(QueryError::Rejected(format!("not a day: {day}")));
         }
         let this = self.clone();
         let (project, day) = (project.to_owned(), day.to_owned());
+        let wanted: Option<Vec<String>> =
+            wanted.map(|w| w.iter().map(|n| (*n).to_owned()).collect());
+        let features = features.clone();
         offload(async move {
             let timeout = this.limits.timeout;
-            match tokio::time::timeout(timeout, this.rollup_here(&project, &day)).await {
+            let work = this.rollup_here(&project, &day, wanted.as_deref(), &features);
+            match tokio::time::timeout(timeout, work).await {
                 Ok(r) => r,
                 Err(_) => Err(this.timed_out(timeout)),
             }
@@ -131,12 +197,18 @@ impl QueryEngine {
         &self,
         project: &str,
         day: &str,
+        wanted: Option<&[String]>,
+        features: &DayFeatures,
     ) -> Result<Vec<(&'static str, RecordBatch)>, QueryError> {
         let ctx = self.context(project).await?;
         let mut out = Vec::new();
         for (name, schema) in openlens_storage::rollup::tables() {
+            if wanted.is_some_and(|w| !w.iter().any(|n| n == name)) {
+                continue;
+            }
             let sql = match name {
                 "person_q" => person_sql(day),
+                "person_day" => person_day_sql(day, features)?,
                 "metric_q" => metric_sql(day),
                 "click_q" => click_sql(day),
                 "label_q" => label_sql(day),
