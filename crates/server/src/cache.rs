@@ -135,6 +135,14 @@ pub struct Caches {
     /// Deploy hook (#504): request tokens per client address and deploy
     /// tokens per project.
     pub(crate) hook_buckets: Mutex<crate::capture::Buckets>,
+    /// Public status page (#561): request tokens per client address,
+    /// apart from capture's so a flood of page views never slows
+    /// ingestion.
+    pub(crate) status_buckets: Mutex<crate::capture::Buckets>,
+    /// Public status pages as computed, per slug (30 seconds; cleared when
+    /// a page's settings change).
+    pub(crate) status_pages:
+        Bounded<String, std::sync::Arc<openlens_engine::commands::status_page::Public>>,
     /// When "disk almost full" was last logged.
     pub(crate) disk_logged: Mutex<Option<Instant>>,
     /// Cookieless mode: visitor → (session id, last seen, Unix s).
@@ -185,6 +193,8 @@ impl Default for Caches {
             ip_buckets: Mutex::default(),
             key_buckets: Mutex::default(),
             hook_buckets: Mutex::default(),
+            status_buckets: Mutex::default(),
+            status_pages: Bounded::new(crate::status_page::CACHED, crate::status_page::TTL),
             disk_logged: Mutex::default(),
             cookieless: Bounded::new(100_000, 30 * MIN),
             icons_in_flight: Bounded::new(10_000, 5 * MIN),
@@ -218,6 +228,8 @@ impl Caches {
             ("ip_buckets", n(buckets(&self.ip_buckets))),
             ("key_buckets", n(buckets(&self.key_buckets))),
             ("hook_buckets", n(buckets(&self.hook_buckets))),
+            ("status_buckets", n(buckets(&self.status_buckets))),
+            ("status_pages", n(self.status_pages.len())),
             ("cookieless", n(self.cookieless.len())),
             ("icons_in_flight", n(self.icons_in_flight.len())),
             ("oidc", n(self.oidc.len())),

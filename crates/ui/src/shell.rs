@@ -176,7 +176,7 @@ pub fn set_admin_source(source: fn() -> bool) {
     let _ = ADMIN.set(source);
 }
 
-fn viewer_is_admin() -> bool {
+pub(crate) fn viewer_is_admin() -> bool {
     ADMIN.get().is_some_and(|f| f())
 }
 

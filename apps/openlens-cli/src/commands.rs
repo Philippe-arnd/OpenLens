@@ -279,12 +279,82 @@ pub(super) enum Command {
         #[arg(long, default_value = "default")]
         project: String,
     },
-    /// Is the app up? (`up`, `down`, `unknown`, `off`, with open incidents.)
-    /// Exits non-zero when down: handy right after a deploy.
+    /// Status announcements and incident updates (#562): list, post,
+    /// update, edit, close, delete, and whether they go to the alert
+    /// channels.
+    Announce {
+        #[command(subcommand)]
+        action: AnnounceCmd,
+    },
+    /// The public status page (#561): show or change its settings (on or
+    /// off, the address, the components and their public names), or read
+    /// the page as anyone sees it.
+    StatusPage {
+        #[command(subcommand)]
+        action: crate::status_page::StatusPageCmd,
+    },
+    /// Is the app up? (`up`, `down`, `maintenance`, `unknown`, `off`, with
+    /// open incidents and maintenance windows.) Exits non-zero when down:
+    /// handy right after a deploy.
     Status {
         /// Project id.
         #[arg(long, default_value = "default")]
         project: String,
+    },
+    /// Uptime history, one row per UTC day (default: the last 90 days of
+    /// production): state, availability, seconds up and measured, checks,
+    /// incidents and response times.
+    Uptime {
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+        /// First day, YYYY-MM-DD (at most 400 days before --to).
+        #[arg(long)]
+        from: Option<String>,
+        /// Last day, YYYY-MM-DD (default: today).
+        #[arg(long)]
+        to: Option<String>,
+        /// Environment (default: production).
+        #[arg(long)]
+        env: Option<String>,
+    },
+    /// Availability over 24 hours, 7, 30, 90 and 365 days, this month and
+    /// the last (#560): time not measured and planned maintenance left
+    /// out, incidents, p95; and the error budget when a target is set.
+    /// With --target (a share, 0.999 for 99.9%) or --clear, sets or
+    /// removes the environment's target over a rolling 30 days.
+    Availability {
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+        /// Environment (default: production).
+        #[arg(long)]
+        env: Option<String>,
+        /// Set the target: a share from 0.5 to 0.99999.
+        #[arg(long, conflicts_with = "clear")]
+        target: Option<f64>,
+        /// Remove the target.
+        #[arg(long)]
+        clear: bool,
+    },
+    /// Every incident, newest first, page by page: pass the `next` it
+    /// prints as --before for the next page.
+    Incidents {
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+        /// Only incidents older than this id (the previous page's `next`).
+        #[arg(long)]
+        before: Option<i64>,
+        /// Page size, 1 to 100.
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+    },
+    /// Planned maintenance windows (#563): incidents during one are not
+    /// announced and its time is not counted against availability.
+    Maintenance {
+        #[command(subcommand)]
+        action: crate::maintenance::MaintenanceCmd,
     },
     /// How sessions move between features (Sankey data, last 30 days).
     Flows {

@@ -3,7 +3,8 @@
 use super::*;
 
 impl Meta {
-    /// Record one uptime probe (#256). Checks older than 7 days are dropped.
+    /// Record one uptime probe of production (#256). Checks older than 7
+    /// days are dropped, except those kept around an incident (#559).
     pub fn record_check(
         &self,
         project: &str,
@@ -13,33 +14,19 @@ impl Meta {
         ms: Option<i64>,
         error: Option<&str>,
     ) -> Result<()> {
-        self.with(|c| {
-            c.execute(
-                "INSERT INTO uptime_checks (project, at, ok, status, ms, error) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![project, at, i64::from(ok), status, ms, error],
-            )?;
-            c.execute(
-                "DELETE FROM uptime_checks WHERE project = ?1 AND at < ?2",
-                params![project, at - 7 * 24 * 3600],
-            )?;
-            Ok(())
-        })
+        let probe = Probe {
+            ok,
+            status,
+            ms,
+            error,
+        };
+        self.record_check_in(project, uptime_history::PRODUCTION, at, &probe)
     }
 
-    /// Probes of a project since `since` (Unix seconds), oldest first:
+    /// Probes of production since `since` (Unix seconds), oldest first:
     /// `(at, ok, status, ms, error)`.
     pub fn checks(&self, project: &str, since: i64) -> Result<Vec<Check>> {
-        self.read(|c| {
-            let mut st = c.prepare(
-                "SELECT at, ok, status, ms, error FROM uptime_checks WHERE project = ?1 AND at >= ?2 ORDER BY at",
-            )?;
-            let rows = st
-                .query_map(params![project, since], |r| {
-                    Ok((r.get(0)?, r.get::<_, i64>(1)? != 0, r.get(2)?, r.get(3)?, r.get(4)?))
-                })?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            Ok(rows)
-        })
+        self.checks_in(project, uptime_history::PRODUCTION, since)
     }
 
     /// The open incident of a rule, if any: `(id, started_at, notified)`.
@@ -54,14 +41,18 @@ impl Meta {
         })
     }
 
-    /// Open an incident.
+    /// Open an incident; the checks of the hour before an availability
+    /// incident are kept with it (#559).
     pub fn start_incident(&self, project: &str, rule: &str, at: i64, cause: &str) -> Result<i64> {
         self.with(|c| {
             c.execute(
                 "INSERT INTO incidents (project, rule, started_at, cause) VALUES (?1, ?2, ?3, ?4)",
                 params![project, rule, at, cause],
             )?;
-            Ok(c.last_insert_rowid())
+            let id = c.last_insert_rowid();
+            // The hour of checks before it is kept with it (#559).
+            uptime_history::mark_incident(c, id)?;
+            Ok(id)
         })
     }
 
@@ -96,6 +87,7 @@ impl Meta {
                 "UPDATE incidents SET ended_at = ?2 WHERE id = ?1",
                 params![id, at],
             )?;
+            uptime_history::mark_incident(c, id)?;
             Ok(())
         })
     }

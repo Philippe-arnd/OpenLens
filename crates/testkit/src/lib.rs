@@ -44,6 +44,59 @@ pub fn hostile_capture_bodies() -> Vec<Vec<u8>> {
     ]
 }
 
+/// Hostile plain texts a person may post (announcement titles and bodies,
+/// #562): markup and scripts that must be shown as text, quotes that
+/// would close an attribute, control characters, and lengths at and past
+/// the limits. Every page that shows posted text keeps these inert.
+pub fn hostile_texts() -> Vec<String> {
+    vec![
+        "<script>alert('x')</script>".into(),
+        "<img src=x onerror=alert(1)>".into(),
+        "\"><svg onload=alert(1)>".into(),
+        "<a href=\"javascript:alert(1)\">link</a>".into(),
+        "</textarea><script>alert(1)</script>".into(),
+        "&lt;b&gt; already escaped &amp;".into(),
+        "line\u{0000}null".into(),
+        "bell\u{0007} and escape\u{001b}[31m".into(),
+        "\u{202e}reversed".into(),
+        "é".repeat(4_000),
+        "x".repeat(4_001),
+        String::new(),
+    ]
+}
+
+/// Hostile slugs for the public status page (#561): what a scan or a
+/// careless admin sends as `/status/<slug>` or as the slug to save. Path
+/// tricks, encoded separators, a route suffix, a project id shape,
+/// Unicode look-alikes, control characters, and lengths around the
+/// limits. None is a valid slug as typed; a page lookup never reaches the
+/// store with one.
+pub fn hostile_slugs() -> Vec<String> {
+    vec![
+        String::new(),
+        "ab".into(),
+        "-lead".into(),
+        "trail-".into(),
+        "../etc/passwd".into(),
+        "..%2F..%2Fadmin".into(),
+        "a%00b".into(),
+        "slug.json".into(),
+        "slug/badge.svg".into(),
+        "slug?window=24h".into(),
+        "slug#x".into(),
+        "UPPER-case".into(),
+        "with space".into(),
+        "tab\there".into(),
+        "nul\u{0000}byte".into(),
+        "ſtatus".into(),
+        "stаtus".into(),
+        "<script>".into(),
+        "' OR 1=1 --".into(),
+        "a".repeat(41),
+        "b".repeat(10_000),
+    ]
+}
+
 use chrono::{DateTime, Duration, Utc};
 use openlens_event::Event;
 
