@@ -86,6 +86,7 @@ pub fn board(
                 p.notice role="status" { (icon("task")) " Setup: " (done) " of " (total) " required steps done — " a href={ "/p/" (p.id) "/settings" } { "Finish in Settings" } }
             }
             @if let Some(w) = &b.window { (window_line(w)) }
+            (window_picker(p.id, b, f))
             (filter_bar(p.id, b, f, ""))
             (insight_cards(p.id, b, plain))
             section.tiles aria-label="Key numbers" {
@@ -603,10 +604,94 @@ pub(crate) fn window_line(w: &openlens_engine::BoardWindow) -> Markup {
     }
 }
 
+/// The period picker (#513, D-060): since a release of the environment,
+/// or a date range, in a GET form so the URL can be shared. The other
+/// filters ride along as hidden fields.
+pub(crate) fn window_picker(project: &str, b: &Board, f: &Filters) -> Markup {
+    use openlens_engine::Window;
+    if shared() {
+        return html! {};
+    }
+    // The environment's releases (`releases.list`), or the board's latest
+    // ones when the window was not resolved (a board filtered on a release).
+    let releases: Vec<&str> = match b.window.as_ref().filter(|w| !w.releases.is_empty()) {
+        Some(w) => w.releases.iter().map(String::as_str).collect(),
+        None => b.releases.iter().map(|r| r.release.as_str()).collect(),
+    };
+    let (since, from, to) = match &f.window {
+        Window::Since { release } => (Some(release.as_str()), None, None),
+        Window::Range { from, to } => (None, Some(from.to_string()), Some(to.to_string())),
+        Window::Fixed | Window::Release => (None, None, None),
+    };
+    html! {
+        form.filters method="get" action={ "/p/" (project) } aria-label="Period" {
+            input type="hidden" name="env" value=(f.environment);
+            @if let Some(r) = &f.role { input type="hidden" name="role" value=(r); }
+            @if let Some(r) = &f.release { input type="hidden" name="release" value=(r); }
+            @if f.internal { input type="hidden" name="internal" value="1"; }
+            label { "Period "
+                select name="since" {
+                    option value="" selected[since.is_none()] { "Current release" }
+                    @for r in &releases {
+                        option value=(r) selected[since == Some(*r)] { "Since " (r) }
+                    }
+                }
+            }
+            label { "Or from " input type="date" name="from" value=[from]; }
+            label { "To " input type="date" name="to" value=[to]; }
+            button type="submit" { "Show" }
+        }
+        p.muted.small { "Filled dates win over the release: clear them to pick one. A range covers at most 400 days, none before the 400 days kept; an empty end is today. It is compared with the same length just before." }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use openlens_engine::{BoardWindow, Period};
+
+    #[test]
+    fn the_period_picker_keeps_the_window_and_the_filters() {
+        let b = Board {
+            window: Some(BoardWindow {
+                releases: vec!["v2".into(), "v1".into()],
+                ..BoardWindow::default()
+            }),
+            ..Board::default()
+        };
+        let day = |s: &str| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
+        let f = Filters {
+            role: Some("admin".into()),
+            window: openlens_engine::Window::Range {
+                from: day("2026-10-01"),
+                to: day("2026-10-31"),
+            },
+            ..Filters::default()
+        };
+        let html = window_picker("p1", &b, &f).into_string();
+        assert!(html.contains(r#"method="get""#), "{html}");
+        assert!(html.contains(r#"name="from" value="2026-10-01""#), "{html}");
+        assert!(html.contains(r#"name="to" value="2026-10-31""#), "{html}");
+        assert!(html.contains(r#"name="role" value="admin""#), "{html}");
+        assert!(
+            html.contains(r#"<option value="v1">Since v1</option>"#),
+            "{html}"
+        );
+        assert!(!html.contains("<script"), "no JavaScript");
+        // A past release is selected, and the dates are left empty.
+        let f = Filters {
+            window: openlens_engine::Window::Since {
+                release: "v1".into(),
+            },
+            ..Filters::default()
+        };
+        let html = window_picker("p1", &b, &f).into_string();
+        assert!(html.contains(r#"<option value="v1" selected>"#), "{html}");
+        assert!(!html.contains(r#"name="from" value"#), "{html}");
+        // The filter bar carries the window along.
+        let bar = filter_bar("p1", &b, &f, "").into_string();
+        assert!(bar.contains(r#"name="since" value="v1""#), "{bar}");
+    }
 
     #[test]
     fn the_board_names_the_window_it_reads() {

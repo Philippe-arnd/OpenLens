@@ -16,6 +16,7 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Deploy hook | The project's secret URL that platforms post their deploy notifications to |
 | Map drift | Routes new in the latest release that no feature of the map claims |
 | Counted with | On a feature's releases: the map version in force when the release came out |
+| Period picker | On the board: the form that picks a past release or a date range for the period blocks |
 | Feature pulse | Per feature: adoption, uses per user, active days, completion and task time |
 | Who uses what | The roles × features grid: the share of each role's users who used each feature |
 | Do they come back? | Weekly retention cohorts |
