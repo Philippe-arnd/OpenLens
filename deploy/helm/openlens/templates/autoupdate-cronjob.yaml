@@ -1,0 +1,102 @@
+{{- if .Values.autoUpdate.enabled }}
+{{- /* A restart only brings something new when the tag moves: refuse a
+    pinned release, a digest and `edge` (it follows main). */}}
+{{- $tag := include "openlens.tag" . -}}
+{{- if or (regexMatch "^v?[0-9]+\\.[0-9]+\\.[0-9]+" $tag) (contains "@" $tag) (eq $tag "edge") }}
+{{- fail (printf "autoUpdate.enabled follows a channel: set image.tag to latest or a minor such as %s, or leave it empty (got %q). See docs/deploy/kubernetes.md." (include "openlens.channel" .) $tag) }}
+{{- end }}
+{{- $name := printf "%s-autoupdate" (include "openlens.fullname" .) }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels: {{- include "openlens.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+# Only what `kubectl rollout restart` and `rollout status` need, on this
+# StatefulSet only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  labels: {{- include "openlens.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    resourceNames: [{{ include "openlens.fullname" . | quote }}]
+    verbs: ["get", "list", "watch", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  labels: {{- include "openlens.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+# Restarts OpenLens on schedule; with imagePullPolicy Always, the new pod
+# pulls the channel tag again. One replica on one volume: the old pod stops
+# before the new one starts, so each run is a short outage (the SDK keeps
+# the events and retries). The Job fails when the new pod is not ready in
+# time: Kubernetes does not roll back by itself (docs/deploy/kubernetes.md).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $name }}
+  labels: {{- include "openlens.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.autoUpdate.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: {{ .Chart.Name }}-autoupdate
+            app.kubernetes.io/instance: {{ .Release.Name }}
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ $name }}
+          # The ServiceAccount does not mount its token by default; only
+          # this pod gets it.
+          automountServiceAccountToken: true
+          securityContext:
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            - name: restart
+              image: {{ include "openlens.kubectlImage" . | quote }}
+              args: ["rollout", "restart", "statefulset/{{ include "openlens.fullname" . }}"]
+              env:
+                - name: HOME
+                  value: /tmp
+              securityContext: {{- include "openlens.securityContext" . | nindent 16 }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          containers:
+            # The first start of a new version copies the data before it
+            # listens (backups/upgrade/): give it time.
+            - name: wait
+              image: {{ include "openlens.kubectlImage" . | quote }}
+              args: ["rollout", "status", "statefulset/{{ include "openlens.fullname" . }}", "--timeout=20m"]
+              env:
+                - name: HOME
+                  value: /tmp
+              securityContext: {{- include "openlens.securityContext" . | nindent 16 }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}
+{{- end }}

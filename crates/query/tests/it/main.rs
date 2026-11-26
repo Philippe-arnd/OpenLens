@@ -9,6 +9,7 @@ use openlens_query::{Limits, QueryEngine};
 use openlens_storage::{FlushPolicy, Writer};
 
 mod person_day;
+mod session_day;
 
 fn ev(project: &str, role: &str, days_ago: i64) -> Event {
     let ts = Utc::now() - Duration::days(days_ago);
@@ -728,4 +729,22 @@ async fn identity_kept_at_ingestion_replaces_the_scan_with_the_same_answers() {
     ));
     let (n, _) = users(later.clone()).await;
     assert!(n < expected.0, "{n:?} vs {:?}", expected.0);
+}
+
+/// A query on a project with nothing stored (or deleted while the query
+/// ran) answers empty and does not create the project's directory.
+#[tokio::test]
+async fn a_query_never_creates_a_project_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let q = QueryEngine::new(dir.path(), Limits::default());
+    let r = q
+        .sql("gone", "SELECT count(*) AS n FROM events")
+        .await
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    assert!(
+        !openlens_storage::project_dir(dir.path(), "gone")
+            .unwrap()
+            .exists()
+    );
 }

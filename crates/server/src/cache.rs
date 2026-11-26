@@ -148,6 +148,10 @@ pub struct Caches {
     pub(crate) login_emails: Bounded<String, Vec<Instant>>,
     /// Environment host rules per project (a minute; cleared on change).
     pub(crate) env_rules: Bounded<String, std::sync::Arc<crate::environments::ProjectEnv>>,
+    /// What ingestion knows of each project's host allow-list (#485):
+    /// when a listed host last sent events, and the events dropped. Kept
+    /// while batches arrive; eight idle days and it is read again.
+    pub(crate) env_allow: Bounded<String, openlens_engine::environments::AllowState>,
     /// Projects whose environment upgrade seed is running now.
     pub(crate) env_seeding: Bounded<String, ()>,
     /// The last two probes of each monitored environment (#410), keyed
@@ -157,6 +161,11 @@ pub struct Caches {
     pub(crate) replay_rates: Bounded<String, crate::replay::RateEntry>,
     /// Projects whose identity backfill (#450) ran or is running.
     pub(crate) identity_checked: Bounded<String, ()>,
+    /// Release name per build fingerprint (#495), keyed `project|env|build`.
+    pub(crate) release_builds: Bounded<String, String>,
+    /// Project days that recorded all the new fingerprints they may (#495),
+    /// keyed `project|day`.
+    pub(crate) release_days_full: Bounded<String, ()>,
 }
 
 impl Default for Caches {
@@ -177,10 +186,13 @@ impl Default for Caches {
             share_pages: Bounded::new(1_000, 5 * MIN),
             login_emails: Bounded::new(10_000, 60 * MIN),
             env_rules: Bounded::new(10_000, MIN),
+            env_allow: Bounded::new(10_000, 8 * 24 * 60 * MIN),
             env_seeding: Bounded::new(10_000, 10 * MIN),
             env_checks: Bounded::new(10_000, 10 * MIN),
             replay_rates: Bounded::new(10_000, 25 * 60 * MIN),
             identity_checked: Bounded::new(10_000, 10 * MIN),
+            release_builds: Bounded::new(10_000, 60 * MIN),
+            release_days_full: Bounded::new(10_000, 10 * MIN),
         }
     }
 }
@@ -204,8 +216,10 @@ impl Caches {
             ("share_pages", n(self.share_pages.len())),
             ("login_emails", n(self.login_emails.len())),
             ("env_rules", n(self.env_rules.len())),
+            ("env_allow", n(self.env_allow.len())),
             ("env_checks", n(self.env_checks.len())),
             ("replay_rates", n(self.replay_rates.len())),
+            ("release_builds", n(self.release_builds.len())),
         ]
     }
 }

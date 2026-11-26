@@ -1,0 +1,139 @@
+//! Engine commands (#308, D-042): every action the dashboard, the REST API,
+//! Ask and MCP offer is a command here, with a name, a serialisable input
+//! and output, and the access level it needs. Front ends are adapters: they
+//! check the level (the server's typed extractors, #294), build the input,
+//! call [`Command::run`] and render the output.
+//!
+//! [`REGISTRY`] lists every command, so a test can compare it with the MCP
+//! tools.
+
+use std::future::Future;
+
+use openlens_featuremap::FeatureMap;
+use openlens_meta::{Meta, Project};
+use openlens_query::QueryEngine;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+
+use crate::{Board, Filters};
+
+pub mod goals;
+
+/// Who may run a command, in the terms of the server's access policy
+/// (`crates/server/src/access.rs`, #294).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Access {
+    /// Anyone signed in who may see the project (any role).
+    Read,
+    /// An admin who may see the project, or the bearer token
+    /// (`ProjectWrite`).
+    Write,
+    /// An admin of every project, or the bearer token (`Admin`).
+    Admin,
+}
+
+/// A command: its name, input, output and access level.
+pub trait Command {
+    /// Stable name, `area.verb` (`goals.set`).
+    const NAME: &'static str;
+    /// The level a caller needs.
+    const ACCESS: Access;
+    /// What the caller sends.
+    type Input: Serialize + DeserializeOwned + Send;
+    /// What the command returns.
+    type Output: Serialize;
+
+    /// Run the command for `caller`.
+    fn run<H: Host>(
+        host: &H,
+        caller: &Caller,
+        input: Self::Input,
+    ) -> impl Future<Output = Result<Self::Output, Error>> + Send;
+}
+
+/// A registry entry: what a front end needs to list a command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Spec {
+    /// [`Command::NAME`].
+    pub name: &'static str,
+    /// [`Command::ACCESS`].
+    pub access: Access,
+}
+
+/// The entry of `C`.
+#[must_use]
+pub const fn spec<C: Command>() -> Spec {
+    Spec {
+        name: C::NAME,
+        access: C::ACCESS,
+    }
+}
+
+/// Every command.
+pub const REGISTRY: &[Spec] = &[
+    spec::<goals::List>(),
+    spec::<goals::Set>(),
+    spec::<goals::Delete>(),
+    spec::<goals::SetObjective>(),
+    spec::<goals::DeleteObjective>(),
+];
+
+/// Who runs a command, beyond the access level the adapter checked.
+#[derive(Debug, Clone, Default)]
+pub struct Caller {
+    /// The viewer's own time zone, when valid; `None` counts in the
+    /// project's (D-017).
+    pub tz: Option<String>,
+}
+
+/// Why a command did not run.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum Error {
+    /// No such project.
+    #[error("unknown project")]
+    NotFound,
+    /// The input is refused; the text says why, for the person.
+    #[error("{0}")]
+    Invalid(String),
+    /// The numbers it needs could not be computed.
+    #[error("{0}")]
+    Unavailable(String),
+    /// Storing the result failed.
+    #[error("{0}")]
+    Storage(String),
+}
+
+/// What a command needs from the process it runs in: the stores, and the
+/// cached board and timeline the server keeps.
+pub trait Host: Sync {
+    /// The metadata store.
+    fn meta(&self) -> &Meta;
+    /// The event query engine.
+    fn query(&self) -> &QueryEngine;
+    /// A project by id.
+    fn project(&self, id: &str) -> impl Future<Output = Option<Project>> + Send;
+    /// The project's latest valid feature map, with its version.
+    fn feature_map(&self, project: &str) -> impl Future<Output = Option<(FeatureMap, i64)>> + Send;
+    /// The board for these filters (cached by the host).
+    fn board(
+        &self,
+        project: &str,
+        f: &Filters,
+        map: Option<(&FeatureMap, i64)>,
+    ) -> impl Future<Output = crate::Result<Board>> + Send;
+    /// What happened in the project over the last `days` (releases first
+    /// seen, changes, alerts, notes).
+    fn changes(&self, project: &str, releases: &[(String, String)], days: i64) -> Vec<Change>;
+}
+
+/// Something that happened in a project, on the timeline.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Change {
+    /// Day (YYYY-MM-DD).
+    pub day: String,
+    /// `release`, `change`, `alert` or `note`.
+    pub kind: String,
+    /// What happened.
+    pub text: String,
+}

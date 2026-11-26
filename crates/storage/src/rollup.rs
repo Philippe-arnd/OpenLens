@@ -114,6 +114,30 @@ pub fn person_day_schema() -> SchemaRef {
     ]))
 }
 
+/// `session_day` (#493, D-041): one row per session, person, environment,
+/// release and role of the UTC day (one row per session in practice).
+/// A session crossing midnight has rows on both days, and a reader
+/// re-assembles it by `session_id`: `min(first_ts)`, `max(last_ts)` and
+/// the sums of `interactions` (events done on purpose, the board's bounce
+/// rule), `errors` (`$error` events) and `tasks` (as in `person_day`). The
+/// person is the merged one and the role the raw one, as in `person_day`;
+/// `map_version` is the version of the feature map that decided the tasks.
+pub fn session_day_schema() -> SchemaRef {
+    Arc::new(Schema::new(vec![
+        Field::new("session_id", DataType::Utf8, true),
+        Field::new("person", DataType::Utf8, true),
+        Field::new("environment", DataType::Utf8, true),
+        Field::new("release", DataType::Utf8, true),
+        Field::new("role", DataType::Utf8, true),
+        Field::new("first_ts", ts(), true),
+        Field::new("last_ts", ts(), true),
+        Field::new("interactions", DataType::Int64, true),
+        Field::new("errors", DataType::Int64, true),
+        Field::new("tasks", DataType::Int64, true),
+        Field::new("map_version", DataType::Int64, true),
+    ]))
+}
+
 /// The dimensions every page rollup is split by.
 fn page_dims() -> Vec<Field> {
     vec![
@@ -168,13 +192,14 @@ pub const TOP_LABELS: usize = 20;
 
 /// The tables with a row per person: erasing someone removes their rows
 /// from them (D-026).
-pub const PERSON_TABLES: [&str; 2] = ["person_q", "person_day"];
+pub const PERSON_TABLES: [&str; 3] = ["person_q", "person_day", "session_day"];
 
 /// The rollup tables: name and schema.
-pub fn tables() -> [(&'static str, SchemaRef); 6] {
+pub fn tables() -> [(&'static str, SchemaRef); 7] {
     [
         ("person_q", person_schema()),
         ("person_day", person_day_schema()),
+        ("session_day", session_day_schema()),
         ("metric_q", metric_schema()),
         ("click_q", click_schema()),
         ("label_q", label_schema()),
@@ -237,6 +262,11 @@ fn schema_of(name: &str) -> Option<SchemaRef> {
         .map(|(_, s)| s)
 }
 
+/// The last closed UTC day at `now` (D-025): rollups exist only up to it.
+pub fn last_closed(now: DateTime<Utc>) -> NaiveDate {
+    now.date_naive() - chrono::Duration::days(GRACE_DAYS + 1)
+}
+
 /// Closed days that still have their events and lack a rollup table
 /// (never rolled up, or rolled up before a table was added), oldest first.
 pub fn missing(root: &Path, project: &str, now: DateTime<Utc>) -> Result<Vec<NaiveDate>> {
@@ -244,7 +274,7 @@ pub fn missing(root: &Path, project: &str, now: DateTime<Utc>) -> Result<Vec<Nai
     if !pdir.is_dir() {
         return Ok(Vec::new());
     }
-    let last_closed = now.date_naive() - chrono::Duration::days(GRACE_DAYS + 1);
+    let last_closed = last_closed(now);
     let mut days = Vec::new();
     for entry in fs::read_dir(&pdir)? {
         let path = entry?.path();

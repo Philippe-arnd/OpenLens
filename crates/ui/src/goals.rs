@@ -4,81 +4,8 @@
 
 use super::*;
 
-/// A goal with where it stands (#235).
-pub struct GoalRow {
-    /// The stored goal.
-    pub goal: openlens_engine::goals::Goal,
-    /// KPI label.
-    pub label: String,
-    /// A share (shown as %).
-    pub share: bool,
-    /// Value now.
-    pub current: Option<f64>,
-    /// Projected value at the deadline.
-    pub projected: Option<f64>,
-    /// Per release (oldest first).
-    pub series: Vec<(String, f64)>,
-    /// Status label.
-    pub status: String,
-    /// Reached or on track.
-    pub good: bool,
-    /// Off track.
-    pub bad: bool,
-    /// Days to the deadline.
-    pub days_left: i64,
-    /// The status itself.
-    pub state: openlens_engine::goals::Status,
-    /// Its guardrails now (#272).
-    pub guards: Vec<GuardRow>,
-    /// Releases that moved the KPI most since the goal was set.
-    pub moves: Vec<openlens_engine::goals::Move>,
-    /// Changes in the period (flags, surveys, map, notes, alerts).
-    pub marks: Vec<Mark>,
-}
-
-/// A guardrail as shown.
-pub struct GuardRow {
-    /// KPI label.
-    pub label: String,
-    /// A share.
-    pub share: bool,
-    /// Value now.
-    pub current: Option<f64>,
-    /// The limit.
-    pub limit: f64,
-    /// Worse than the limit.
-    pub breached: bool,
-}
-
-/// An objective as shown (#272).
-pub struct ObjectiveRow {
-    /// As stored.
-    pub objective: openlens_engine::goals::Objective,
-    /// Its status (the worst key result).
-    pub status: String,
-    /// Reached or on track.
-    pub good: bool,
-    /// At risk or off track.
-    pub bad: bool,
-    /// Key results: (label, now, target, share, status).
-    pub results: Vec<(String, Option<f64>, f64, bool, String)>,
-}
-
-/// A KPI a goal can be set on, with its suggested target.
-pub struct GoalChoice {
-    /// Key.
-    pub kpi: String,
-    /// Label.
-    pub label: String,
-    /// Higher is better.
-    pub up: bool,
-    /// A share.
-    pub share: bool,
-    /// Value now.
-    pub current: f64,
-    /// Suggested target.
-    pub suggested: f64,
-}
+/// The rows the Goals page shows, as `goals.list` returns them (#494).
+pub use openlens_engine::commands::goals::{GoalChoice, GoalRow, GuardRow, ObjectiveRow};
 
 pub(crate) fn kpi_fmt(v: f64, share: bool) -> String {
     if share {

@@ -2,6 +2,7 @@ export interface Dimensions { role?: string; account?: string; plan?: string }
 export interface Options {
   host: string;
   key: string;
+  /** Default: the commit the host exposes (SOURCE_COMMIT, GITHUB_SHA, ...), else npm_package_version. */
   release?: string;
   environment?: string;
   flushAt?: number;
@@ -18,4 +19,5 @@ export declare class OpenLens {
   flush(): Promise<void>;
   shutdown(): Promise<void>;
 }
+export declare function detectRelease(env: Record<string, string | undefined>): string | undefined;
 export default OpenLens;

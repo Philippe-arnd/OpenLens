@@ -206,8 +206,8 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "environments",
-                description: "The app's environments: hosts per environment over 30 days (events, last seen, the rule that applies), the host rules, hosts no rule classifies yet (stored as 'unknown', counted in no production number), aliases, hidden environments and per-environment checks. Optional changes, applied first: host+env sets the rule for a host (exact or *.suffix; env is a name or 'ignore' to drop its events), remove removes it; alias+to stores an environment the app sends under another name ('ignore' drops it), unalias removes it; hide / show takes an environment out of the selector or back (its events stay readable by name); monitor+url (+level 'log' or 'notify', default log) checks a non-production environment at its own address every minute, unmonitor stops it. Rules and aliases apply to the next events, with no change to the app; relabel (a host or *.suffix, +days 1-90, default 30) then moves that host's past events to the environment the rules give now, as a dry run that only counts the moves unless dry_run is false.",
-                input_schema: json!({"type":"object","properties":with(json!({"relabel":{"type":"string"},"days":{"type":"integer","minimum":1,"maximum":90},"dry_run":{"type":"boolean","default":true},"host":{"type":"string"},"env":{"type":"string"},"remove":{"type":"string"},"alias":{"type":"string"},"to":{"type":"string"},"unalias":{"type":"string"},"hide":{"type":"string"},"show":{"type":"string"},"monitor":{"type":"string"},"url":{"type":"string"},"level":{"type":"string","enum":["log","notify"]},"unmonitor":{"type":"string"}}))}),
+                description: "The app's environments: hosts per environment over 30 days (events, last seen, the rule that applies), the host rules, hosts no rule classifies yet (stored as 'unknown', counted in no production number), aliases, hidden environments and per-environment checks. Optional changes, applied first: host+env sets the rule for a host (exact or *.suffix; env is a name or 'ignore' to drop its events), remove removes it; alias+to stores an environment the app sends under another name ('ignore' drops it), unalias removes it; hide / show takes an environment out of the selector or back (its events stay readable by name); monitor+url (+level 'log' or 'notify', default log) checks a non-production environment at its own address every minute, unmonitor stops it. Rules and aliases apply to the next events, with no change to the app; relabel (a host or *.suffix, +days 1-90, default 30) then moves that host's past events to the environment the rules give now, as a dry run that only counts the moves unless dry_run is false. allow (a list of hosts or *.suffix, at most 50; [] turns it off) previews a host allow-list: the hosts outside it and their events over the last 24 h; with confirm true it is saved, and events of other hosts are then dropped at ingestion, but only while a listed host has sent events in the last 7 days (otherwise it is 'pending' and drops nothing); events without a page address always pass. The result's 'allow' shows the list, its status and the events it dropped per host.",
+                input_schema: json!({"type":"object","properties":with(json!({"allow":{"type":"array","items":{"type":"string"},"maxItems":50},"confirm":{"type":"boolean","default":false},"relabel":{"type":"string"},"days":{"type":"integer","minimum":1,"maximum":90},"dry_run":{"type":"boolean","default":true},"host":{"type":"string"},"env":{"type":"string"},"remove":{"type":"string"},"alias":{"type":"string"},"to":{"type":"string"},"unalias":{"type":"string"},"hide":{"type":"string"},"show":{"type":"string"},"monitor":{"type":"string"},"url":{"type":"string"},"level":{"type":"string","enum":["log","notify"]},"unmonitor":{"type":"string"}}))}),
             },
             ToolSpec {
                 name: "verify",
@@ -463,10 +463,30 @@ impl Tools for OpenLensTools {
                     }
                     None => None,
                 };
+                // The allow-list: a preview unless the agent confirms.
+                let allowed = match args.get("allow").and_then(Value::as_array) {
+                    Some(hosts) => {
+                        let body = json!({
+                            "hosts": hosts,
+                            "confirm": args.get("confirm").and_then(Value::as_bool).unwrap_or(false),
+                        });
+                        let (st, v) = c.call(
+                            "POST",
+                            &format!("/api/projects/{p}/environments/allow"),
+                            Some(Body::Json(body)),
+                        )?;
+                        Some(ok_or(st, v)?)
+                    }
+                    None => None,
+                };
                 let (st, v) = c.call("GET", &format!("/api/projects/{p}/environments"), None)?;
                 let mut v = ok_or(st, v)?;
                 if let Some(r) = relabelled {
                     v["relabel"] = r;
+                }
+                if let Some(a) = allowed {
+                    v["allow_preview"] = a["preview"].clone();
+                    v["allow_saved"] = a["saved"].clone();
                 }
                 Ok(v)
             }
