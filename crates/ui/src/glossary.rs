@@ -32,6 +32,22 @@ pub(crate) const KPI: &[(&str, &str)] = &[
         "Releases and changes whose target metric moved the expected way, measured 14 days after they shipped.",
     ),
     (
+        "Deploy frequency",
+        "Changes shipped per week over the period: the deploy hook's succeeded deploys, else releases that reached live (95 % of a day's users) or were rolled back.",
+    ),
+    (
+        "Lead time",
+        "Median time from a release's first commit to live. Unknown until the commit range of each release is recorded (`openlens-cli release`).",
+    ),
+    (
+        "Change failure rate",
+        "Changes that failed ÷ changes: failed deploys, deploys or releases rolled back, and releases whose verdict is regressed.",
+    ),
+    (
+        "Time to restore",
+        "Median time from a failed change to the rollback or the next change that did not fail. Failures not restored yet are counted apart.",
+    ),
+    (
         "Active now",
         "Distinct users with an event in the last 5 minutes.",
     ),
@@ -381,6 +397,7 @@ mod tests {
             include_str!("features.rs"),
             include_str!("explore.rs"),
             include_str!("feature_page.rs"),
+            include_str!("delivery.rs"),
         ];
         let mut seen = 0;
         for src in sources {

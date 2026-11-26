@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::components::detail_url;
+use openlens_engine::delivery::Delivery;
 use openlens_engine::deploys::Status;
 use openlens_engine::releases::{Releases, State};
 
@@ -85,8 +86,15 @@ fn hook_card(p: &ProjectInfo<'_>, r: &Releases, h: &HookView<'_>) -> Markup {
     }
 }
 
-/// Releases (#500): `releases.list`, as a table, and the deploy hook.
-pub fn releases(p: &ProjectInfo<'_>, r: &Releases, hook: &HookView<'_>) -> Markup {
+/// Releases (#500): `releases.list`, as a table, the delivery metrics
+/// (`releases.delivery`, #523) when they could be computed, and the
+/// deploy hook.
+pub fn releases(
+    p: &ProjectInfo<'_>,
+    r: &Releases,
+    delivery: Option<&Delivery>,
+    hook: &HookView<'_>,
+) -> Markup {
     layout(
         "Releases",
         Some(p),
@@ -151,6 +159,9 @@ pub fn releases(p: &ProjectInfo<'_>, r: &Releases, hook: &HookView<'_>) -> Marku
                     } }
                 }
             }
+            @if let Some(d) = delivery {
+                (crate::delivery::delivery_card(d))
+            }
             (hook_card(p, r, hook))
         },
     )
@@ -202,7 +213,7 @@ mod tests {
             admin: true,
             new_url: None,
         };
-        let html = releases(&p, &r, &hook).into_string();
+        let html = releases(&p, &r, None, &hook).into_string();
         assert!(
             html.contains("/p/demo?env=production&amp;release=v2%20%3Cb%3E"),
             "{html}"

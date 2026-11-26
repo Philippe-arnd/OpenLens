@@ -197,6 +197,12 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "Releases per environment over 90 days (`env` for one): state (rolling out, live, superseded, rolled back; failed or deploying for a deploy with no traffic) from the share of daily users, first and last seen, users, time in staging, deploy time and last deploy status; the deploys the deploy hook recorded; when the hook was set up.",
     ),
     (
+        "GET",
+        "/api/projects/{project}/delivery",
+        "read",
+        "Delivery metrics per environment over `days` (1 to 90, default 90; `env` for one): deploy frequency (succeeded deploys from the deploy hook, else releases reaching live), lead time from first commit to live (unknown until a commit range is recorded), change failure rate (failed or rolled-back deploys and releases, and regressed verdicts) and time to restore, as medians in seconds.",
+    ),
+    (
         "POST",
         "/api/projects/{project}/deploy-hook",
         "write",
