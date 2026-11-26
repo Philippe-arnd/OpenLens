@@ -11,6 +11,7 @@
 //! level; at `log` they are recorded on Uptime and never sent.
 
 use openlens_engine::commands::alerts::{self as cmd, Settings};
+use openlens_engine::commands::uptime;
 
 use crate::AppState;
 
@@ -132,6 +133,13 @@ pub(crate) async fn tick(state: &AppState, minute: u64) {
         return;
     };
     for p in projects {
+        // Uptime history (#559): the days of the last week after a start,
+        // then yesterday and today every hour.
+        if minute == 1 {
+            uptime::rebuild_recent(&state.meta, &p.id, chrono::Utc::now());
+        } else if minute % 60 == 6 {
+            uptime::close_days(&state.meta, &p.id, chrono::Utc::now());
+        }
         let s = Settings::load(&state.meta, &p.id);
         if s.down
             && let Some(origin) = state.meta.project_setting(&p.id, "app_url").ok().flatten()
@@ -186,6 +194,16 @@ pub(crate) async fn tick(state: &AppState, minute: u64) {
             ))
             .await;
         }
+        // Error budgets of the environments with a target (#560).
+        if minute % 5 == 2 {
+            Box::pin(openlens_engine::slo::alert_pass(
+                state,
+                &p,
+                &s,
+                chrono::Utc::now(),
+            ))
+            .await;
+        }
         Box::pin(cmd::flush_queue(state, &p.id, &s)).await;
         if s.traffic
             && minute.is_multiple_of(5)
@@ -203,7 +221,8 @@ pub(crate) async fn tick(state: &AppState, minute: u64) {
 /// The probe and certificate check of each monitored non-production
 /// environment (#410): down after two failed checks in a row, as for
 /// production, with the project's health path and switches. Their checks
-/// are kept in memory, apart from production's uptime history.
+/// are stored under their environment, for their own days (#559); the
+/// last two stay in memory for the down check.
 async fn environments(state: &AppState, p: &openlens_meta::Project, s: &Settings, minute: u64) {
     use openlens_engine::environments::incident_rule;
     let monitors = crate::environments::current(state, &p.id)
@@ -214,9 +233,16 @@ async fn environments(state: &AppState, p: &openlens_meta::Project, s: &Settings
         if s.down {
             let url = format!("{}{}", m.url, s.health_path);
             let target = url.clone();
-            let (ok, _, _, err) = tokio::task::spawn_blocking(move || probe(&target))
+            let (ok, code, ms, err) = tokio::task::spawn_blocking(move || probe(&target))
                 .await
                 .unwrap_or((false, None, None, Some("probe crashed".into())));
+            let found = openlens_meta::Probe {
+                ok,
+                status: code,
+                ms,
+                error: err.as_deref(),
+            };
+            uptime::record_env_probe(&state.meta, &p.id, &m.env, &found);
             let key = format!("{}|{}", p.id, m.env);
             let mut last = state.caches.env_checks.get(&key).unwrap_or_default();
             let failing = cmd::push_env_check(&mut last, ok);

@@ -9,6 +9,7 @@
 
 use maud::{Markup, PreEscaped, html};
 
+mod announcements;
 mod audience;
 mod board;
 mod board_job;
@@ -24,13 +25,19 @@ mod glossary;
 mod goals;
 mod goto;
 mod icons;
+mod maintenance;
 mod manage;
 mod releases;
 mod settings;
 mod shell;
+mod slo;
+mod status_page;
 mod team;
 mod totp;
 mod world;
+pub use announcements::{
+    NoticeForm, NoticeRow, NoticesView, OfferRow, linked, notice_page, notices,
+};
 pub use audience::*;
 pub use board::*;
 pub use board_job::{JobView, board_job};
@@ -44,12 +51,17 @@ pub(crate) use glossary::{th_def, th_num, vital_info};
 pub use goals::*;
 pub use goto::{GotoPlace, goto_results, goto_sections};
 pub use icons::icon;
+pub use maintenance::{MaintenanceRow, MaintenanceView, maintenance_card};
 pub use manage::*;
 use openlens_engine::{Board, EventRow, Filters};
 pub use releases::*;
 pub use settings::*;
 pub(crate) use shell::{Crumbs, NAV, Signal, layout, layout_in, layout_with, signals};
 pub use shell::{NavProject, set_admin_source, set_icon_source, set_nav_project_source};
+pub use slo::{AvailabilityView, availability_card};
+pub use status_page::{
+    StatusComponentRow, StatusPageCard, state_words, status_page, status_page_card,
+};
 pub use team::*;
 pub use totp::{TotpCard, login_code, totp_recovery_codes};
 

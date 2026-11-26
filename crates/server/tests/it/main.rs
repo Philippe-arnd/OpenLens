@@ -17,6 +17,7 @@ use tower::ServiceExt;
 mod access;
 mod agents;
 mod allowlist;
+mod announcements;
 mod auth;
 mod board_jobs;
 mod environments;
@@ -28,6 +29,8 @@ mod manage;
 mod pages;
 mod privacy;
 mod releases;
+mod slo;
+mod status_page;
 mod team;
 mod totp;
 

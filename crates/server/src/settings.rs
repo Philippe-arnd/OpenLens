@@ -8,6 +8,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use serde::Deserialize;
 
 use openlens_engine::commands::alerts::{self, ProjectInput};
+use openlens_engine::commands::uptime;
 use openlens_engine::commands::{Caller, Command, Error};
 
 use crate::AppState;
@@ -351,6 +352,7 @@ async fn page_at(
             "Past events re-labelled. Boards follow at once; closed days are rolled up again within minutes.",
         ),
         Some("allow") => Some("Allowed hosts saved."),
+        Some("status") => Some("Status page saved."),
         Some("test") => Some("Test alert sent: check every channel."),
         Some("test-none") => {
             Some("No channel is set: add an email (SMTP), a webhook or an ntfy topic.")
@@ -400,6 +402,11 @@ async fn page_at(
         _ => None,
     };
     let host = crate::public_url(&headers);
+    let status_page = if tab == openlens_ui::SettingsTab::Sharing {
+        crate::status_page::card(&state, &p, &host, viewer.admin).await
+    } else {
+        None
+    };
     let a = alerts::GetSettings::run(&state, &Caller::default(), project_input(&p.id))
         .await
         .unwrap_or_default();
@@ -429,6 +436,7 @@ async fn page_at(
                 relabel,
                 allow,
                 allow_preview,
+                status_page,
                 setup: setup_steps(
                     &state,
                     &p.id,
@@ -444,6 +452,8 @@ async fn page_at(
                         regressions: a.regressions,
                         cert: a.cert,
                         failing: a.failing,
+                        budget_spent: a.budget_spent,
+                        budget_burn: a.budget_burn,
                         quiet: a.quiet,
                         health_path: a.health_path,
                         email: a.email,
@@ -768,6 +778,10 @@ pub(crate) struct AlertsForm {
     #[serde(default)]
     failing: Option<String>,
     #[serde(default)]
+    budget_spent: Option<String>,
+    #[serde(default)]
+    budget_burn: Option<String>,
+    #[serde(default)]
     quiet_start: String,
     #[serde(default)]
     quiet_end: String,
@@ -797,6 +811,8 @@ pub(crate) async fn alerts(
         regressions: f.regressions.as_deref() == Some("on"),
         cert: f.cert.as_deref() == Some("on"),
         failing: f.failing.as_deref() == Some("on"),
+        budget_spent: f.budget_spent.as_deref() == Some("on"),
+        budget_burn: f.budget_burn.as_deref() == Some("on"),
         quiet: match (
             f.quiet_start.trim().parse::<u8>(),
             f.quiet_end.trim().parse::<u8>(),
@@ -852,18 +868,30 @@ pub(crate) async fn alerts_test(
     }
 }
 
+fn now() -> i64 {
+    chrono::Utc::now().timestamp()
+}
+
 fn when(t: i64, tz: &str) -> String {
     chrono::DateTime::from_timestamp(t, 0).map_or_else(String::new, |d| {
         openlens_ui::local_time(&d.format("%Y-%m-%d %H:%M:%S").to_string(), tz, false)
     })
 }
 
-/// `GET /p/{id}/uptime` (#256).
+/// The query of the Uptime page: the page of incidents (#559).
+#[derive(Debug, Deserialize)]
+pub(crate) struct UptimeQuery {
+    before: Option<i64>,
+}
+
+/// `GET /p/{id}/uptime` (#256): with the last 90 days and every incident,
+/// page by page (#559).
 pub(crate) async fn uptime(
     _: crate::access::Session,
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    Query(q): Query<UptimeQuery>,
 ) -> Response {
     let Some(p) = load(&state, &id).await else {
         return html_page(
@@ -876,25 +904,76 @@ pub(crate) async fn uptime(
         Ok(u) => u,
         Err(e) => return oops(&e.to_string()),
     };
+    let days_input = uptime::DaysInput {
+        project: p.id.clone(),
+        from: None,
+        to: None,
+        environment: None,
+    };
+    let days = match uptime::GetDays::run(&state, &Caller::default(), days_input).await {
+        Ok(d) => d,
+        Err(e) => return oops(&e.to_string()),
+    };
+    let page_input = uptime::IncidentsInput {
+        project: p.id.clone(),
+        before: q.before,
+        limit: None,
+    };
+    let page = match uptime::GetIncidents::run(&state, &Caller::default(), page_input).await {
+        Ok(i) => i,
+        Err(e) => return oops(&e.to_string()),
+    };
+    let left = |s: i64| (s > 0).then(|| openlens_engine::maintenance::length(s));
+    let maintenance = openlens_ui::MaintenanceView {
+        rows: openlens_engine::commands::maintenance::list(&state, &p.id, &tz, now())
+            .into_iter()
+            .map(|w| openlens_ui::MaintenanceRow {
+                id: w.id,
+                when: w.when,
+                length: w.length,
+                state: w.state.to_owned(),
+                components: w.components.join(", "),
+                text: w.text,
+            })
+            .collect(),
+        admin: crate::auth::viewer(&state, &headers).is_some_and(|v| v.admin),
+        tz: tz.clone(),
+    };
     let view = openlens_ui::UptimeView {
         state: u.status.state,
         since: u.status.since.map(|t| when(t, &tz)),
         url: u.url,
         avail: u.avail,
+        left_out: (
+            left(u.maintenance_left_out.0),
+            left(u.maintenance_left_out.1),
+        ),
+        maintenance,
         ms: u.ms,
-        incidents: u
+        incidents: page
             .incidents
             .into_iter()
             .map(|i| {
                 let end = i.end.map(|e| when(e, &tz));
-                (i.rule, when(i.start, &tz), end, i.minutes, i.cause)
+                let cause = if i.planned {
+                    format!("{} · during planned maintenance, not announced", i.cause)
+                } else {
+                    i.cause
+                };
+                (i.rule, when(i.start, &tz), end, i.minutes, cause)
             })
             .collect(),
+        older: page.next,
+        paged: q.before.is_some(),
         last: u
             .last
             .into_iter()
             .map(|c| (when(c.0, &tz), c.1, c.2, c.3, c.4))
             .collect(),
+        days_avail: days.availability,
+        days: days.days,
+        notices: crate::announcements::section(&state, &p, &tz).await,
+        availability: crate::slo::section(&state, &headers, &p).await,
     };
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
@@ -906,21 +985,4 @@ pub(crate) async fn uptime(
         r.headers_mut().insert(axum::http::header::REFRESH, v);
     }
     r
-}
-
-/// `GET /api/projects/{id}/status` (bearer): up, down, unknown or off,
-/// with open incidents (for agents around a deploy).
-pub(crate) async fn api_status(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-) -> Response {
-    if !crate::auth::has_bearer(&state, &headers) {
-        return crate::apierr::json(StatusCode::UNAUTHORIZED, "admin bearer token required");
-    }
-    match alerts::GetStatus::run(&state, &Caller::default(), project_input(&id)).await {
-        Ok(st) => axum::Json(st).into_response(),
-        Err(Error::NotFound) => crate::apierr::json(StatusCode::NOT_FOUND, "unknown project"),
-        Err(e) => crate::apierr::json(StatusCode::BAD_REQUEST, e.to_string()),
-    }
 }

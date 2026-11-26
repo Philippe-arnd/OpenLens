@@ -18,6 +18,7 @@ use serde::de::DeserializeOwned;
 use crate::{Board, Filters};
 
 pub mod alerts;
+pub mod announcements;
 pub mod ask;
 pub mod board;
 pub mod delivery;
@@ -26,14 +27,20 @@ pub mod explore;
 pub mod flags;
 pub mod goals;
 pub mod goto;
+pub mod maintenance;
 pub mod releases;
+pub mod status_page;
 pub mod tickets;
+pub mod uptime;
 
 /// Who may run a command, in the terms of the server's access policy
 /// (`crates/server/src/access.rs`, #294).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Access {
+    /// Anyone, without signing in: the command returns only what its
+    /// owner chose to publish (the public status page, #561, D-079).
+    Public,
     /// Anyone signed in who may see the project (any role).
     Read,
     /// An admin who may see the project, or the bearer token
@@ -128,8 +135,32 @@ pub const REGISTRY: &[Spec] = &[
     spec::<board::GetEstimate>(),
     // Delivery metrics (#523).
     spec::<delivery::GetDelivery>(),
+    // Uptime history (#559).
+    spec::<uptime::GetDays>(),
+    spec::<uptime::GetIncidents>(),
+    // Availability windows and the SLO (#560).
+    spec::<uptime::GetReport>(),
+    spec::<uptime::SetTarget>(),
+    // Planned maintenance windows (#563).
+    spec::<maintenance::List>(),
+    spec::<maintenance::Schedule>(),
+    spec::<maintenance::Extend>(),
+    spec::<maintenance::EndNow>(),
+    spec::<maintenance::Cancel>(),
+    // Status announcements and incident updates (#562).
+    spec::<announcements::List>(),
+    spec::<announcements::Create>(),
+    spec::<announcements::Update>(),
+    spec::<announcements::AddUpdate>(),
+    spec::<announcements::Close>(),
+    spec::<announcements::Delete>(),
+    spec::<announcements::SetSend>(),
     // The sidebar's Go to… field (#541).
     spec::<goto::Lookup>(),
+    // The public status page (#561).
+    spec::<status_page::Get>(),
+    spec::<status_page::Set>(),
+    spec::<status_page::GetPublic>(),
 ];
 
 /// A 12-character id from `s` (the first bytes of its SHA-256, in hex).
