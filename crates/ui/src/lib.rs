@@ -33,6 +33,7 @@ mod releases;
 mod settings;
 mod shell;
 mod tables;
+pub(crate) use tables::family_label;
 mod team;
 mod totp;
 mod world;
@@ -283,18 +284,33 @@ mod tests {
     /// must use `tile_to` / `to(...)`, or say `no_detail` on purpose.
     #[test]
     fn every_board_card_and_tile_leads_somewhere() {
-        let src = include_str!("board.rs");
-        let body = &src[src.find("pub fn board(").unwrap()..];
+        let src = include_str!("board/mod.rs");
+        let body = [
+            &src[src.find("pub fn board(").unwrap()..],
+            include_str!("board/focus.rs"),
+            include_str!("board/tiles.rs"),
+            include_str!("board/charts.rs"),
+            include_str!("board/sections.rs"),
+        ]
+        .concat();
         assert!(
             !body.contains("(tile(\""),
-            "a board tile without a detail: use tile_to"
+            "a board tile without a detail: use kpi_to"
         );
-        for line in body.lines().filter(|l| l.trim_start().starts_with("h2.")) {
+        // Every card title (`h2.x`, `h2 id=…`, `h2 {`) opens its page, or
+        // says why not.
+        for line in body.lines().filter(|l| {
+            let l = l.trim_start();
+            l.starts_with("h2.") || l.starts_with("h2 ") || l.starts_with("h2#")
+        }) {
             assert!(
                 line.contains("(to(") || line.contains("no_detail"),
                 "card without a detail: {line}"
             );
         }
+        // The section heads of the other cards go through `head(…)`, which
+        // is `to(…)`.
+        assert!(include_str!("board/sections.rs").contains("h2 id=(id) { (to(href, title)) }"));
         let f = Filters {
             environment: "production".into(),
             role: Some("admin".into()),
