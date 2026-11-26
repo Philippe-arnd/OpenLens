@@ -34,8 +34,9 @@ for (const theme of ["light", "dark"]) {
     const r = await tab.goto(url);
     if (!r || r.status() !== 200) problems.push(`${url}: HTTP ${r ? r.status() : "none"}`);
     // The icon sprite must not take space, and meters must have a length.
-    // Matrix cells must carry their heat class (one class attribute only).
-    const heat = await tab.evaluate(() => document.querySelectorAll("table.matrix td[class*=heat-]").length);
+    // Matrix cells must carry their heat class, bucketed by tenths (UI v2,
+    // #543: no inline style under the CSP, so the shade is a class).
+    const heat = await tab.evaluate(() => [...document.querySelectorAll("table.heat .hc")].filter((c) => /\bp(10|\d)\b/.test(c.className)).length);
     if (p === "" && heat === 0) problems.push(`${url}: roles × features cells have no heat class`);
     const spriteHeight = await tab.evaluate(() => document.querySelector("svg.sprite")?.getBoundingClientRect().height ?? 0);
     if (spriteHeight > 0) problems.push(`${url}: icon sprite is visible`);
@@ -59,10 +60,12 @@ for (const [w, h] of [[1366, 768], [1280, 720]]) {
   await tab.goto(`${server}/p/default/events`);
   const fit = await tab.evaluate(() => {
     const side = document.querySelector(".side");
-    const c = document.querySelector(".side .collapse")?.getBoundingClientRect();
+    // UI v2 (#540): the collapse link sits in the account menu, opened by
+    // the account button at the bottom of the sidebar; that button must show.
+    const c = document.querySelector(".side .me")?.getBoundingClientRect();
     return { scrolls: side ? side.scrollHeight > side.clientHeight + 1 : true, visible: !!c && c.bottom <= innerHeight && c.height > 0 };
   });
-  if (fit.scrolls || !fit.visible) problems.push(`sidebar does not fit at ${w}x${h} (scrolls: ${fit.scrolls}, collapse visible: ${fit.visible})`);
+  if (fit.scrolls || !fit.visible) problems.push(`sidebar does not fit at ${w}x${h} (scrolls: ${fit.scrolls}, account menu visible: ${fit.visible})`);
   const tabs = await tab.locator('nav.section-tabs a[aria-current="page"]').count();
   if (tabs !== 1) problems.push(`the current tab is not marked at ${w}x${h} (${tabs})`);
 }
