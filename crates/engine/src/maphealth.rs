@@ -700,7 +700,11 @@ pub async fn feature_context(
     let def = m.features.iter().find(|x| x.key == key).cloned();
     // The map's stored version, when `m` is one: its rolled-up days are
     // read from the rollups (#483, D-054).
-    let version = history.iter().filter(|h| h.map == *m).map(|h| h.version).max();
+    let version = history
+        .iter()
+        .filter(|h| h.map == *m)
+        .map(|h| h.version)
+        .max();
     let days = crate::mapdays::MapDays::load(q, project, version).await?;
     let health = measure(q, project, m, &days, f).await?;
     let src = source(Some(m));
