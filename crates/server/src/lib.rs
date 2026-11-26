@@ -18,6 +18,7 @@ mod board_query;
 pub mod boards;
 pub mod cache;
 mod capture;
+pub mod closed_days;
 mod cold;
 mod commands;
 mod comments;
@@ -366,12 +367,14 @@ async fn run_jobs(state: AppState, digest: Job, digest_first: Duration) {
             };
             let _turn = lock.lock().await;
             let (root, meta) = (st.data_dir.clone(), st.meta.clone());
+            let boards = st.boards.clone();
             let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
             match tokio::task::spawn_blocking(move || {
                 let r = s3::sync(&cfg, &root, &meta, &today);
                 s3::record(&meta, &r);
-                if r.is_ok() {
-                    cold::run(&cfg, &root, &meta);
+                if r.is_ok() && cold::run(&cfg, &root, &meta) {
+                    // Days moved, expired or erased (#516).
+                    boards.closed().all_changed();
                 }
                 r
             })
@@ -441,6 +444,10 @@ fn flush(state: &AppState) -> Result<(), String> {
                     for project in pending.projects() {
                         state.boards.bump(&project);
                     }
+                    // Late events mark their closed days (#516).
+                    for (project, days) in pending.days() {
+                        state.boards.closed().days_changed(&project, days);
+                    }
                 }
                 Err(e) => {
                     if let Ok(mut w) = state.writer.lock() {
@@ -464,8 +471,9 @@ fn compact(state: &AppState) -> Result<(), String> {
         clean_stored_urls(state, &p.id);
         // Compaction, erasure and retention below rewrite files.
         state.boards.bump(&p.id);
-        if let Err(err) = openlens_storage::compact(&state.data_dir, &p.id, now) {
-            tracing::warn!(project = %p.id, %err, "compaction failed");
+        match openlens_storage::compact_days(&state.data_dir, &p.id, now) {
+            Ok(days) => state.boards.closed().days_changed(&p.id, days),
+            Err(err) => tracing::warn!(project = %p.id, %err, "compaction failed"),
         }
         // People forgotten lately: rewritten out again, in case a
         // restore or a late flush brought rows back (#230).
@@ -475,19 +483,27 @@ fn compact(state: &AppState) -> Result<(), String> {
             .unwrap_or_default();
         if !recent.is_empty() {
             let ids: std::collections::HashSet<String> = recent.into_iter().collect();
-            if let Err(err) = openlens_storage::erase(&state.data_dir, &p.id, &ids) {
-                tracing::warn!(project = %p.id, %err, "erasure re-apply failed");
+            match openlens_storage::erase(&state.data_dir, &p.id, &ids) {
+                Ok(0) => {}
+                Ok(_) => state.boards.closed().project_changed(&p.id),
+                Err(err) => tracing::warn!(project = %p.id, %err, "erasure re-apply failed"),
             }
         }
         match openlens_storage::prune(&state.data_dir, &p.id, now) {
             Ok(0) => {}
-            Ok(n) => tracing::info!(project = %p.id, days = n, "expired old event days"),
+            Ok(n) => {
+                state.boards.closed().project_changed(&p.id);
+                tracing::info!(project = %p.id, days = n, "expired old event days");
+            }
             Err(err) => tracing::warn!(project = %p.id, %err, "event retention failed"),
         }
         // Click labels and positions go after 30 days, once rolled up (#324).
         match openlens_storage::trim_clicks(&state.data_dir, &p.id, now) {
             Ok(0) => {}
-            Ok(n) => tracing::info!(project = %p.id, clicks = n, "trimmed old click detail"),
+            Ok(n) => {
+                state.boards.closed().project_changed(&p.id);
+                tracing::info!(project = %p.id, clicks = n, "trimmed old click detail");
+            }
             Err(err) => tracing::warn!(project = %p.id, %err, "click trimming failed"),
         }
         match openlens_replay::prune(&state.data_dir, &p.id, now) {
@@ -547,7 +563,10 @@ async fn roll_up(state: &AppState, now: chrono::DateTime<chrono::Utc>) -> usize 
             };
             match openlens_storage::rollup::write(&state.data_dir, &p.id, day, generation, &batches)
             {
-                Ok(true) => written += 1,
+                Ok(true) => {
+                    written += 1;
+                    state.boards.closed().days_changed(&p.id, [day]);
+                }
                 Ok(false) => {}
                 Err(err) => {
                     tracing::warn!(project = %p.id, day = %label, %err, "rollup not written")
@@ -577,6 +596,7 @@ fn clean_stored_urls(state: &AppState, project: &str) {
     });
     match run {
         Ok(n) => {
+            state.boards.closed().project_changed(project);
             tracing::info!(project, n, "query strings removed from stored URLs");
             if let Err(err) = state.meta.set_project_setting(project, DONE, "1") {
                 tracing::warn!(project, %err, "URL cleaning not recorded");
@@ -591,9 +611,13 @@ pub fn flush_now(state: &AppState) -> Result<usize, String> {
     let _flushing = state.flushing.lock().map_err(|_| "flush lock poisoned")?;
     let mut w = state.writer.lock().map_err(|_| "writer lock poisoned")?;
     let projects = w.buffered_projects();
+    let days = w.buffered_days();
     let n = w.flush().map_err(|e| e.to_string())?;
     for project in projects {
         state.boards.bump(&project);
+    }
+    for (project, days) in days {
+        state.boards.closed().days_changed(&project, days);
     }
     Ok(n)
 }

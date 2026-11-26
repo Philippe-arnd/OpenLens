@@ -357,6 +357,10 @@ pub(crate) fn relabel(
     let done = env::Relabelled::new(pattern, days, req.dry_run, moves);
     if !req.dry_run && done.events > 0 {
         state.boards.bump(project);
+        state
+            .boards
+            .closed()
+            .days_changed(project, crate::closed_days::span(from, to));
     }
     Ok(done)
 }

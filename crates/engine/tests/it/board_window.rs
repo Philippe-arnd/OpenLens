@@ -156,3 +156,36 @@ async fn a_date_range_or_a_past_release_narrows_the_period_blocks() {
     };
     assert!(board(&q, "p", &ahead, None).await.is_err());
 }
+
+/// A range before today handed its period blocks back reads them from
+/// there, not from the days, and still reads the blocks that end now
+/// (#516, D-064).
+#[tokio::test]
+async fn a_past_range_reuses_its_kept_period_blocks() {
+    let (dir, q) = store(&[(None, 0..3, 10 * 24)]);
+    let today = Utc::now().date_naive();
+    let range = Filters {
+        window: Window::Range {
+            from: today - Duration::days(12),
+            to: today - Duration::days(1),
+        },
+        ..Filters::default()
+    };
+    let first = board(&q, "p", &range, None).await.unwrap();
+    let kept = openlens_engine::PeriodBlocks::of(&first);
+    // Late events on a day of the range, from new people.
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let late: Vec<Event> = (10..14).map(|u| ev(1000 + u, None, u, 5 * 24)).collect();
+    w.append(&late).unwrap();
+    w.flush().unwrap();
+    let fresh = board(&q, "p", &range, None).await.unwrap();
+    assert!(fresh.sessions.count > first.sessions.count);
+    let reused = openlens_engine::board_reusing(&q, "p", &range, None, Some(&kept))
+        .await
+        .unwrap();
+    assert_eq!(reused.sessions.count, first.sessions.count, "kept");
+    assert_eq!(reused.dau_series, first.dau_series);
+    // MAU ends now: it is read again.
+    assert_eq!(reused.users.mau, fresh.users.mau);
+    assert!(reused.users.mau > first.users.mau);
+}

@@ -16,7 +16,9 @@
 //! - boards of different keys are computed side by side: none holds a
 //!   copy of its events in memory any more (#502, D-051), so their number
 //!   is not capped; only a background rollup pass waits for them, and
-//!   they for it ([`BoardCache::exclusive`]).
+//!   they for it ([`BoardCache::exclusive`]);
+//! - a date range entirely before today keeps its period blocks past new
+//!   data, until a day it read is written ([`crate::closed_days`], #516).
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -68,6 +70,8 @@ struct Inner {
     /// Read by every board being computed, written by a rollup pass
     /// ([`BoardCache::exclusive`]).
     quiet: tokio::sync::RwLock<()>,
+    /// Period blocks of windows of closed days (#516, D-064).
+    closed: crate::closed_days::ClosedDays,
 }
 
 impl Default for BoardCache {
@@ -80,6 +84,7 @@ impl Default for BoardCache {
                 flights: Mutex::new(HashMap::new()),
                 refreshing: Mutex::new(std::collections::HashSet::new()),
                 quiet: tokio::sync::RwLock::new(()),
+                closed: crate::closed_days::ClosedDays::default(),
             }),
         }
     }
@@ -104,6 +109,12 @@ impl BoardCache {
         if let Ok(mut m) = self.inner.generations.lock() {
             *m.entry(project.to_owned()).or_default() += 1;
         }
+    }
+
+    /// The period blocks kept for windows of closed days, and the marks of
+    /// the days written since (#516).
+    pub fn closed(&self) -> &crate::closed_days::ClosedDays {
+        &self.inner.closed
     }
 
     /// The current data generation of `project`.
@@ -272,14 +283,30 @@ async fn compute(
 ) -> openlens_engine::Result<Entry> {
     let cache = &state.boards;
     let _quiet = cache.inner.quiet.read().await;
+    // A date range before today: its period blocks may be kept (#516).
+    let closed = f.window.closed_utc_days(&f.tz, chrono::Utc::now());
+    let kept = closed.and_then(|days| cache.inner.closed.get(&key, days));
+    let since = cache.inner.closed.mark();
     let (board, revenue) = tokio::join!(
-        Box::pin(openlens_engine::board(&state.query, project, f, map)),
+        Box::pin(openlens_engine::board_reusing(
+            &state.query,
+            project,
+            f,
+            map,
+            kept.as_deref()
+        )),
         openlens_engine::revenue(&state.query, project, map.map(|(m, _)| m), f)
     );
     let revenue = revenue.map_err(|err| {
         tracing::warn!(project, %err, "revenue not computed");
         err.to_string()
     });
+    if kept.is_none()
+        && let (Some(days), Ok(b)) = (closed, &board)
+    {
+        let blocks = openlens_engine::PeriodBlocks::of(b);
+        cache.inner.closed.put(key.clone(), days, since, blocks);
+    }
     let entry = Entry {
         generation,
         at: Instant::now(),
