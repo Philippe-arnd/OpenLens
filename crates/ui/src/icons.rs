@@ -122,6 +122,11 @@ const ICONS: &[(&str, &str)] = &[
         r#"<circle cx="12" cy="12" r="8"/><path d="M6.4 6.4l11.2 11.2"/>"#,
     ),
     (
+        "info",
+        r#"<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.8v.4"/>"#,
+    ),
+    ("chev", r#"<path d="m7 10 5 5 5-5"/>"#),
+    (
         "gap",
         r#"<circle cx="7" cy="12" r="3"/><circle cx="17" cy="12" r="3"/><path d="M10 12h1M13 12h1"/>"#,
     ),
