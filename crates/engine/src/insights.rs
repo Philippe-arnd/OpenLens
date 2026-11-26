@@ -458,7 +458,8 @@ pub(crate) fn slow_pages(vitals: &[crate::Vital], why: &[crate::VitalReport]) ->
 pub struct Journey {
     /// The success event the path leads to.
     pub success: String,
-    /// The feature this success belongs to.
+    /// The feature this success belongs to; the features, comma-separated,
+    /// when several share the success event.
     pub feature: String,
     /// Up to 3 features used before the first success, oldest first (D-059).
     pub path: Vec<String>,
@@ -468,7 +469,8 @@ pub struct Journey {
     pub share: f64,
 }
 
-/// Top 3 paths into the first success of each feature (at most 4 features):
+/// Top 3 paths into the first success of each success event (at most 4
+/// events; features sharing an event share its paths):
 /// the last three distinct features a user started in the day before
 /// reaching it for the first time. `sf` is the first use of each feature in
 /// each session over the last 30 days ([`crate::board_sessions::feature_rows`]):
@@ -487,8 +489,20 @@ pub(crate) async fn journeys(
     let q = &q.with_params(&f.params()?);
     let mut out = Vec::new();
     let mut runs = Vec::new();
-    for (feature, ev) in successes.iter().take(4) {
-        let ev_lit = openlens_sqlgen::quote(ev);
+    // The paths depend on the success event alone, so features that share
+    // one get a single set of rows, labelled with all of them (#555).
+    let mut by_event: Vec<(String, String)> = Vec::new();
+    for (feature, ev) in successes {
+        match by_event.iter_mut().find(|(_, e)| e == ev) {
+            Some((names, _)) => {
+                names.push_str(", ");
+                names.push_str(feature);
+            }
+            None => by_event.push((feature.clone(), ev.clone())),
+        }
+    }
+    for (feature, ev) in by_event.into_iter().take(4) {
+        let ev_lit = openlens_sqlgen::quote(&ev);
         let rows = firsts.rows_in(f, crate::Span::days(30), &ev_lit)?;
         let sql = format!(
             "WITH firsts AS (SELECT distinct_id, min(first_ts) AS t FROM {rows} GROUP BY distinct_id), \
@@ -507,7 +521,7 @@ pub(crate) async fn journeys(
              LEFT JOIN ranked p3 ON p1.distinct_id = p3.distinct_id AND p3.rn = 3 \
              WHERE p1.rn = 1 GROUP BY p3.place, p2.place, p1.place ORDER BY users DESC, c, b, a LIMIT 3"
         );
-        runs.push(async move { (feature.clone(), ev.clone(), q.sql(project, &sql).await) });
+        runs.push(async move { (feature, ev, q.sql(project, &sql).await) });
     }
     for (feature, ev, res) in futures::future::join_all(runs).await {
         for r in res?.rows {
