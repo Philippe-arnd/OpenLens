@@ -85,15 +85,15 @@ fn links(pid: &str, f: &Filters, b: &Board, c: &Insight) -> Vec<(String, String)
 }
 
 /// One side of a before/after comparison.
-pub(super) struct Side {
+pub(crate) struct Side {
     /// What it is ("v1", "with the flag").
-    pub(super) label: String,
+    pub(crate) label: String,
     /// The value.
-    pub(super) value: f64,
+    pub(crate) value: f64,
     /// The value as shown.
-    pub(super) shown: String,
+    pub(crate) shown: String,
     /// What it rests on ("4,814 sessions").
-    pub(super) base: String,
+    pub(crate) base: String,
 }
 
 /// The two values an insight compares, when the board holds them both
@@ -160,7 +160,7 @@ pub(super) fn compared(b: &Board, c: &Insight) -> Option<([Side; 2], bool)> {
 
 /// The before/after bars: widths are SVG attributes (the CSP forbids
 /// `style`), the larger value fills the track.
-fn compare(sides: &[Side; 2], worse: bool) -> Markup {
+pub(crate) fn compare(sides: &[Side; 2], worse: bool) -> Markup {
     let max = sides
         .iter()
         .map(|s| s.value)
