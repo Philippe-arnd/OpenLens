@@ -119,18 +119,10 @@ pub struct AlertsView {
 }
 
 /// A project's settings: name, app address, time zone, capture key and
-/// snippets, wiring check, export, and deletion (#219).
+/// snippets, wiring check, export, and deletion (#219). Every form is a
+/// form card (#546): fields in a grid, help under each, Save in the foot.
 pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
     let base = format!("/p/{}/settings", p.id);
-    let script = format!(
-        r#"<script src="{}/c.js" data-key="{}" defer></script>"#,
-        v.host, p.key
-    );
-    let npm = format!(
-        "import {{ init }} from '@openlens/web';\ninit({{ host: '{}', key: '{}' }});",
-        v.host, p.key
-    );
-    let server = format!("OPENLENS_HOST={}\nOPENLENS_KEY={}", v.host, p.key);
     let tab = v.tab;
     layout(
         tab.title(),
@@ -141,161 +133,341 @@ pub fn project_settings(p: &ProjectInfo<'_>, v: &SettingsView<'_>) -> Markup {
                 p.muted { "Everything agents do with " code { "openlens-cli" } " for this project, here too." }
             } }
             @if let Some(n) = v.notice { p.notice role="status" { (n) } }
-            @if tab == SettingsTab::General {
-            @if !v.setup.is_empty() { (setup_progress(&v.setup)) }
-            section.card.wide {
-                h2.violet { (icon("gear")) "Project" }
-                @if v.admin {
-                    form.settings method="post" action=(base) {
-                        label { "Name " input type="text" name="name" value=(p.name) required maxlength="80"; }
-                        label { "App address "
-                            input type="url" name="app_url" value=[v.app_url] placeholder=(v.detected_url.unwrap_or("https://app.example.com")) maxlength="200";
-                        }
-                        label { "Time zone " input type="text" name="timezone" value=(v.timezone) required maxlength="64" list="tz-all"; }
-                        (zone_list())
-                        button type="submit" { "Save" }
-                    }
-                } @else {
-                    dl.facts {
-                        dt { "Name" } dd { (p.name) }
-                        dt { "App address" } dd { (v.app_url.or(v.detected_url).unwrap_or("—")) }
-                        dt { "Time zone" } dd { (v.timezone) }
+            @match tab {
+                SettingsTab::General => (general(p, v, &base)),
+                SettingsTab::Install => (install(p, v, &base)),
+                SettingsTab::Alerts => (alerts(p, v, &base)),
+                SettingsTab::Sharing => (sharing(v, &base)),
+                SettingsTab::Environments => {
+                    @if let Some(e) = &v.environments {
+                        (crate::environments::tab(&base, v.admin, v.timezone, e, v.relabel.as_ref(), v.allow.as_ref(), v.allow_preview.as_ref()))
+                    } @else {
+                        section.card { p.muted { "The environments could not be read just now." } }
                     }
                 }
-                p.muted.small {
-                    "The app address gives the project its icon (the app's favicon). Empty: "
-                    @match v.detected_url { Some(u) => { "detected from pageviews, " span.mono { (u) } "." }, None => "detected from pageviews once some arrive." }
-                    " Days and weeks of every KPI start in the time zone (an IANA name like Europe/Paris)."
-                }
-            }
-            }
-            @if tab == SettingsTab::Install {
-            section.card.wide #install {
-                h2.sky { (icon("code")) "Install" }
-                p { "Capture key " code.mono { (p.key) } " (public: it only sends events)." }
-                h3 { "Script tag" }
-                pre.snippet { code { (script) } }
-                h3 { "npm" }
-                pre.snippet { code { (npm) } }
-                h3 { "Server SDKs (Node, Python, Go, Ruby, PHP)" }
-                pre.snippet { code { (server) } }
-                p.muted.small { "Agents: " a href={ (v.host) "/agents.md" } { "the wiring guide" } "." }
-                @if v.admin {
-                    form.inline method="post" action={ (base) "/rotate-key" } {
-                        label.check { input type="checkbox" name="confirm" value="yes" required; " The old key stops working at once: every app must get the new one" }
-                        button.ghost type="submit" { "Rotate the key" }
-                    }
-                }
-            }
-            section.card.wide {
-                h2.mint { (icon("task")) "Wiring check" }
-                p.muted.small { "Last 24 hours, all environments (what " code { "openlens-cli verify" } " checks)." }
-                ul.checks {
-                    @for (label, n, hint) in v.checks {
-                        li.ok[*n > 0] {
-                            (icon(if *n > 0 { "task" } else { "alert" }))
-                            span { strong { (label) } " " (compact(*n)) }
-                            @if *n == 0 { span.muted.small { " · " (hint) } }
-                        }
-                    }
-                    li.ok[v.map_version.is_some()] {
-                        (icon(if v.map_version.is_some() { "task" } else { "alert" }))
-                        span { strong { "Feature map" } " " @match v.map_version { Some(n) => { "v" (n) }, None => "none" } }
-                        @if v.map_version.is_none() { span.muted.small { " · push one with " code { "openlens-cli map push" } } }
-                    }
-                }
-            }
-            }
-            @if tab == SettingsTab::Alerts {
-            section.card.wide #alerts {
-                h2.coral { (icon("bolt")) "Alerts" }
-                p.small { "Know when the app is down: OpenLens checks the app address every minute (" a href={ "/p/" (p.id) "/uptime" } { "Uptime" } "), notices when the traffic stops for much longer than usual (after four weeks of history), and, every hour, when the board finds a regression (a release or flag with more errors, pages turning slow) or a new error hits several users. One message when an incident starts, one when it ends." }
-                @if v.admin {
-                    form.settings method="post" action={ (base) "/alerts" } {
-                        label.check { input type="checkbox" name="down" checked[v.alerts.down]; " App down (needs the app address)" }
-                        label { "Announce after (min) " input type="number" name="down_wait" min="1" max="60" value=(v.alerts.down_wait); }
-                        label { "Health path " input type="text" name="health_path" value=(v.alerts.health_path) maxlength="200" list="health-paths"; }
-                        datalist id="health-paths" { option value="/" {} option value="/healthz" {} option value="/readyz" {} option value="/health" {} }
-                        label.check { input type="checkbox" name="traffic" checked[v.alerts.traffic]; " Traffic stopped" }
-                        label.check { input type="checkbox" name="regressions" checked[v.alerts.regressions]; " Regressions and new errors" }
-                        label.check { input type="checkbox" name="failing" checked[v.alerts.failing]; " Failing requests spike" }
-                        label.check { input type="checkbox" name="cert" checked[v.alerts.cert]; " Certificate expiring (14 days)" }
-                        label { "Quiet from " (hour_select("quiet_start", v.alerts.quiet.map(|q| q.0))) }
-                        label { "to " (hour_select("quiet_end", v.alerts.quiet.map(|q| q.1))) }
-                        label.check { input type="checkbox" name="email" checked[v.alerts.email]; " Email" @if !v.alerts.smtp { span.muted { " (SMTP not set)" } } }
-                        label { "Webhook (Slack, Discord…) " input type="url" name="webhook" value=(v.alerts.webhook) placeholder="https://hooks.slack.com/…" maxlength="500"; }
-                        label { "ntfy topic " input type="text" name="ntfy" value=(v.alerts.ntfy) placeholder="my-app-alerts" maxlength="300"; }
-                        button type="submit" { "Save" }
-                    }
-                    form.inline method="post" action={ (base) "/alerts/test" } { button.soft type="submit" { "Send a test alert" } }
-                    p.muted.small { "Emails go to " code { "OPENLENS_ALERT_TO" } " (or the digest list, or the admins). ntfy: a topic on ntfy.sh, or a full https:// topic URL of your own server; install the ntfy app to get pushes on a phone. Quiet hours (the project's time zone) hold non-urgent alerts until they end; " em { "down" } " and an expired certificate always go out. An incident that lasts is repeated at most once an hour." }
-                }
-            }
-            }
-            @if tab == SettingsTab::Sharing {
-            @if !v.admin { section.card { p.muted { "Admins make and revoke share links." } } }
-            @if v.admin {
-                section.card.wide #share {
-                    h2.sky { (icon("route")) "Share links" }
-                    p.small { "A read-only link to the Focus board or the weekly digest, for people without an account: no SQL, people, replays or settings behind it. Filters are fixed when the link is made." }
-                    form.settings method="post" action={ (base) "/share" } {
-                        label { "What " select name="scope" { option value="board" { "Focus board" } option value="digest" { "Weekly digest" } } }
-                        label { "Release " input type="text" name="release" placeholder="all" maxlength="100" list="share-releases"; }
-                        datalist id="share-releases" { @for r in v.releases { option value=(r) {} } }
-                        label { "Expires after (days, 0 = never) " input type="number" name="days" min="0" max="366" value="30"; }
-                        label { "May be embedded on " input type="text" name="embed" placeholder="https://intranet.example.com" maxlength="500" list="embed-on"; }
-                        datalist id="embed-on" { @if let Some(u) = v.app_url.or(v.detected_url) { option value=(u) {} } }
-                        button type="submit" { "Make a link" }
-                    }
-                    @if !v.shares.is_empty() {
-                        div.table-scroll { table.plain {
-                            thead { tr { th { "What" } th { "Release" } th { "Embed" } th { "Expires" } th { "By" } th { span.sr-only { "Actions" } } } }
-                            tbody { @for l in &v.shares {
-                                tr {
-                                    td { (l.scope) } td.small { (l.release.as_deref().unwrap_or("all")) } td.small { (l.embed.as_deref().unwrap_or("no")) }
-                                    td.small { @match l.expires_at { Some(t) => (chrono::DateTime::from_timestamp(t, 0).map_or_else(String::new, |d| d.format("%Y-%m-%d").to_string())), None => "never" } }
-                                    td.small { (l.created_by) }
-                                    td { form.inline method="post" action={ (base) "/share/" (l.id) "/revoke" } { button.ghost type="submit" { "Revoke" } } }
-                                }
-                            } }
-                        } }
-                    }
-                }
-            }
-            }
-            @if tab == SettingsTab::Environments {
-            @if let Some(e) = &v.environments {
-                (crate::environments::tab(&base, v.admin, v.timezone, e, v.relabel.as_ref(), v.allow.as_ref(), v.allow_preview.as_ref()))
-            } @else {
-                section.card { p.muted { "The environments could not be read just now." } }
-            }
-            }
-            @if tab == SettingsTab::Data {
-            @if v.admin {
-                section.card.wide {
-                    h2.violet { (icon("code")) "Explore the data" }
-                    p { a.button href={ "/p/" (p.id) "/sql" } { "Read-only SQL" } " " a.button href={ "/p/" (p.id) "/breakdown?by=role" } { "Break down" } }
-                }
-            }
-            section.card.wide {
-                h2.sun { (icon("down")) "Export" }
-                form.inline method="get" action={ "/p/" (p.id) "/export" } {
-                    label { "Day " input type="date" name="date" value=(v.yesterday) required; }
-                    button type="submit" { "Download NDJSON" }
-                }
-                p.muted.small { "One line per event of that day (UTC partitions), up to 500,000." }
-            }
-            @if v.admin {
-                section.card.wide.danger {
-                    h2.coral { (icon("alert")) "Delete the project" }
-                    p { "Removes its events, replays, source maps, people, flags, surveys and feature map. There is no undo (backups excepted)." }
-                    form.inline method="post" action={ (base) "/delete" } {
-                        label { "Type " code { (p.name) } " to confirm " input type="text" name="confirm" required autocomplete="off"; }
-                        button.danger type="submit" { "Delete forever" }
-                    }
-                }
-            }
+                SettingsTab::Data => (data(p, v, &base)),
             }
         },
     )
+}
+
+/// The foot of a form card: its submit button and one line of text.
+pub(crate) fn form_foot(button: &str, line: Markup) -> Markup {
+    html! {
+        div.form-foot {
+            button.btn.primary type="submit" { (button) }
+            p { (line) }
+        }
+    }
+}
+
+/// The setup of a project (#403, #546) as numbered steps: the required
+/// ones with a progress bar, the optional ones folded below. A done step
+/// is ticked; a step to do keeps its one action.
+pub(crate) fn setup_progress(steps: &[SetupStep]) -> Markup {
+    let req: Vec<&SetupStep> = steps.iter().filter(|s| s.required).collect();
+    let opt: Vec<&SetupStep> = steps.iter().filter(|s| !s.required).collect();
+    let done = req.iter().filter(|s| s.done).count();
+    let opt_done = opt.iter().filter(|s| s.done).count();
+    // The bar's width is an SVG attribute (the CSP forbids style=), in
+    // the units of a 100-wide track, so it can never pass the track.
+    let width = if req.is_empty() {
+        100.0
+    } else {
+        (done as f64 * 100.0 / req.len() as f64).clamp(0.0, 100.0)
+    };
+    let first_todo = req.iter().position(|s| !s.done);
+    html! {
+        section.card.wide.setup aria-label="Setup" {
+            div.setup-head {
+                div.section-head {
+                    h2 { (if done == req.len() { "Set up" } else { "Finish the setup" }) }
+                    span.muted.num { (done) " of " (req.len()) " required · " (opt_done) " of " (opt.len()) " optional" }
+                }
+                svg.progress role="img" aria-label=(format!("{done} of {} required steps done", req.len())) viewBox="0 0 100 6" preserveAspectRatio="none" {
+                    rect.track width="100" height="6" {}
+                    rect.bar width=(format!("{width:.1}")) height="6" {}
+                }
+            }
+            div.steps {
+                @for (i, st) in req.iter().enumerate() { (setup_step(i + 1, st, first_todo == Some(i))) }
+                @if !opt.is_empty() {
+                    details {
+                        summary {
+                            (opt.len()) " optional steps"
+                            span { @for (i, st) in opt.iter().enumerate() { @if i > 0 { " · " } (st.label) } }
+                        }
+                        div.steps {
+                            @for (i, st) in opt.iter().enumerate() { (setup_step(req.len() + i + 1, st, false)) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One setup step: its state (a tick, or its number), its label, and
+/// either "Done" or its action.
+fn setup_step(n: usize, st: &SetupStep, next: bool) -> Markup {
+    html! {
+        div class={ "step " (if st.done { "done" } else { "todo" }) } {
+            span.state {
+                @if st.done { (icon("task")) span.sr-only { "Done:" } } @else { (n) }
+            }
+            div {
+                b { (st.label) }
+                @if !st.required { p { "Optional" } }
+            }
+            @if st.done {
+                span.status.good { "Done" }
+            } @else {
+                a class=(if next { "btn primary sm" } else { "btn sm" }) href=(st.href) { "Set it up" }
+            }
+        }
+    }
+}
+
+/// *General*: the setup steps and the project's name, address and zone.
+fn general(p: &ProjectInfo<'_>, v: &SettingsView<'_>, base: &str) -> Markup {
+    let detected = html! {
+        "The app address gives the project its icon (the app's favicon). Empty: "
+        @match v.detected_url { Some(u) => { "detected from pageviews, " span.mono { (u) } "." }, None => "detected from pageviews once some arrive." }
+    };
+    html! {
+        @if !v.setup.is_empty() { (setup_progress(&v.setup)) }
+        @if v.admin {
+            form.card.wide.form-card #project method="post" action=(base) aria-labelledby="project-h" {
+                div.section-head { h2 #project-h { (icon("gear")) "Project" } }
+                div.form-grid {
+                    label.field { "Name" input type="text" name="name" value=(p.name) required maxlength="80"; }
+                    label.field { "App address"
+                        input type="url" name="app_url" value=[v.app_url] placeholder=(v.detected_url.unwrap_or("https://app.example.com")) maxlength="200";
+                        small { (detected) }
+                    }
+                    label.field { "Time zone"
+                        input type="text" name="timezone" value=(v.timezone) required maxlength="64" list="tz-all";
+                        small { "Days and weeks of every KPI start here. An IANA name, like Europe/Paris." }
+                    }
+                }
+                (zone_list())
+                (form_foot("Save", html! { "Changes apply to every board of this project." }))
+            }
+        } @else {
+            section.card.wide {
+                h2.violet { (icon("gear")) "Project" }
+                dl.facts {
+                    dt { "Name" } dd { (p.name) }
+                    dt { "App address" } dd { (v.app_url.or(v.detected_url).unwrap_or("—")) }
+                    dt { "Time zone" } dd { (v.timezone) }
+                }
+                p.muted.small { (detected) " Days and weeks of every KPI start in the time zone (an IANA name like Europe/Paris)." }
+            }
+        }
+    }
+}
+
+/// *Install*: one card per method, the wiring check, and the key.
+fn install(p: &ProjectInfo<'_>, v: &SettingsView<'_>, base: &str) -> Markup {
+    let script = format!(
+        r#"<script src="{}/c.js" data-key="{}" defer></script>"#,
+        v.host, p.key
+    );
+    let npm = format!(
+        "import {{ init }} from '@openlens/web';\ninit({{ host: '{}', key: '{}' }});",
+        v.host, p.key
+    );
+    let server = format!("OPENLENS_HOST={}\nOPENLENS_KEY={}", v.host, p.key);
+    html! {
+        section.card.wide #install {
+            h2.sky { (icon("code")) "Script tag" }
+            p.small { "In every page's " code { "<head>" } ". Capture key " code.mono { (p.key) } " (public: it only sends events)." }
+            pre.snippet { code { (script) } }
+            p.muted.small { "One click selects the whole snippet. Agents: " a href={ (v.host) "/agents.md" } { "the wiring guide" } "." }
+        }
+        section.card.wide {
+            h2.sky { (icon("code")) "npm" }
+            pre.snippet { code { (npm) } }
+            p.muted.small { "One click selects the whole snippet." }
+        }
+        section.card.wide {
+            h2.sky { (icon("code")) "Server SDKs (Node, Python, Go, Ruby, PHP)" }
+            pre.snippet { code { (server) } }
+            p.muted.small { "One click selects the whole snippet." }
+        }
+        section.card.wide {
+            h2.mint { (icon("task")) "Wiring check" }
+            p.muted.small { "Last 24 hours, all environments (what " code { "openlens-cli verify" } " checks)." }
+            ul.checks {
+                @for (label, n, hint) in v.checks {
+                    li.ok[*n > 0] {
+                        (icon(if *n > 0 { "task" } else { "alert" }))
+                        span { strong { (label) } " " (compact(*n)) }
+                        @if *n == 0 { span.muted.small { " · " (hint) } }
+                    }
+                }
+                li.ok[v.map_version.is_some()] {
+                    (icon(if v.map_version.is_some() { "task" } else { "alert" }))
+                    span { strong { "Feature map" } " " @match v.map_version { Some(n) => { "v" (n) }, None => "none" } }
+                    @if v.map_version.is_none() { span.muted.small { " · push one with " code { "openlens-cli map push" } } }
+                }
+            }
+        }
+        @if v.admin {
+            form.card.wide.form-card.danger method="post" action={ (base) "/rotate-key" } aria-labelledby="key-h" {
+                div.section-head { h2 #key-h { (icon("alert")) "Capture key" } }
+                p.small { "Now " code.mono { (p.key) } ". A new key replaces it everywhere at once." }
+                label.switch {
+                    input type="checkbox" name="confirm" value="yes" required;
+                    span { b { "The old key stops working at once" } small { "Every app must get the new one." } }
+                }
+                div.form-foot {
+                    button.btn.danger type="submit" { "Rotate the key" }
+                    p { "Events sent with the old key are refused from then on." }
+                }
+            }
+        }
+    }
+}
+
+/// One alert type: its on/off switch, what it watches, and its fields.
+fn alert_row(name: &str, on: bool, label: &str, help: &str, fields: Markup) -> Markup {
+    html! {
+        li {
+            label.switch {
+                input type="checkbox" role="switch" name=(name) checked[on];
+                span { b { (label) } small { (help) } }
+            }
+            div.form-grid { (fields) }
+        }
+    }
+}
+
+/// *Alerts* (#256): one row per alert type, quiet hours, the channels.
+fn alerts(p: &ProjectInfo<'_>, v: &SettingsView<'_>, base: &str) -> Markup {
+    let a = &v.alerts;
+    let intro = html! {
+        p.small { "Know when the app is down: OpenLens checks the app address every minute (" a href={ "/p/" (p.id) "/uptime" } { "Uptime" } "), notices when the traffic stops for much longer than usual (after four weeks of history), and, every hour, when the board finds a regression (a release or flag with more errors, pages turning slow) or a new error hits several users. One message when an incident starts, one when it ends." }
+    };
+    html! {
+        @if !v.admin {
+            section.card.wide #alerts {
+                h2.coral { (icon("bolt")) "Alerts" }
+                (intro)
+            }
+        }
+        @if v.admin {
+            form.card.wide.form-card #alerts method="post" action={ (base) "/alerts" } aria-labelledby="alerts-h" {
+                div.section-head { h2 #alerts-h { (icon("bolt")) "Alerts" } }
+                (intro)
+                ul.alert-rows {
+                    (alert_row("down", a.down, "App down", "Checked every minute at the app address (needed).", html! {
+                        label.field { "Announce after (min)" input type="number" name="down_wait" min="1" max="60" value=(a.down_wait); small { "A shorter outage stays quiet." } }
+                        label.field { "Health path" input type="text" name="health_path" value=(a.health_path) maxlength="200" list="health-paths"; small { "The page the check opens." } }
+                    }))
+                    (alert_row("traffic", a.traffic, "Traffic stopped", "Much longer than usual, after four weeks of history.", html! {}))
+                    (alert_row("regressions", a.regressions, "Regressions and new errors", "Checked every hour: more errors after a release or a flag, pages turning slow, a new error hitting several users.", html! {}))
+                    (alert_row("failing", a.failing, "Failing requests spike", "Many more failed requests than usual.", html! {}))
+                    (alert_row("cert", a.cert, "Certificate expiring", "14 days before it ends.", html! {}))
+                }
+                datalist id="health-paths" { option value="/" {} option value="/healthz" {} option value="/readyz" {} option value="/health" {} }
+                fieldset {
+                    legend { "Quiet hours" }
+                    div.form-grid {
+                        label.field { "From" (hour_select("quiet_start", a.quiet.map(|q| q.0))) small { "In the project's time zone." } }
+                        label.field { "To" (hour_select("quiet_end", a.quiet.map(|q| q.1))) small { "Down and an expired certificate always go out." } }
+                    }
+                }
+                fieldset {
+                    legend { "Channels" }
+                    label.switch {
+                        input type="checkbox" role="switch" name="email" checked[a.email];
+                        span { b { "Email" } small { @if a.smtp { "To the alert list, the digest list, or the admins." } @else { "SMTP not set: no email goes out." } } }
+                    }
+                    div.form-grid {
+                        label.field { "Webhook (Slack, Discord…)" input type="url" name="webhook" value=(a.webhook) placeholder="https://hooks.slack.com/…" maxlength="500"; small { "Empty: no webhook." } }
+                        label.field { "ntfy topic" input type="text" name="ntfy" value=(a.ntfy) placeholder="my-app-alerts" maxlength="300"; small { "A topic on ntfy.sh, or a full https:// topic URL." } }
+                    }
+                }
+                (form_foot("Save", html! { "One message when an incident starts, one when it ends." }))
+            }
+            section.card.wide {
+                form.inline method="post" action={ (base) "/alerts/test" } { button.soft type="submit" { "Send a test alert" } }
+                p.muted.small { "Emails go to " code { "OPENLENS_ALERT_TO" } " (or the digest list, or the admins). ntfy: a topic on ntfy.sh, or a full https:// topic URL of your own server; install the ntfy app to get pushes on a phone. Quiet hours (the project's time zone) hold non-urgent alerts until they end; " em { "down" } " and an expired certificate always go out. An incident that lasts is repeated at most once an hour." }
+            }
+        }
+    }
+}
+
+/// *Sharing* (#229): the form card, then the links as a table.
+fn sharing(v: &SettingsView<'_>, base: &str) -> Markup {
+    html! {
+        @if !v.admin { section.card { p.muted { "Admins make and revoke share links." } } }
+        @if v.admin {
+            form.card.wide.form-card #share method="post" action={ (base) "/share" } aria-labelledby="share-h" {
+                div.section-head { h2 #share-h { (icon("route")) "Share links" } }
+                p.small { "A read-only link to the Focus board or the weekly digest, for people without an account: no SQL, people, replays or settings behind it. Filters are fixed when the link is made." }
+                div.form-grid {
+                    fieldset.field {
+                        legend { "What" }
+                        div.seg {
+                            label { input type="radio" name="scope" value="board" checked; "Focus board" }
+                            label { input type="radio" name="scope" value="digest"; "Weekly digest" }
+                        }
+                    }
+                    label.field { "Release" input type="text" name="release" placeholder="all" maxlength="100" list="share-releases"; small { "Empty: every release." } }
+                    label.field { "Expires after (days)" input type="number" name="days" min="0" max="366" value="30"; small { "0: never." } }
+                    label.field { "May be embedded on" input type="text" name="embed" placeholder="https://intranet.example.com" maxlength="500" list="embed-on"; small { "Empty: it cannot be embedded in another site." } }
+                }
+                datalist id="share-releases" { @for r in v.releases { option value=(r) {} } }
+                datalist id="embed-on" { @if let Some(u) = v.app_url.or(v.detected_url) { option value=(u) {} } }
+                (form_foot("Make a link", html! { "Anyone with the link reads what it shows, until it expires or is revoked." }))
+            }
+            @if !v.shares.is_empty() {
+                section.card.wide {
+                    h2.sky { (icon("route")) "Links" }
+                    div.table-scroll { table.plain {
+                        thead { tr { th { "What" } th { "Release" } th { "Embed" } th { "Expires" } th { "By" } th { span.sr-only { "Actions" } } } }
+                        tbody { @for l in &v.shares {
+                            tr {
+                                td { (l.scope) } td.small { (l.release.as_deref().unwrap_or("all")) } td.small { (l.embed.as_deref().unwrap_or("no")) }
+                                td.small { @match l.expires_at { Some(t) => (chrono::DateTime::from_timestamp(t, 0).map_or_else(String::new, |d| d.format("%Y-%m-%d").to_string())), None => "never" } }
+                                td.small { (l.created_by) }
+                                td { form.inline method="post" action={ (base) "/share/" (l.id) "/revoke" } { button.ghost type="submit" { "Revoke" } } }
+                            }
+                        } }
+                    } }
+                }
+            }
+        }
+    }
+}
+
+/// *Data*: explore, export, and the project's deletion.
+fn data(p: &ProjectInfo<'_>, v: &SettingsView<'_>, base: &str) -> Markup {
+    html! {
+        @if v.admin {
+            section.card.wide {
+                h2.violet { (icon("code")) "Explore the data" }
+                p { a.button href={ "/p/" (p.id) "/sql" } { "Read-only SQL" } " " a.button href={ "/p/" (p.id) "/breakdown?by=role" } { "Break down" } }
+            }
+        }
+        form.card.wide.form-card method="get" action={ "/p/" (p.id) "/export" } aria-labelledby="export-h" {
+            div.section-head { h2 #export-h { (icon("down")) "Export" } }
+            div.form-grid {
+                label.field { "Day" input type="date" name="date" value=(v.yesterday) required; small { "A UTC day: one partition of events." } }
+            }
+            (form_foot("Download NDJSON", html! { "One line per event of that day, up to 500,000." }))
+        }
+        @if v.admin {
+            section.card.wide.danger {
+                h2.coral { (icon("alert")) "Delete the project" }
+                p { "Removes its events, replays, source maps, people, flags, surveys and feature map. There is no undo (backups excepted)." }
+                form.inline method="post" action={ (base) "/delete" } {
+                    label { "Type " code { (p.name) } " to confirm " input type="text" name="confirm" required autocomplete="off"; }
+                    button.danger type="submit" { "Delete forever" }
+                }
+            }
+        }
+    }
 }
