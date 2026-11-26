@@ -140,6 +140,18 @@ pub(crate) const COLUMNS: &[(&str, &str)] = &[
         "Skipped the first",
         "Users of the second feature who never used the first one.",
     ),
+    (
+        "Sessions together",
+        "Sessions of the last 30 days that used both features.",
+    ),
+    (
+        "Lift",
+        "How many times more often the two features share a session than if they were unrelated (×1 = no relation).",
+    ),
+    (
+        "Comes first",
+        "Of the sessions that used both, the share where the first feature was used before the second.",
+    ),
     ("Share", "This row's part of the total."),
     (
         "Length",
