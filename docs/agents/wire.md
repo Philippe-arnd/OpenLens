@@ -76,6 +76,7 @@ Once the app is wired, every release should be measured without anyone asking. `
 - **Deploy hook.** `init` makes the URL (the MCP tool `deploy_hook` makes a new one later, and the old one then stops working). Store it as a secret of the platform or the CI and paste it where the platform sends deploy notifications (step 5c).
 - **Release step.** Add `openlens-cli release` (or the `openlens-release` GitHub Action) to the deploy step, after the build, with the release name the SDK sends.
 - **Rules.** Add the block printed by `openlens-cli rules` to the app's `AGENTS.md`. It tells the app's agents to keep the feature map and its code paths (routes, `data-feature` controls, success events) current, to keep the release step, to read `release_report` through MCP after each deploy and act on a `regressed` verdict, and to remove the flags `stale_flags` reports in `ready_to_remove`.
+- **Status announcements.** Around a risky deploy, post what users should know and resolve it after: `openlens-cli announce post "Deploying v2.3" --level degraded`, then `openlens-cli announce close <id>` (MCP `announce`, `announcement_update`, `announcement_close`; a write token). The text is plain; markup is shown as text.
 - **Check.** `openlens-cli verify --project <id>` (MCP `verify`) lists the release layers under `release_layers`, each `active` or not, with its `detail` and a `fix`:
 
 | Layer | Active when |

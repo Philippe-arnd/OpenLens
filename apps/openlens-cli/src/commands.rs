@@ -279,6 +279,13 @@ pub(super) enum Command {
         #[arg(long, default_value = "default")]
         project: String,
     },
+    /// Status announcements and incident updates (#562): list, post,
+    /// update, edit, close, delete, and whether they go to the alert
+    /// channels.
+    Announce {
+        #[command(subcommand)]
+        action: AnnounceCmd,
+    },
     /// Is the app up? (`up`, `down`, `unknown`, `off`, with open incidents.)
     /// Exits non-zero when down: handy right after a deploy.
     Status {

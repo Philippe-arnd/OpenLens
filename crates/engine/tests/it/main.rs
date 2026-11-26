@@ -10,6 +10,7 @@ use openlens_featuremap::parse;
 use openlens_query::{Limits, QueryEngine};
 use openlens_storage::{FlushPolicy, Writer};
 
+mod announcements;
 mod board_cohorts;
 mod board_people;
 mod board_window;

@@ -301,6 +301,8 @@ pub struct UptimeView<'a> {
     pub incidents: Vec<(String, String, Option<String>, i64, String)>,
     /// The last checks, newest first: (time, ok, status, ms, error).
     pub last: Vec<CheckRow>,
+    /// The announcements section (#562), from [`notices`].
+    pub notices: Option<Markup>,
 }
 
 /// The Uptime page.
@@ -330,6 +332,7 @@ pub fn uptime(p: &ProjectInfo<'_>, v: &UptimeView<'_>) -> Markup {
                 }
                 p.muted.small { "Checking " span.mono { (v.url.as_deref().unwrap_or("")) } " every minute. Down after two failed checks in a row (no answer, or HTTP 5xx)." }
             }
+            @if let Some(n) = &v.notices { (n) }
             section.card.wide {
                 h2.coral { (icon("alert")) "Incidents and alerts, last 30 days" }
                 @if v.incidents.is_empty() { p.muted { "None." } }
