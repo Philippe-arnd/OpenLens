@@ -173,6 +173,33 @@ async fn board_with(
         None => (q, projected),
     };
     let ident = identified(any_person(q, project).await?);
+    // The people blocks read `person_day` for the closed days rolled up
+    // with the map in force, the events for the rest (#492, D-040).
+    let now = chrono::Utc::now();
+    let people = board_people::People {
+        src: &src,
+        role: map.map_or_else(|| "role".to_owned(), |(m, _)| lookups(m).0),
+        rolled: board_people::People::rolled_days(q, project, map.map(|(_, v)| v), now).await?,
+        now,
+    };
+    let any_role = Filters {
+        role: None,
+        ..f.clone()
+    };
+    let (p30, p30_roles, p90) = (
+        people.rows(f, 30)?,
+        people.rows(&any_role, 30)?,
+        people.rows(f, 90)?,
+    );
+    // Rollup days are UTC days: a block grouped by the project's day reads
+    // them only where the two agree (D-017, D-040).
+    let utc_days = |days: i64| {
+        board_people::utc_days(
+            &f.tz,
+            (now - Duration::days(days)).date_naive(),
+            now.date_naive(),
+        )
+    };
     let w30 = f.clause(30)?;
     let w14 = f.clause(14)?;
     // Days are the project's days (D-017).
@@ -205,15 +232,13 @@ async fn board_with(
         format!("event IN ({success_list})")
     };
     let users_sql = format!(
-        "SELECT count(DISTINCT CASE WHEN timestamp >= now() - INTERVAL '1 day' THEN distinct_id END) AS dau, \
-         count(DISTINCT CASE WHEN timestamp >= now() - INTERVAL '7 days' THEN distinct_id END) AS wau, \
-         count(DISTINCT distinct_id) AS mau FROM {src} WHERE {w30} AND {ident}"
+        "SELECT count(DISTINCT CASE WHEN last_ts >= now() - INTERVAL '1 day' THEN distinct_id END) AS dau, \
+         count(DISTINCT CASE WHEN last_ts >= now() - INTERVAL '7 days' THEN distinct_id END) AS wau, \
+         count(DISTINCT distinct_id) AS mau FROM {p30} WHERE {ident}"
     );
-    let w90 = f.clause(90)?;
-    let known_sql =
-        format!("SELECT count(DISTINCT distinct_id) AS n FROM {src} WHERE {w90} AND {ident}");
+    let known_sql = format!("SELECT count(DISTINCT distinct_id) AS n FROM {p90} WHERE {ident}");
     let anonymous_sql =
-        format!("SELECT count(DISTINCT distinct_id) AS n FROM {src} WHERE {w30} AND NOT {ident}");
+        format!("SELECT count(DISTINCT distinct_id) AS n FROM {p30} WHERE NOT {ident}");
     let sessions_sql = format!(
         "SELECT count(*) AS sessions, \
          avg(CASE WHEN n > 1 THEN secs END) AS avg_secs, \
@@ -227,32 +252,37 @@ async fn board_with(
                sum(CASE WHEN {task} THEN 1 ELSE 0 END) AS tasks \
                FROM {src} WHERE {w7} AND session_id IS NOT NULL GROUP BY session_id) s"
     );
-    let dau_sql = format!(
-        "SELECT {day} AS date, count(DISTINCT distinct_id) AS n FROM {src} WHERE {w14} AND {ident} GROUP BY 1 ORDER BY 1"
-    );
+    let dau_sql = if utc_days(14) {
+        format!(
+            "SELECT day AS date, count(DISTINCT distinct_id) AS n FROM {} WHERE {ident} GROUP BY 1 ORDER BY 1",
+            people.rows(f, 14)?
+        )
+    } else {
+        format!(
+            "SELECT {day} AS date, count(DISTINCT distinct_id) AS n FROM {src} WHERE {w14} AND {ident} GROUP BY 1 ORDER BY 1"
+        )
+    };
     let vitals_sql = vitals::p75_sql(&vsrc, &w7);
-    let features_sql = format!(
-        "SELECT feature AS key, count(*) AS uses, count(DISTINCT distinct_id) AS users, \
-         count(DISTINCT concat(distinct_id, '|', {day})) AS user_days \
-         FROM {src} WHERE {w30} AND feature IS NOT NULL GROUP BY feature ORDER BY users DESC, uses DESC LIMIT 12"
-    );
+    let features_sql = if utc_days(30) {
+        format!(
+            "SELECT feature AS key, sum(events) AS uses, count(DISTINCT distinct_id) AS users, \
+             count(DISTINCT concat(distinct_id, '|', day)) AS user_days \
+             FROM {p30} WHERE feature IS NOT NULL GROUP BY feature ORDER BY users DESC, uses DESC LIMIT 12"
+        )
+    } else {
+        format!(
+            "SELECT feature AS key, count(*) AS uses, count(DISTINCT distinct_id) AS users, \
+             count(DISTINCT concat(distinct_id, '|', {day})) AS user_days \
+             FROM {src} WHERE {w30} AND feature IS NOT NULL GROUP BY feature ORDER BY users DESC, uses DESC LIMIT 12"
+        )
+    };
     let roles_sql = format!(
-        "SELECT role, count(DISTINCT distinct_id) AS users FROM {src} WHERE {} \
-         GROUP BY role ORDER BY users DESC LIMIT 12",
-        Filters {
-            role: None,
-            ..f.clone()
-        }
-        .clause(30)?
+        "SELECT role, count(DISTINCT distinct_id) AS users FROM {p30_roles} \
+         GROUP BY role ORDER BY users DESC LIMIT 12"
     );
     let role_features_sql = format!(
-        "SELECT role, feature, count(DISTINCT distinct_id) AS users FROM {src} WHERE {} \
-         AND role IS NOT NULL AND feature IS NOT NULL GROUP BY role, feature",
-        Filters {
-            role: None,
-            ..f.clone()
-        }
-        .clause(30)?
+        "SELECT role, feature, count(DISTINCT distinct_id) AS users FROM {p30_roles} \
+         WHERE role IS NOT NULL AND feature IS NOT NULL GROUP BY role, feature"
     );
     let releases_sql = format!(
         "SELECT release, CAST(min(first) AS VARCHAR) AS first_seen, count(DISTINCT uid) AS users, \
