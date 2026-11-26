@@ -18,7 +18,9 @@ use serde::de::DeserializeOwned;
 use crate::{Board, Filters};
 
 pub mod alerts;
+pub mod ask;
 pub mod deploys;
+pub mod flags;
 pub mod goals;
 pub mod releases;
 pub mod tickets;
@@ -93,6 +95,15 @@ pub const REGISTRY: &[Spec] = &[
     spec::<tickets::SetTarget>(),
     spec::<deploys::RotateHook>(),
     spec::<deploys::Record>(),
+    // Ask's lookups and its confirmed flag change (#508).
+    spec::<ask::Board>(),
+    spec::<ask::Feature>(),
+    spec::<ask::Errors>(),
+    spec::<ask::Sql>(),
+    spec::<ask::Vitals>(),
+    spec::<ask::Goals>(),
+    spec::<flags::List>(),
+    spec::<flags::Update>(),
 ];
 
 /// A 12-character id from `s` (the first bytes of its SHA-256, in hex).
@@ -177,6 +188,9 @@ pub trait Host: Sync {
     /// Store the GitHub token every project shares, sealed: why it could
     /// not be sealed.
     fn set_github_token(&self, token: &str) -> Result<(), String>;
+    /// `bytes` random bytes from the system's secure source, in hex (a new
+    /// secret, such as Ask's per-project pseudonym key).
+    fn random_hex(&self, bytes: usize) -> String;
 }
 
 /// Something that happened in a project, on the timeline.

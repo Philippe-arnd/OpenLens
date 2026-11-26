@@ -92,6 +92,10 @@ impl Host for AppState {
         let _ = self.meta.set_setting("github_token", &s);
         Ok(())
     }
+
+    fn random_hex(&self, bytes: usize) -> String {
+        crate::cookieless::random_hex(bytes)
+    }
 }
 
 /// The caller of a command made from a dashboard request: the viewer's
