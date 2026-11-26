@@ -116,7 +116,7 @@ fn notice(p: &ProjectInfo<'_>, n: &NoticeRow, admin: bool) -> Markup {
 /// The announcements section of the Uptime page: what the team posted
 /// (90 days), what to do about recent incidents, and the sending switch.
 pub fn notices(p: &ProjectInfo<'_>, v: &NoticesView) -> Markup {
-    let admin = viewer_is_admin();
+    let admin = crate::shell::viewer_is_admin();
     let base = format!("/p/{}/uptime/announcements", p.id);
     html! {
         section.card.table-card.wide {

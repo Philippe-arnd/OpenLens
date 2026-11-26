@@ -131,6 +131,7 @@ pub fn router(state: AppState) -> Router {
     openlens_ui::set_prefs_source(web::current_prefs);
     openlens_ui::set_nav_project_source(web::current_nav_project);
     openlens_ui::set_admin_source(web::current_admin);
+    openlens_ui::set_icon_source(icon::current_has_icon);
     let capture = Router::new()
         .route("/capture", post(capture::capture))
         .route("/e", post(capture::capture))

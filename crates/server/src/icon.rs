@@ -61,7 +61,7 @@ fn image(mime: &'static str, body: Vec<u8>) -> Response {
 
 /// The project's stored favicon, else its initial; never fetches (the
 /// public status page's icon, #561).
-pub(crate) fn stored(state: &AppState, id: &str, name: &str) -> Response {
+pub(crate) fn stored_or_initial(state: &AppState, id: &str, name: &str) -> Response {
     let bytes = std::fs::read(path(state, id)).ok();
     match bytes.as_deref().and_then(|b| sniff(b).map(|m| (m, b))) {
         Some((mime, b)) => image(mime, b.to_vec()),
@@ -70,7 +70,41 @@ pub(crate) fn stored(state: &AppState, id: &str, name: &str) -> Response {
 }
 
 fn path(state: &AppState, id: &str) -> std::path::PathBuf {
-    state.data_dir.join("icons").join(format!("{id}.img"))
+    dir(state).join(format!("{id}.img"))
+}
+
+fn dir(state: &AppState) -> std::path::PathBuf {
+    state.data_dir.join("icons")
+}
+
+tokio::task_local! {
+    /// Where the icons of the server answering this request are kept.
+    static DIR: std::path::PathBuf;
+}
+
+/// Whether project `id` has a stored icon: one file check, no fetch.
+fn stored(dir: &std::path::Path, id: &str) -> bool {
+    openlens_replay::valid_id(id) && dir.join(format!("{id}.img")).is_file()
+}
+
+/// For `openlens_ui` (#540): whether the project of the page being
+/// rendered has an icon of its own; when not, the sidebar shows its
+/// initial instead of an image.
+pub(crate) fn current_has_icon(id: &str) -> bool {
+    DIR.try_with(|d| stored(d, id)).unwrap_or(false)
+}
+
+/// Run `f` with this server's icon folder known to [`current_has_icon`].
+pub(crate) async fn with_dir<F: std::future::Future>(state: &AppState, f: F) -> F::Output {
+    DIR.scope(dir(state), f).await
+}
+
+/// After a project page was shown: fetch its icon when it has none yet
+/// (the sidebar no longer asks `/icon` for it). At most once a week.
+pub(crate) fn fetch_if_missing(state: &AppState, id: &str) {
+    if !stored(&dir(state), id) {
+        refresh_if_due(state, id);
+    }
 }
 
 /// Forget the stored icon (a new app address, or a deleted project).

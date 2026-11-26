@@ -127,9 +127,10 @@ pub fn breakdown(
         .find(|(k, _)| *k == by)
         .map_or(by, |(_, l)| l);
     let max = rows.iter().map(|r| r.users).max().unwrap_or(1).max(1) as f64;
-    layout(
+    layout_in(
         "Breakdown",
         Some(p),
+        context_bar(p.id, b, f, &format!("/breakdown?by={by}"), false),
         html! {
             div.heading { div {
                 h1 { "Break down by " (label.to_lowercase()) }
@@ -140,7 +141,6 @@ pub fn breakdown(
                     a href={ "/p/" (p.id) "/breakdown?by=" (k) "&env=" (url_enc(&f.environment)) } aria-current=[(*k == by).then_some("page")] { (l) }
                 }
             }
-            (filter_bar(p.id, b, f, &format!("/breakdown?by={by}")))
             section.card.wide {
                 @if rows.is_empty() { p.muted { "No data in this window." } }
                 @else {
