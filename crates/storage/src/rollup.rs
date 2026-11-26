@@ -262,6 +262,11 @@ fn schema_of(name: &str) -> Option<SchemaRef> {
         .map(|(_, s)| s)
 }
 
+/// The last closed UTC day at `now` (D-025): rollups exist only up to it.
+pub fn last_closed(now: DateTime<Utc>) -> NaiveDate {
+    now.date_naive() - chrono::Duration::days(GRACE_DAYS + 1)
+}
+
 /// Closed days that still have their events and lack a rollup table
 /// (never rolled up, or rolled up before a table was added), oldest first.
 pub fn missing(root: &Path, project: &str, now: DateTime<Utc>) -> Result<Vec<NaiveDate>> {
@@ -269,7 +274,7 @@ pub fn missing(root: &Path, project: &str, now: DateTime<Utc>) -> Result<Vec<Nai
     if !pdir.is_dir() {
         return Ok(Vec::new());
     }
-    let last_closed = now.date_naive() - chrono::Duration::days(GRACE_DAYS + 1);
+    let last_closed = last_closed(now);
     let mut days = Vec::new();
     for entry in fs::read_dir(&pdir)? {
         let path = entry?.path();
