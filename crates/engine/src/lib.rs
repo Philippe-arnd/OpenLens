@@ -16,6 +16,7 @@ mod acquisition;
 mod board;
 mod board_people;
 pub mod churn;
+pub mod commands;
 mod digest;
 mod drift;
 pub mod environments;
