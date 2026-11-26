@@ -168,6 +168,56 @@ async fn sessions_suggest_splits_merges_order_and_drift() {
     );
 }
 
+/// Drift reads the current release of the release states (D-049, #483
+/// item 3): a canary next to a live release is not it, so its new route
+/// waits until it takes over.
+#[tokio::test]
+async fn a_canary_is_not_the_release_drift_reads() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let mut n = 0;
+    let mut rows = Vec::new();
+    for i in 0..20 {
+        let u = format!("u{i}");
+        rows.push(ev(
+            &mut n,
+            &u,
+            &format!("a{i}"),
+            "$pageview",
+            "/search",
+            60 * 48,
+            "v1",
+        ));
+        // Today, two users of twenty are on the canary, with a new route.
+        let (rel, path) = if i < 2 {
+            ("v2", format!("/reports/{i}"))
+        } else {
+            ("v1", "/cart".to_owned())
+        };
+        rows.push(ev(
+            &mut n,
+            &u,
+            &format!("b{i}"),
+            "$pageview",
+            &path,
+            100,
+            rel,
+        ));
+    }
+    w.append(&rows).unwrap();
+    w.flush().unwrap();
+    let q = QueryEngine::new(dir.path(), Limits::default());
+    let m = parse(MAP).map.unwrap();
+    let h = openlens_engine::map_health(&q, "p", &m, &Filters::default())
+        .await
+        .unwrap();
+    assert!(
+        !h.findings.iter().any(|f| f.kind == "drift"),
+        "{:?}",
+        h.findings
+    );
+}
+
 #[tokio::test]
 async fn each_release_keeps_the_map_version_it_shipped_with() {
     let (_d, q) = seeded();
@@ -176,7 +226,7 @@ async fn each_release_keeps_the_map_version_it_shipped_with() {
     // into cart.
     let new_yaml = MAP.replace("['/cart']", "['/cart', '/search']");
     let new = parse(&new_yaml).map.unwrap();
-    let history = vec![
+    let versions = vec![
         openlens_engine::MapAt {
             version: 1,
             saved: Utc::now() - Duration::days(5),
@@ -188,6 +238,7 @@ async fn each_release_keeps_the_map_version_it_shipped_with() {
             map: new.clone(),
         },
     ];
+    let history = openlens_engine::History::from(versions.clone());
     let ctx =
         openlens_engine::feature_context(&q, "p", &new, &history, &Filters::default(), "cart")
             .await
@@ -199,11 +250,17 @@ async fn each_release_keeps_the_map_version_it_shipped_with() {
     // Same users on both releases; only v2 counts the search pages as cart.
     assert!(v2.uses > v1.uses, "{v1:?} {v2:?}");
     // Counted with the current map for both, v1 would change.
-    let now_only =
-        openlens_engine::feature_context(&q, "p", &new, &[], &Filters::default(), "cart")
-            .await
-            .unwrap()
-            .unwrap();
+    let now_only = openlens_engine::feature_context(
+        &q,
+        "p",
+        &new,
+        &Default::default(),
+        &Filters::default(),
+        "cart",
+    )
+    .await
+    .unwrap()
+    .unwrap();
     let v1_now = now_only
         .releases
         .iter()
@@ -211,6 +268,43 @@ async fn each_release_keeps_the_map_version_it_shipped_with() {
         .unwrap();
     assert!(v1_now.uses > v1.uses);
     assert!(ctx.relations.iter().any(|r| r.then == "checkout"));
+
+    // The versions found the first time are recorded (D-070) and win over
+    // a later derivation: with version 1 gone from the stored versions read
+    // (out of the newest 50), v1 would be counted with version 2.
+    let rows = openlens_engine::inforce::to_record(&Filters::default(), &ctx.releases);
+    assert!(rows.iter().any(|r| r.release == "v1" && r.map_version == 1));
+    let later = openlens_engine::History {
+        versions: versions[1..].to_vec(),
+        recorded: rows,
+        older: vec![(1, old.clone())],
+    };
+    let kept = openlens_engine::feature_context(&q, "p", &new, &later, &Filters::default(), "cart")
+        .await
+        .unwrap()
+        .unwrap();
+    let k1 = kept.releases.iter().find(|r| r.release == "v1").unwrap();
+    assert_eq!((k1.map_version, k1.recorded), (Some(1), true));
+    assert_eq!(k1.uses, v1.uses);
+    let derived = openlens_engine::feature_context(
+        &q,
+        "p",
+        &new,
+        &versions[1..].to_vec().into(),
+        &Filters::default(),
+        "cart",
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let d1 = derived.releases.iter().find(|r| r.release == "v1").unwrap();
+    assert_eq!(d1.map_version, Some(2), "what the record prevents");
+    // A role filter derives from part of the traffic: nothing is recorded.
+    let staff = Filters {
+        role: Some("member".into()),
+        ..Filters::default()
+    };
+    assert!(openlens_engine::inforce::to_record(&staff, &ctx.releases).is_empty());
 }
 
 /// Closed days rolled up with the map in force give the relations and the

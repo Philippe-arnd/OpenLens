@@ -273,12 +273,15 @@ pub(crate) async fn feature_or_download(
         return gone();
     };
     let f = q.filters.filters(&p.timezone);
-    let history = crate::map_history(&state, &p.id).await;
+    let history = crate::map_history(&state, &p.id, &f.environment).await;
     let ctx =
         match openlens_engine::feature_context(&state.query, &p.id, &m, &history, &f, &current)
             .await
         {
-            Ok(Some(c)) => c,
+            Ok(Some(c)) => {
+                crate::record_release_maps(&state, &p.id, &f, &c.releases).await;
+                c
+            }
             Ok(None) => return gone(),
             Err(e) => {
                 return html_page(
@@ -485,18 +488,13 @@ pub(crate) async fn api_feature(
         Ok(x) => x,
         Err(r) => return *r,
     };
-    let history = crate::map_history(&state, &p.id).await;
-    match openlens_engine::feature_context(
-        &state.query,
-        &p.id,
-        &m,
-        &history,
-        &q.filters(&p.timezone),
-        &key,
-    )
-    .await
-    {
-        Ok(Some(c)) => axum::Json(c).into_response(),
+    let f = q.filters(&p.timezone);
+    let history = crate::map_history(&state, &p.id, &f.environment).await;
+    match openlens_engine::feature_context(&state.query, &p.id, &m, &history, &f, &key).await {
+        Ok(Some(c)) => {
+            crate::record_release_maps(&state, &p.id, &f, &c.releases).await;
+            axum::Json(c).into_response()
+        }
         Ok(None) => crate::apierr::json(
             StatusCode::NOT_FOUND,
             format!("no feature `{key}` in the map"),
