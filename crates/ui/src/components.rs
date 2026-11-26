@@ -15,7 +15,24 @@ pub(crate) fn filter_bar(project: &str, b: &Board, f: &Filters, action: &str) ->
     html! {
         form.filters method="get" action={ "/p/" (project) (action) } aria-label="Filters" {
             (filter_fields(&envs, b, f))
+            (window_fields(&f.window))
             button type="submit" { "Apply" }
+        }
+    }
+}
+
+/// The board's window as hidden fields (D-060), so applying the filters
+/// keeps the period picked; nothing for the default windows.
+pub(crate) fn window_fields(w: &openlens_engine::Window) -> Markup {
+    use openlens_engine::Window;
+    html! {
+        @match w {
+            Window::Since { release } => { input type="hidden" name="since" value=(release); }
+            Window::Range { from, to } => {
+                input type="hidden" name="from" value=(from.to_string());
+                input type="hidden" name="to" value=(to.to_string());
+            }
+            Window::Fixed | Window::Release => {}
         }
     }
 }

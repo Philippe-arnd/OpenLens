@@ -8,7 +8,8 @@
 //! The period blocks (sessions, tasks, errors, the daily active series,
 //! features, roles, role × feature and success events) read 7, 14 or 30
 //! days, or, on the board pages, the release window and its comparison
-//! (#323, D-055, [`board_window`]).
+//! (#323, D-055, [`board_window`]), or a date range or past release
+//! (#513, D-060).
 
 use super::*;
 
@@ -97,15 +98,12 @@ pub async fn board(
     // `session_day` (#498, D-047).
     let now = chrono::Utc::now();
     // The board pages read their period blocks since the current release
-    // (D-055); a board filtered on one release already reads that release,
-    // and keeps the fixed windows, as every other caller.
-    let win = match f.window {
-        Window::Release if f.release.is_none() => {
-            Some(board_window::resolve(q, project, f, now).await?)
-        }
-        _ => None,
-    };
-    // The comparison reaches up to twice the longest window back.
+    // (D-055), or a date range or past release they ask for (D-060); a
+    // board filtered on one release already reads that release, and keeps
+    // the fixed windows, as every other caller.
+    let win = board_window::resolve(q, project, f, now).await?;
+    // The comparison reaches twice the window back (more for a range in
+    // the past).
     let back = win
         .as_ref()
         .map_or(90, |w| w.previous.start / 86_400 + 2)

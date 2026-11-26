@@ -442,24 +442,38 @@ impl FilterQuery {
 }
 
 /// The board's query: the filters, and `window=fixed` for the fixed 7-,
-/// 14- and 30-day windows instead of the release window (D-055).
+/// 14- and 30-day windows instead of the release window (D-055), or
+/// `since=<release>` or `from=&to=` (`YYYY-MM-DD`, the project's days) for
+/// a past release or a date range (D-060). The board page reads the same.
 #[derive(Deserialize, Default)]
-struct BoardQuery {
+pub(crate) struct BoardQuery {
     #[serde(flatten)]
-    f: FilterQuery,
+    pub(crate) f: FilterQuery,
     window: Option<String>,
+    since: Option<String>,
+    from: Option<String>,
+    to: Option<String>,
 }
 
 impl BoardQuery {
-    /// The board's filters: the release window unless `window=fixed`.
-    fn filters(&self, tz: &str) -> Filters {
-        Filters {
-            window: match self.window.as_deref().map(str::trim) {
+    /// The board's filters: the window asked for, else the release window
+    /// unless `window=fixed`.
+    pub(crate) fn filters(&self, tz: &str) -> Result<Filters, openlens_engine::EngineError> {
+        let f = self.f.filters(tz);
+        let asked = openlens_engine::Window::asked(
+            self.since.as_deref(),
+            self.from.as_deref(),
+            self.to.as_deref(),
+            &f.tz,
+            chrono::Utc::now(),
+        )?;
+        Ok(Filters {
+            window: asked.unwrap_or(match self.window.as_deref().map(str::trim) {
                 Some("fixed") => openlens_engine::Window::Fixed,
                 _ => openlens_engine::Window::Release,
-            },
-            ..self.f.filters(tz)
-        }
+            }),
+            ..f
+        })
     }
 }
 
@@ -476,15 +490,12 @@ async fn board(
         Ok(p) => p,
         Err(r) => return *r,
     };
+    let f = match q.filters(&p.timezone) {
+        Ok(f) => f,
+        Err(e) => return err(StatusCode::BAD_REQUEST, &e.to_string()),
+    };
     let map = crate::load_map(&state, &p.id).await;
-    match crate::boards::board(
-        &state,
-        &p.id,
-        &q.filters(&p.timezone),
-        map.as_ref().map(|(m, v)| (m, *v)),
-    )
-    .await
-    {
+    match crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))).await {
         Ok(b) => Json(b).into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()),
     }
