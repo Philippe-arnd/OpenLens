@@ -9,7 +9,7 @@ The reference is the public feature lists of hosted product-analytics suites, de
 | Capture | Server-side events: Node, Python, Go, Ruby and PHP clients, plain HTTP | M7 | ● |
 | Capture | Native mobile SDKs (iOS, Android, React Native, Flutter) | — | — not planned yet |
 | Capture | ★ Environment and release on every event | M1 | ● |
-| Platform | ★ Self-hosted with no required env vars: Docker, binary, Kubernetes, Coolify | M1, M8 | ● (more platforms: #238) |
+| Platform | ★ Self-hosted with no required env vars: Docker, binary + systemd, Kubernetes, Coolify, Swarm | M1, M8 | ● (more platforms: #238) |
 | Setup | ★ Feature map with roles, lint and verify, maintained by agents | M2 | ● |
 | Setup | ★ Backfill from the app's own data | M2 | ● |
 | Agents | ★ MCP server: insights, KPI report, user timeline, errors, read-only SQL, flags, export | M2–M3 | ● |

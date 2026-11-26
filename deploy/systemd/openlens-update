@@ -1,0 +1,218 @@
+#!/usr/bin/env bash
+# openlens-update CHANNEL: install the newest OpenLens release of a channel,
+# verified, and roll back if it does not come up healthy.
+# Guide: docs/deploy/systemd.md. Run as root, by hand or from
+# openlens-update@<channel>.timer.
+#
+# CHANNEL is `latest` (newest stable release) or a minor such as `0.6`
+# (patches of that minor only). Pre-releases and `edge` are never installed.
+#
+# 1. Finds the newest matching release on GitHub. Older or equal: nothing to do.
+# 2. Downloads the tarball for this machine and SHA256SUMS, checks the sum,
+#    then the build provenance with `gh attestation verify` (Sigstore,
+#    signed by the release workflow; needs gh 2.49+ and jq, no GitHub login).
+# 3. Unpacks it in /opt/openlens/<tag>/ and points /opt/openlens/current to it.
+#    On a first install it stops there: enable the service yourself.
+# 4. Restarts openlens.service and waits for /healthz. The first start of a
+#    new version copies the data to backups/upgrade/ before it listens, so
+#    the wait is long (15 minutes); a crash or a restart loop fails at once.
+# 5. On failure: points `current` back to the previous release and restarts.
+#    If that one does not come up either (the new release wrote a data format
+#    the old one refuses), restores the upgrade backup the new release made
+#    and starts again.
+set -euo pipefail
+
+REPO=Philippe-arnd/OpenLens
+WORKFLOW=$REPO/.github/workflows/publish.yml
+ROOT=/opt/openlens
+UNIT=openlens.service
+HEALTH_WAIT=900
+KEEP=3
+
+log() { printf 'openlens-update: %s\n' "$*" >&2; }
+die() { log "$*"; exit 1; }
+
+usage() { die "usage: openlens-update latest|X.Y (for example 0.6)"; }
+
+[ $# -eq 1 ] || usage
+CHANNEL=$1
+[[ $CHANNEL == latest || $CHANNEL =~ ^[0-9]+\.[0-9]+$ ]] || usage
+[ "$(id -u)" -eq 0 ] || die "run it as root"
+
+for tool in curl sha256sum tar gh jq flock systemctl; do
+  command -v "$tool" > /dev/null || die "$tool is missing (see docs/deploy/systemd.md)"
+done
+gh attestation verify --help > /dev/null 2>&1 \
+  || die "this gh has no 'attestation verify': install gh 2.49 or newer"
+
+case "$(uname -m)" in
+  x86_64 | amd64) ARCH=x86_64 ;;
+  aarch64 | arm64) ARCH=aarch64 ;;
+  *) die "no release for $(uname -m)" ;;
+esac
+
+install -d -m 755 "$ROOT"
+exec 9> "$ROOT/.update.lock"
+flock -n 9 || die "another openlens-update is running"
+
+# One value of the unit's Environment= (not of its EnvironmentFile).
+unit_env() {
+  systemctl show -p Environment --value "$UNIT" | tr ' ' '\n' | sed -n "s/^$1=//p" | tail -n 1
+}
+
+# Newest tag of the channel: stable releases only (vX.Y.Z, no suffix).
+resolve_tag() {
+  local pattern
+  if [ "$CHANNEL" = latest ]; then
+    pattern='^v[0-9]+\.[0-9]+\.[0-9]+$'
+  else
+    pattern="^v${CHANNEL//./\\.}\\.[0-9]+\$"
+  fi
+  local tags
+  tags=$(curl -fsS --retry 3 -H 'Accept: application/vnd.github+json' \
+    "https://api.github.com/repos/$REPO/releases?per_page=100" \
+    | jq -r '.[] | select(.draft == false and .prerelease == false) | .tag_name') || return 1
+  printf '%s\n' "$tags" | { grep -E "$pattern" || true; } | sort -V | tail -n 1
+}
+
+current_tag() {
+  if [ -L "$ROOT/current" ]; then basename "$(readlink "$ROOT/current")"; fi
+}
+
+# Point $ROOT/current to $1, atomically.
+point_to() {
+  ln -sfn "$1" "$ROOT/.current.new"
+  mv -Tf "$ROOT/.current.new" "$ROOT/current"
+}
+
+# Wait until the restarted service answers /healthz; fail early on a crash.
+wait_healthy() {
+  local port restarts deadline
+  port=$(unit_env OPENLENS_ADDR); port=${port##*:}; port=${port:-8686}
+  restarts=$(systemctl show -p NRestarts --value "$UNIT")
+  deadline=$((SECONDS + HEALTH_WAIT))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    if OPENLENS_ADDR="127.0.0.1:$port" "$ROOT/current/openlens" healthcheck; then
+      return 0
+    fi
+    [ "$(systemctl show -p ActiveState --value "$UNIT")" = failed ] && return 1
+    [ "$(systemctl show -p NRestarts --value "$UNIT")" = "$restarts" ] || return 1
+    sleep 2
+  done
+  return 1
+}
+
+# Put the upgrade backup made after $1 (a `date +%s`) back in the data dir.
+# The trees and meta.db are the ones `openlens backup` copies; the rest of
+# the data dir (keys, icons, backups) stays. The version stamp is removed so
+# the older release reads the data as its own and starts.
+restore_upgrade_backup() {
+  local since=$1 data backup t
+  data=$(unit_env OPENLENS_DATA_DIR); data=${data:-/var/lib/openlens}
+  backup=$(find "$data/backups/upgrade" -mindepth 1 -maxdepth 1 -type d -newermt "@$since" 2> /dev/null | sort | tail -n 1)
+  [ -n "$backup" ] && [ -f "$backup/meta.db" ] || return 1
+  log "restoring the data from $backup"
+  for t in wal events replay rollups sourcemaps cold; do
+    rm -rf "${data:?}/$t"
+    if [ -d "$backup/$t" ]; then cp -a "$backup/$t" "$data/$t"; fi
+  done
+  rm -f "$data/meta.db" "$data/meta.db-wal" "$data/meta.db-shm" "$data/openlens-version.json"
+  cp -a "$backup/meta.db" "$data/meta.db"
+}
+
+# Download release $1, check its checksum and build provenance, unpack it
+# in $ROOT/$1/ and link /usr/local/bin to the current release.
+fetch_release() {
+  local tag=$1 file
+  file="openlens-$tag-$ARCH-linux.tar.gz"
+  WORK=$(mktemp -d)
+  local work=$WORK digest
+  log "downloading $tag"
+  curl -fsSL --retry 3 -o "$work/$file" "https://github.com/$REPO/releases/download/$tag/$file"
+  curl -fsSL --retry 3 -o "$work/SHA256SUMS" "https://github.com/$REPO/releases/download/$tag/SHA256SUMS"
+  grep -q "  $file\$" "$work/SHA256SUMS" || die "$file is not in SHA256SUMS"
+  (cd "$work" && grep "  $file\$" SHA256SUMS | sha256sum -c --quiet -) || die "checksum mismatch for $file"
+
+  # Provenance: the attestation from GitHub's public API, checked by gh
+  # offline against Sigstore's roots, for this repository and workflow.
+  digest=$(sha256sum "$work/$file" | cut -d' ' -f1)
+  curl -fsS --retry 3 "https://api.github.com/repos/$REPO/attestations/sha256:$digest" \
+    | jq -c '.attestations[].bundle' > "$work/bundles.jsonl" \
+    || die "no build provenance for $file (releases before 0.6 are not signed)"
+  [ -s "$work/bundles.jsonl" ] || die "no build provenance for $file"
+  HOME="$work" XDG_CACHE_HOME="$work/cache" GH_CONFIG_DIR="$work/gh" GH_NO_UPDATE_NOTIFIER=1 GH_PROMPT_DISABLED=1 \
+    gh attestation verify "$work/$file" --bundle "$work/bundles.jsonl" -R "$REPO" \
+    --signer-workflow "$WORKFLOW" --deny-self-hosted-runners > /dev/null \
+    || die "build provenance of $file does not verify"
+
+  tar -C "$work" -xzf "$work/$file"
+  rm -rf "${ROOT:?}/$tag.new"
+  install -d -m 755 "$ROOT/$tag.new"
+  install -m 755 "$work/openlens-$tag-$ARCH-linux/openlens" "$work/openlens-$tag-$ARCH-linux/openlens-cli" "$ROOT/$tag.new/"
+  rm -rf "${ROOT:?}/$tag"
+  mv -T "$ROOT/$tag.new" "$ROOT/$tag"
+  ln -sfn "$ROOT/current/openlens" /usr/local/bin/openlens
+  ln -sfn "$ROOT/current/openlens-cli" /usr/local/bin/openlens-cli
+}
+
+WORK=""
+trap '[ -z "$WORK" ] || rm -rf "$WORK"' EXIT
+
+main() {
+  local tag current previous started
+  tag=$(resolve_tag) || die "cannot read the releases from GitHub"
+  [ -n "$tag" ] || die "no stable release in channel $CHANNEL"
+  current=$(current_tag)
+  if [ -n "$current" ]; then
+    if [ "$current" = "$tag" ] || [ "$(printf '%s\n%s\n' "$current" "$tag" | sort -V | tail -n 1)" = "$current" ]; then
+      log "$current is up to date (channel $CHANNEL)"
+      return 0
+    fi
+  fi
+  if grep -qxF "$tag" "$ROOT/failed" 2> /dev/null; then
+    log "$tag failed its health check here before; waiting for the next release (remove it from $ROOT/failed to retry)"
+    return 0
+  fi
+
+  fetch_release "$tag"
+
+  if [ -z "$current" ]; then
+    point_to "$tag"
+    log "installed $tag; start it with: systemctl enable --now $UNIT"
+    return 0
+  fi
+
+  previous=$current
+  started=$(date +%s)
+  point_to "$tag"
+  ln -sfn "$previous" "$ROOT/previous"
+  log "restarting on $tag (was $previous)"
+  systemctl restart "$UNIT"
+  if wait_healthy; then
+    log "updated to $tag"
+    # Keep the newest $KEEP releases, and always the one in use and the previous one.
+    find "$ROOT" -mindepth 1 -maxdepth 1 -type d -name 'v*' -printf '%f\n' | sort -V | head -n "-$KEEP" \
+      | while read -r old; do
+          [ "$old" = "$tag" ] || [ "$old" = "$previous" ] || rm -rf "${ROOT:?}/$old"
+        done
+    return 0
+  fi
+
+  log "$tag did not come up healthy, rolling back to $previous"
+  echo "$tag" >> "$ROOT/failed"
+  point_to "$previous"
+  systemctl restart "$UNIT"
+  if wait_healthy; then
+    die "rolled back to $previous; $tag failed its health check (journalctl -u $UNIT)"
+  fi
+  systemctl stop "$UNIT"
+  restore_upgrade_backup "$started" || die "$previous does not start and there is no upgrade backup to restore: see docs/deploy/systemd.md#roll-back"
+  systemctl reset-failed "$UNIT" || true
+  systemctl start "$UNIT"
+  if wait_healthy; then
+    die "rolled back to $previous with the data from before $tag; $tag failed its health check"
+  fi
+  die "$previous does not start after the rollback either: see docs/deploy/systemd.md#roll-back"
+}
+
+main

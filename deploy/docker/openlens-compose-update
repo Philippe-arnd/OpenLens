@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# openlens-compose-update DIR: pull the channel tag of the `openlens` service
+# of the Compose project in DIR, recreate it, and go back to the image it ran
+# before if the new one does not come up healthy.
+# Guide: docs/deploy/docker.md#updates. Run it from cron or a systemd timer.
+#
+# - The service's image must follow a channel: `:latest` or a minor such as
+#   `:0.6`. `:edge` is refused (it follows main); a pinned `:vX.Y.Z` or a
+#   digest never moves, so there is nothing to do.
+# - The service needs the healthcheck of docs/deploy/docker.md: the first
+#   start of a new version copies the data to backups/upgrade/ before it
+#   listens, so the wait is long (15 minutes); an exit or a restart fails
+#   at once.
+# - With cosign installed, the new image's signature is checked first
+#   (docs/deploy/README.md#verify-what-you-run); without it, the script says
+#   so and goes on.
+# - A failed image is remembered in DIR/.openlens-failed-images, so the next
+#   run waits for another image instead of trying the same one every day.
+# - If the previous image does not start either (the new one wrote a data
+#   format it refuses), the script stops and says how to restore the upgrade
+#   backup by hand (docs/deploy/docker.md#roll-back).
+set -euo pipefail
+
+SERVICE=openlens
+HEALTH_WAIT=900
+IDENTITY='^https://github.com/Philippe-arnd/OpenLens/\.github/workflows/release\.yml@refs/(heads/main|tags/v.*)$'
+
+log() { printf 'openlens-compose-update: %s\n' "$*" >&2; }
+die() { log "$*"; exit 1; }
+
+[ $# -eq 1 ] || die "usage: openlens-compose-update <compose project dir>"
+cd "$1"
+command -v docker > /dev/null || die "docker is missing"
+
+image=$(docker compose config --images "$SERVICE" | head -n 1)
+[ -n "$image" ] || die "no service $SERVICE in this Compose project"
+[[ $image != *@sha256:* ]] || { log "$image is pinned by digest: nothing to update"; exit 0; }
+tag=${image##*:}
+[[ ${image##*/} == *:* ]] || tag=latest
+if [ "$tag" = edge ]; then
+  die "$image follows main: use :latest or a minor such as :0.6"
+elif [[ $tag =~ ^v?[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+  log "$image is one release: nothing to update"
+  exit 0
+elif [[ $tag != latest && ! $tag =~ ^[0-9]+\.[0-9]+$ ]]; then
+  die "$image follows no channel: use :latest or a minor such as :0.6"
+fi
+
+container() { docker compose ps -q "$SERVICE" | head -n 1; }
+cid=$(container)
+[ -n "$cid" ] || die "$SERVICE is not running: start it with docker compose up -d"
+[ -n "$(docker inspect -f '{{if .Config.Healthcheck}}yes{{end}}' "$cid")" ] \
+  || die "$SERVICE has no healthcheck: add the one from docs/deploy/docker.md"
+old=$(docker inspect -f '{{.Image}}' "$cid")
+failed=.openlens-failed-images
+
+docker compose pull -q "$SERVICE"
+new=$(docker image inspect -f '{{.Id}}' "$image")
+if [ "$new" = "$old" ]; then
+  log "$image is up to date"
+  exit 0
+fi
+if grep -qxF "$new" "$failed" 2> /dev/null; then
+  docker tag "$old" "$image"
+  log "the image behind $image failed here before; waiting for the next one (remove it from $failed to retry)"
+  exit 0
+fi
+
+if command -v cosign > /dev/null; then
+  ref=$(docker image inspect -f '{{index .RepoDigests 0}}' "$image")
+  if ! cosign verify "$ref" --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    --certificate-identity-regexp "$IDENTITY" > /dev/null; then
+    docker tag "$old" "$image"
+    die "the signature of $ref does not verify; staying on the current image"
+  fi
+else
+  log "cosign is not installed: the image signature is not checked"
+fi
+
+# Healthy within HEALTH_WAIT, or fail at once on an exit or a restart.
+wait_healthy() {
+  local c restarts deadline state
+  c=$(container)
+  [ -n "$c" ] || return 1
+  restarts=$(docker inspect -f '{{.RestartCount}}' "$c")
+  deadline=$((SECONDS + HEALTH_WAIT))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    state=$(docker inspect -f '{{.State.Health.Status}} {{.State.Status}} {{.RestartCount}}' "$c") || return 1
+    case "$state" in
+      healthy\ running\ *) return 0 ;;
+      *\ exited\ * | *\ dead\ *) return 1 ;;
+    esac
+    [ "${state##* }" = "$restarts" ] || return 1
+    sleep 2
+  done
+  return 1
+}
+
+log "recreating $SERVICE on the new $image"
+docker compose up -d --pull never "$SERVICE"
+if wait_healthy; then
+  log "updated: $image is now $new"
+  exit 0
+fi
+
+log "the new image did not come up healthy, going back to $old"
+echo "$new" >> "$failed"
+docker tag "$old" "$image"
+docker compose up -d --pull never "$SERVICE"
+if wait_healthy; then
+  die "rolled back to the previous image; the new $image failed its health check (docker compose logs $SERVICE)"
+fi
+die "the previous image does not start either: restore the upgrade backup, see docs/deploy/docker.md#roll-back"

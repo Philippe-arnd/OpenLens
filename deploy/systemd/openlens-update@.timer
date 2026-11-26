@@ -1,0 +1,15 @@
+# Daily check for a new OpenLens release in the channel of the instance name:
+#   systemctl enable --now openlens-update@0.6.timer     (patches of 0.6)
+#   systemctl enable --now openlens-update@latest.timer  (every stable release)
+# Guide: docs/deploy/systemd.md#hands-off-updates.
+
+[Unit]
+Description=Daily OpenLens update check (channel %i)
+
+[Timer]
+OnCalendar=*-*-* 04:00:00
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
