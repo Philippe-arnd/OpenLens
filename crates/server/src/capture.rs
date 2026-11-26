@@ -14,7 +14,7 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use chrono::Utc;
-use openlens_event::{CaptureBatch, names, normalize_batch};
+use openlens_event::{CaptureBatch, normalize_batch};
 use serde_json::json;
 
 use crate::{AppState, MAX_INFLATED};
@@ -380,19 +380,17 @@ pub(crate) async fn capture(
     let stored = tokio::task::spawn_blocking(move || -> Result<(), String> {
         // Automatic release names from the build fingerprint (#495).
         releases::assign(&st, &pid, &tz, &mut events, Utc::now());
-        // Aliases and person ids (#450), before the events are durable.
-        crate::identity::record(&st, &pid, &events)?;
-        for ev in events.iter().filter(|e| e.event == names::IDENTIFY) {
-            st.meta
-                .identify(
-                    &ev.project,
-                    &ev.distinct_id,
-                    ev.role.as_deref(),
-                    ev.account.as_deref(),
-                    ev.plan.as_deref(),
-                    ev.timestamp,
-                )
-                .map_err(|e| e.to_string())?;
+        // People, aliases and person ids (D-009, #450), before the events
+        // are durable: one metadata write for the batch, none without an
+        // `$identify` (#510).
+        let started = std::time::Instant::now();
+        let seen = crate::identity::seen_of(&pid, &events);
+        crate::identity::record(&st, &pid, &events, &seen)?;
+        // The metadata part of a batch should cost well under a
+        // millisecond; say when it does not (#510).
+        let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        if ms >= 100 {
+            tracing::warn!(project = %pid, ms, identifies = seen.len(), "capture: metadata write slow");
         }
         // Write under the lock, wait for the disk outside it, so one fsync
         // serves every request that arrives meanwhile (#333).
