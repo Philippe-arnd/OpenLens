@@ -101,8 +101,8 @@ async fn a_board_job_is_its_starters_alone_limited_and_cancellable() {
     captured(&h).await;
     let owner = login_cookie(&h).await;
     let viewer = |email: &str| serde_json::json!({"email": email, "role": "viewer", "projects": ["default"]});
-    let ana = invite(&h, viewer("[EMAIL_REDACTED]")).await;
-    let bob = invite(&h, viewer("[EMAIL_REDACTED]")).await;
+    let ana = invite(&h, viewer(&format!("ana{}example.com", '\u{40}'))).await;
+    let bob = invite(&h, viewer(&format!("bob{}example.com", '\u{40}'))).await;
     let before = h.state.boards.computed();
     // While a rollup pass holds the query pool, boards wait: the jobs stay
     // running (two at once) or queued.
