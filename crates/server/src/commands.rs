@@ -1,6 +1,7 @@
 //! The server as the host of engine commands (#494, D-042): the stores,
 //! and the cached board and timeline the commands read.
 
+use openlens_engine::commands::alerts::Delivery;
 use openlens_engine::commands::{Caller, Change, Host};
 use openlens_featuremap::FeatureMap;
 use openlens_meta::{Meta, Project};
@@ -48,6 +49,24 @@ impl Host for AppState {
                 text: m.text,
             })
             .collect()
+    }
+
+    fn alert_level(&self, project: &str, env: &str) -> String {
+        crate::environments::current(self, project)
+            .rules
+            .level(env)
+            .to_owned()
+    }
+
+    async fn send_alert(
+        &self,
+        project: &str,
+        title: &str,
+        body: &str,
+        rule: &str,
+        resolved: bool,
+    ) -> Vec<Delivery> {
+        crate::alerts::deliver(self, project, title, body, rule, resolved).await
     }
 }
 
