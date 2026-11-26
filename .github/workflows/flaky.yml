@@ -1,0 +1,89 @@
+name: Flaky
+
+# A CI run on main whose first attempt fails is re-run once, failed jobs
+# only (#200). If the second attempt passes on the same commit, the jobs
+# that failed first are flaky: one open `flaky` issue collects them (a
+# comment per occurrence), for the self-healing routine or a person
+# (docs/agents/self-healing.md). If it fails again, it is a real break:
+# ci.yml's `report` job files `main-broken` from that second attempt.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+concurrency:
+  group: flaky-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  rerun:
+    name: re-run a failed main run once
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.run_attempt == 1 &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.event != 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    # The browser e2e and the nightly reference apps are the longest jobs.
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      SHA: ${{ github.event.workflow_run.head_sha }}
+      EVENT: ${{ github.event.workflow_run.event }}
+      RUN: ${{ github.event.workflow_run.html_url }}
+    steps:
+      - name: the jobs that failed on the first attempt
+        id: first
+        run: |
+          gh api "repos/$GH_REPO/actions/runs/$RUN_ID/attempts/1/jobs?per_page=100" \
+            --jq '.jobs[] | select(.conclusion == "failure") | "- \(.name): \([(.steps // [])[] | select(.conclusion == "failure") | .name] | join(", "))"' \
+            > "$RUNNER_TEMP/failed.md"
+          cat "$RUNNER_TEMP/failed.md"
+      - name: re-run them, and wait for the second attempt
+        id: rerun
+        run: |
+          gh run rerun "$RUN_ID" --failed
+          for _ in $(seq 1 20); do
+            [ "$(gh run view "$RUN_ID" --json attempt -q .attempt)" -ge 2 ] && break
+            sleep 3
+          done
+          gh run watch "$RUN_ID" --interval 60 > /dev/null || true
+          state=$(gh run view "$RUN_ID" --json attempt,status,conclusion -q '"\(.attempt) \(.status) \(.conclusion)"')
+          echo "second attempt: $state"
+          case "$state" in
+            "2 completed "*) echo "conclusion=${state##* }" >> "$GITHUB_ENV" ;;
+            *) echo "::error::the second attempt did not complete: $state"; exit 1 ;;
+          esac
+      - name: "passed on the same commit: file it as flaky"
+        if: env.conclusion == 'success'
+        run: |
+          gh label create flaky --color FBCA04 --description "A CI job failed, then passed on the same commit" 2>/dev/null || true
+          body="CI on main (${EVENT}, ${SHA::7}) failed, then passed when re-run on the same commit: $RUN"$'\n\n'"Failed on the first attempt (job: steps):"$'\n'"$(cat "$RUNNER_TEMP/failed.md")"
+          open=$(gh issue list --label flaky --state open --json number -q '.[0].number')
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --body "$body"
+          else
+            gh issue create --label flaky --title "Flaky CI job on main" \
+              --body "$body"$'\n\n'"Each new occurrence is a comment here. Fix the cause (timing, order, shared state); a retry, a longer sleep or #[ignore] hides it (AGENTS.md rule 29). Close this issue when it is fixed."
+          fi
+      # ci.yml waits for the second attempt before it files main-broken: if
+      # there is none, report the break here so it is not lost.
+      - name: "the re-run could not run: report the break"
+        if: failure() && steps.rerun.outcome != 'success'
+        run: |
+          gh label create main-broken --color B60205 --description "CI failed on main" 2>/dev/null || true
+          open=$(gh issue list --label main-broken --state open --json number -q '.[0].number')
+          msg="CI failed on main (${EVENT}, ${SHA::7}) and could not be re-run: $RUN"
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --body "$msg"
+          else
+            gh issue create --label main-broken --title "main is broken: CI failed on ${SHA::7}" --body "$msg. Fix before merging new work."
+          fi
