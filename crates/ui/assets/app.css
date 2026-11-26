@@ -390,9 +390,6 @@
   .status.warn { color: var(--warn); }
 
   /* Explorer (#222) */
-  nav.tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 12px; }
-  nav.tabs a { padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); font-size: 13px; }
-  nav.tabs a[aria-current="page"] { background: var(--violet); border-color: var(--violet); color: var(--surface); }
   ul.plain-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; }
   .sql-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; align-items: start; }
   .sql-layout .schema summary { cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 6px; }
@@ -1277,6 +1274,12 @@
     /* Setup: a done step's tick pops once */
     .steps .step.done .state .icon { animation: pop-in 360ms 300ms var(--ease-spring) both; }
     @keyframes pop-in { from { opacity: 0; scale: .6; } }
+
+    /* The ?confirm= dialog (#545) arrives open with the page: the scrim
+       fades in, the dialog rises and settles. */
+    .scrim { animation: fade 200ms var(--ease-out) both; }
+    .scrim > dialog.dialog { animation: dialog-in 260ms var(--ease-spring) both; }
+    @keyframes dialog-in { from { opacity: 0; scale: .96; translate: 0 -4px; } }
   }
 }
 
@@ -1404,12 +1407,8 @@
 
   /* Acquisition: what to group by, and which touch, as underlined tabs. */
   .people-tabs { display: flex; flex-wrap: wrap; align-items: end; gap: 4px 28px; border-bottom: 1px solid var(--line); }
-  .people-tabs nav.tabs { display: flex; gap: 2px; margin: 0; overflow-x: auto; scrollbar-width: none; }
-  .people-tabs nav.tabs a { display: inline-flex; align-items: center; min-height: 40px; padding: 0 12px; margin-bottom: -1px;
-    border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--muted);
-    font-weight: 500; white-space: nowrap; text-decoration: none; }
-  .people-tabs nav.tabs a:hover { color: var(--ink); }
-  .people-tabs nav.tabs a[aria-current="page"] { background: transparent; color: var(--ink); border-bottom-color: var(--ink); }
+  /* The underline tabs come from the Behaviour block; here they sit on the row's own line. */
+  .people-tabs nav.tabs { margin: 0; border-bottom: 0; }
 
   /* Goals: the value now, the progress bar (SVG rects), the forms. */
   .goal .section-head { align-items: center; }
