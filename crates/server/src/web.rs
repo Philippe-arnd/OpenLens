@@ -696,7 +696,10 @@ async fn pages_page(
                 std::mem::take(&mut b.environments),
                 &f.environment,
             );
-            html(StatusCode::OK, openlens_ui::pages(&info, &b, &l, &vitals, &f))
+            html(
+                StatusCode::OK,
+                openlens_ui::pages(&info, &b, &l, &vitals, &f),
+            )
         }
         (Err(e), _) | (_, Err(e)) => html(
             StatusCode::BAD_REQUEST,

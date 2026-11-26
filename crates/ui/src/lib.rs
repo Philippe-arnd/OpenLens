@@ -393,6 +393,9 @@ mod tests {
 }
 
 #[cfg(test)]
+mod behaviour_tests;
+
+#[cfg(test)]
 mod diff_tests {
     #[test]
     fn line_diff_keeps_common_lines() {
