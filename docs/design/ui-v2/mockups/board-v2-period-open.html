@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Focus board · v2 proposal</title>
+<link rel="stylesheet" href="v2.css">
+</head>
+<body>
+
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..600&amp;display=swap">
+<style>
+body{margin:0}
+</style>
+
+<div class="ol" style="min-height: 100vh; width: 100%">
+<svg xmlns="http://www.w3.org/2000/svg" class="sprite" width="0" height="0" aria-hidden="true" focusable="false"><symbol id="i-gear" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M12 3.5v2.5M12 18v2.5M3.5 12H6M18 12h2.5M6 6l1.8 1.8M16.2 16.2 18 18M6 18l1.8-1.8M16.2 7.8 18 6"></path></symbol><symbol id="i-plus" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5.5v13M5.5 12h13"></path></symbol><symbol id="i-globe" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"></circle><path d="M3.5 12h17M12 3.5c2.6 2.4 3.8 5.2 3.8 8.5s-1.2 6.1-3.8 8.5c-2.6-2.4-3.8-5.2-3.8-8.5s1.2-6.1 3.8-8.5z"></path></symbol><symbol id="i-code" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m8.5 7.5-4.5 4.5 4.5 4.5M15.5 7.5l4.5 4.5-4.5 4.5"></path></symbol><symbol id="i-flag" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 20.5V4"></path><path d="M6 4.5h10.5l-2.2 4 2.2 4H6"></path></symbol><symbol id="i-mail" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5.5" width="17" height="13" rx="2"></rect><path d="M4.5 7.5 12 13l7.5-5.5"></path></symbol><symbol id="i-left" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 6.5 9 12l5.5 5.5"></path></symbol><symbol id="i-right" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 6.5 15 12l-5.5 5.5"></path></symbol><symbol id="i-board" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="1.5"></rect><rect x="13" y="4" width="7" height="4" rx="1.5"></rect><rect x="13" y="10" width="7" height="10" rx="1.5"></rect><rect x="4" y="13" width="7" height="7" rx="1.5"></rect></symbol><symbol id="i-events" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"></path><circle cx="5" cy="6" r=".6"></circle><circle cx="5" cy="12" r=".6"></circle><circle cx="5" cy="18" r=".6"></circle></symbol><symbol id="i-play" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"></circle><path d="M10 8.8v6.4l5.2-3.2z"></path></symbol><symbol id="i-flag" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4M5 4h11l-2.5 4L16 12H5"></path></symbol><symbol id="i-users" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"></circle><path d="M3.5 19c.4-3 2.7-5 5.5-5s5.1 2 5.5 5"></path><circle cx="17" cy="9" r="2.3"></circle><path d="M16.5 14.2c2.4.2 4 1.9 4.3 4.3"></path></symbol><symbol id="i-pulse" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.2-6 4.6 12 2.2-6h5"></path></symbol><symbol id="i-clock" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"></circle><path d="M12 8v4l2.8 1.8"></path></symbol><symbol id="i-task" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3.5"></rect><path d="M8.5 12.2l2.4 2.4 4.6-5.2"></path></symbol><symbol id="i-alert" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 4.8a2 2 0 013.4 0l7 12.2a2 2 0 01-1.7 3H5a2 2 0 01-1.7-3z"></path><path d="M12 10v3.5M12 16.6v.1"></path></symbol><symbol id="i-bolt" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3L5.5 13.5H11l-1 7.5 7.5-10.5H12z"></path></symbol><symbol id="i-layers" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l8 4-8 4-8-4z"></path><path d="M4 12l8 4 8-4M4 16l8 4 8-4"></path></symbol><symbol id="i-shield" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l7 2.7v5.6c0 4.2-2.9 7.3-7 8.7-4.1-1.4-7-4.5-7-8.7V6.2z"></path></symbol><symbol id="i-release" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M3 12h6M15 12h6"></path></symbol><symbol id="i-route" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="18" r="2"></circle><circle cx="18" cy="6" r="2"></circle><path d="M8 18h5.5a3 3 0 000-6h-3a3 3 0 010-6H16"></path></symbol><symbol id="i-funnel" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16l-6 7.5V18l-4 2v-7.5z"></path></symbol><symbol id="i-star" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.2l2.3 4.7 5.2.8-3.8 3.6.9 5.2L12 16l-4.6 2.5.9-5.2-3.8-3.6 5.2-.8z"></path></symbol><symbol id="i-down" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5l6 6 4-4 8 8"></path><path d="M21 12v5.5h-5.5"></path></symbol><symbol id="i-up" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16.5l6-6 4 4 8-8"></path><path d="M21 12V6.5h-5.5"></path></symbol><symbol id="i-sun" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.6"></circle><path d="M12 3v1.8M12 19.2V21M3 12h1.8M19.2 12H21M5.6 5.6l1.3 1.3M17.1 17.1l1.3 1.3M5.6 18.4l1.3-1.3M17.1 6.9l1.3-1.3"></path></symbol><symbol id="i-moon" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19.5 14.5A7.5 7.5 0 119.5 4.5a6 6 0 0010 10z"></path></symbol><symbol id="i-auto" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="11.5" rx="2"></rect><path d="M9 20h6M12 16v4"></path></symbol><symbol id="i-logout" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4.5h4.5v15H14"></path><path d="M10 8l-4 4 4 4M6 12h10"></path></symbol><symbol id="i-idea" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 18h5M10.5 21h3"></path><path d="M12 3.5a5.8 5.8 0 00-3.7 10.3c.8.7 1.2 1.4 1.2 2.4h5c0-1 .4-1.7 1.2-2.4A5.8 5.8 0 0012 3.5z"></path></symbol><symbol id="i-spark" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v4M12 16.5v4M3.5 12h4M16.5 12h4M6 6l2.6 2.6M15.4 15.4L18 18M6 18l2.6-2.6M15.4 8.6L18 6"></path></symbol><symbol id="i-ban" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"></circle><path d="M6.4 6.4l11.2 11.2"></path></symbol><symbol id="i-gap" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="12" r="3"></circle><circle cx="17" cy="12" r="3"></circle><path d="M10 12h1M13 12h1"></path></symbol><symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></symbol><symbol id="i-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m7 10 5 5 5-5"></path></symbol><symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 11v5M12 8v.1"></path></symbol><symbol id="i-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13.5 6.5 19 12l-5.5 5.5"></path></symbol><symbol id="i-cal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5.5" width="16" height="14" rx="2"></rect><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"></path></symbol></svg>
+<div class="shell">
+
+<aside class="side" aria-label="Project navigation">
+<div class="brand"><span class="brand-mark" aria-hidden="true"></span>OpenLens</div>
+<button class="project" type="button" aria-haspopup="menu">
+<span class="monogram" aria-hidden="true">D</span>
+<span style="flex: 1; min-width: 0">default<small>production · 300 users</small></span>
+<svg class="i" aria-hidden="true"><use href="#i-chev"></use></svg>
+</button>
+<form class="goto" action="#" method="get" role="search">
+<svg class="i" aria-hidden="true"><use href="#i-search"></use></svg>
+<label class="sr-only" for="goto">Go to a page, feature or person</label>
+<input id="goto" name="q" type="search" list="goto-list" placeholder="Go to…" autocomplete="off">
+<kbd>/</kbd>
+<datalist id="goto-list"><option value="Errors"></option><option value="Feature: Export"></option><option value="Person: u276"></option><option value="Releases"></option></datalist>
+</form>
+<nav class="nav" aria-label="Sections">
+<a href="board.html" aria-current="page" accesskey="1"><svg class="i" aria-hidden="true"><use href="#i-board"></use></svg>Focus board<kbd>1</kbd></a>
+<a href="ask.html" accesskey="2"><svg class="i" aria-hidden="true"><use href="#i-spark"></use></svg>Ask<kbd>2</kbd></a>
+<a href="live.html" accesskey="3"><svg class="i" aria-hidden="true"><use href="#i-pulse"></use></svg>Live<kbd>3</kbd></a>
+<a href="events.html" accesskey="4"><svg class="i" aria-hidden="true"><use href="#i-events"></use></svg>Behaviour<kbd>4</kbd></a>
+<a href="errors.html" accesskey="5"><svg class="i" aria-hidden="true"><use href="#i-alert"></use></svg>Quality<kbd>5</kbd></a>
+<a href="audience.html" accesskey="6"><svg class="i" aria-hidden="true"><use href="#i-users"></use></svg>People<kbd>6</kbd></a>
+<a href="features.html" accesskey="7"><svg class="i" aria-hidden="true"><use href="#i-layers"></use></svg>Product<kbd>7</kbd></a>
+<a href="settings.html" accesskey="8"><svg class="i" aria-hidden="true"><use href="#i-gear"></use></svg>Settings<kbd>8</kbd></a>
+</nav>
+<div class="side-foot">
+<button class="me" type="button" aria-haspopup="menu">
+<span class="avatar" aria-hidden="true">AD</span>
+<span style="flex: 1; min-width: 0">Admin<small>Instance settings, profile, log out</small></span>
+<svg class="i" aria-hidden="true" style="color: var(--muted)"><use href="#i-chev"></use></svg>
+</button>
+</div>
+</aside>
+
+<div class="main">
+<header class="topbar">
+<div class="wrap">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="board.html" style="color: inherit">default</a><span aria-hidden="true">/</span><b>Focus board</b></nav>
+<div class="context" aria-label="Context for every number on this page">
+<button class="chip" type="button" aria-haspopup="dialog" aria-expanded="true"><svg class="i" aria-hidden="true"><use href="#i-cal"></use></svg>Since v2 <span>· 10 days</span><svg class="i" aria-hidden="true"><use href="#i-chev"></use></svg></button>
+<button class="chip" type="button" aria-haspopup="dialog"><svg class="i" aria-hidden="true"><use href="#i-globe"></use></svg>production<svg class="i" aria-hidden="true"><use href="#i-chev"></use></svg></button>
+<button class="chip" type="button" aria-haspopup="dialog">All roles<svg class="i" aria-hidden="true"><use href="#i-chev"></use></svg></button>
+<button class="chip" type="button" aria-haspopup="dialog"><svg class="i" aria-hidden="true"><use href="#i-release"></use></svg>All releases<svg class="i" aria-hidden="true"><use href="#i-chev"></use></svg></button>
+<button class="chip is-off" type="button" aria-pressed="false">Team excluded</button>
+
+<form class="pop" action="board.html" method="get" aria-label="Period">
+<h3>Period</h3>
+<fieldset class="seg" style="border: 0; margin: 0">
+<legend class="sr-only">Release window</legend>
+<label class="is-on"><input type="radio" name="since" value="current">Current release</label>
+<label><input type="radio" name="since" value="v2">Since v2</label>
+<label><input type="radio" name="since" value="v1">Since v1</label>
+</fieldset>
+<h3>Or a range</h3>
+<div class="range">
+<label class="field">From<input type="date" name="from"></label>
+<label class="field">To<input type="date" name="to"></label>
+</div>
+<div class="pop-foot"><span>Compared with the 10 days before</span><button class="btn primary sm" type="submit">Apply</button></div>
+</form>
+
+</div>
+</div>
+</header>
+
+<main class="wrap stack gap-32" style="padding-block: 28px 0">
+
+<div class="stack gap-16">
+<div class="signals" role="status">
+<span class="signal bad"><span class="dot" aria-hidden="true"></span>No traffic since 15:54 UTC<a href="uptime.html">Uptime</a></span>
+<span class="signal todo"><span class="meter" aria-hidden="true"><i style="width: 33%"></i></span>Setup: 1 of 3 required steps<a href="settings.html">Finish</a></span>
+</div>
+<div class="page-head">
+<div>
+<h1>Focus board</h1>
+<p>Since <b>v2</b> (10 days) in <b>production</b>, compared with the 10 days before.</p>
+</div>
+<div class="actions">
+<a class="btn" href="board-release.html">This week vs last</a>
+<a class="btn" href="breakdown.html">Break down</a>
+</div>
+</div>
+</div>
+
+<section class="focus stack gap-16" aria-labelledby="focus-h">
+<div class="eyebrow" id="focus-h">What to focus on <span class="count">5</span></div>
+<div class="focus-grid">
+
+<article class="card lead">
+<div class="lead-top">
+<span class="rank">01</span>
+<span class="tag tone-bad"><svg class="i" aria-hidden="true"><use href="#i-alert"></use></svg>Regression</span>
+<span class="muted" style="font-size: 12.5px">Release v2 · first seen 16 Nov</span>
+</div>
+<div class="stack gap-8">
+<h2>Sessions with errors went from 3% to 33% on v2</h2>
+<p class="evidence">623 sessions on v2, 4,814 on v1.</p>
+</div>
+<dl class="compare">
+<dt>v1</dt><dd><div class="track"><div class="fill" style="width: 7%"></div></div></dd><dd class="v">2.9%<small>4,814 sessions</small></dd>
+<dt>v2</dt><dd><div class="track"><div class="fill bad" style="width: 84%"></div></div></dd><dd class="v" style="color: var(--bad)">33.4%<small>623 sessions</small></dd>
+</dl>
+<div class="next">
+<svg class="i" aria-hidden="true"><use href="#i-idea"></use></svg>
+<div><b>Next step</b><p>Check the errors introduced by v2: Events page, filtered by release.</p></div>
+</div>
+<div class="actions">
+<a class="btn primary" href="ticket-new.html">Create ticket</a>
+<a class="btn" href="errors.html">Errors on v2</a>
+<a class="btn ghost" href="events.html">Events on v2<svg class="i" aria-hidden="true"><use href="#i-arrow"></use></svg></a>
+</div>
+</article>
+
+<div class="card ranked">
+<ol>
+<li class="row">
+<span class="rank">02</span>
+<div>
+<h3>72% of churned users were last seen in billing</h3>
+<div class="meta"><span class="tag tone-warn">Churn</span>113 of 156 churned users; only 38% of all users go there</div>
+<div class="links"><a href="replays.html">Watch a session</a><a href="churn.html">Churn</a><a href="ticket-new.html">Create ticket</a></div>
+</div>
+</li>
+<li class="row">
+<span class="rank">03</span>
+<div>
+<h3>Users who use export in their first week stay 5.2× more</h3>
+<div class="meta"><span class="tag tone-good">Retention</span>80% stay with it (151 users) vs 15% without (149)</div>
+<div class="links"><a href="feature.html">Export</a><a href="ticket-new.html">Create ticket</a></div>
+</div>
+</li>
+<li class="row">
+<span class="rank">04</span>
+<div>
+<h3>Admins almost never use Reports</h3>
+<div class="meta"><span class="tag tone-info">Adoption</span>0% of 34 admins vs 97% of other users</div>
+<div class="links"><a href="breakdown.html">Break down by role</a><a href="ticket-new.html">Create ticket</a></div>
+</div>
+</li>
+<li class="row">
+<span class="rank">05</span>
+<div>
+<h3>Pages feel slow: LCP p75 is 4.8 s</h3>
+<div class="meta"><span class="tag tone-accent">Performance</span>121 measurements in 7 days, rated poor; start with /home</div>
+<div class="links"><a href="pages.html">Pages</a><a href="ticket-new.html">Create ticket</a></div>
+</div>
+</li>
+</ol>
+</div>
+
+</div>
+</section>
+
+<section class="stack gap-16" aria-labelledby="kpi-h">
+<div class="eyebrow" id="kpi-h">Key numbers</div>
+<div class="kpis">
+<a class="card kpi" href="audience.html" style="color: inherit; text-decoration: none">
+<div class="kpi-head">Active users<button class="info" type="button" aria-label="Definition: active users"><svg class="i" aria-hidden="true"><use href="#i-info"></use></svg></button></div>
+<div style="display: flex; align-items: end; justify-content: space-between; gap: 8px"><div class="kpi-value">144</div>
+<svg class="spark" viewBox="0 0 84 28" role="img" aria-label="Daily active users, 16 to 26 November"><polyline pathLength="1" points="0,23.6 8.4,2 16.8,5.3 25.2,4.7 33.6,2.3 42,2 50.4,5.3 58.8,2.3 67.2,8.6 75.6,17.6 84,25.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"></polyline></svg></div>
+<div class="kpi-foot"><span class="delta bad"><svg class="i" aria-hidden="true"><use href="#i-down"></use></svg>−8%</span><span>vs 10 days before</span></div>
+</a>
+<a class="card kpi" href="events.html" style="color: inherit; text-decoration: none">
+<div class="kpi-head">Sessions<button class="info" type="button" aria-label="Definition: sessions"><svg class="i" aria-hidden="true"><use href="#i-info"></use></svg></button></div>
+<div class="kpi-value">623</div>
+<div class="kpi-foot"><span class="delta bad"><svg class="i" aria-hidden="true"><use href="#i-down"></use></svg>−15%</span><span>vs 10 days before</span></div>
+</a>
+<a class="card kpi is-alert" href="errors.html" style="color: inherit; text-decoration: none">
+<div class="kpi-head">Sessions with errors<button class="info" type="button" aria-label="Definition: sessions with errors"><svg class="i" aria-hidden="true"><use href="#i-info"></use></svg></button></div>
+<div class="kpi-value" style="color: var(--bad)">33.4<small>%</small></div>
+<div class="kpi-foot"><span class="delta bad"><svg class="i" aria-hidden="true"><use href="#i-up"></use></svg>+30 pts</span><span>was 3.4%</span></div>
+</a>
+<a class="card kpi" href="releases.html" style="color: inherit; text-decoration: none">
+<div class="kpi-head">Avg session<button class="info" type="button" aria-label="Definition: average session"><svg class="i" aria-hidden="true"><use href="#i-info"></use></svg></button></div>
+<div class="kpi-value">3m 57s</div>
+<div class="kpi-foot"><span class="delta bad"><svg class="i" aria-hidden="true"><use href="#i-down"></use></svg>−13%</span><span>v1: 4m 32s</span></div>
+</a>
+<a class="card kpi" href="features.html" style="color: inherit; text-decoration: none">
+<div class="kpi-head">Tasks per session<button class="info" type="button" aria-label="Definition: tasks per session"><svg class="i" aria-hidden="true"><use href="#i-info"></use></svg></button></div>
+<div class="kpi-value">2.48</div>
+<div class="kpi-foot"><span class="delta bad"><svg class="i" aria-hidden="true"><use href="#i-down"></use></svg>−10%</span><span>v1: 2.76</span></div>
+</a>
+</div>
+</section>
+
+<div class="split">
+<section class="card pad stack gap-16" aria-labelledby="au-h">
+<div class="section-head"><h2 id="au-h">Active users per day</h2><a href="timeline.html" style="font-size: 13px">Timeline</a></div>
+<div class="stack gap-8">
+<div class="chart" role="img" aria-label="Daily active users from 16 to 26 November: 8, 80, 69, 71, 79, 80, 69, 79, 58, 28, 2">
+<div class="b" style="height: 10%"><span>16 Nov · 8 users</span></div>
+<div class="b" style="height: 100%"><span>17 Nov · 80 users</span></div>
+<div class="b" style="height: 86%"><span>18 Nov · 69 users</span></div>
+<div class="b" style="height: 89%"><span>19 Nov · 71 users</span></div>
+<div class="b" style="height: 99%"><span>20 Nov · 79 users</span></div>
+<div class="b" style="height: 100%"><span>21 Nov · 80 users</span></div>
+<div class="b" style="height: 86%"><span>22 Nov · 69 users</span></div>
+<div class="b" style="height: 99%"><span>23 Nov · 79 users</span></div>
+<div class="b" style="height: 73%"><span>24 Nov · 58 users</span></div>
+<div class="b" style="height: 35%"><span>25 Nov · 28 users</span></div>
+<div class="b is-now" style="height: 3%"><span>26 Nov · 2 users (today)</span></div>
+</div>
+<div class="axis" aria-hidden="true"><span>16</span><span>17</span><span>18</span><span>19</span><span>20</span><span>21</span><span>22</span><span>23</span><span>24</span><span>25</span><span>26</span></div>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px 20px">
+<span class="marker"><i aria-hidden="true"></i>16 Nov: v2 first seen</span>
+<span class="marker"><i aria-hidden="true" style="background: var(--bad)"></i>26 Nov: traffic stopped</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px 20px; padding-top: 14px; border-top: 1px solid var(--line-2); font-size: 13px">
+<span class="muted">Who uses the app</span>
+<span><b class="num">115</b> <span class="muted">member</span></span>
+<span><b class="num">29</b> <span class="muted">admin</span></span>
+</div>
+</section>
+
+<section class="card pad stack gap-16" aria-labelledby="fp-h">
+<div class="section-head"><h2 id="fp-h">Feature pulse</h2><a href="features.html" style="font-size: 13px">Feature map</a></div>
+<div class="scroll">
+<table>
+<thead><tr><th>Feature</th><th style="width: 40%">Adoption</th><th class="r">Uses / user</th><th class="r">Completion</th></tr></thead>
+<tbody>
+<tr><td><a href="feature.html">Home</a></td><td><div class="barcell"><div class="track"><div class="fill" style="width: 100%"></div></div><span class="num">100%</span></div></td><td class="r">7.0</td><td class="r">100%</td></tr>
+<tr><td><a href="feature.html">Search</a></td><td><div class="barcell"><div class="track"><div class="fill" style="width: 100%"></div></div><span class="num">100%</span></div></td><td class="r">4.3</td><td class="r">100%</td></tr>
+<tr><td><a href="feature.html">Reports</a></td><td><div class="barcell"><div class="track"><div class="fill" style="width: 78%"></div></div><span class="num">78%</span></div></td><td class="r">2.7</td><td class="r">100%</td></tr>
+<tr class="dim"><td><a href="feature.html">Export</a></td><td colspan="3"><span class="tag tone-warn">Never used since v2</span></td></tr>
+<tr class="dim"><td><a href="feature.html">Billing</a></td><td colspan="3"><span class="tag tone-warn">Never used since v2</span></td></tr>
+</tbody>
+</table>
+</div>
+<p class="muted" style="font-size: 12.5px">Adoption: share of the 144 active users who used the feature. Completion: share of them who reached its success event.</p>
+</section>
+</div>
+
+<details class="card disclose" open>
+<summary><h2 style="font-size: var(--step-2); font-weight: 600">Do they come back?</h2><span class="muted" style="font-size: 13px">Weekly cohorts, share active again N weeks later</span><svg class="i chev" aria-hidden="true"><use href="#i-chev"></use></svg></summary>
+<div class="body scroll">
+<table class="heat">
+<thead><tr><th>Week of</th><th class="r">Users</th><th style="text-align: center">W1</th><th style="text-align: center">W2</th><th style="text-align: center">W3</th><th style="text-align: center">W4</th><th style="text-align: center">W5</th><th style="text-align: center">W6</th><th style="text-align: center">W7</th></tr></thead>
+<tbody>
+<tr><td class="mono">05 Oct</td><td class="r">41</td><td class="c"><div style="--p: 55%">100%</div></td><td class="c"><div style="--p: 54%">97.6%</div></td><td class="c"><div style="--p: 42%">75.6%</div></td><td class="c"><div style="--p: 35%">63.4%</div></td><td class="c"><div style="--p: 35%">63.4%</div></td><td class="c"><div style="--p: 35%">63.4%</div></td><td class="c"><div style="--p: 28%">51.2%</div></td></tr>
+<tr><td class="mono">12 Oct</td><td class="r">29</td><td class="c"><div style="--p: 55%">100%</div></td><td class="c"><div style="--p: 47%">86.2%</div></td><td class="c"><div style="--p: 32%">58.6%</div></td><td class="c"><div style="--p: 23%">41.4%</div></td><td class="c"><div style="--p: 23%">41.4%</div></td><td class="c"><div style="--p: 21%">37.9%</div></td><td></td></tr>
+<tr><td class="mono">19 Oct</td><td class="r">45</td><td class="c"><div style="--p: 55%">100%</div></td><td class="c"><div style="--p: 53%">95.6%</div></td><td class="c"><div style="--p: 29%">53.3%</div></td><td class="c"><div style="--p: 22%">40.0%</div></td><td class="c"><div style="--p: 20%">35.6%</div></td><td></td><td></td></tr>
+<tr><td class="mono">26 Oct</td><td class="r">13</td><td class="c"><div style="--p: 55%">100%</div></td><td class="c"><div style="--p: 47%">84.6%</div></td><td class="c"><div style="--p: 42%">76.9%</div></td><td class="c"><div style="--p: 42%">76.9%</div></td><td></td><td></td><td></td></tr>
+</tbody>
+</table>
+</div>
+</details>
+
+<details class="card disclose">
+<summary><h2 style="font-size: var(--step-2); font-weight: 600">v2 compared with v1</h2><span class="tag tone-bad">3 worse</span><span class="tag tone-good">1 better</span><svg class="i chev" aria-hidden="true"><use href="#i-chev"></use></svg></summary>
+<div class="body scroll">
+<table>
+<thead><tr><th>Release</th><th class="r">Users</th><th class="r">Sessions</th><th class="r">Avg session</th><th class="r">Bounce</th><th class="r">Tasks / session</th><th class="r">Sessions with errors</th><th class="r">First seen</th></tr></thead>
+<tbody>
+<tr><td><a href="board-release.html">v2</a> <span class="tag tone-accent" style="height: 20px; font-size: 11px">Latest</span></td><td class="r">144</td><td class="r">623</td><td class="r">3m 57s</td><td class="r">0.0%</td><td class="r">2.48</td><td class="r" style="color: var(--bad)">33.4%</td><td class="r muted">16 Nov 2026</td></tr>
+<tr><td><a href="releases.html">v1</a></td><td class="r">300</td><td class="r">4,814</td><td class="r">4m 32s</td><td class="r">3.2%</td><td class="r">2.76</td><td class="r">2.9%</td><td class="r muted">3 Sep 2026</td></tr>
+</tbody>
+</table>
+</div>
+</details>
+
+</main>
+<footer class="foot">OpenLens 0.6.0 · map → measure → focus → act → compare</footer>
+</div>
+</div>
+</div>
+
+</body>
+</html>
