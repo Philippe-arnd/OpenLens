@@ -200,7 +200,8 @@ pub fn flows(
                             @for (i, col) in flow.steps.iter().enumerate() {
                                 @for (n, c) in col {
                                     @let (y, hh) = boxes.get(&(i, n.clone())).copied().unwrap_or((0.0, 0.0));
-                                    @let cls = if n == SUCCESS { "node ok" } else if n == EXIT { "node exit" } else { "node" };
+                                    @let step = format!("node s{}", i.min(4));
+                                    @let cls = if n == SUCCESS { "node ok" } else if n == EXIT { "node exit" } else { step.as_str() };
                                     rect class=(cls) x=(format!("{:.1}", x(i))) y=(format!("{y:.1}")) width=(nw) height=(format!("{hh:.1}")) rx="2" { title { (label(n)) ": " (compact(*c)) } }
                                     @if hh >= 11.0 {
                                         text.slabel x=(format!("{:.1}", x(i) + nw + 5.0)) y=(format!("{:.1}", y + hh / 2.0 + 4.0)) { (label(n)) " · " (compact(*c)) }
@@ -209,15 +210,31 @@ pub fn flows(
                             }
                         }
                     }
-                    details.table-view {
-                        summary { "As a table" }
-                        table.plain {
-                            thead { tr { th.num { "Step" } th { "From" } th { "To" } (th_num("Sessions")) } }
-                            tbody { @for l in &flow.links {
-                                tr { td.num { (l.step + 1) } td { (label(&l.from)) } td { @if l.to == EXIT { span.status.bad { "exit" } } @else { (label(&l.to)) } } td.num { (compact(l.sessions)) } }
-                            } }
-                        }
+                    p.muted.small.flow-key {
+                        span.key.step { "Feature (darker: later step)" } " "
+                        span.key.ok { "Success event" } " "
+                        span.key.exit { "Left the app" }
                     }
+                }
+            }
+            @if flow.sessions > 0 {
+                details.card.disclose.flow-table {
+                    summary {
+                        h2 { "As a table" }
+                        span.muted.small { (flow.links.len()) " moves between steps" }
+                        (icon("chev"))
+                    }
+                    div.body { div.scroll { table {
+                        thead { tr { th.num scope="col" { "Step" } th scope="col" { "From" } th scope="col" { "To" } th.num scope="col" { "Sessions" } } }
+                        tbody { @for l in &flow.links {
+                            tr {
+                                td.num { (l.step + 1) }
+                                td { (label(&l.from)) }
+                                td { @if l.to == EXIT { span.status.bad { "exit" } } @else if l.to == SUCCESS { span.status.good { (label(&l.to)) } } @else { (label(&l.to)) } }
+                                td.num { (compact(l.sessions)) }
+                            }
+                        } }
+                    } } }
                 }
             }
         },
