@@ -639,7 +639,27 @@
    light or dark from color-scheme. */
 @layer components {
   .tone-info { --tone: var(--info); } .tone-accent { --tone: var(--accent); }
-  .form-card { padding: 22px; display: flex; flex-direction: column; gap: 20px; }
+  .btn:hover { text-decoration: none; border-color: var(--muted); }
+  .btn.ghost { background: transparent; border-color: transparent; color: var(--ink-2); }
+  .btn.ghost:hover { background: var(--line-2); }
+  .btn.sm { min-height: 28px; padding: 0 10px; font-size: 12.5px; }
+  .btn.danger-btn { color: var(--bad); border-color: color-mix(in oklab, var(--bad) 40%, var(--line)); background: transparent; }
+  .field textarea { padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-s); background: var(--bg); color: var(--ink); font: inherit; resize: vertical; }
+  .field.wide { grid-column: 1 / -1; }
+  .card.danger { border-color: color-mix(in oklab, var(--bad) 40%, var(--line)); }
+  .card.danger .item { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line-2); }
+  .card.danger .item:first-of-type { border-top: 0; }
+  .tone-muted { --tone: var(--muted); }
+  .table-card .pad { padding: 0 20px 12px; }
+  .form-card label.check { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+  .form-card h2 { margin: 0; }
+  .row-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+  .row-actions form { display: inline; }
+  .notice-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .notice-list > li { padding: 14px 20px; border-top: 1px solid var(--line-2); display: flex; flex-direction: column; gap: 6px; }
+  .notice-list > li:first-child { border-top: 0; }
+  .notice-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .notice-updates { margin: 0; padding-left: 18px; font-size: 13px; color: var(--ink-2); }
   .form-card form { display: flex; flex-direction: column; gap: 16px; }
   .field label.check { display: flex; align-items: center; gap: 6px; font-weight: 400; }
   .table-card { overflow: hidden; padding: 18px 0 6px; }
