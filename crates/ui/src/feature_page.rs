@@ -225,26 +225,7 @@ pub fn feature_page(v: &FeaturePage<'_>) -> Markup {
                     }
                 }
                 @if !v.ctx.relations.is_empty() {
-                    section.card.wide {
-                        h2.violet { (icon("route")) "Used with" }
-                        div.table-scroll { table.plain {
-                            thead { tr { th { "Before" } th { "After" } (th_num("Sessions together")) (th_num("Lift")) (th_num("Comes first")) th { "Leads to value" } } }
-                            tbody { @for r in &v.ctx.relations {
-                                tr {
-                                    td { a href={ "/p/" (v.p.id) "/features/" (r.first) } { code { (r.first) } } }
-                                    td { a href={ "/p/" (v.p.id) "/features/" (r.then) } { code { (r.then) } } }
-                                    td.num { (compact(r.together)) }
-                                    td.num { (format!("×{:.1}", r.lift)) }
-                                    td.num { (pct(r.first_share)) }
-                                    td.small { @match (r.success_after, r.success_without) {
-                                        (Some(a), Some(w)) => { @if r.leads_to_value { span.status.good { "yes" } " " } (pct(a)) " after vs " (pct(w)) " without" },
-                                        _ => span.muted { "—" },
-                                    } }
-                                }
-                            } }
-                        } }
-                        p.muted.small { "From sessions of the last 30 days (with the filters above). Lift: how many times more often the two are used in the same session than chance. Leads to value: the second one succeeds more often after the first, and the difference is significant." }
-                    }
+                    (relations(v.p.id, &v.ctx.relations))
                 }
                 @if !v.ctx.findings.is_empty() {
                     section.card.wide {
