@@ -16,6 +16,7 @@ pub mod boards;
 pub mod cache;
 mod capture;
 mod cold;
+mod commands;
 mod comments;
 mod cookieless;
 mod csrf;
