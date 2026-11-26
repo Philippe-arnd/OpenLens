@@ -91,9 +91,16 @@ pub(crate) fn required(method: &Method, path: &str) -> Scope {
     {
         return Scope::Admin;
     }
+    // A board job only reads, and is its starter's alone (#515): starting
+    // or cancelling one needs no more than reading the board.
+    let board_job = path
+        .strip_prefix("/api/projects/")
+        .and_then(|rest| rest.split_once('/'))
+        .is_some_and(|(_, tail)| tail == "board/jobs" || tail.starts_with("board/jobs/"));
     let reads = matches!(*method, Method::GET | Method::HEAD)
         || (*method == Method::POST
-            && (path.ends_with("/sql") || path == "/api/feature-map/validate"));
+            && (path.ends_with("/sql") || path == "/api/feature-map/validate"))
+        || board_job;
     if reads { Scope::Read } else { Scope::Write }
 }
 
@@ -191,6 +198,14 @@ mod tests {
         assert_eq!(required(&Method::POST, "/api/login-links"), Scope::Admin);
         assert_eq!(required(&Method::GET, "/api/tokens"), Scope::Admin);
         assert_eq!(required(&Method::GET, "/api/projects"), Scope::Read);
+        assert_eq!(
+            required(&Method::POST, "/api/projects/a/board/jobs"),
+            Scope::Read
+        );
+        assert_eq!(
+            required(&Method::DELETE, "/api/projects/a/board/jobs/j1"),
+            Scope::Read
+        );
         assert_eq!(
             required(&Method::GET, "/api/projects/a/environments"),
             Scope::Read

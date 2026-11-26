@@ -11,8 +11,10 @@ use maud::{DOCTYPE, Markup, PreEscaped, html};
 
 mod audience;
 mod board;
+mod board_job;
 mod components;
 mod cost;
+mod delivery;
 mod environments;
 mod explore;
 mod feature_page;
@@ -28,6 +30,7 @@ mod totp;
 mod world;
 pub use audience::*;
 pub use board::*;
+pub use board_job::{JobView, board_job};
 pub use components::*;
 pub use cost::board_confirm;
 pub use explore::*;

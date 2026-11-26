@@ -51,6 +51,24 @@ fn flushed_events_land_in_hive_partitions_and_count_back() {
     );
 }
 
+/// A flush names the UTC days it writes, so a late event on a closed day
+/// drops the results kept for that day (#516).
+#[test]
+fn a_flush_names_the_days_it_writes() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let today = Utc.with_ymd_and_hms(2026, 11, 26, 9, 30, 0).unwrap();
+    let late = today - Duration::days(3);
+    w.append(&[ev("p1", today), ev("p1", late), ev("p2", today)])
+        .unwrap();
+    let days = w.buffered_days();
+    let pending = w.take().unwrap().unwrap();
+    assert_eq!(pending.days(), days);
+    let p1 = &days["p1"];
+    assert!(p1.contains(&late.date_naive()) && p1.contains(&today.date_naive()));
+    assert!(!days["p2"].contains(&late.date_naive()));
+}
+
 /// The size of a day comes from its files' footers (#514): rows as stored,
 /// only the days asked for, and nothing for a day without events.
 #[test]

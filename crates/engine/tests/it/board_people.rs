@@ -316,7 +316,77 @@ async fn a_day_rolled_with_an_older_map_is_read_from_its_events() {
     // The map in force reads that day's events, so losing them shows; the
     // map it was rolled with reads the rollup.
     let (v1, v2) = (uses(root, 1).await, uses(root, 2).await);
-    drop_events(root, rolled[rolled.len() - 5]);
+    let lost = rolled[rolled.len() - 5];
+    drop_events(root, lost);
     assert_eq!(uses(root, 1).await, v1);
     assert!(uses(root, 2).await < v2);
+    // The board with the map in force names the day it cannot count
+    // (#489); the map it was rolled with still reads it.
+    let q = QueryEngine::new(root, Limits::default());
+    let (m1, m2) = (map(1), map(2));
+    let f = Filters::default();
+    let b2 = board(&q, "p", &f, Some((&m2, 2))).await.unwrap();
+    assert_eq!(
+        b2.unavailable_days,
+        vec![lost.format("%Y-%m-%d").to_string()]
+    );
+    let b1 = board(&q, "p", &f, Some((&m1, 1))).await.unwrap();
+    assert!(b1.unavailable_days.is_empty());
+}
+
+#[tokio::test]
+async fn a_day_with_neither_its_events_nor_a_matching_rollup_is_named() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let now = Utc::now();
+    let (gone, kept) = (
+        now.date_naive() - Duration::days(10),
+        now.date_naive() - Duration::days(9),
+    );
+    let (mut w, _) = Writer::open(root, FlushPolicy::default()).unwrap();
+    let evs: Vec<Event> = [kept, now.date_naive()]
+        .iter()
+        .enumerate()
+        .map(|(i, d)| {
+            let ts = d.and_hms_opt(0, 30, 0).unwrap().and_utc().min(now);
+            Event {
+                uuid: format!("e{i}"),
+                project: "p".into(),
+                event: "$pageview".into(),
+                distinct_id: "m1".into(),
+                session_id: Some(format!("s{i}")),
+                timestamp: ts,
+                received_at: ts,
+                url: None,
+                path: Some("/search".into()),
+                feature: None,
+                role: Some("member".into()),
+                account: None,
+                plan: None,
+                environment: "production".into(),
+                release: Some("v1".into()),
+                flags: None,
+                properties: "{}".into(),
+            }
+        })
+        .collect();
+    w.append(&evs).unwrap();
+    w.flush().unwrap();
+    // Both days were rolled up with nothing the map in force can read
+    // (empty tables, as with another map's rows); only `gone` lost its
+    // events, as the cold tier or the retention would.
+    for d in [gone, kept] {
+        assert!(rollup::write(root, "p", d, rollup::generation(), &rollup::empty()).unwrap());
+    }
+    let q = QueryEngine::new(root, Limits::default());
+    let m = map(1);
+    let want = vec![gone.format("%Y-%m-%d").to_string()];
+    let b = board(&q, "p", &Filters::default(), Some((&m, 1)))
+        .await
+        .unwrap();
+    assert_eq!(b.unavailable_days, want);
+    let h = openlens_engine::map_health_in(&q, "p", &m, Some(1), &Filters::default())
+        .await
+        .unwrap();
+    assert_eq!(h.unavailable_days, want);
 }

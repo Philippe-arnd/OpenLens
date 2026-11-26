@@ -169,6 +169,9 @@ pub struct Caches {
     /// Project days that recorded all the new fingerprints they may (#495),
     /// keyed `project|day`.
     pub(crate) release_days_full: Bounded<String, ()>,
+    /// Long boards computed in the background (#515), each private to
+    /// whoever started it; finished ones kept an hour.
+    pub(crate) board_jobs: crate::board_jobs::BoardJobs,
 }
 
 impl Default for Caches {
@@ -197,6 +200,7 @@ impl Default for Caches {
             identity_checked: Bounded::new(10_000, 10 * MIN),
             release_builds: Bounded::new(10_000, 60 * MIN),
             release_days_full: Bounded::new(10_000, 10 * MIN),
+            board_jobs: crate::board_jobs::BoardJobs::default(),
         }
     }
 }
@@ -225,6 +229,7 @@ impl Caches {
             ("env_checks", n(self.env_checks.len())),
             ("replay_rates", n(self.replay_rates.len())),
             ("release_builds", n(self.release_builds.len())),
+            ("board_jobs", n(self.board_jobs.len())),
         ]
     }
 }

@@ -164,6 +164,7 @@ impl Meta {
                 "share_links",
                 "notes",
                 "release_builds",
+                "release_maps",
                 "deploy_hooks",
                 "deploys",
             ] {
@@ -190,36 +191,30 @@ impl Meta {
         plan: Option<&str>,
         at: DateTime<Utc>,
     ) -> Result<()> {
-        let at = at.to_rfc3339();
+        self.identify_all(
+            project,
+            &[Seen {
+                distinct_id,
+                role,
+                account,
+                plan,
+                at,
+            }],
+        )
+    }
+
+    /// Record several identifies in one write transaction (an import's
+    /// people), not one write each (#510).
+    pub fn identify_all(&self, project: &str, seen: &[Seen<'_>]) -> Result<()> {
+        if seen.is_empty() {
+            return Ok(());
+        }
         self.with(|c| {
-            let previous: Option<Option<String>> = c
-                .query_row(
-                    "SELECT role FROM persons WHERE project = ?1 AND distinct_id = ?2",
-                    params![project, distinct_id],
-                    |r| r.get(0),
-                )
-                .optional()?;
-            c.execute(
-                "INSERT INTO persons (project, distinct_id, role, account, plan, first_seen, last_seen)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
-                 ON CONFLICT (project, distinct_id) DO UPDATE SET
-                   role = COALESCE(excluded.role, role),
-                   account = COALESCE(excluded.account, account),
-                   plan = COALESCE(excluded.plan, plan),
-                   last_seen = excluded.last_seen",
-                params![project, distinct_id, role, account, plan, at],
-            )?;
-            let changed = match (&previous, role) {
-                (_, None) => false,
-                (Some(Some(old)), Some(new)) => old != new,
-                _ => true,
-            };
-            if let (true, Some(r)) = (changed, role) {
-                c.execute(
-                    "INSERT INTO role_history (project, distinct_id, role, since) VALUES (?1, ?2, ?3, ?4)",
-                    params![project, distinct_id, r, at],
-                )?;
+            let tx = c.unchecked_transaction()?;
+            for s in seen {
+                identify_in(&tx, project, s)?;
             }
+            tx.commit()?;
             Ok(())
         })
     }
@@ -256,4 +251,58 @@ impl Meta {
             Ok(rows.collect::<rusqlite::Result<_>>()?)
         })
     }
+}
+
+/// One identify to record (D-009): the person, their traits, and when.
+#[derive(Debug, Clone, Copy)]
+pub struct Seen<'a> {
+    /// The person's id.
+    pub distinct_id: &'a str,
+    /// Their role, if sent.
+    pub role: Option<&'a str>,
+    /// Their account, if sent.
+    pub account: Option<&'a str>,
+    /// Their plan, if sent.
+    pub plan: Option<&'a str>,
+    /// When.
+    pub at: DateTime<Utc>,
+}
+
+/// Upsert the person of `s` and, when the role changed, append to the role
+/// history; inside the caller's transaction.
+pub(crate) fn identify_in(c: &Connection, project: &str, s: &Seen<'_>) -> Result<()> {
+    let at = s.at.to_rfc3339();
+    let previous: Option<Option<String>> = c
+        .prepare_cached("SELECT role FROM persons WHERE project = ?1 AND distinct_id = ?2")?
+        .query_row(params![project, s.distinct_id], |r| r.get(0))
+        .optional()?;
+    c.prepare_cached(
+        "INSERT INTO persons (project, distinct_id, role, account, plan, first_seen, last_seen)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+         ON CONFLICT (project, distinct_id) DO UPDATE SET
+           role = COALESCE(excluded.role, role),
+           account = COALESCE(excluded.account, account),
+           plan = COALESCE(excluded.plan, plan),
+           last_seen = excluded.last_seen",
+    )?
+    .execute(params![
+        project,
+        s.distinct_id,
+        s.role,
+        s.account,
+        s.plan,
+        at
+    ])?;
+    let changed = match (&previous, s.role) {
+        (_, None) => false,
+        (Some(Some(old)), Some(new)) => old != new,
+        _ => true,
+    };
+    if let (true, Some(r)) = (changed, s.role) {
+        c.prepare_cached(
+            "INSERT INTO role_history (project, distinct_id, role, since) VALUES (?1, ?2, ?3, ?4)",
+        )?
+        .execute(params![project, s.distinct_id, r, at])?;
+    }
+    Ok(())
 }

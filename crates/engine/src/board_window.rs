@@ -202,6 +202,8 @@ pub(crate) mod tests {
             staged_as: None,
             deployed_at: None,
             deploy: None,
+            verdict: None,
+            reasons: Vec::new(),
         }
     }
 

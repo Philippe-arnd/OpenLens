@@ -160,3 +160,47 @@ async fn the_releases_page_and_api_list_releases_with_their_state() {
     assert!(html.contains("v1.1.0"), "every environment");
     assert!(html.contains("/p/default?env=production&amp;release=v1.0.0"));
 }
+
+/// A release's verdict (#522, D-067): an error group first seen in it,
+/// hitting several users, makes it regressed against the release before,
+/// in its report and in the list; the first release has nothing to be
+/// compared with.
+#[tokio::test]
+async fn a_new_error_in_a_release_makes_its_verdict_regressed() {
+    let h = harness();
+    let ago = |hours: i64| (chrono::Utc::now() - chrono::Duration::hours(hours)).to_rfc3339();
+    let mut events = Vec::new();
+    for i in 0..4 {
+        let u = format!("u{i}");
+        for (rel, at) in [("v1", 72), ("v2", 30)] {
+            let s = format!("{rel}-s{i}");
+            events.push(serde_json::json!({"event": "$pageview", "distinct_id": u, "session_id": s, "timestamp": ago(at), "properties": {"$pathname": "/", "$release": rel}}));
+            events.push(serde_json::json!({"event": "$vital", "distinct_id": u, "session_id": s, "timestamp": ago(at), "properties": {"$name": "LCP", "$value": 1200, "$release": rel}}));
+        }
+        events.push(serde_json::json!({"event": "$error", "distinct_id": u, "session_id": format!("v2-s{i}"), "timestamp": ago(29), "properties": {"$message": "TypeError: x is undefined", "$release": "v2"}}));
+    }
+    capture(&h, events).await;
+    openlens_server::flush_now(&h.state).unwrap();
+
+    let r = get(&h, "/api/projects/default/releases/v2/report", None, true).await;
+    assert_eq!(r.status(), StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_str(&body_text(r).await).unwrap();
+    assert_eq!(v["previous_release"], "v1", "{v}");
+    assert_eq!(v["verdict"], "regressed", "{v}");
+    assert!(!v["current"]["new_errors"].as_array().unwrap().is_empty());
+
+    let r = get(&h, "/api/projects/default/releases", None, true).await;
+    let v: serde_json::Value = serde_json::from_str(&body_text(r).await).unwrap();
+    let rows = v["releases"].as_array().unwrap();
+    let verdict = |name: &str| {
+        rows.iter()
+            .find(|x| x["release"] == name)
+            .map(|x| x["verdict"].clone())
+            .unwrap()
+    };
+    assert_eq!(verdict("v2"), "regressed");
+    assert_eq!(verdict("v1"), "inconclusive", "no earlier release");
+
+    let none = get(&h, "/api/projects/default/releases/v9/report", None, true).await;
+    assert_eq!(none.status(), StatusCode::BAD_REQUEST);
+}

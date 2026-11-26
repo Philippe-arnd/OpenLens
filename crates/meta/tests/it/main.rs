@@ -480,3 +480,136 @@ fn a_deploy_hook_secret_is_kept_hashed_and_deploys_stay_bounded() {
     assert!(m.deploys("default", 0).unwrap().is_empty());
     assert_eq!(m.deploy_hook_project(&second).unwrap(), None);
 }
+
+#[test]
+fn a_recorded_release_starts_its_range_after_the_previous_one() {
+    use openlens_meta::deploys::Deploy;
+    let m = Meta::in_memory().unwrap();
+    m.ensure_default_project(None).unwrap();
+    let d = |release: &str, commit: &str, status: &str, at: i64| Deploy {
+        environment: "production".into(),
+        release: Some(release.into()),
+        commit: Some(commit.into()),
+        status: status.into(),
+        at,
+        source: "cli".into(),
+    };
+    assert_eq!(
+        m.previous_commit("default", "production", None).unwrap(),
+        None
+    );
+    m.record_release("default", &d("v1", "aaaaaaa", "succeeded", 10), None, 10)
+        .unwrap();
+    m.record_deploy("default", &d("v2", "bbbbbbb", "failed", 20), 20)
+        .unwrap();
+    // A failed deploy is not where the next range starts, and a release
+    // recorded again with the same commit does not start after itself.
+    let from = m
+        .previous_commit("default", "production", Some("ccccccc"))
+        .unwrap();
+    assert_eq!(from.as_deref(), Some("aaaaaaa"));
+    assert_eq!(
+        m.previous_commit("default", "production", Some("aaaaaaa"))
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        m.previous_commit("default", "staging", Some("ccccccc"))
+            .unwrap(),
+        None,
+        "another environment's deploys are not this one's range"
+    );
+    m.record_release(
+        "default",
+        &d("v3", "ccccccc", "succeeded", 30),
+        from.as_deref(),
+        30,
+    )
+    .unwrap();
+    let (start, end) = m
+        .release_range("default", "production", "v3")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (start.as_deref(), end.as_str()),
+        (Some("aaaaaaa"), "ccccccc")
+    );
+    assert_eq!(
+        m.deploys("default", 0).unwrap().len(),
+        3,
+        "a release is a deploy"
+    );
+}
+
+/// #510: a write transaction that meets the write lock held waits for it
+/// (`BEGIN IMMEDIATE` calls the busy handler) instead of failing at once
+/// with "database is locked", which capture answered with a 503.
+#[test]
+fn a_write_transaction_waits_for_the_lock_instead_of_failing() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("meta.db");
+    let meta = Meta::open(&path).unwrap();
+    let other = rusqlite::Connection::open(&path).unwrap();
+    other.execute_batch("BEGIN IMMEDIATE").unwrap();
+    std::thread::scope(|s| {
+        s.spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            other.execute_batch("COMMIT").unwrap();
+        });
+        let row = ("bob".to_owned(), Some("anon-1".to_owned()), 1, false);
+        assert!(meta.record_identities("p", &[row]).unwrap());
+    });
+}
+
+/// #510: a batch's people and identity rows go in one write, with the
+/// same effect as one `identify` each.
+#[test]
+fn a_batch_of_identifies_is_recorded_in_one_write() {
+    let m = Meta::in_memory().unwrap();
+    let at = Utc::now();
+    let seen = |id: &'static str, role: &'static str| openlens_meta::Seen {
+        distinct_id: id,
+        role: Some(role),
+        account: None,
+        plan: Some("pro"),
+        at,
+    };
+    let rows = [("ann".to_owned(), Some("anon-9".to_owned()), 1, false)];
+    let changed = m
+        .record_identify("p", &[seen("ann", "admin"), seen("ann", "member")], &rows)
+        .unwrap();
+    assert!(changed);
+    let ann = m.person("p", "ann").unwrap().unwrap();
+    assert_eq!(ann.role.as_deref(), Some("member"));
+    assert_eq!(ann.plan.as_deref(), Some("pro"));
+    assert_eq!(m.role_history("p", "ann").unwrap().len(), 2);
+    assert_eq!(m.aliases_of("p", "ann").unwrap(), vec!["anon-9".to_owned()]);
+    // Nothing to record: no write, nothing changed.
+    assert!(!m.record_identify("p", &[], &[]).unwrap());
+}
+
+#[test]
+fn a_release_keeps_the_map_version_first_recorded() {
+    use openlens_meta::release_maps::ReleaseMap;
+    let m = Meta::in_memory().unwrap();
+    let row = |release: &str, version: i64| ReleaseMap {
+        environment: "production".into(),
+        release: release.into(),
+        first_seen: "2026-11-01 10:00:00".into(),
+        map_version: version,
+        before_first_map: false,
+    };
+    assert_eq!(m.record_release_maps("p", &[row("v1", 1)]).unwrap(), 1);
+    // A later read derives another version (its first event left the
+    // window, or the version left the newest 50): the record wins.
+    assert_eq!(
+        m.record_release_maps("p", &[row("v1", 3), row("v2", 3)])
+            .unwrap(),
+        1
+    );
+    let got = m.release_maps("p", "production").unwrap();
+    let v1 = got.iter().find(|r| r.release == "v1").unwrap();
+    assert_eq!(v1.map_version, 1);
+    assert_eq!(got.len(), 2);
+    assert!(m.release_maps("p", "staging").unwrap().is_empty());
+}

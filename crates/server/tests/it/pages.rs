@@ -828,7 +828,7 @@ async fn api_errors_carry_a_stable_code() {
 
 /// A date range that reads more than 30 days of events shows its cost
 /// before it runs (#514, D-061): the page shows the estimate and a "Run
-/// it" link, the API answers 409 with it, and both run with `confirm=1`;
+/// it" button (a background job, #515), the API answers 409 with it, and both run with `confirm=1`;
 /// a short range runs at once.
 #[tokio::test]
 async fn a_long_range_shows_its_cost_and_runs_once_confirmed() {
@@ -871,13 +871,16 @@ async fn a_long_range_shows_its_cost_and_runs_once_confirmed() {
     assert_eq!(v["code"], "conflict");
     assert!(v["estimate"]["raw_days"].as_u64().unwrap() > 30, "{v}");
     assert_eq!(v["estimate"]["confirm"], true);
-    // The page asks too, with a link that runs it.
     let cookie = login_cookie(&h).await;
+    // The page asks too, with a form that runs it.
     let page = get(&h, &format!("/p/default?{long}"), Some(&cookie), false).await;
     assert_eq!(page.status(), StatusCode::OK);
     let html = body_text(page).await;
     assert!(html.contains("Run it"), "{html}");
-    assert!(html.contains("confirm=1"), "{html}");
+    assert!(
+        html.contains("/board/jobs"),
+        "a form that starts a job: {html}"
+    );
     assert!(
         !html.contains("Daily active users"),
         "the board did not run"

@@ -12,6 +12,8 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use chrono::{Datelike, Timelike, Utc};
+use openlens_engine::commands::releases::{List, ListInput};
+use openlens_engine::commands::{Caller, Command};
 use serde_json::json;
 
 use crate::{AppState, auth};
@@ -32,6 +34,15 @@ pub(crate) async fn compute(
     let (at_risk, goals) = crate::goals::snapshot(state, &project.id);
     d.goals = goals;
     d.objectives_at_risk = at_risk;
+    // The week's production releases with their verdicts (#522, D-067);
+    // the digest still goes out when they cannot be read.
+    let input = ListInput {
+        project: project.id.clone(),
+        environment: Some("production".into()),
+    };
+    if let Ok(r) = List::run(state, &Caller::default(), input).await {
+        d.releases = openlens_engine::release_lines(&r, Utc::now());
+    }
     let md =
         openlens_engine::digest_markdown(&project.name, &format!("{base}/p/{}", project.id), &d);
     Ok((d, md))
