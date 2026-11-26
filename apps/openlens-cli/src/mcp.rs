@@ -720,9 +720,8 @@ impl Tools for OpenLensTools {
                         let q: Vec<String> = ["env", "role", "release", "since", "from", "to"]
                             .iter()
                             .filter_map(|k| {
-                                s(args, k).map(|v| {
-                                    format!("{k}={}", v.replace(['&', '#', '?', ' '], ""))
-                                })
+                                s(args, k)
+                                    .map(|v| format!("{k}={}", v.replace(['&', '#', '?', ' '], "")))
                             })
                             .collect();
                         c.call("POST", &format!("{base}?{}", q.join("&")), None)?

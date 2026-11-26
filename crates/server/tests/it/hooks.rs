@@ -408,6 +408,8 @@ async fn a_release_from_the_deploy_step_is_a_deploy_with_its_commit_range() {
             .iter()
             .all(|d| d["source"] == "cli" && d["status"] == "succeeded")
     );
+}
+
 /// Delivery metrics (#523, D-068) from the hook's deploys: a failed
 /// deploy is a failed change, and the card is on the Releases page.
 #[tokio::test]

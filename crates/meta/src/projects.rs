@@ -285,7 +285,14 @@ pub(crate) fn identify_in(c: &Connection, project: &str, s: &Seen<'_>) -> Result
            plan = COALESCE(excluded.plan, plan),
            last_seen = excluded.last_seen",
     )?
-    .execute(params![project, s.distinct_id, s.role, s.account, s.plan, at])?;
+    .execute(params![
+        project,
+        s.distinct_id,
+        s.role,
+        s.account,
+        s.plan,
+        at
+    ])?;
     let changed = match (&previous, s.role) {
         (_, None) => false,
         (Some(Some(old)), Some(new)) => old != new,

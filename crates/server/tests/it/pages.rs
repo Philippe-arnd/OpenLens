@@ -877,7 +877,10 @@ async fn a_long_range_shows_its_cost_and_runs_once_confirmed() {
     assert_eq!(page.status(), StatusCode::OK);
     let html = body_text(page).await;
     assert!(html.contains("Run it"), "{html}");
-    assert!(html.contains("/board/jobs"), "a form that starts a job: {html}");
+    assert!(
+        html.contains("/board/jobs"),
+        "a form that starts a job: {html}"
+    );
     assert!(
         !html.contains("Daily active users"),
         "the board did not run"

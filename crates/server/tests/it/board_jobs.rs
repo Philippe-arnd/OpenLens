@@ -100,9 +100,7 @@ async fn a_board_job_is_its_starters_alone_limited_and_cancellable() {
     let h = harness();
     captured(&h).await;
     let owner = login_cookie(&h).await;
-    let viewer = |email: &str| {
-        serde_json::json!({"email": email, "role": "viewer", "projects": ["default"]})
-    };
+    let viewer = |email: &str| serde_json::json!({"email": email, "role": "viewer", "projects": ["default"]});
     let ana = invite(&h, viewer("[EMAIL_REDACTED]")).await;
     let bob = invite(&h, viewer("[EMAIL_REDACTED]")).await;
     let before = h.state.boards.computed();
