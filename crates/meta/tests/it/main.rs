@@ -584,4 +584,27 @@ fn a_batch_of_identifies_is_recorded_in_one_write() {
     assert_eq!(m.aliases_of("p", "ann").unwrap(), vec!["anon-9".to_owned()]);
     // Nothing to record: no write, nothing changed.
     assert!(!m.record_identify("p", &[], &[]).unwrap());
+fn a_release_keeps_the_map_version_first_recorded() {
+    use openlens_meta::release_maps::ReleaseMap;
+    let m = Meta::in_memory().unwrap();
+    let row = |release: &str, version: i64| ReleaseMap {
+        environment: "production".into(),
+        release: release.into(),
+        first_seen: "2026-11-01 10:00:00".into(),
+        map_version: version,
+        before_first_map: false,
+    };
+    assert_eq!(m.record_release_maps("p", &[row("v1", 1)]).unwrap(), 1);
+    // A later read derives another version (its first event left the
+    // window, or the version left the newest 50): the record wins.
+    assert_eq!(
+        m.record_release_maps("p", &[row("v1", 3), row("v2", 3)])
+            .unwrap(),
+        1
+    );
+    let got = m.release_maps("p", "production").unwrap();
+    let v1 = got.iter().find(|r| r.release == "v1").unwrap();
+    assert_eq!(v1.map_version, 1);
+    assert_eq!(got.len(), 2);
+    assert!(m.release_maps("p", "staging").unwrap().is_empty());
 }
