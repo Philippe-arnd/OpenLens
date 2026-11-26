@@ -18,6 +18,7 @@ use clap::{Parser, Subcommand};
 use serde_json::{Value, json};
 
 mod commands;
+mod release;
 mod verify;
 use commands::*;
 pub(crate) use verify::*;
@@ -330,55 +331,7 @@ fn run(cli: Cli) -> Result<bool, String> {
             project,
             release,
             dir,
-        } => {
-            let c = client()?;
-            let mut maps = Vec::new();
-            let mut stack = vec![dir.clone()];
-            while let Some(d) = stack.pop() {
-                let entries = std::fs::read_dir(&d)
-                    .map_err(|e| format!("cannot read {}: {e}", d.display()))?;
-                for e in entries.flatten() {
-                    let p = e.path();
-                    if p.is_dir() {
-                        stack.push(p);
-                    } else if p.extension().is_some_and(|x| x == "map") {
-                        maps.push(p);
-                    }
-                }
-            }
-            let rel: String = release
-                .chars()
-                .map(|ch| {
-                    if ch.is_ascii_alphanumeric() || "-_.@+".contains(ch) {
-                        ch
-                    } else {
-                        '_'
-                    }
-                })
-                .collect();
-            let (mut ok, mut failed) = (Vec::new(), Vec::new());
-            for p in &maps {
-                let Some(bundle) = p.file_stem().and_then(|s| s.to_str()) else {
-                    continue;
-                };
-                let text = std::fs::read_to_string(p)
-                    .map_err(|e| format!("cannot read {}: {e}", p.display()))?;
-                let (status, v) = c.call(
-                    "PUT",
-                    &format!("/api/projects/{project}/sourcemaps/{rel}/{bundle}"),
-                    Some(Body::Text(text)),
-                )?;
-                if status == 200 {
-                    ok.push(bundle.to_owned());
-                } else {
-                    failed.push(
-                        serde_json::json!({ "file": p.display().to_string(), "error": v["error"] }),
-                    );
-                }
-            }
-            out(&serde_json::json!({ "release": rel, "uploaded": ok, "failed": failed }));
-            Ok(failed.is_empty() && !maps.is_empty())
-        }
+        } => release::sourcemaps(&client()?, project, release, dir),
         Command::Import {
             project,
             file,
