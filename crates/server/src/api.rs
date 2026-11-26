@@ -35,6 +35,10 @@ pub(crate) fn routes() -> Router<AppState> {
             post(crate::allowlist::api_allow),
         )
         .route("/api/projects/{project}/board", get(board))
+        .route(
+            "/api/projects/{project}/board/estimate",
+            get(crate::board_query::api_estimate),
+        )
         .route("/api/projects/{project}/errors", get(errors))
         .route("/api/projects/{project}/breakdown", get(breakdown))
         .route("/api/projects/{project}/people/{distinct_id}", get(person))
@@ -126,7 +130,7 @@ fn err(status: StatusCode, msg: &str) -> Response {
     crate::apierr::json(status, msg)
 }
 
-fn guard(state: &AppState, headers: &HeaderMap) -> Option<Response> {
+pub(crate) fn guard(state: &AppState, headers: &HeaderMap) -> Option<Response> {
     if auth::has_bearer(state, headers) {
         None
     } else {
@@ -134,7 +138,7 @@ fn guard(state: &AppState, headers: &HeaderMap) -> Option<Response> {
     }
 }
 
-async fn known_project(
+pub(crate) async fn known_project(
     state: &AppState,
     id: &str,
 ) -> Result<openlens_meta::Project, Box<Response>> {
@@ -460,7 +464,14 @@ async fn board(
         Err(e) => return err(StatusCode::BAD_REQUEST, &e.to_string()),
     };
     let map = crate::load_map(&state, &p.id).await;
-    match crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))).await {
+    let map = map.as_ref().map(|(m, v)| (m, *v));
+    // A long date range or past release runs once confirmed (D-061).
+    match crate::board_query::unconfirmed(&state, &p.id, &q, &f, map).await {
+        Ok(None) => {}
+        Ok(Some(e)) => return crate::board_query::conflict(&e),
+        Err(e) => return err(StatusCode::BAD_REQUEST, &e),
+    }
+    match crate::boards::board(&state, &p.id, &f, map).await {
         Ok(b) => Json(b).into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()),
     }
