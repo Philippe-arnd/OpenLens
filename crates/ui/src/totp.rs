@@ -78,22 +78,21 @@ pub(crate) fn totp_card(card: &TotpCard) -> Markup {
 /// The code step of password sign-in: the password was right, the code
 /// comes next. `challenge` is the signed token from the password step.
 pub fn login_code(challenge: &str, failed: bool) -> Markup {
-    layout(
+    entry::auth_page(
         "Log in",
-        None,
         html! {
-            section.login {
-                h1 { "One more step" }
-                p.muted { "Enter the 6-digit code from your authenticator app, or one of your recovery codes." }
-                @if failed { p.alert role="alert" { "That code didn't work. Check and try again; after a few failed tries, each new try waits a little longer." } }
-                form method="post" action="/login/totp" {
-                    input type="hidden" name="challenge" value=(challenge);
-                    label for="totp-code" { "Code" }
-                    input #totp-code name="code" type="text" autocomplete="one-time-code" required autofocus maxlength="40";
-                    button type="submit" { "Log in" }
+            h1 #auth-h { "One more step" }
+            p { "Enter the 6-digit code from your authenticator app, or one of your recovery codes." }
+            @if failed { p.alert role="alert" { "That code didn't work. Check and try again; after a few failed tries, each new try waits a little longer." } }
+            form.auth-form method="post" action="/login/totp" {
+                input type="hidden" name="challenge" value=(challenge);
+                label.field for="totp-code" {
+                    "Code"
+                    input.mono #totp-code name="code" type="text" inputmode="numeric" autocomplete="one-time-code" spellcheck="false" required autofocus maxlength="40";
                 }
-                p.muted.small { a href="/login" { "Start over" } }
+                button.btn.primary type="submit" { "Log in" }
             }
+            a.btn.ghost href="/login" { "Start over" }
         },
     )
 }
