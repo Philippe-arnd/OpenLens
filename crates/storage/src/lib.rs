@@ -18,6 +18,7 @@
 mod compaction;
 mod pending;
 mod segments;
+mod typed;
 pub use pending::Pending;
 use pending::projects_of;
 pub use segments::{SegmentFacts, count_rows, segment_facts, segment_files};
@@ -27,6 +28,7 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Instant;
+pub use typed::names as typed_columns;
 
 use arrow::array::{Array, ArrayRef, RecordBatch, StringBuilder, TimestampMicrosecondBuilder};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef, TimeUnit};
@@ -70,10 +72,11 @@ pub fn valid_project(id: &str) -> bool {
 }
 
 /// Arrow schema of the Parquet files. `project` and `date` are not
-/// in the files: they are the partition directories.
+/// in the files: they are the partition directories. The typed columns
+/// (`vital_*`, #449) come last; files written before them do not have them.
 pub fn event_schema() -> SchemaRef {
     let ts = || DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into()));
-    Arc::new(Schema::new(vec![
+    let mut fields = vec![
         Field::new("uuid", DataType::Utf8, false),
         Field::new("event", DataType::Utf8, false),
         Field::new("distinct_id", DataType::Utf8, false),
@@ -90,7 +93,9 @@ pub fn event_schema() -> SchemaRef {
         Field::new("release", DataType::Utf8, true),
         Field::new("flags", DataType::Utf8, true),
         Field::new("properties", DataType::Utf8, false),
-    ]))
+    ];
+    fields.extend(typed::fields());
+    Arc::new(Schema::new(fields))
 }
 
 /// Directory holding all event partitions.
@@ -560,27 +565,30 @@ fn to_batch(events: &[&Event]) -> Result<RecordBatch> {
     };
     let timestamp = ts(&|e| e.timestamp);
     let received = ts(&|e| e.received_at);
-    Ok(RecordBatch::try_new(
-        event_schema(),
-        vec![
-            uuid,
-            event,
-            distinct,
-            session,
-            timestamp,
-            received,
-            url,
-            path,
-            feature,
-            role,
-            account,
-            plan,
-            environment,
-            release,
-            flags,
-            props,
-        ],
-    )?)
+    let mut cols = vec![
+        uuid,
+        event,
+        distinct,
+        session,
+        timestamp,
+        received,
+        url,
+        path,
+        feature,
+        role,
+        account,
+        plan,
+        environment,
+        release,
+        flags,
+        props,
+    ];
+    cols.extend(typed::columns(
+        events
+            .iter()
+            .map(|e| (e.event.as_str(), e.properties.as_str())),
+    ));
+    Ok(RecordBatch::try_new(event_schema(), cols)?)
 }
 
 /// Merge each day's segments into one file: closed days as soon as they
@@ -752,6 +760,8 @@ fn rewrite_day(
             continue;
         }
         total += changed;
+        // A file written before the typed columns gets them (#449).
+        let out = out.iter().map(typed::conform).collect::<Result<Vec<_>>>()?;
         let merged = arrow::compute::concat_batches(&event_schema(), &out)?;
         if merged.num_rows() > 0 {
             write_parquet(date, &merged)?;

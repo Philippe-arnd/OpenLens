@@ -198,3 +198,58 @@ fn the_host_of_a_page_has_no_port_path_or_case() {
     assert_eq!(host_of("/relative/path"), None);
     assert_eq!(host_of("https:///nohost"), None);
 }
+
+/// The typed facts of a `$vital` (#449) keep a value only where the
+/// pattern the engine used on the text would have found it, so old files
+/// (read through the pattern) and new ones agree; hostile text is bounded.
+#[test]
+fn vital_facts_keep_what_the_patterns_found_and_nothing_else() {
+    use openlens_event::vital;
+    let props = |extra: &str| format!(r#"{{"$name":"INP","$value":250{extra}}}"#);
+    let v = vital("$vital", &props(r#","$input":"pointer","$processing":80"#)).unwrap();
+    assert_eq!(v.value, Some(250.0));
+    assert_eq!(
+        v.kind.as_deref(),
+        Some("pointer"),
+        "$input when no $el_type"
+    );
+    assert_eq!(v.parts.iter().flatten().count(), 1);
+
+    let at = |n: usize| "a".repeat(n);
+    let el = |s: &str| {
+        vital("$vital", &props(&format!(r#","$el":{}"#, json!(s))))
+            .unwrap()
+            .el
+    };
+    assert_eq!(el(&at(120)).map(|e| e.len()), Some(120));
+    for bad in [
+        at(121),
+        "a\"b".into(),
+        "a\\b".into(),
+        "a\nb".into(),
+        String::new(),
+    ] {
+        assert_eq!(el(&bad), None, "{bad:?}");
+    }
+    // Non-ASCII counts in characters, as the pattern does.
+    assert!(el(&"é".repeat(120)).is_some());
+
+    let one = |extra: &str| vital("$vital", &props(extra)).unwrap();
+    assert_eq!(one(r#","$device":"watch""#).device, None);
+    assert_eq!(one(r#","$el_type":"Image""#).kind, None);
+    let text_value = vital("$vital", r#"{"$name":"INP","$value":"250"}"#).unwrap();
+    assert_eq!(text_value.value, None);
+
+    // No valid name, not a vital, not an object, too large: no facts.
+    let huge = props(&format!(r#","$x":"{}""#, at(limits::MAX_PROPERTIES_BYTES)));
+    for (event, text) in [
+        ("$vital", r#"{"$name":"lcp","$value":1}"#.to_owned()),
+        ("$pageview", props("")),
+        ("$vital", "[1,2]".into()),
+        ("$vital", "{".into()),
+        ("$vital", huge),
+    ] {
+        let head: String = text.chars().take(40).collect();
+        assert!(vital(event, &text).is_none(), "{event} {head}");
+    }
+}

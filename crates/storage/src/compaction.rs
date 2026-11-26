@@ -71,7 +71,10 @@ pub(crate) fn compact_dir(dir: &Path, min_files: usize) -> Result<bool> {
 /// Every row of one (small) file.
 fn read_all(path: &Path) -> Result<RecordBatch> {
     let reader = ParquetRecordBatchReaderBuilder::try_new(File::open(path)?)?.build()?;
-    let batches = reader.collect::<std::result::Result<Vec<_>, _>>()?;
+    let mut batches = Vec::new();
+    for b in reader {
+        batches.push(crate::typed::conform(&b?)?);
+    }
     Ok(arrow::compute::concat_batches(&event_schema(), &batches)?)
 }
 
@@ -201,7 +204,8 @@ fn merge(inputs: &[PathBuf], out: &Path) -> Result<()> {
 /// Load the cursor's next non-empty batch; false at the end of its file.
 fn advance(c: &mut Cursor, held: &mut Vec<RecordBatch>) -> Result<bool> {
     for b in c.reader.by_ref() {
-        let b = b?;
+        // Segments written before the typed columns get them here (#449).
+        let b = crate::typed::conform(&b?)?;
         if b.num_rows() > 0 {
             c.rows = b.num_rows();
             c.row = 0;

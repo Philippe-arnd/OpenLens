@@ -36,6 +36,7 @@ mod internal;
 mod rebatch;
 mod retry;
 mod rollup;
+mod typed;
 pub use aggregate::MIN_USERS;
 use serde::Serialize;
 
@@ -50,18 +51,19 @@ const SNAPSHOT_LINGER: Duration = Duration::from_secs(15);
 /// The `events` table as callers see it: `raw_events` with every
 /// anonymous id found in `person_aliases` replaced by its user, through
 /// the scalar function `person_of` (a lookup in the cached alias map, not
-/// a join: a join would build its hash table on the events). Derived
-/// from the data, so it also fixes what was stored before, and nothing is
-/// rewritten.
-fn events_view_sql() -> String {
+/// a join: a join would build its hash table on the events), when `merge`
+/// is set. Derived from the data, so it also fixes what was stored before,
+/// and nothing is rewritten. The typed columns read the text on rows
+/// stored before they existed (#449, see `typed`).
+fn events_view_sql(merge: bool) -> String {
     let cols: Vec<String> = openlens_storage::event_schema()
         .fields()
         .iter()
         .map(|f| {
-            if f.name() == "distinct_id" {
+            if merge && f.name() == "distinct_id" {
                 "person_of(r.distinct_id) AS distinct_id".to_owned()
             } else {
-                format!("r.{}", f.name())
+                typed::select(f.name())
             }
         })
         .collect();
@@ -507,30 +509,28 @@ impl QueryEngine {
     async fn context(&self, project: &str) -> Result<SessionContext, QueryError> {
         let ctx = self.session()?;
         functions::register(&ctx);
-        let table = self.register_raw(&ctx, project)?;
+        self.register_raw(&ctx, project)?;
         let identity = self.identity(project, &ctx).await?;
         ctx.register_table("persons", identity.persons)
             .map_err(|e| QueryError::Storage(e.to_string()))?;
         ctx.register_udf(internal::is_internal_udf(identity.internal));
-        match identity.aliases {
-            // Nobody to merge: `events` is the stored table, at no cost.
-            None => {
-                ctx.register_table("events", table)
-                    .map_err(|e| QueryError::Storage(e.to_string()))?;
-            }
+        let merge = match identity.aliases {
+            // Nobody to merge: no lookup per row.
+            None => false,
             Some(aliases) => {
                 ctx.register_udf(person_of_udf(identity.lookup));
                 ctx.register_table("person_aliases", aliases)
                     .map_err(|e| QueryError::Storage(e.to_string()))?;
-                let view = ctx
-                    .sql(&events_view_sql())
-                    .await
-                    .map_err(|e| QueryError::Storage(e.to_string()))?
-                    .into_view();
-                ctx.register_table("events", view)
-                    .map_err(|e| QueryError::Storage(e.to_string()))?;
+                true
             }
-        }
+        };
+        let view = ctx
+            .sql(&events_view_sql(merge))
+            .await
+            .map_err(|e| QueryError::Storage(e.to_string()))?
+            .into_view();
+        ctx.register_table("events", view)
+            .map_err(|e| QueryError::Storage(e.to_string()))?;
         // The rollups of closed days (#322), read-only like the events.
         let rdir = openlens_storage::rollup::rollups_dir(&self.root, project)
             .map_err(|e| QueryError::Storage(e.to_string()))?;

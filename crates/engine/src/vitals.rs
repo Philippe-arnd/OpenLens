@@ -337,11 +337,11 @@ impl VitalReport {
     }
 }
 
-/// The values of every `$vital` over the last 7 days: `name`, `v`, `path`.
+/// The values of every `$vital` over the last 7 days: `name`, `v`, `path`,
+/// from the typed columns (#449).
 fn values(src: &str, w7: &str) -> String {
     format!(
-        "SELECT regexp_match(properties, '\"\\$name\":\"([A-Z]+)\"')[1] AS name, \
-                CAST(regexp_match(properties, '\"\\$value\":([0-9.eE+-]+)')[1] AS DOUBLE) AS v, path \
+        "SELECT vital_name AS name, vital_value AS v, path \
          FROM {src} WHERE {w7} AND event = '$vital'"
     )
 }
