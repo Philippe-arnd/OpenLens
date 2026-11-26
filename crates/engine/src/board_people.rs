@@ -121,9 +121,10 @@ pub(crate) async fn rolled_days_back(
 
 /// How a window of `days` days at `now`, with the filters `f`, splits
 /// between the `rolled` days and the events: the condition that keeps the
-/// events off the rolled days entirely inside the window (empty when there
-/// is none), and the rollup's WHERE clause for those days (none when no
-/// day qualifies). `role` maps the rollup's raw role to the canonical one.
+/// events to the days not read from the rollup (empty when every day is
+/// read from the events), and the rollup's WHERE clause for the rolled
+/// days entirely inside the window (none when no day qualifies). `role`
+/// maps the rollup's raw role to the canonical one.
 pub(crate) fn split(
     rolled: &[NaiveDate],
     now: DateTime<Utc>,
@@ -137,6 +138,10 @@ pub(crate) fn split(
 /// [`split`] for any span of time (D-055): a rolled day is read from the
 /// rollup when it lies entirely inside the span, after the day the span
 /// starts in and before the day it ends in.
+///
+/// The events side names the days it reads (`date IN (…)`), never the
+/// ones it skips: the scan then lists only those days' partitions,
+/// whatever the plan makes of the rest of the clause (D-062).
 pub(crate) fn split_span(
     rolled: &[NaiveDate],
     now: DateTime<Utc>,
@@ -146,15 +151,24 @@ pub(crate) fn split_span(
 ) -> (String, Option<String>) {
     let cutoff = (now - Duration::seconds(span.start)).date_naive();
     let until = (now - Duration::seconds(span.end)).date_naive();
-    let list = rolled
+    let inside: std::collections::BTreeSet<NaiveDate> = rolled
         .iter()
-        .filter(|d| **d > cutoff && **d < until)
-        .map(|d| format!("'{}'", d.format("%Y-%m-%d")))
-        .collect::<Vec<_>>()
-        .join(", ");
-    if list.is_empty() {
+        .copied()
+        .filter(|d| *d > cutoff && *d < until)
+        .collect();
+    if inside.is_empty() {
         return (String::new(), None);
     }
+    let quoted = |d: &NaiveDate| format!("'{}'", d.format("%Y-%m-%d"));
+    let list = inside.iter().map(quoted).collect::<Vec<_>>().join(", ");
+    // Every other day of the span: its first and last days at least.
+    let open = cutoff
+        .iter_days()
+        .take_while(|d| *d <= until)
+        .filter(|d| !inside.contains(d))
+        .map(|d| quoted(&d))
+        .collect::<Vec<_>>()
+        .join(", ");
     // The same filters as `Filters::clause`, on the rollup's columns.
     let mut w = format!("date IN ({list}) AND environment = $env");
     if f.role.is_some() {
@@ -166,7 +180,7 @@ pub(crate) fn split_span(
     if !f.internal {
         w.push_str(" AND NOT is_internal(person)");
     }
-    (format!(" AND date NOT IN ({list})"), Some(w))
+    (format!(" AND date IN ({open})"), Some(w))
 }
 
 /// Whether every day from `from` to `to` starts and ends on a UTC
@@ -197,6 +211,56 @@ mod tests {
 
     fn day(s: &str) -> NaiveDate {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap_or_default()
+    }
+
+    /// The days an events-side condition names, in order.
+    fn named(skip: &str) -> Vec<String> {
+        skip.split('\'')
+            .skip(1)
+            .step_by(2)
+            .map(str::to_owned)
+            .collect()
+    }
+
+    #[test]
+    fn with_every_closed_day_rolled_the_events_side_reads_only_the_open_days() {
+        // 90 days at noon: every closed day is rolled up, as bench-gen
+        // leaves a data dir (#452).
+        let now = day("2026-03-31")
+            .and_hms_opt(12, 0, 0)
+            .unwrap_or_default()
+            .and_utc();
+        let last = openlens_query::last_closed(now);
+        let first = (now - Duration::days(90)).date_naive();
+        let rolled: Vec<NaiveDate> = first.iter_days().take_while(|d| *d <= last).collect();
+        let f = Filters::default();
+        let (skip, w) = split(&rolled, now, 90, &f, "role");
+        // The events: the day the window starts in, and the open days
+        // (D-025) up to today; nothing else, and no day left out.
+        let mut open = vec![first.format("%Y-%m-%d").to_string()];
+        open.extend(
+            last.succ_opt()
+                .unwrap_or(last)
+                .iter_days()
+                .take_while(|d| *d <= now.date_naive())
+                .map(|d| d.format("%Y-%m-%d").to_string()),
+        );
+        assert!(skip.starts_with(" AND date IN ("), "{skip}");
+        assert_eq!(named(&skip), open);
+        assert!(open.len() <= 4, "{open:?}");
+        // The rollup: every other day, each read once.
+        let w = w.unwrap_or_default();
+        let from_rollup = named(w.split(')').next().unwrap_or_default());
+        assert_eq!(from_rollup.len() + open.len(), 91);
+        assert!(from_rollup.iter().all(|d| !open.contains(d)));
+        // A day not rolled up yet (or rolled with another map) is read
+        // from its events.
+        let gap = rolled[40];
+        let fewer: Vec<NaiveDate> = rolled.iter().copied().filter(|d| *d != gap).collect();
+        let (skip, _) = split(&fewer, now, 90, &f, "role");
+        assert!(named(&skip).contains(&gap.format("%Y-%m-%d").to_string()));
+        // Nothing rolled: the events alone, with no day list.
+        assert_eq!(split(&[], now, 90, &f, "role"), (String::new(), None));
     }
 
     #[test]

@@ -112,11 +112,14 @@ pub async fn board(
         .map_or(90, |w| w.previous.start / 86_400 + 2)
         .max(90);
     let version = map.map(|(_, v)| v);
-    // Journeys read `session_feature_day` the same way (#452, D-059).
-    let (rolled_people, rolled_sessions, rolled_features) = futures::try_join!(
+    // Journeys read `session_feature_day` the same way (#452, D-059), and
+    // success events (the block, the first success of each journey)
+    // `success_day` (D-062).
+    let (rolled_people, rolled_sessions, rolled_features, rolled_successes) = futures::try_join!(
         board_people::rolled_days_back(q, project, "person_day", version, now, back),
         board_people::rolled_days_back(q, project, "session_day", version, now, back),
         board_people::rolled_days(q, project, "session_feature_day", version, now),
+        board_people::rolled_days_back(q, project, "success_day", version, now, back),
     )?;
     // A period block's span: its fixed days, or the release window.
     let span = |days: i64| win.as_ref().map_or(Span::days(days), |w| w.current);
@@ -153,6 +156,12 @@ pub async fn board(
         now,
     };
     let journey_rows = board_sessions::feature_rows(&src, &role, &rolled_features, now, f, 30)?;
+    let success_reads = board_success::SuccessRows {
+        src: &src,
+        role: role.clone(),
+        rolled: rolled_successes,
+        now,
+    };
     let any_role = Filters {
         role: None,
         ..f.clone()
@@ -248,12 +257,14 @@ pub async fn board(
     // from a query.
 
     // Success events: 30 days (or the release window) of the declared
-    // events only, read from their typed columns (#502).
+    // events only: `success_day` for the closed days, the events for the
+    // rest (#502, D-062).
     let success_sql = if successes.is_empty() {
         "SELECT CAST(NULL AS VARCHAR) AS event, 0 AS n, 0 AS users WHERE false".to_owned()
     } else {
         format!(
-            "SELECT event, count(*) AS n, count(DISTINCT distinct_id) AS users FROM {src} WHERE {w30} AND event IN ({success_list}) GROUP BY event"
+            "SELECT event, sum(events) AS n, count(DISTINCT distinct_id) AS users FROM {} GROUP BY event",
+            success_reads.rows_in(f, span(30), &success_list)?
         )
     };
     // The release window's comparison (D-055): users of the window and of
@@ -481,7 +492,7 @@ pub async fn board(
     let ((mut cards, readiness), journeys, cohorts, funnels, task_times, resurrected, retention) =
         futures::try_join!(
             insights::compute(q, project, &card_rows, f, ident, churn, &successes),
-            insights::journeys(q, project, &src, &journey_rows, f, &successes),
+            insights::journeys(q, project, &success_reads, &journey_rows, f, &successes),
             insights::flag_cohorts(q, project, &src, f),
             insights::funnels(q, project, &src, f, &funnel_defs),
             tasks::task_times(q, project, &src, f, &successes),

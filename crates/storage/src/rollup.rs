@@ -163,6 +163,26 @@ pub fn session_feature_day_schema() -> SchemaRef {
     ]))
 }
 
+/// `success_day` (#452, D-062): one row per person, environment,
+/// release, role and success event of the UTC day, for the success events
+/// the feature map declares (the map in force when the day was rolled up,
+/// `map_version`): how many there were (`events`) and the first one
+/// (`first_ts`). Every day also has one row with nothing but its
+/// `map_version`, so a day rolled without any success event is still
+/// known to be rolled; readers never count it (it has no environment).
+pub fn success_day_schema() -> SchemaRef {
+    Arc::new(Schema::new(vec![
+        Field::new("person", DataType::Utf8, true),
+        Field::new("environment", DataType::Utf8, true),
+        Field::new("release", DataType::Utf8, true),
+        Field::new("role", DataType::Utf8, true),
+        Field::new("event", DataType::Utf8, true),
+        Field::new("events", DataType::Int64, true),
+        Field::new("first_ts", ts(), true),
+        Field::new("map_version", DataType::Int64, true),
+    ]))
+}
+
 /// The dimensions every page rollup is split by.
 fn page_dims() -> Vec<Field> {
     vec![
@@ -217,20 +237,22 @@ pub const TOP_LABELS: usize = 20;
 
 /// The tables with a row per person: erasing someone removes their rows
 /// from them (D-026).
-pub const PERSON_TABLES: [&str; 4] = [
+pub const PERSON_TABLES: [&str; 5] = [
     "person_q",
     "person_day",
     "session_day",
     "session_feature_day",
+    "success_day",
 ];
 
 /// The rollup tables: name and schema.
-pub fn tables() -> [(&'static str, SchemaRef); 8] {
+pub fn tables() -> [(&'static str, SchemaRef); 9] {
     [
         ("person_q", person_schema()),
         ("person_day", person_day_schema()),
         ("session_day", session_day_schema()),
         ("session_feature_day", session_feature_day_schema()),
+        ("success_day", success_day_schema()),
         ("metric_q", metric_schema()),
         ("click_q", click_schema()),
         ("label_q", label_schema()),

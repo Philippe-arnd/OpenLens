@@ -69,8 +69,14 @@ fn person_day_sql(day: &str, f: &DayFeatures) -> Result<String, QueryError> {
 /// the board counts them: the map's success events, or any event with a
 /// feature when the map declares none.
 fn task_sql(f: &DayFeatures) -> Result<String, QueryError> {
+    Ok(success_sql(f)?.unwrap_or_else(|| "feature IS NOT NULL".to_owned()))
+}
+
+/// Whether an event is one of the map's success events; none when the map
+/// declares none.
+fn success_sql(f: &DayFeatures) -> Result<Option<String>, QueryError> {
     if f.successes.is_empty() {
-        return Ok("feature IS NOT NULL".to_owned());
+        return Ok(None);
     }
     let list = f
         .successes
@@ -78,7 +84,7 @@ fn task_sql(f: &DayFeatures) -> Result<String, QueryError> {
         .map(|e| openlens_sqlgen::lit(e))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| QueryError::Rejected("not a valid success event".into()))?;
-    Ok(format!("event IN ({})", list.join(", ")))
+    Ok(Some(format!("event IN ({})", list.join(", "))))
 }
 
 /// The map's version as a SQL literal (`NULL` without a map).
@@ -130,6 +136,40 @@ fn session_feature_day_sql(day: &str, f: &DayFeatures) -> Result<String, QueryEr
          GROUP BY 1, 2, 3, 4, 5, 6",
         feature = f.feature
     ))
+}
+
+/// `success_day` of one UTC day (#452): per person, environment, release,
+/// role and success event of the map, from the `events` view (people
+/// already merged). Without success events it has no row but the day's
+/// marker ([`day_marker`]).
+fn success_day_sql(day: &str, f: &DayFeatures) -> Result<String, QueryError> {
+    let (success, version) = (success_sql(f)?, version_sql(f));
+    Ok(format!(
+        "SELECT distinct_id AS person, environment, release, role, event, \
+         count(*) AS events, min(timestamp) AS first_ts, \
+         CAST({version} AS BIGINT) AS map_version \
+         FROM events WHERE date = '{day}' AND {success} \
+         GROUP BY 1, 2, 3, 4, 5",
+        success = success.as_deref().unwrap_or("false")
+    ))
+}
+
+/// The row that says a day's `success_day` was rolled up, with the map
+/// `version` (D-062): every other column is null, so no reader counts it.
+fn day_marker(schema: &SchemaRef, version: Option<i64>) -> Result<RecordBatch, QueryError> {
+    let cols = schema
+        .fields()
+        .iter()
+        .map(|f| {
+            if f.name() == "map_version" {
+                std::sync::Arc::new(arrow::array::Int64Array::from(vec![version]))
+                    as arrow::array::ArrayRef
+            } else {
+                arrow::array::new_null_array(f.data_type(), 1)
+            }
+        })
+        .collect();
+    RecordBatch::try_new(schema.clone(), cols).map_err(|e| QueryError::Storage(e.to_string()))
 }
 
 /// `metric_q` of one UTC day.
@@ -221,7 +261,8 @@ impl QueryEngine {
     /// `None`) of `project` for the UTC `day` (`YYYY-MM-DD`), as
     /// `(name, batch)` pairs in the schemas of `openlens_storage::rollup`.
     /// `features` resolves the features of `person_day` and
-    /// `session_feature_day` and the tasks of those and `session_day`.
+    /// `session_feature_day`, the tasks of those and `session_day`, and the
+    /// success events of `success_day`.
     pub async fn rollup_day(
         &self,
         project: &str,
@@ -266,6 +307,7 @@ impl QueryEngine {
                 "person_day" => person_day_sql(day, features)?,
                 "session_day" => session_day_sql(day, features)?,
                 "session_feature_day" => session_feature_day_sql(day, features)?,
+                "success_day" => success_day_sql(day, features)?,
                 "metric_q" => metric_sql(day),
                 "click_q" => click_sql(day),
                 "label_q" => label_sql(day),
@@ -278,7 +320,13 @@ impl QueryEngine {
                 .collect()
                 .await
                 .map_err(|e| QueryError::Storage(e.to_string()))?;
-            out.push((name, conform(&schema, &batches)?));
+            let mut batch = conform(&schema, &batches)?;
+            if name == "success_day" {
+                let marker = day_marker(&schema, features.map_version)?;
+                batch = arrow::compute::concat_batches(&schema, &[batch, marker])
+                    .map_err(|e| QueryError::Storage(e.to_string()))?;
+            }
+            out.push((name, batch));
         }
         Ok(out)
     }
