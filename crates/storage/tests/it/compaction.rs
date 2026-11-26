@@ -116,3 +116,93 @@ fn a_day_of_mixed_segments_compacts_sorted_once_per_uuid() {
     }
     assert!(keys.windows(2).all(|k| k[0] <= k[1]));
 }
+
+/// A segment written before the typed columns (#449) has none: compaction
+/// merges it with new segments and fills them in from `properties`, the
+/// same values a new segment gets at write time.
+#[test]
+fn a_segment_without_typed_columns_merges_and_gets_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let t = Utc.with_ymd_and_hms(2026, 11, 20, 9, 0, 0).unwrap();
+    let vital = |i: i64| {
+        let mut e = ev("p", t + Duration::seconds(i));
+        e.event = "$vital".into();
+        e.properties =
+            r#"{"$name":"LCP","$value":4200,"$el":"main > img","$el_type":"image","$ttfb":300}"#
+                .into();
+        e
+    };
+    w.append(&[vital(1), ev("p", t)]).unwrap();
+    w.flush().unwrap();
+    w.append(&[vital(2)]).unwrap();
+    w.flush().unwrap();
+    let day = dir.path().join("events/project=p/date=2026-11-20");
+
+    // Rewrite one segment as an old one: without the `vital_*` columns.
+    let seg = std::fs::read_dir(&day)
+        .unwrap()
+        .map(|f| f.unwrap().path())
+        .find(|p| p.extension().is_some_and(|x| x == "parquet"))
+        .unwrap();
+    let r = ParquetRecordBatchReaderBuilder::try_new(std::fs::File::open(&seg).unwrap())
+        .unwrap()
+        .build()
+        .unwrap();
+    let old: Vec<RecordBatch> = r
+        .map(|b| {
+            let b = b.unwrap();
+            let keep: Vec<usize> = (0..b.num_columns())
+                .filter(|&i| !b.schema().field(i).name().starts_with("vital_"))
+                .collect();
+            b.project(&keep).unwrap()
+        })
+        .collect();
+    std::fs::remove_file(&seg).unwrap();
+    let path = day.join("00000000-old.parquet");
+    let mut wr =
+        ArrowWriter::try_new(std::fs::File::create(&path).unwrap(), old[0].schema(), None).unwrap();
+    for b in &old {
+        wr.write(b).unwrap();
+    }
+    wr.close().unwrap();
+    assert!(old[0].column_by_name("vital_name").is_none());
+
+    assert_eq!(compact(dir.path(), "p", Utc::now()).unwrap(), 1);
+    let after = read_day(&day);
+    let b = arrow::compute::concat_batches(&after[0].schema(), &after).unwrap();
+    let col = |n: &str| {
+        b.column_by_name(n)
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap()
+            .clone()
+    };
+    let (event, name, el, kind) = (
+        col("event"),
+        col("vital_name"),
+        col("vital_el"),
+        col("vital_kind"),
+    );
+    let vitals: Vec<usize> = (0..b.num_rows())
+        .filter(|&i| event.value(i) == "$vital")
+        .collect();
+    assert_eq!(vitals.len(), 2);
+    for &i in &vitals {
+        assert!(!name.is_null(i) && !el.is_null(i) && !kind.is_null(i));
+        assert_eq!(
+            (name.value(i), el.value(i), kind.value(i)),
+            (
+                name.value(vitals[0]),
+                el.value(vitals[0]),
+                kind.value(vitals[0])
+            ),
+            "an old row gets the values a new row has"
+        );
+    }
+    let other = (0..b.num_rows())
+        .find(|&i| event.value(i) != "$vital")
+        .unwrap();
+    assert!(name.is_null(other), "only a $vital has facts");
+}

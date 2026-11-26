@@ -186,26 +186,18 @@ impl Attribution {
 }
 
 /// `$name`, `$value`, `$device`, the element, its kind and resource and
-/// every part, for each `$vital` of the last 7 days. Patterns are bounded:
-/// a hostile client cannot make a group key longer than the SDK's caps.
+/// every part, for each `$vital` of the last 7 days, from the typed
+/// columns (#449). Their values are bounded at write time as the patterns
+/// that read them before: a hostile client cannot make a group key longer
+/// than the SDK's caps.
 fn facts(src: &str, w7: &str) -> String {
     let parts: String = PHASES
         .iter()
-        .map(|p| {
-            format!(
-                ", CAST(regexp_match(properties, '\"\\${k}\":([0-9.eE+-]+)')[1] AS DOUBLE) AS {k}",
-                k = p.key
-            )
-        })
+        .map(|p| format!(", vital_{k} AS {k}", k = p.key))
         .collect();
     format!(
-        "SELECT regexp_match(properties, '\"\\$name\":\"([A-Z]+)\"')[1] AS name, \
-                CAST(regexp_match(properties, '\"\\$value\":([0-9.eE+-]+)')[1] AS DOUBLE) AS v, path, \
-                regexp_match(properties, '\"\\$device\":\"(phone|tablet|desktop)\"')[1] AS device, \
-                regexp_match(properties, '\"\\$el\":\"([^\"\\\\]{{1,120}})\"')[1] AS el, \
-                coalesce(regexp_match(properties, '\"\\$el_type\":\"([a-z]{{1,12}})\"')[1], \
-                         regexp_match(properties, '\"\\$input\":\"([a-z]{{1,12}})\"')[1]) AS kind, \
-                regexp_match(properties, '\"\\$res\":\"([^\"\\\\]{{1,200}})\"')[1] AS res{parts} \
+        "SELECT vital_name AS name, vital_value AS v, path, vital_device AS device, \
+                vital_el AS el, vital_kind AS kind, vital_res AS res{parts} \
          FROM {src} WHERE {w7} AND event = '$vital'"
     )
 }

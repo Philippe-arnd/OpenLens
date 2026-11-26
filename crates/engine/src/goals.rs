@@ -272,7 +272,7 @@ pub async fn weekly(
         )
     });
     let vitals = format!(
-        "SELECT d, name, approx_percentile_cont(v, 0.75) AS p75 FROM (            SELECT {day} AS d, regexp_match(properties, '\"\\$name\":\"([A-Z]+)\"')[1] AS name,                   CAST(regexp_match(properties, '\"\\$value\":([0-9.eE+-]+)')[1] AS DOUBLE) AS v            FROM {src} WHERE {w} AND event = '$vital') x          WHERE name IN ('LCP', 'INP', 'CLS') AND v IS NOT NULL GROUP BY d, name"
+        "SELECT d, name, approx_percentile_cont(v, 0.75) AS p75 FROM (            SELECT {day} AS d, vital_name AS name, vital_value AS v            FROM {src} WHERE {w} AND event = '$vital') x          WHERE name IN ('LCP', 'INP', 'CLS') AND v IS NOT NULL GROUP BY d, name"
     );
     let (u, v) = futures::join!(q.sql(project, &users), q.sql(project, &vitals));
     let pairs: Vec<(String, String)> = u?
