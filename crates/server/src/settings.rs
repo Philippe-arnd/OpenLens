@@ -30,6 +30,20 @@ async fn load(state: &AppState, id: &str) -> Option<openlens_meta::Project> {
 pub(crate) struct Notice {
     #[serde(default)]
     done: Option<String>,
+    /// *Environments*: the host whose past events a dry run counts (#484).
+    #[serde(default)]
+    relabel: Option<String>,
+    #[serde(default)]
+    days: Option<String>,
+}
+
+/// The days of a re-labelling form: empty is the default, anything not a
+/// number is refused by the engine's check.
+fn form_days(raw: Option<&str>) -> Option<i64> {
+    match raw.map(str::trim) {
+        None | Some("") => None,
+        Some(d) => Some(d.parse().unwrap_or(0)),
+    }
 }
 
 /// `GET /p/{id}/settings`: the *General* tab.
@@ -108,7 +122,9 @@ pub(crate) async fn environments_page(
 
 /// The form of `POST /p/{id}/settings/environments`: `action` is `rule`
 /// (the default: set a host's rule, or remove it when `remove` is sent),
-/// `remove`, `alias`, `unalias`, `hide`, `show`, `monitor` or `unmonitor`.
+/// `remove`, `alias`, `unalias`, `hide`, `show`, `monitor`, `unmonitor`, or
+/// `relabel` (re-label a host's past events, after the dry run of the
+/// page's preview, #484).
 #[derive(Debug, Deserialize)]
 pub(crate) struct EnvironmentForm {
     #[serde(default)]
@@ -127,6 +143,8 @@ pub(crate) struct EnvironmentForm {
     url: String,
     #[serde(default)]
     level: String,
+    #[serde(default)]
+    days: String,
 }
 
 impl EnvironmentForm {
@@ -205,6 +223,26 @@ pub(crate) async fn environments(
 ) -> Response {
     if load(&state, &id).await.is_none() {
         return oops("No such project.");
+    }
+    if f.action == "relabel" {
+        let req = crate::environments::RelabelRequest {
+            host: f.host.clone(),
+            days: form_days(Some(&f.days)),
+            dry_run: false,
+        };
+        let (st, pid) = (state.clone(), id.clone());
+        let done =
+            tokio::task::spawn_blocking(move || crate::environments::relabel(&st, &pid, &req))
+                .await;
+        return match done {
+            Ok(Ok(r)) => {
+                crate::environments::audit_relabel(&state, &headers, &id, &r);
+                Redirect::to(&format!("/p/{id}/settings/environments?done=relabelled"))
+                    .into_response()
+            }
+            Ok(Err((_, msg))) => oops(&msg),
+            Err(_) => oops("The events could not be re-labelled."),
+        };
     }
     let Some((change, detail)) = f.change() else {
         return oops("Unknown action.");
@@ -300,6 +338,9 @@ async fn page_at(
         Some("environments") => {
             Some("Saved. Rules and aliases apply to events received from now on.")
         }
+        Some("relabelled") => Some(
+            "Past events re-labelled. Boards follow at once; closed days are rolled up again within minutes.",
+        ),
         Some("test") => Some("Test alert sent: check every channel."),
         Some("test-none") => {
             Some("No channel is set: add an email (SMTP), a webhook or an ntfy topic.")
@@ -316,6 +357,30 @@ async fn page_at(
             .ok()
     } else {
         None
+    };
+    // The dry run of a re-labelling (#484), for admins: the page shows the
+    // moves, then a confirm button posts the rewrite.
+    let relabel = match nq.relabel.as_deref() {
+        Some(host) if viewer.admin && tab == openlens_ui::SettingsTab::Environments => {
+            let req = crate::environments::RelabelRequest {
+                host: host.to_owned(),
+                days: form_days(nq.days.as_deref()),
+                dry_run: true,
+            };
+            let (st, pid) = (state.clone(), p.id.clone());
+            Some(
+                match tokio::task::spawn_blocking(move || {
+                    crate::environments::relabel(&st, &pid, &req)
+                })
+                .await
+                {
+                    Ok(Ok(r)) => Ok(r),
+                    Ok(Err((_, msg))) => Err(msg),
+                    Err(_) => Err("The events could not be counted.".to_owned()),
+                },
+            )
+        }
+        _ => None,
     };
     let host = crate::public_url(&headers);
     let info = openlens_ui::ProjectInfo {
@@ -341,6 +406,7 @@ async fn page_at(
                 shares: state.meta.share_links(&p.id).unwrap_or_default(),
                 releases: &releases,
                 environments,
+                relabel,
                 setup: setup_steps(
                     &state,
                     &p.id,

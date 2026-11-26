@@ -12,6 +12,10 @@
 //!   (markers of the days whose only copy is on S3, D-031) are copied too,
 //!   and `cold-manifest.json` lists those days with their S3 prefixes
 //!   (#419), empty when there are none.
+//! - `icons` (the projects' fetched favicons, #488) are copied too.
+//! - The session and secret keys (`.session.key`, `.secret.key`) are left
+//!   out on purpose: a backup alone must not open sessions or unseal the
+//!   S3 secret and the second factors (#440, SECURITY.md).
 //!
 //! Restore: stop the server, replace the data dir with the backup, start.
 //!
@@ -25,7 +29,17 @@ use std::path::{Path, PathBuf};
 
 // `rollups` too: they outlive the events and cannot be rebuilt (D-026).
 // `sourcemaps` and `cold` (#419): source frames and S3-only day markers.
-const TREES: [&str; 6] = ["wal", "events", "replay", "rollups", "sourcemaps", "cold"];
+// `icons` (#488): the projects' favicons. The key files at the root of the
+// data dir are not in any tree, so they never reach a backup.
+const TREES: [&str; 7] = [
+    "wal",
+    "events",
+    "replay",
+    "rollups",
+    "sourcemaps",
+    "cold",
+    "icons",
+];
 
 /// The manifest of the cold days in a backup.
 pub const COLD_MANIFEST: &str = "cold-manifest.json";
@@ -204,12 +218,22 @@ mod tests {
         .unwrap();
         fs::create_dir_all(data.join("cold/project=p")).unwrap();
         fs::write(data.join("cold/project=p/date=2025-06-01"), b"a.parquet\n").unwrap();
+        fs::create_dir_all(data.join("icons")).unwrap();
+        fs::write(data.join("icons/p.img"), b"\x89PNG").unwrap();
+        fs::write(data.join("icons/q.tmp"), b"").unwrap();
+        fs::write(data.join(".session.key"), [7u8; 32]).unwrap();
+        fs::write(data.join(".secret.key"), [9u8; 32]).unwrap();
         let meta = openlens_meta::Meta::open(&data.join("meta.db")).unwrap();
         meta.ensure_default_project(None).unwrap();
         drop(meta);
 
         let out = d.path().join("backup");
-        assert_eq!(run(&data, &out).unwrap(), 8);
+        assert_eq!(run(&data, &out).unwrap(), 9);
+        // The icons are in (#488), the keys are not, on purpose.
+        assert!(out.join("icons/p.img").exists());
+        assert!(!out.join("icons/q.tmp").exists());
+        assert!(!out.join(".session.key").exists());
+        assert!(!out.join(".secret.key").exists());
         assert!(
             out.join("sourcemaps/project=p/release=r/app.js.map")
                 .exists()

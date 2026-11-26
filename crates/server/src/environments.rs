@@ -1,6 +1,7 @@
 //! Environments per project (#410, D-034): host rules and aliases applied
 //! to every captured batch, the upgrade seed, and the API that reads and
-//! changes them (rules, aliases, hidden environments, monitors). The rules and their precedence live in the engine
+//! changes them (rules, aliases, hidden environments, monitors), and the
+//! re-labelling of past events after a rule changed (#484). The rules and their precedence live in the engine
 //! ([`openlens_engine::environments`]); this module stores them, caches
 //! them and runs them.
 
@@ -303,6 +304,121 @@ pub(crate) fn as_json(r: &Rules) -> serde_json::Value {
         "hidden_environments": r.hidden,
         "environment_monitors": r.monitors,
     })
+}
+
+/// A re-labelling as sent to `POST /api/projects/{id}/environments`
+/// (#484): a host or `*.suffix`, the days (default 30, at most 90), and
+/// whether to only count.
+#[derive(Debug, Default, serde::Deserialize)]
+pub(crate) struct RelabelRequest {
+    pub(crate) host: String,
+    #[serde(default)]
+    pub(crate) days: Option<i64>,
+    #[serde(default)]
+    pub(crate) dry_run: bool,
+}
+
+/// Re-label the past events of a host (blocking; engine command
+/// `relabel_environment` run on the files): each event of the host over
+/// the last `days` UTC days, today included, gets the environment the
+/// current rules give, through the same rewrite as erasure. A dry run
+/// only counts. After a rewrite the project's board cache is dropped, and
+/// the closed days rewritten are rolled up again by the next pass.
+pub(crate) fn relabel(
+    state: &AppState,
+    project: &str,
+    req: &RelabelRequest,
+) -> Result<env::Relabelled, (StatusCode, String)> {
+    let (pattern, days) =
+        env::check_relabel(&req.host, req.days).map_err(|e| (StatusCode::BAD_REQUEST, e.into()))?;
+    let failed = |e: String| (StatusCode::INTERNAL_SERVER_ERROR, e);
+    // The rules as stored now, not as cached a minute ago.
+    let p = load(state, project);
+    let to = chrono::Utc::now().date_naive();
+    let from = to - chrono::Duration::days(days - 1);
+    let target = |url: Option<&str>, stored: &str| {
+        let host = openlens_event::host_of(url?)?;
+        if !env::covers(&pattern, &host) {
+            return None;
+        }
+        env::relabel_target(&p.rules, p.seeded, &host, stored)
+    };
+    let moves = {
+        let _guard = crate::privacy::MAINTENANCE
+            .lock()
+            .map_err(|_| failed("maintenance lock poisoned".into()))?;
+        crate::flush_now(state).map_err(failed)?;
+        openlens_storage::relabel::relabel(&state.data_dir, project, from, to, &target, req.dry_run)
+            .map_err(|e| failed(e.to_string()))?
+    };
+    let done = env::Relabelled::new(pattern, days, req.dry_run, moves);
+    if !req.dry_run && done.events > 0 {
+        state.boards.bump(project);
+    }
+    Ok(done)
+}
+
+/// `POST /api/projects/{id}/environments` with `{"host", "days",
+/// "dry_run"}`: re-label the past events of a host (#484), audited as
+/// `environments.relabel` unless it is a dry run.
+pub(crate) async fn api_relabel(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(project): Path<String>,
+    Json(req): Json<RelabelRequest>,
+) -> Response {
+    if !auth::has_bearer(&state, &headers) {
+        return bad(StatusCode::UNAUTHORIZED, "admin bearer token required");
+    }
+    let (st, id) = (state.clone(), project.clone());
+    let done = tokio::task::spawn_blocking(move || match st.meta.project(&id) {
+        Ok(Some(_)) => relabel(&st, &id, &req),
+        Ok(None) => Err((StatusCode::NOT_FOUND, "unknown project".into())),
+        Err(_) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "metadata store unavailable".into(),
+        )),
+    })
+    .await;
+    match done {
+        Ok(Ok(r)) => {
+            audit_relabel(&state, &headers, &project, &r);
+            Json(r).into_response()
+        }
+        Ok(Err((status, msg))) => bad(status, &msg),
+        Err(_) => bad(StatusCode::INTERNAL_SERVER_ERROR, "re-labelling failed"),
+    }
+}
+
+/// Record a re-labelling that wrote something (dry runs are not audited).
+pub(crate) fn audit_relabel(
+    state: &AppState,
+    headers: &HeaderMap,
+    project: &str,
+    r: &env::Relabelled,
+) {
+    if r.dry_run {
+        return;
+    }
+    let moves: Vec<String> = r
+        .moves
+        .iter()
+        .map(|m| format!("{}→{} {}", m.from, m.to, m.events))
+        .collect();
+    let detail = format!(
+        "{} last {} days: {} events ({})",
+        r.host,
+        r.days,
+        r.events,
+        moves.join(", ")
+    );
+    crate::privacy::audit(
+        state,
+        headers,
+        Some(project),
+        "environments.relabel",
+        &detail.chars().take(500).collect::<String>(),
+    );
 }
 
 /// The environments a selector lists for `project` (hidden ones left out,

@@ -35,6 +35,12 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "Hosts per environment, host rules, unclassified hosts, aliases, hidden environments and checks per environment.",
     ),
     (
+        "POST",
+        "/api/projects/{project}/environments",
+        "admin",
+        "Re-label a host's past events (`host`, `days` up to 90, `dry_run`) with the current host rules; returns the moves per old and new environment.",
+    ),
+    (
         "GET",
         "/api/projects/{project}/vitals",
         "read",

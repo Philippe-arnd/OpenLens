@@ -399,3 +399,130 @@ async fn a_monitored_environment_is_announced_only_at_the_notify_level() {
     // Production's own status is not touched by another environment.
     assert!(!incidents.iter().any(|i| i.0 == "down"), "{incidents:?}");
 }
+
+/// Environments stored per page address, from the Parquet files.
+async fn stored_by_url(h: &Harness) -> std::collections::BTreeMap<String, String> {
+    let r = h
+        .state
+        .query
+        .sql("default", "SELECT url, environment FROM events")
+        .await
+        .unwrap();
+    r.rows
+        .iter()
+        .map(|row| {
+            (
+                row["url"].as_str().unwrap_or_default().to_owned(),
+                row["environment"].as_str().unwrap_or_default().to_owned(),
+            )
+        })
+        .collect()
+}
+
+/// Re-labelling (#484): the dry run counts the moves and writes nothing;
+/// the rewrite moves only that host's events inside the window, is
+/// audited, and is refused past 90 days.
+#[tokio::test]
+async fn relabelling_moves_only_the_hosts_events_in_the_window() {
+    let h = harness();
+    let at = |host: &str, path: &str, uuid: u32, days_ago: i64| {
+        let mut e = page(host, uuid, None);
+        e["properties"]["$current_url"] = format!("https://{host}/{path}").into();
+        e["timestamp"] = (chrono::Utc::now() - chrono::Duration::days(days_ago))
+            .to_rfc3339()
+            .into();
+        e
+    };
+    // Stored as production before any rule said otherwise.
+    stored_before_upgrade(
+        &h,
+        vec![
+            at("kanban-test.example.com", "a", 1, 2),
+            at("kanban-test.example.com", "b", 2, 0),
+            at("kanban-test.example.com", "old", 3, 20),
+            at("shop.example.com", "c", 4, 2),
+        ],
+    );
+    patch(
+        &h,
+        serde_json::json!({ "environment_rule": { "host": "kanban-test.example.com", "env": "staging" } }),
+    )
+    .await;
+    let before = stored_by_url(&h).await;
+    let uri = "/api/projects/default/environments";
+
+    let body = serde_json::json!({ "host": "kanban-test.example.com", "days": 7, "dry_run": true });
+    let (status, dry) = api(&h, "POST", uri, Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{dry}");
+    assert_eq!(dry["events"], 2, "{dry}");
+    assert_eq!(
+        dry["moves"],
+        serde_json::json!([{ "from": "production", "to": "staging", "events": 2 }])
+    );
+    assert_eq!(stored_by_url(&h).await, before, "a dry run writes nothing");
+
+    let body = serde_json::json!({ "host": "kanban-test.example.com", "days": 7 });
+    let (status, done) = api(&h, "POST", uri, Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{done}");
+    assert_eq!(done["moves"], dry["moves"], "{done}");
+    let after = stored_by_url(&h).await;
+    assert_eq!(after["https://kanban-test.example.com/a"], "staging");
+    assert_eq!(after["https://kanban-test.example.com/b"], "staging");
+    assert_eq!(
+        after["https://kanban-test.example.com/old"], "production",
+        "outside the window"
+    );
+    assert_eq!(after["https://shop.example.com/c"], "production");
+    assert_eq!(after.len(), before.len());
+    let log = h.state.meta.audit_log(20).unwrap();
+    assert!(
+        log.iter()
+            .any(|e| e.3 == "environments.relabel" && e.4.contains("kanban-test")),
+        "{log:?}"
+    );
+
+    let body = serde_json::json!({ "host": "kanban-test.example.com", "days": 91 });
+    let (status, _) = api(&h, "POST", uri, Some(body)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+/// The settings tab previews the moves (a GET), then posts the rewrite.
+#[tokio::test]
+async fn the_settings_tab_previews_then_relabels() {
+    let h = harness();
+    stored_before_upgrade(&h, vec![page("kanban-test.example.com", 1, None)]);
+    patch(
+        &h,
+        serde_json::json!({ "environment_rule": { "host": "kanban-test.example.com", "env": "qa" } }),
+    )
+    .await;
+    let owner = login_cookie(&h).await;
+    let uri = "/p/default/settings/environments";
+    let html = body_text(
+        get(
+            &h,
+            &format!("{uri}?relabel=kanban-test.example.com&days=7"),
+            Some(&owner),
+            false,
+        )
+        .await,
+    )
+    .await;
+    assert!(html.contains("Re-label 1 event"), "{html}");
+    assert_eq!(
+        stored_by_url(&h).await["https://kanban-test.example.com/board"],
+        "production"
+    );
+    let status = post_form(
+        &h,
+        uri,
+        &owner,
+        "action=relabel&host=kanban-test.example.com&days=7",
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(
+        stored_by_url(&h).await["https://kanban-test.example.com/board"],
+        "qa"
+    );
+}
