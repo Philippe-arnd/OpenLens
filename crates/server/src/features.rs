@@ -20,77 +20,6 @@ async fn project(state: &AppState, id: &str) -> Option<openlens_meta::Project> {
         .ok()?
 }
 
-/// What the last 7 days say about the map: uses and users per feature,
-/// hits per success event, raw roles no role matches.
-async fn live(
-    state: &AppState,
-    project: &str,
-    map: Option<&openlens_featuremap::FeatureMap>,
-) -> openlens_ui::MapLive {
-    let mut out = openlens_ui::MapLive::default();
-    let Some(m) = map else { return out };
-    let since = (chrono::Utc::now() - chrono::Duration::days(7)).format("%Y-%m-%d");
-    let src = openlens_engine::source(Some(m));
-    let uses = format!(
-        "SELECT feature, count(*) AS n, count(DISTINCT distinct_id) AS u FROM {src} \
-         WHERE date >= '{since}' AND feature IS NOT NULL GROUP BY feature"
-    );
-    let roles = format!(
-        "SELECT DISTINCT role FROM raw_events WHERE date >= '{since}' AND role IS NOT NULL LIMIT 200"
-    );
-    // Bound, not spliced (#310).
-    let mut params = openlens_sqlgen::Params::new();
-    let successes: Vec<String> = m
-        .features
-        .iter()
-        .filter_map(|f| f.success.as_deref())
-        .filter_map(|s| params.bind(s).ok())
-        .collect();
-    let hits = (!successes.is_empty()).then(|| {
-        format!(
-            "SELECT event, count(*) AS n FROM events WHERE date >= '{since}' AND event IN ({}) GROUP BY event",
-            successes.join(", ")
-        )
-    });
-    let (a, b) = tokio::join!(
-        state.query.sql(project, &uses),
-        state.query.sql(project, &roles)
-    );
-    let int = |r: &serde_json::Map<String, serde_json::Value>, k: &str| {
-        r.get(k).and_then(serde_json::Value::as_i64).unwrap_or(0)
-    };
-    let txt = |r: &serde_json::Map<String, serde_json::Value>, k: &str| {
-        r.get(k).and_then(|v| v.as_str()).map(str::to_owned)
-    };
-    if let Ok(r) = a {
-        for row in &r.rows {
-            if let Some(f) = txt(row, "feature") {
-                out.uses.push((f, int(row, "n"), int(row, "u")));
-            }
-        }
-    }
-    if let Ok(r) = b {
-        for row in &r.rows {
-            if let Some(raw) = txt(row, "role")
-                && m.resolve_role(&raw).is_none()
-                && !m.roles.is_empty()
-            {
-                out.unmapped_roles.push(raw);
-            }
-        }
-    }
-    if let Some(sql) = hits
-        && let Ok(r) = state.query.with_params(&params).sql(project, &sql).await
-    {
-        for row in &r.rows {
-            if let Some(e) = txt(row, "event") {
-                out.success_hits.push((e, int(row, "n")));
-            }
-        }
-    }
-    out
-}
-
 #[derive(Deserialize, Default)]
 pub(crate) struct PageQuery {
     #[serde(default)]
@@ -124,7 +53,7 @@ pub(crate) async fn page(
     };
     let yaml = shown.as_ref().map_or_else(String::new, |(_, y)| y.clone());
     let parsed = openlens_featuremap::parse(&yaml);
-    let live = live(&state, &p.id, parsed.map.as_ref()).await;
+    let live = openlens_engine::reads::map_live(&state.query, &p.id, parsed.map.as_ref()).await;
     let history = state.meta.feature_map_versions(&p.id).unwrap_or_default();
     let health = match parsed.map.as_ref() {
         Some(m) => {
@@ -242,7 +171,7 @@ pub(crate) async fn edit(
     let stored = current
         .as_ref()
         .map_or_else(String::new, |(_, y)| y.clone());
-    let live = live(&state, &p.id, parsed.map.as_ref()).await;
+    let live = openlens_engine::reads::map_live(&state.query, &p.id, parsed.map.as_ref()).await;
     let history = state.meta.feature_map_versions(&p.id).unwrap_or_default();
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
