@@ -128,10 +128,12 @@ pub(super) async fn import(
             events.extend(n.events);
         }
     }
+    crate::identity::ensure(&state, &p.id);
     let st = state.clone();
     let pid = p.id.clone();
     let n_persons = persons.len();
     let stored = tokio::task::spawn_blocking(move || -> Result<(), String> {
+        crate::identity::record(&st, &pid, &events)?;
         for (id, role, account, plan, created) in persons {
             let at = created
                 .as_deref()

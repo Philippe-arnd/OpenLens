@@ -65,6 +65,8 @@ mod access;
 mod collab;
 mod config;
 mod forget;
+mod identity;
+pub use identity::{Identified, IdentityTables, PersonIdentity};
 /// Read-only connections next to the writer (#344).
 mod projects;
 mod totp;
@@ -105,6 +107,25 @@ CREATE TABLE IF NOT EXISTS persons (
   first_seen TEXT NOT NULL,
   last_seen TEXT NOT NULL,
   PRIMARY KEY (project, distinct_id)
+);
+CREATE TABLE IF NOT EXISTS person_aliases (
+  project TEXT NOT NULL,
+  anon TEXT NOT NULL,
+  person TEXT NOT NULL,
+  PRIMARY KEY (project, anon)
+);
+CREATE INDEX IF NOT EXISTS person_aliases_person ON person_aliases (project, person);
+CREATE TABLE IF NOT EXISTS person_ids (
+  project TEXT NOT NULL,
+  person TEXT NOT NULL,
+  id INTEGER NOT NULL,
+  first_seen INTEGER NOT NULL,
+  internal INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (project, person)
+);
+CREATE TABLE IF NOT EXISTS person_id_seq (
+  project TEXT PRIMARY KEY,
+  last INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS role_history (
   project TEXT NOT NULL,

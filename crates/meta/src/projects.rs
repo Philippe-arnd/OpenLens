@@ -149,6 +149,9 @@ impl Meta {
             let tx = c.unchecked_transaction()?;
             for table in [
                 "persons",
+                "person_aliases",
+                "person_ids",
+                "person_id_seq",
                 "role_history",
                 "feature_maps",
                 "imports",

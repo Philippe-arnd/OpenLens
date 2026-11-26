@@ -29,6 +29,11 @@ async fn a_forgotten_person_is_gone_everywhere_and_stays_gone() {
         post_form(&h, "/p/default/people/ana/forget", &owner, "confirm=bo").await,
         StatusCode::BAD_REQUEST
     );
+    // The identity recorded at capture (#450) holds the link until erasure.
+    assert_eq!(
+        h.state.meta.aliases_of("default", "ana").unwrap(),
+        vec!["anon-1".to_owned()]
+    );
     assert_eq!(
         post_form(&h, "/p/default/people/ana/forget", &owner, "confirm=ana").await,
         StatusCode::OK
@@ -51,6 +56,25 @@ async fn a_forgotten_person_is_gone_everywhere_and_stays_gone() {
         "others untouched"
     );
     assert!(h.state.meta.person("default", "ana").unwrap().is_none());
+    assert!(
+        h.state
+            .meta
+            .aliases_of("default", "ana")
+            .unwrap()
+            .is_empty()
+    );
+    openlens_server::identity::backfill(&h.state, "default")
+        .await
+        .unwrap();
+    let kept = h.state.meta.identities("default").unwrap().unwrap();
+    assert!(
+        kept.persons.iter().all(|p| p.person != "ana")
+            && kept
+                .aliases
+                .iter()
+                .all(|(a, p)| a != "anon-1" && p != "ana"),
+        "{kept:?}"
+    );
     // Anything they send later is dropped.
     let again =
         serde_json::json!({"key": h.key, "batch": [{"event": "note_saved", "distinct_id": "ana"}]})

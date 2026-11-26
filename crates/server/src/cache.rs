@@ -150,6 +150,8 @@ pub struct Caches {
     pub(crate) env_rules: Bounded<String, std::sync::Arc<crate::environments::ProjectEnv>>,
     /// Projects whose environment upgrade seed is running now.
     pub(crate) env_seeding: Bounded<String, ()>,
+    /// Projects whose identity backfill (#450) ran or is running.
+    pub(crate) identity_checked: Bounded<String, ()>,
 }
 
 impl Default for Caches {
@@ -171,6 +173,7 @@ impl Default for Caches {
             login_emails: Bounded::new(10_000, 60 * MIN),
             env_rules: Bounded::new(10_000, MIN),
             env_seeding: Bounded::new(10_000, 10 * MIN),
+            identity_checked: Bounded::new(10_000, 10 * MIN),
         }
     }
 }

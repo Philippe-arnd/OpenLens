@@ -22,6 +22,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- **Identity kept at ingestion** (#450, D-035): each `$identify` records which anonymous id belongs to which user, and gives every person a stable integer id, in the metadata store. Boards no longer re-read every `$identify` to merge visitors with their users; the numbers are the same. On upgrade, existing data is read once in the background, and until then nothing changes. Forgetting a person also removes these records.
 - **A host nothing classifies is `unknown`, not production** (#410, D-034): it is kept out of production numbers until a rule says what it is. On upgrade, every host that sent production events in the last 30 days keeps a `production` rule. An environment set in the app (`init({ environment })`) still wins.
 - **Password sign-in slows down instead of locking** (#428): after 3 failures in 15 minutes, each try for that email waits 1 s, 2 s, 4 s… up to 30 s, one at a time, so nobody can lock someone else out. One client address gets at most 30 failures per 15 minutes. Wrong current passwords on *My profile* count the same and are audited. The token holder can no longer create their account on an existing member's email.
 - **Journal is the third M2 reference app** (#18): the docs and the roadmap describe it as wired outside this repo, with its `verify` result recorded by hand on #18 rather than replayed in CI.

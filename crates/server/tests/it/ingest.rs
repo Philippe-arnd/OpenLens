@@ -97,3 +97,115 @@ async fn sdk_is_served_as_cacheable_javascript() {
         .unwrap();
     assert!(body.len() > 10_000);
 }
+
+/// People counted through `events`, by the server's engine.
+async fn users(q: &openlens_query::QueryEngine) -> i64 {
+    q.sql(
+        "default",
+        "SELECT count(DISTINCT distinct_id) AS n FROM events",
+    )
+    .await
+    .unwrap()
+    .rows[0]["n"]
+        .as_i64()
+        .unwrap()
+}
+
+/// #450: a `$identify` received after anonymous events still gives them to
+/// the user, through the identity recorded at capture.
+#[tokio::test]
+async fn an_identify_after_anonymous_events_counts_the_person_once() {
+    let h = harness();
+    let send = |batch: serde_json::Value| {
+        let body = serde_json::json!({ "key": h.key, "batch": batch }).to_string();
+        post(&h, "/capture", body.into_bytes(), false)
+    };
+    let (s, _) = send(serde_json::json!([
+        {"event": "$pageview", "distinct_id": "anon-1", "properties": {"$pathname": "/"}},
+        {"event": "$pageview", "distinct_id": "anon-1", "properties": {"$pathname": "/pricing"}}
+    ]))
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    let (s, _) = send(serde_json::json!([
+        {"event": "$identify", "distinct_id": "alice", "properties": {"$anon_distinct_id": "anon-1"}},
+        {"event": "note_saved", "distinct_id": "alice"}
+    ]))
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    openlens_server::flush_now(&h.state).unwrap();
+    openlens_server::identity::backfill(&h.state, "default")
+        .await
+        .unwrap();
+
+    let kept = h.state.meta.identities("default").unwrap().unwrap();
+    assert_eq!(kept.aliases, vec![("anon-1".into(), "alice".into())]);
+    assert_eq!(kept.persons.len(), 1);
+    assert_eq!(users(&h.state.query).await, 1);
+}
+
+/// #450: data stored before identity was kept at ingestion (no tables) is
+/// backfilled once from the files, with the same results.
+#[tokio::test]
+async fn identity_is_backfilled_from_existing_events_with_the_same_results() {
+    let h = harness();
+    let at = chrono::Utc::now();
+    let ev = |n: usize, event: &str, who: &str, props: &str| openlens_event::Event {
+        uuid: format!("old-{n}"),
+        project: "default".into(),
+        event: event.into(),
+        distinct_id: who.into(),
+        session_id: None,
+        timestamp: at - chrono::Duration::minutes(10 - n as i64),
+        received_at: at,
+        url: None,
+        path: Some("/".into()),
+        feature: None,
+        role: None,
+        account: None,
+        plan: None,
+        environment: "production".into(),
+        release: None,
+        flags: None,
+        properties: props.into(),
+    };
+    // Written straight to storage, as an older release left them.
+    {
+        let mut w = h.state.writer.lock().unwrap();
+        w.append(&[
+            ev(0, "$pageview", "anon-1", "{}"),
+            ev(1, "$identify", "alice", r#"{"$anon_distinct_id":"anon-1"}"#),
+            ev(2, "$pageview", "anon-2", "{}"),
+            ev(
+                3,
+                "$identify",
+                "bob",
+                r#"{"$anon_distinct_id":"anon-2","$internal":true}"#,
+            ),
+            ev(4, "$pageview", "anon-3", "{}"),
+        ])
+        .unwrap();
+        w.flush().unwrap();
+    }
+    assert!(h.state.meta.identities("default").unwrap().is_none());
+    let files = openlens_query::QueryEngine::new(&h.state.data_dir, Default::default());
+    let persons = "SELECT person, first_seen, internal FROM persons ORDER BY person";
+    let before = files.sql("default", persons).await.unwrap().rows;
+
+    openlens_server::identity::backfill(&h.state, "default")
+        .await
+        .unwrap();
+    let kept = h.state.meta.identities("default").unwrap().unwrap();
+    assert_eq!(kept.aliases.len(), 2);
+    assert_eq!(kept.persons.len(), before.len());
+    let ready = openlens_query::QueryEngine::new(&h.state.data_dir, Default::default())
+        .with_identity(openlens_server::identity::source(h.state.meta.clone()));
+    assert_eq!(users(&ready).await, users(&files).await);
+    assert_eq!(ready.sql("default", persons).await.unwrap().rows, before);
+    assert_eq!(ready.identity_scans(), 0, "the files are not scanned again");
+    // Running it again changes nothing.
+    openlens_server::identity::backfill(&h.state, "default")
+        .await
+        .unwrap();
+    assert_eq!(h.state.meta.identities("default").unwrap().unwrap(), kept);
+}

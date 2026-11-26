@@ -643,3 +643,81 @@ async fn page_rollups_match_the_raw_clicks_and_scrolls() {
         r#"[{"depth":7,"n":1},{"depth":10,"n":1}]"#
     );
 }
+
+/// #450: with identity kept at ingestion, queries read it instead of
+/// scanning every `$identify`, and give the same answers as the files.
+#[tokio::test]
+async fn identity_kept_at_ingestion_replaces_the_scan_with_the_same_answers() {
+    use openlens_query::{IdentityRows, IdentitySource};
+    use std::sync::{Arc, Mutex};
+
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let mut rows = Vec::new();
+    for (i, id) in ["anon-1", "anon-1", "alice", "anon-2"].iter().enumerate() {
+        let mut e = ev("a", "user", 0);
+        e.uuid = format!("e-{i}");
+        e.distinct_id = (*id).into();
+        rows.push(e);
+    }
+    let mut identify = ev("a", "user", 0);
+    identify.uuid = "identify".into();
+    identify.event = "$identify".into();
+    identify.distinct_id = "alice".into();
+    identify.properties = r#"{"$anon_distinct_id":"anon-1","$internal":true}"#.into();
+    rows.push(identify);
+    w.append(&rows).unwrap();
+    w.flush().unwrap();
+
+    let users = |q: QueryEngine| async move {
+        let r = q
+            .sql(
+                "a",
+                "SELECT count(DISTINCT distinct_id) AS n, \
+                 count(*) FILTER (WHERE is_internal(distinct_id)) AS internal FROM events",
+            )
+            .await
+            .unwrap();
+        (r.rows[0]["n"].as_i64(), r.rows[0]["internal"].as_i64())
+    };
+    let files = QueryEngine::new(dir.path(), Limits::default());
+    let expected = users(files.clone()).await;
+    assert!(files.identity_scans() > 0);
+
+    // The source is not ready yet (backfill running): the files are read.
+    let kept: Arc<Mutex<Option<IdentityRows>>> = Arc::default();
+    let k = kept.clone();
+    let source = IdentitySource(Arc::new(move |_: &str| Ok(k.lock().unwrap().clone())));
+    let waiting = QueryEngine::new(dir.path(), Limits::default()).with_identity(source.clone());
+    assert_eq!(users(waiting.clone()).await, expected);
+    assert!(waiting.identity_scans() > 0);
+
+    // Ready: the same answers, and no scan at all.
+    *kept.lock().unwrap() = Some(files.identity_from_files("a").await.unwrap());
+    let ready = QueryEngine::new(dir.path(), Limits::default()).with_identity(source);
+    assert_eq!(users(ready.clone()).await, expected);
+    let persons = ready
+        .sql("a", "SELECT person, first_seen, internal FROM persons")
+        .await
+        .unwrap();
+    let before = files
+        .sql("a", "SELECT person, first_seen, internal FROM persons")
+        .await
+        .unwrap();
+    assert_eq!(persons.rows, before.rows);
+    assert_eq!(ready.identity_scans(), 0);
+
+    // What the source says wins over the files: an alias recorded at
+    // ingestion counts even before its `$identify` reaches a file.
+    kept.lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .aliases
+        .push(("anon-2".into(), "alice".into()));
+    let later = QueryEngine::new(dir.path(), Limits::default()).with_identity(IdentitySource(
+        Arc::new(move |_: &str| Ok(kept.lock().unwrap().clone())),
+    ));
+    let (n, _) = users(later.clone()).await;
+    assert!(n < expected.0, "{n:?} vs {:?}", expected.0);
+}
