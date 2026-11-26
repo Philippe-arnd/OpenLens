@@ -279,7 +279,8 @@ pub struct AskView<'a> {
     pub admin: bool,
 }
 
-/// Ask OpenLens (#244): the conversation and the question box.
+/// Ask OpenLens (#244, #549): when no model is set up, one empty state;
+/// else each answer as a card, then the question as a form card.
 pub fn ask(v: &AskView<'_>) -> Markup {
     let p = v.p;
     let n = v.turns.len();
@@ -293,13 +294,14 @@ pub fn ask(v: &AskView<'_>) -> Markup {
             } }
             @if let Some(e) = v.error { p.alert role="alert" { (e) } }
             @match &v.on {
-                None => section.card.wide {
-                    p { "Ask is off. An admin turns it on in " a href="/settings/ai" { "Settings → AI" } ": an Anthropic key, or any OpenAI-compatible server (a LiteLLM proxy, OpenRouter, a local Ollama: then no data leaves your network)." }
-                },
+                None => (crate::live_screens::ask_off(v.admin)),
                 Some(on) => {
                     @for (i, t) in v.turns.iter().enumerate() {
-                        section.card.wide.turn id=[(i + 1 == n).then_some("last")] {
-                            p.question { strong { (t.question) } span.muted.small { " · " (t.at.get(..16).unwrap_or(&t.at).replace('T', " ")) } }
+                        article.card.answer-card id=[(i + 1 == n).then_some("last")] {
+                            div.q {
+                                h2 { (t.question) }
+                                span.muted.small { (t.at.get(..16).unwrap_or(&t.at).replace('T', " ")) }
+                            }
                             div.answer {
                                 @for para in t.answer.split("\n\n") {
                                     @let lines: Vec<&str> = para.lines().collect();
@@ -317,7 +319,7 @@ pub fn ask(v: &AskView<'_>) -> Markup {
                             }
                             @if let Some((token, desc)) = &t.pending {
                                 div.pending {
-                                    p { strong { "Proposed change" } }
+                                    p { span.tag.tone-warn { (icon("bolt")) "Proposed change" } }
                                     pre.diff { ins { "+ " (desc) } }
                                     @if v.admin {
                                         form.inline method="post" action={ "/p/" (p.id) "/ask/confirm" } {
@@ -328,32 +330,38 @@ pub fn ask(v: &AskView<'_>) -> Markup {
                                     } @else { p.muted.small { "An admin can apply it." } }
                                 }
                             }
-                            @if !t.evidence.is_empty() {
-                                details { summary.small { "Evidence (" (t.evidence.len()) ")" }
-                                    ul.plain-list.small { @for (label, e) in &t.evidence {
-                                        li { @if e.starts_with('/') { a href=(e) { (label) } } @else { (label) ": " code { (e) } } }
-                                    } }
+                            div.answer-foot {
+                                @if !t.evidence.is_empty() {
+                                    details { summary.small { "Evidence (" (t.evidence.len()) ")" }
+                                        ul.plain-list.small { @for (label, e) in &t.evidence {
+                                            li { @if e.starts_with('/') { a href=(e) { (label) } } @else { (label) ": " code { (e) } } }
+                                        } }
+                                    }
                                 }
+                                span.muted.small { (t.tokens) " tokens" @if t.cached > 0 { ", " (t.cached) " from the cache" } }
                             }
-                            p.muted.small { (t.tokens) " tokens" @if t.cached > 0 { ", " (t.cached) " from the cache" } }
                         }
                     }
-                    section.card.wide {
-                        form.sqlbox method="post" action={ "/p/" (p.id) "/ask" } {
-                            label for="ask-q" { "Your question" @if let Some(f) = v.from { span.muted.small { " · about " code { (f) } } } }
-                            textarea #ask-q name="question" rows="3" required maxlength="2000" placeholder="Why did writing drop in the last release?" {}
-                            @if let Some(f) = v.from { input type="hidden" name="from" value=(f); }
-                            div.actions {
-                                label.check { input type="checkbox" name="deep"; " Investigate deeply (main model)" }
-                                button type="submit" { "Ask" }
+                    form.card.form-card.ask-form method="post" action={ "/p/" (p.id) "/ask" } aria-label="Ask a question" {
+                        div.form-grid {
+                            label.field.wide for="ask-q" {
+                                span { "Your question" @if let Some(f) = v.from { span.muted { " · about " code { (f) } } } }
+                                textarea #ask-q name="question" rows="3" required maxlength="2000" placeholder="Why did writing drop in the last release?" {}
+                                small { "The model sees the project's aggregates and definitions, never event properties, replays or emails (unless an admin allows person-level detail). Your conversation is kept 30 days." }
                             }
                         }
-                        p.muted.small {
-                            (on) " · today " (compact(v.used)) " of " (compact(v.budget)) " tokens · "
-                            a href={ "/p/" (p.id) "/ask/export.md" } { "Export" }
-                            @if v.admin { " · " a href={ "/p/" (p.id) "/ask/sent" } { "What is sent" } }
+                        @if let Some(f) = v.from { input type="hidden" name="from" value=(f); }
+                        label.check { input type="checkbox" name="deep"; " Investigate deeply (main model)" }
+                        div.form-foot {
+                            button.btn.primary type="submit" { "Ask" }
+                            p {
+                                (on) " · today " (compact(v.used)) " of " (compact(v.budget)) " tokens · "
+                                a href={ "/p/" (p.id) "/ask/export.md" } { "Export" }
+                                @if v.admin { " · " a href={ "/p/" (p.id) "/ask/sent" } { "What is sent" } }
+                            }
                         }
-                        p.muted.small { "The model sees the project's aggregates and definitions, never event properties, replays or emails (unless an admin allows person-level detail). Your conversation is kept 30 days." }
+                    }
+                    section.card.ask-more aria-label="Conversation and privacy" {
                         form.inline method="post" action={ "/p/" (p.id) "/ask/clear" } { button.ghost type="submit" { "Forget this conversation" } }
                         @if v.admin {
                             form.inline method="post" action={ "/p/" (p.id) "/ask/privacy" } {

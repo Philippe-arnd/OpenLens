@@ -312,30 +312,18 @@ pub fn timeline(p: &ProjectInfo<'_>, marks: &[Mark], me: &str, admin: bool, toda
                 h1 { "Timeline" }
                 p.muted { "What changed, last 90 days: releases, flag and survey changes, feature map pushes, alerts, and notes. Each day with a change is marked on the active users chart." }
             } }
-            section.card.wide {
-                form.settings method="post" action={ "/p/" (p.id) "/timeline" } {
-                    label { "Day " input type="date" name="day" value=(today) required; }
-                    label.wide { "Note " input type="text" name="body" required maxlength="500" placeholder="Pricing page redesign shipped"; }
-                    button type="submit" { "Add" }
+            form.card.form-card method="post" action={ "/p/" (p.id) "/timeline" } aria-labelledby="note-h" {
+                div.section-head {
+                    h2 #note-h { (icon("idea")) "Add a note" }
+                    p { "Anyone signed in can add one. It shows here and on the active users chart." }
                 }
-            }
-            section.card.wide {
-                @if marks.is_empty() { p.muted { "Nothing yet." } }
-                @else {
-                    ol.timeline { @for m in marks {
-                        li class={ "tl " (m.kind) } {
-                            span.tl-day.mono { (m.day) }
-                            span.tl-icon { (icon(mark_icon(&m.kind))) }
-                            span.tl-text { (m.text) @if let Some(b) = &m.by { span.muted.small { " — " (b) } } }
-                            @if let (Some(id), Some(a)) = (m.id, &m.author_id) {
-                                @if admin || a == me {
-                                    form.inline method="post" action={ "/p/" (p.id) "/timeline/" (id) "/delete" } { button.ghost type="submit" aria-label="Delete this note" { "Delete" } }
-                                }
-                            }
-                        }
-                    } }
+                div.form-grid {
+                    label.field { "Day" input type="date" name="day" value=(today) required; }
+                    label.field.wide { "Note" input type="text" name="body" required maxlength="500" placeholder="Pricing page redesign shipped"; small { "Up to 500 characters." } }
                 }
+                div.form-foot { button.btn.primary type="submit" { "Add the note" } }
             }
+            (crate::live_screens::timeline_table(p.id, marks, me, admin))
         },
     )
 }

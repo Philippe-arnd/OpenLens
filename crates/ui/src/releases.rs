@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::components::detail_url;
+use crate::tables::Col;
 use openlens_engine::delivery::Delivery;
 use openlens_engine::deploys::Status;
 use openlens_engine::releases::{Releases, State};
@@ -31,23 +32,27 @@ fn duration(secs: i64) -> String {
     }
 }
 
-fn state_class(s: State) -> &'static str {
-    match s {
-        State::Live => "status good",
-        State::RollingOut => "status warn",
-        State::RolledBack => "status bad",
-        State::Superseded => "status muted",
-        State::Failed => "status bad",
-        State::Deploying => "status warn",
-    }
+/// A state as a tag: its tone, and an icon besides the colour when it is
+/// bad.
+fn state_tag(s: State) -> Markup {
+    let (class, glyph) = match s {
+        State::Live => ("tag tone-good", None),
+        State::RollingOut | State::Deploying => ("tag tone-warn", None),
+        State::RolledBack | State::Failed => ("tag tone-bad", Some("alert")),
+        State::Superseded => ("tag", None),
+    };
+    html! { span class=(class) { @if let Some(g) = glyph { (icon(g)) } (s.label()) } }
 }
 
-fn verdict_class(v: Verdict) -> &'static str {
-    match v {
-        Verdict::Healthy => "status good",
-        Verdict::Regressed => "status bad",
-        Verdict::Inconclusive => "status muted",
-    }
+/// A verdict as a tag: the word, a tone, and an icon so that the colour
+/// is never the only signal (down for regressed, a tick for healthy).
+fn verdict_tag(v: Verdict) -> Markup {
+    let (class, glyph) = match v {
+        Verdict::Healthy => ("tag tone-good", Some("task")),
+        Verdict::Regressed => ("tag tone-bad", Some("down")),
+        Verdict::Inconclusive => ("tag", None),
+    };
+    html! { span class=(class) { @if let Some(g) = glyph { (icon(g)) } (v.label()) } }
 }
 
 fn deploy_label(s: Status) -> &'static str {
@@ -95,89 +100,121 @@ fn hook_card(p: &ProjectInfo<'_>, r: &Releases, h: &HookView<'_>) -> Markup {
     }
 }
 
-/// Releases (#500): `releases.list`, as a table, the delivery metrics
-/// (`releases.delivery`, #523) when they could be computed, and the
-/// deploy hook.
+/// Releases (#500, #549): `releases.list`, one row per release with its
+/// users compared with the release before it in the environment (as on
+/// the board: arrow, sign and colour) and its verdict as a tag, the
+/// delivery metrics (`releases.delivery`, #523) when they could be
+/// computed, and the deploy hook.
 pub fn releases(
     p: &ProjectInfo<'_>,
     r: &Releases,
     delivery: Option<&Delivery>,
     hook: &HookView<'_>,
 ) -> Markup {
+    // Newest first within an environment: the one before is the next row
+    // of the same environment.
+    let before = |i: usize| {
+        let x = r.releases.get(i)?;
+        r.releases
+            .iter()
+            .skip(i + 1)
+            .find(|y| y.environment == x.environment)
+    };
     layout(
         "Releases",
         Some(p),
         html! {
             div.heading { div {
                 h1 { "Releases" }
-                p.muted { "Last " (r.days) " days, times in " (r.timezone) ". A release's share is its part of the environment's distinct users per day. "
-                    strong { "Live" } ": at least 95 % on the latest day. "
-                    strong { "Rolling out" } ": below that, not overtaken. "
-                    strong { "Superseded" } ": a newer release took the majority. "
-                    strong { "Rolled back" } ": it had the majority, then an older release took it back. "
-                    strong { "Failed" } " and " strong { "deploying" } ": a deploy the hook reported, with no traffic. "
-                    "Time in staging runs from the build's first event in staging to its first in production. "
-                    strong { "Verdict" } ": once a release has 30 sessions and 8 users, or is a day old, it is compared with the release before it in the environment (errors, new error groups, bounce, tasks, Web Vitals, features with a success event, guardrails): "
-                    strong { "healthy" } " when nothing got worse, " strong { "regressed" } " when something did, " strong { "inconclusive" } " with too little traffic or nothing to compare with. Production is judged unless one environment is picked." }
+                p.muted { "Last " (r.days) " days, times in " (r.timezone) ". Each release is compared with the one before it in its environment; production is judged unless one environment is picked." }
             } }
-            section.card.wide {
-                @if r.releases.is_empty() {
-                    p.muted { "No release seen yet. Pass a release to the SDK, or let the browser SDK name builds on its own (D-044)." }
-                } @else {
-                    div.table-scroll { table.plain {
-                        thead { tr {
-                            th scope="col" { "Release" } th scope="col" { "Environment" } th scope="col" { "State" }
-                            th.num scope="col" { "Share" } th scope="col" { "First seen" } th scope="col" { "Last seen" }
-                            th.num scope="col" { "Users" } th scope="col" { "Verdict" } th scope="col" { "Deployed" } th scope="col" { "Time in staging" } th scope="col" { "Board" }
-                        } }
-                        tbody { @for x in &r.releases {
-                            tr {
-                                td { code { (x.release) } }
-                                td { (x.environment) }
-                                td { span class=(state_class(x.state)) { (x.state.label()) } }
-                                td.num { (pct(x.share)) }
-                                td.small.mono { (x.first_seen) }
-                                td.small.mono { (x.last_seen) }
-                                td.num { (x.users) }
-                                td.small {
-                                    @match x.verdict {
-                                        Some(v) => { span class=(verdict_class(v)) { (v.label()) } }
-                                        None if x.reasons.iter().any(|r| r.starts_with("Waiting")) => { span.muted { "waiting" } }
-                                        None => { span.muted { "—" } }
-                                    }
-                                    @for reason in x.reasons.iter().take(3) {
-                                        br; span.muted { (reason) }
-                                    }
-                                }
-                                td.small {
-                                    @match (&x.deployed_at, x.deploy) {
-                                        (Some(t), Some(Status::Succeeded) | None) => { span.mono { (t) } }
-                                        (Some(t), Some(s)) => { span.mono { (t) } span.muted { ", then " (deploy_label(s)) } }
-                                        (None, Some(s)) => { span.muted { (deploy_label(s)) } }
-                                        (None, None) => { span.muted { "—" } }
-                                    }
-                                }
-                                td.small {
-                                    @match (x.staging_secs, &x.staged_as) {
-                                        (Some(s), Some(n)) if *n != x.release => { (duration(s)) span.muted { " as " code { (n) } } }
-                                        (Some(s), _) => { (duration(s)) }
-                                        _ => { span.muted { "—" } }
-                                    }
-                                }
-                                td.small {
-                                    @if x.users > 0 {
-                                        a href=(detail_url(p.id, "", &Filters {
-                                            environment: x.environment.clone(),
-                                            release: Some(x.release.clone()),
-                                            ..Filters::default()
-                                        })) { "Board" }
-                                    } @else {
-                                        span.muted { "—" }
+            @if r.releases.is_empty() {
+                section.card.empty aria-labelledby="rel-empty-h" {
+                    (crate::tables::empty_art())
+                    div {
+                        h2 #rel-empty-h { "No release seen yet" }
+                        p { "Pass a release to the SDK, or let the browser SDK name builds on its own (D-044). Deploys reported by the hook below show up here too." }
+                    }
+                }
+            } @else {
+                (crate::tables::TableCard {
+                    label: "Releases",
+                    head: html! {},
+                    cols: &[
+                        Col::Shown("Release"), Col::Shown("Environment"), Col::Shown("State"), Col::Num("Share"),
+                        Col::Num("Users"), Col::Shown("Verdict"), Col::Shown("First seen"), Col::Shown("Last seen"),
+                        Col::Shown("Deployed"), Col::Shown("Time in staging"), Col::Shown("Board"),
+                    ],
+                    body: html! { @for (i, x) in r.releases.iter().enumerate() {
+                        tr {
+                            th scope="row" { code { (x.release) } }
+                            td { (x.environment) }
+                            td { (state_tag(x.state)) }
+                            td.num { (pct(x.share)) }
+                            td.num {
+                                (x.users)
+                                @if let Some(prev) = before(i) {
+                                    @if let Some(d) = crate::board::delta(x.users as f64, prev.users as f64, true, false) {
+                                        br; (crate::board::delta_mark(&d)) span.muted.small { " vs " (prev.release) }
                                     }
                                 }
                             }
-                        } }
-                    } }
+                            td.small {
+                                @match x.verdict {
+                                    Some(v) => (verdict_tag(v)),
+                                    None if x.reasons.iter().any(|r| r.starts_with("Waiting")) => span.muted { "waiting" },
+                                    None => span.muted { "—" },
+                                }
+                                @if !x.reasons.is_empty() {
+                                    ul.reasons { @for reason in x.reasons.iter().take(3) { li { (reason) } } }
+                                }
+                            }
+                            td.when.muted { (x.first_seen) }
+                            td.when.muted { (x.last_seen) }
+                            td.small {
+                                @match (&x.deployed_at, x.deploy) {
+                                    (Some(t), Some(Status::Succeeded) | None) => { span.mono { (t) } }
+                                    (Some(t), Some(s)) => { span.mono { (t) } span.muted { ", then " (deploy_label(s)) } }
+                                    (None, Some(s)) => { span.muted { (deploy_label(s)) } }
+                                    (None, None) => { span.muted { "—" } }
+                                }
+                            }
+                            td.small {
+                                @match (x.staging_secs, &x.staged_as) {
+                                    (Some(s), Some(n)) if *n != x.release => { (duration(s)) span.muted { " as " code { (n) } } }
+                                    (Some(s), _) => { (duration(s)) }
+                                    _ => { span.muted { "—" } }
+                                }
+                            }
+                            td {
+                                @if x.users > 0 {
+                                    a href=(detail_url(p.id, "", &Filters {
+                                        environment: x.environment.clone(),
+                                        release: Some(x.release.clone()),
+                                        ..Filters::default()
+                                    })) title={ "Focus board on " (x.release) } { "Board →" }
+                                } @else {
+                                    span.muted { "—" }
+                                }
+                            }
+                        }
+                    } },
+                    foot: html! {},
+                }
+                .render())
+            }
+            details.card.disclose {
+                summary { h2 { "How releases are judged" } (icon("chev")) }
+                div.body {
+                    p.muted.small { "A release's share is its part of the environment's distinct users per day. "
+                        strong { "Live" } ": at least 95 % on the latest day. "
+                        strong { "Rolling out" } ": below that, not overtaken. "
+                        strong { "Superseded" } ": a newer release took the majority. "
+                        strong { "Rolled back" } ": it had the majority, then an older release took it back. "
+                        strong { "Failed" } " and " strong { "deploying" } ": a deploy the hook reported, with no traffic. "
+                        "Time in staging runs from the build's first event in staging to its first in production. " }
+                    p.muted.small { strong { "Verdict" } ": once a release has 30 sessions and 8 users, or is a day old, it is compared with the release before it in the environment (errors, new error groups, bounce, tasks, Web Vitals, features with a success event, guardrails): "
+                        strong { "healthy" } " when nothing got worse, " strong { "regressed" } " when something did, " strong { "inconclusive" } " with too little traffic or nothing to compare with. Production is judged unless one environment is picked. Users are compared with the release before it in the same environment." }
                 }
             }
             @if let Some(d) = delivery {
@@ -252,5 +289,72 @@ mod tests {
         assert!(html.contains("Make the URL"));
         assert!(html.contains("regressed"), "the verdict");
         assert!(html.contains("TypeError &lt;x&gt;"), "its reason, escaped");
+    }
+
+    #[test]
+    fn a_regressed_release_is_marked_beyond_colour_and_compared_with_the_one_before() {
+        let p = ProjectInfo {
+            id: "demo",
+            name: "Demo",
+            key: "k",
+        };
+        let old = Release {
+            release: "v1".into(),
+            environment: "production".into(),
+            state: State::Superseded,
+            share: 0.0,
+            first_seen: "2026-11-10 10:00".into(),
+            last_seen: "2026-11-20 10:00".into(),
+            users: 10,
+            events: 50,
+            staging_secs: None,
+            staged_as: None,
+            deployed_at: None,
+            deploy: None,
+            verdict: Some(Verdict::Healthy),
+            reasons: Vec::new(),
+        };
+        let new = Release {
+            release: "v2".into(),
+            state: State::Live,
+            share: 1.0,
+            users: 20,
+            verdict: Some(Verdict::Regressed),
+            reasons: vec!["Bounce went up".into()],
+            ..old.clone()
+        };
+        let r = Releases {
+            days: 90,
+            timezone: "UTC".into(),
+            measure: "distinct users per day",
+            releases: vec![new, old],
+            deploys: Vec::new(),
+            deploy_hook: None,
+        };
+        let hook = HookView {
+            admin: false,
+            new_url: None,
+        };
+        let html = releases(&p, &r, None, &hook).into_string();
+        let row = |name: &str| {
+            html.split("<tr>")
+                .find(|r| r.contains(&format!("<code>{name}</code>")))
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let (v2, v1) = (row("v2"), row("v1"));
+        // Without colour, the regressed verdict still shows: an icon and the word.
+        let regressed = verdict_tag(Verdict::Regressed).into_string();
+        assert!(v2.contains(&regressed), "{v2}");
+        assert!(regressed.contains("<svg") && regressed.contains("regressed"));
+        assert!(!v1.contains(&regressed), "{v1}");
+        // The newer release is compared with the one before in its
+        // environment; the oldest has nothing to compare with.
+        assert!(
+            v2.contains("class=\"delta ") && v2.contains(" vs v1"),
+            "{v2}"
+        );
+        assert!(!v1.contains("class=\"delta "), "{v1}");
+        assert!(!html.contains("style=") && !html.contains("<script"));
     }
 }
