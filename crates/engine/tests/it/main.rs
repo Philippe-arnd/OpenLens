@@ -14,6 +14,7 @@ mod board_cohorts;
 mod board_people;
 mod board_window;
 mod commands;
+mod maintenance;
 mod map_lookups;
 mod map_shape;
 mod releases;

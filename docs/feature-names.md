@@ -25,3 +25,4 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Do they come back? | Weekly retention cohorts |
 | Came back | Resurrected users: active again after a gap longer than the churn window |
 | Why and what to do | Under a Web Vital that is not good: its worst pages, the likely cause and what to fix first |
+| Planned maintenance | A window declared ahead when components are expected down: shown as *under maintenance*, its incidents not announced, its time not counted in availability |

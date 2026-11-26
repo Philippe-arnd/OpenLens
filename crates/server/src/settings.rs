@@ -853,6 +853,10 @@ pub(crate) async fn alerts_test(
     }
 }
 
+fn now() -> i64 {
+    chrono::Utc::now().timestamp()
+}
+
 fn when(t: i64, tz: &str) -> String {
     chrono::DateTime::from_timestamp(t, 0).map_or_else(String::new, |d| {
         openlens_ui::local_time(&d.format("%Y-%m-%d %H:%M:%S").to_string(), tz, false)
@@ -904,18 +908,44 @@ pub(crate) async fn uptime(
         Ok(i) => i,
         Err(e) => return oops(&e.to_string()),
     };
+    let left = |s: i64| (s > 0).then(|| openlens_engine::maintenance::length(s));
+    let maintenance = openlens_ui::MaintenanceView {
+        rows: openlens_engine::commands::maintenance::list(&state, &p.id, &tz, now())
+            .into_iter()
+            .map(|w| openlens_ui::MaintenanceRow {
+                id: w.id,
+                when: w.when,
+                length: w.length,
+                state: w.state.to_owned(),
+                components: w.components.join(", "),
+                text: w.text,
+            })
+            .collect(),
+        admin: crate::auth::viewer(&state, &headers).is_some_and(|v| v.admin),
+        tz: tz.clone(),
+    };
     let view = openlens_ui::UptimeView {
         state: u.status.state,
         since: u.status.since.map(|t| when(t, &tz)),
         url: u.url,
         avail: u.avail,
+        left_out: (
+            left(u.maintenance_left_out.0),
+            left(u.maintenance_left_out.1),
+        ),
+        maintenance,
         ms: u.ms,
         incidents: page
             .incidents
             .into_iter()
             .map(|i| {
                 let end = i.end.map(|e| when(e, &tz));
-                (i.rule, when(i.start, &tz), end, i.minutes, i.cause)
+                let cause = if i.planned {
+                    format!("{} · during planned maintenance, not announced", i.cause)
+                } else {
+                    i.cause
+                };
+                (i.rule, when(i.start, &tz), end, i.minutes, cause)
             })
             .collect(),
         older: page.next,

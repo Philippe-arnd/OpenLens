@@ -188,7 +188,7 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "GET",
         "/api/projects/{project}/status",
         "read",
-        "Uptime checks and incidents.",
+        "Up, down, under maintenance, unknown or off; open incidents and maintenance windows running or within 7 days.",
     ),
     (
         "GET",
@@ -296,7 +296,37 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "GET",
         "/api/projects/{project}/uptime",
         "read",
-        "Status, availability over a day and a week, response times, incidents of 30 days and the last checks.",
+        "Status, availability over a day and a week (planned maintenance left out, and how long), response times, maintenance windows, incidents of 30 days and the last checks.",
+    ),
+    (
+        "GET",
+        "/api/projects/{project}/maintenance",
+        "read",
+        "Planned maintenance windows: planned, running and ended within 30 days (`windows`).",
+    ),
+    (
+        "POST",
+        "/api/projects/{project}/maintenance",
+        "write",
+        "Schedule a maintenance window: `start` (now, RFC 3339 or YYYY-MM-DD HH:MM in the project's zone; default now), `end` or `minutes` (at most 3 days), `components` (production, the default, and/or environments), `text`, `announce` (once on the alert channels). Its incidents are not announced and its time is not counted in availability.",
+    ),
+    (
+        "POST",
+        "/api/projects/{project}/maintenance/{window}/extend",
+        "write",
+        "Extend a planned or running window: a new `end`, or `minutes` added to its end.",
+    ),
+    (
+        "POST",
+        "/api/projects/{project}/maintenance/{window}/end",
+        "write",
+        "End a running window now; incidents still failing are announced from then.",
+    ),
+    (
+        "DELETE",
+        "/api/projects/{project}/maintenance/{window}",
+        "write",
+        "Cancel a window that has not started.",
     ),
     (
         "GET",
