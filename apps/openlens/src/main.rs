@@ -268,10 +268,14 @@ fn build_state() -> Result<openlens_server::AppState, String> {
     }
     let session_key = openlens_server::secrets::session_key(&data_dir)?;
     let session_gen = openlens_server::tokens::session_generation(&meta);
+    let meta = Arc::new(meta);
+    // Identity is read from the metadata store, kept at ingestion (#450).
+    let query = openlens_query::QueryEngine::new(&data_dir, openlens_query::Limits::from_host())
+        .with_identity(openlens_server::identity::source(meta.clone()));
     Ok(openlens_server::AppState {
-        meta: Arc::new(meta),
+        meta,
         writer: Arc::new(Mutex::new(writer)),
-        query: openlens_query::QueryEngine::new(&data_dir, openlens_query::Limits::from_host()),
+        query,
         data_dir,
         admin_token_hash: admin_token_hash.into(),
         session_key: session_key.into(),

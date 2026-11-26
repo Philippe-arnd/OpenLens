@@ -152,6 +152,8 @@ pub struct Caches {
     pub(crate) env_seeding: Bounded<String, ()>,
     /// Replay rate per project (#327): counted at most once a day.
     pub(crate) replay_rates: Bounded<String, crate::replay::RateEntry>,
+    /// Projects whose identity backfill (#450) ran or is running.
+    pub(crate) identity_checked: Bounded<String, ()>,
 }
 
 impl Default for Caches {
@@ -174,6 +176,7 @@ impl Default for Caches {
             env_rules: Bounded::new(10_000, MIN),
             env_seeding: Bounded::new(10_000, 10 * MIN),
             replay_rates: Bounded::new(10_000, 25 * 60 * MIN),
+            identity_checked: Bounded::new(10_000, 10 * MIN),
         }
     }
 }

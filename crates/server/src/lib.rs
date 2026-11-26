@@ -26,6 +26,7 @@ mod features;
 mod flags;
 mod goals;
 mod icon;
+pub mod identity;
 mod llm;
 mod llm_presets;
 mod manage;
@@ -380,6 +381,8 @@ async fn run_jobs(state: AppState, digest: Job, digest_first: Duration) {
     use tokio::time::{MissedTickBehavior, interval_at};
     tokio::spawn(update_check());
     let heavy = Arc::new(tokio::sync::Mutex::new(()));
+    // Identity tables filled from the files once, after an upgrade (#450).
+    tokio::spawn(identity::backfill_all(state.clone()));
     let every = |first: Duration, period: Duration| {
         let mut t = interval_at(tokio::time::Instant::now() + first, period);
         t.set_missed_tick_behavior(MissedTickBehavior::Delay);

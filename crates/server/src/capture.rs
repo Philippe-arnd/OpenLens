@@ -370,9 +370,13 @@ pub(crate) async fn capture(
         .map(|(i, e)| json!({ "index": i, "reason": e.to_string() }))
         .collect();
 
+    crate::identity::ensure(&state, &project.id);
     let st = state.clone();
+    let pid = project.id.clone();
     let events = normalized.events;
     let stored = tokio::task::spawn_blocking(move || -> Result<(), String> {
+        // Aliases and person ids (#450), before the events are durable.
+        crate::identity::record(&st, &pid, &events)?;
         for ev in events.iter().filter(|e| e.event == names::IDENTIFY) {
             st.meta
                 .identify(

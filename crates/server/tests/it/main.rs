@@ -37,10 +37,12 @@ fn harness() -> Harness {
     let meta = Meta::in_memory().unwrap();
     let key = meta.ensure_default_project(None).unwrap().api_key;
     let (writer, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let meta = Arc::new(meta);
     let state = AppState {
-        meta: Arc::new(meta),
+        query: openlens_query::QueryEngine::new(dir.path(), openlens_query::Limits::default())
+            .with_identity(openlens_server::identity::source(meta.clone())),
+        meta,
         writer: Arc::new(Mutex::new(writer)),
-        query: openlens_query::QueryEngine::new(dir.path(), openlens_query::Limits::default()),
         data_dir: dir.path().to_path_buf(),
         admin_token_hash: openlens_meta::sha256_hex("adm_test").into(),
         session_key: "session-key-for-tests".into(),

@@ -341,3 +341,66 @@ fn reads_on_the_reader_connections_see_each_write_at_once() {
     });
     assert_eq!(meta.setting("other").unwrap().as_deref(), Some("49"));
 }
+
+/// #450: identity kept at ingestion follows the rules the query layer
+/// applied to the files, and erasure removes it.
+#[test]
+fn identity_rows_follow_the_alias_rules_and_erasure_removes_them() {
+    let m = Meta::in_memory().unwrap();
+    let id = |p: &str, a: Option<&str>, at: i64, internal: bool| {
+        (p.to_owned(), a.map(str::to_owned), at, internal)
+    };
+    // Not readable until the backfill ran, even with rows recorded.
+    m.record_identities("p", &[id("bob", Some("anon-1"), 20, false)])
+        .unwrap();
+    assert!(m.identities("p").unwrap().is_none());
+    m.backfill_identities("p", &[], &[]).unwrap();
+    m.record_identities(
+        "p",
+        &[
+            // Identified as two users: the smallest wins, whatever the order.
+            id("alice", Some("anon-1"), 30, false),
+            id("carol", Some("anon-1"), 5, true),
+            // An id is never its own alias.
+            id("dave", Some("dave"), 40, false),
+            // `internal` stays set, `first_seen` keeps the earliest.
+            id("carol", None, 50, false),
+        ],
+    )
+    .unwrap();
+    let t = m.identities("p").unwrap().unwrap();
+    assert_eq!(t.aliases, vec![("anon-1".to_owned(), "alice".to_owned())]);
+    let carol = t.persons.iter().find(|p| p.person == "carol").unwrap();
+    assert!(carol.internal);
+    assert!(carol.first_seen < 50);
+    let mut ids: Vec<u32> = t.persons.iter().map(|p| p.id).collect();
+    ids.dedup();
+    assert_eq!(ids.len(), 4, "one id per person: {:?}", t.persons);
+
+    // Erasure drops the person and every alias to or from them; their id
+    // is never given to anyone else.
+    let alice = t.persons.iter().find(|p| p.person == "alice").unwrap().id;
+    let top = t.persons.iter().map(|p| p.id).max().unwrap();
+    m.forget("p", &["alice".to_owned()]).unwrap();
+    let t = m.identities("p").unwrap().unwrap();
+    assert!(t.aliases.is_empty());
+    assert!(t.persons.iter().all(|p| p.person != "alice"));
+    assert!(m.aliases_of("p", "alice").unwrap().is_empty());
+    // A late write (a backfill that read the files before the erasure)
+    // does not bring them back.
+    m.record_identities("p", &[id("alice", Some("anon-2"), 1, false)])
+        .unwrap();
+    assert!(
+        m.identities("p")
+            .unwrap()
+            .unwrap()
+            .persons
+            .iter()
+            .all(|p| p.person != "alice")
+    );
+    m.record_identities("p", &[id("erin", None, 60, false)])
+        .unwrap();
+    let erin = m.identities("p").unwrap().unwrap().persons;
+    let erin = erin.iter().find(|p| p.person == "erin").unwrap().id;
+    assert!(erin > top && erin != alice);
+}
