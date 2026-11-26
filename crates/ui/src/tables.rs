@@ -5,10 +5,12 @@
 
 use super::*;
 
-/// A column header: shown, or read by screen readers only (an icon column).
+/// A column header: shown, numeric (right-aligned), or read by screen
+/// readers only (an icon column).
 #[derive(Clone, Copy)]
 pub(crate) enum Col<'a> {
     Shown(&'a str),
+    Num(&'a str),
     Hidden(&'a str),
 }
 
@@ -35,6 +37,7 @@ impl TableCard<'_> {
                     thead { tr { @for c in self.cols {
                         @match c {
                             Col::Shown(l) => th scope="col" { (l) },
+                            Col::Num(l) => th.num scope="col" { (l) },
                             Col::Hidden(l) => th scope="col" { span.sr-only { (l) } },
                         }
                     } } }

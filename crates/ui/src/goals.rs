@@ -227,16 +227,29 @@ pub fn audit(rows: &[(String, String, Option<String>, String, String)]) -> Marku
                 h1 { "Audit log" }
                 p.muted { "Every admin action: users, keys, settings, flags, surveys, feature maps, storage, exports and erasures. It can't be edited or deleted." }
             } }
-            section.card.wide {
-                @if rows.is_empty() { p.muted { "Nothing yet." } }
-                @else {
-                    div.table-scroll { table.plain {
-                        thead { tr { th { "When" } th { "Who" } th { "Project" } th { "Action" } th { "Detail" } } }
-                        tbody { @for (at, who, proj, act, d) in rows {
-                            tr { td.small.mono { (at) } td.small { (who) } td.small { (proj.as_deref().unwrap_or("—")) } td { span.chip { (act) } } td.small { (d) } }
-                        } }
-                    } }
+            @if rows.is_empty() { section.card.wide { p.muted { "Nothing yet." } } }
+            @else {
+                // The times are UTC (the log spans every project and its zone).
+                (crate::tables::TableCard {
+                    label: "Audit log",
+                    head: html! {},
+                    cols: &[
+                        crate::tables::Col::Shown("Time (UTC)"), crate::tables::Col::Shown("Who"),
+                        crate::tables::Col::Shown("Project"), crate::tables::Col::Shown("Action"),
+                        crate::tables::Col::Shown("Detail"),
+                    ],
+                    body: crate::tables::day_rows(rows, |r| r.0.as_str(), "UTC", 5, |(_, who, proj, act, d), time| html! {
+                        tr {
+                            td.when.muted { (time) }
+                            td.small { (who) }
+                            td.small { (proj.as_deref().unwrap_or("—")) }
+                            td { span.ev.ev-other.action { (act) } }
+                            td.small { (d) }
+                        }
+                    }),
+                    foot: html! { div.pager { span { (rows.len()) " entries · newest first · times in UTC" } } },
                 }
+                .render())
             }
         },
     )
