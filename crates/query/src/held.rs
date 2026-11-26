@@ -56,12 +56,21 @@ struct Taken<'a> {
 impl Taken<'_> {
     /// Take `bytes` more from the budget, if it has them.
     fn take(&mut self, bytes: usize) -> bool {
-        let ok = self
-            .budget
-            .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
-                left.checked_sub(bytes)
-            })
-            .is_ok();
+        // A compare-and-swap loop: `fetch_update` is deprecated and its new
+        // name `try_update` is newer than the crate's MSRV (1.88).
+        let mut left = self.budget.load(Ordering::SeqCst);
+        let ok = loop {
+            let Some(rest) = left.checked_sub(bytes) else {
+                break false;
+            };
+            match self
+                .budget
+                .compare_exchange_weak(left, rest, Ordering::SeqCst, Ordering::SeqCst)
+            {
+                Ok(_) => break true,
+                Err(now) => left = now,
+            }
+        };
         if ok {
             self.n += bytes;
         }
