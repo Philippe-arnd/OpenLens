@@ -199,6 +199,9 @@ jobs:
             cpu0=$(awk '{print $14+$15}' /proc/$PID/stat)
             cold=$(curl -s -o cold.html -w '%{http_code} %{time_total}' -H "cookie: $C" 127.0.0.1:18741/p/default)
             cpu1=$(awk '{print $14+$15}' /proc/$PID/stat)
+            # A board that failed still answers 200 (its page streams), and
+            # is not cached: the warm load then computes it again (D-071).
+            if grep -q "t show that" cold.html; then echo "::warning::run $run: the board failed, see server.log"; fi
             warm=$(curl -s -o /dev/null -w '%{time_total}' -H "cookie: $C" 127.0.0.1:18741/p/default)
             peak=$(awk '/VmHWM/ {print $2}' /proc/$PID/status)
             runs+=("{\"status\": ${cold%% *}, \"board_cold_s\": ${cold##* }, \"board_warm_s\": $warm, \"cold_cpu_s\": $(( (cpu1 - cpu0) ))e-2, \"peak_rss_mb\": $(( peak / 1024 ))}")
