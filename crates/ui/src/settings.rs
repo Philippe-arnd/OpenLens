@@ -121,7 +121,9 @@ pub struct TicketDraft<'a> {
     pub admin: bool,
 }
 
-/// The ticket drafted from a finding: copy it, or open it on GitHub.
+/// The ticket drafted from a finding (#551): the title, the Markdown body
+/// in a monospace field, and the existing actions (open or update the
+/// issue on GitHub, or copy it by hand).
 pub fn ticket_draft(v: &TicketDraft<'_>) -> Markup {
     let p = v.p;
     layout(
@@ -132,20 +134,29 @@ pub fn ticket_draft(v: &TicketDraft<'_>) -> Markup {
                 h1 { "New ticket" }
                 p.muted { "Prefilled for a person or a coding agent: the problem, the evidence, a hypothesis, the metric OpenLens will check after the release that ships it." }
             } }
-            section.card.wide {
-                label for="t-title" { "Title" }
-                input #t-title type="text" readonly value=(v.title);
-                label for="t-body" { "Body (Markdown): select and copy" }
-                textarea #t-body rows="22" readonly spellcheck="false" { (v.markdown) }
+            section.card.wide.form-card.ticket-draft aria-labelledby="draft-h" {
+                div.section-head {
+                    h2 #draft-h { (icon("task")) "Draft" }
+                    p { span.tag.tone-info { (v.kind) } }
+                }
+                div.form-grid {
+                    label.field.wide for="t-title" { "Title" input #t-title type="text" readonly value=(v.title); }
+                    label.field.wide for="t-body" {
+                        "Body (Markdown)"
+                        textarea.mono #t-body rows="22" readonly spellcheck="false" { (v.markdown) }
+                        small { "Select it and copy it into any tracker." }
+                    }
+                }
                 @match (&v.repo, v.admin) {
-                    (Some(repo), true) => form.inline method="post" action={ "/p/" (p.id) "/tickets" } {
+                    (Some(repo), true) => form.form-foot method="post" action={ "/p/" (p.id) "/tickets" } {
                         input type="hidden" name="kind" value=(v.kind);
                         input type="hidden" name="subject" value=(v.subject);
-                        button type="submit" { @if v.existing.is_some() { "Update the issue with these numbers" } @else { "Open an issue in " (repo) } }
-                        @if let Some(u) = &v.existing { " " a href=(u) { "Open issue" } }
+                        button.btn.primary type="submit" { @if v.existing.is_some() { "Update the issue with these numbers" } @else { "Open an issue in " (repo) } }
+                        @if let Some(u) = &v.existing { a.btn href=(u) { "Open issue" } }
+                        p { "OpenLens posts only when you click." }
                     },
-                    (None, true) => p.muted.small { "To open issues directly, set the GitHub repository on " a href={ "/p/" (p.id) "/tickets" } { "Tickets" } "." },
-                    _ => p.muted.small { "An admin can open it as an issue." },
+                    (None, true) => div.form-foot { p { "To open issues directly, set the GitHub repository on " a href={ "/p/" (p.id) "/tickets" } { "Tickets" } "." } },
+                    _ => div.form-foot { p { "An admin can open it as an issue." } },
                 }
             }
         },
@@ -170,7 +181,18 @@ pub struct TicketRow {
     pub outcome: Option<(String, String)>,
 }
 
-/// Tickets and the learning log (#245).
+/// The tag tone of a ticket's measured effect.
+fn effect_tone(verdict: &str) -> &'static str {
+    match verdict {
+        "improved" => "good",
+        "worse" => "bad",
+        _ => "warn",
+    }
+}
+
+/// Tickets and the learning log (#245, #551): an empty state until the
+/// first ticket, else the tickets as a table; then the GitHub connection
+/// as a form card (admins).
 pub fn tickets(
     p: &ProjectInfo<'_>,
     rows: &[TicketRow],
@@ -200,36 +222,57 @@ pub fn tickets(
                     (tile("mint", "star", "Changes that moved their metric", &format!("{improved} of {}", measured.len()), "measured 14 days after their release"))
                 }
             }
-            section.card.wide {
-                h2.violet { (icon("task")) "Tickets" }
-                @if rows.is_empty() { p.muted { "None yet. Use " em { "Create ticket" } " on an insight card, an error, a goal or a feature map finding." } }
-                @else {
-                    div.table-scroll { table.plain {
-                        thead { tr { th { "Ticket" } th { "From" } th { "Metric" } th { "Shipped in" } th { "Effect" } } }
-                        tbody { @for r in rows {
-                            tr {
-                                th scope="row" { @match &r.url { Some(u) => a href=(u) { (r.title) }, None => (r.title) } br; span.muted.small { (r.created) } }
-                                td { span.chip { (r.kind) } }
-                                td.small { (r.metric.as_deref().unwrap_or("—")) }
-                                td.small { @match &r.shipped_in { Some(s) => code { (s) }, None => span.muted { "not yet" } } }
-                                td.small { @match &r.outcome {
-                                    Some((w, ev)) => { span class={ "status " (match w.as_str() { "improved" => "good", "worse" => "bad", _ => "warn" }) } { (w) } br; span.muted { (ev) } },
-                                    None => span.muted { "waiting" },
-                                } }
-                            }
-                        } }
-                    } }
+            @if rows.is_empty() {
+                section.card.empty aria-labelledby="no-tickets" {
+                    (crate::tables::empty_art())
+                    div {
+                        h2 #no-tickets { "No ticket yet" }
+                        p { "Use " em { "Create ticket" } " on an insight card, an error, a goal or a feature map finding. The draft holds the evidence and the metric to check; OpenLens then follows it to the release that ships it." }
+                        div.actions {
+                            a.btn.primary href={ "/p/" (p.id) } { "Open the Focus board" }
+                            a.btn href={ "/p/" (p.id) "/errors" } { "Errors" }
+                        }
+                    }
                 }
+            } @else {
+                (crate::tables::TableCard {
+                    label: "Tickets",
+                    head: html! { h2 { (icon("task")) "Tickets" } },
+                    cols: &[
+                        crate::tables::Col::Shown("Ticket"), crate::tables::Col::Shown("From"),
+                        crate::tables::Col::Shown("Metric"), crate::tables::Col::Shown("Shipped in"),
+                        crate::tables::Col::Shown("Effect"),
+                    ],
+                    body: html! { @for r in rows {
+                        tr {
+                            th scope="row" { @match &r.url { Some(u) => a href=(u) { (r.title) }, None => (r.title) } br; span.muted.small { (r.created) } }
+                            td { span.tag.tone-info { (r.kind) } }
+                            td.small { (r.metric.as_deref().unwrap_or("—")) }
+                            td.small { @match &r.shipped_in { Some(s) => code { (s) }, None => span.muted { "not yet" } } }
+                            td.small { @match &r.outcome {
+                                Some((w, ev)) => { span class={ "tag tone-" (effect_tone(w)) } { (w) } br; span.muted { (ev) } },
+                                None => span.muted { "waiting" },
+                            } }
+                        }
+                    } },
+                    foot: html! {},
+                }
+                .render())
             }
             @if admin {
-                section.card.wide {
-                    h2.sky { (icon("code")) "GitHub" }
-                    form.settings method="post" action={ "/p/" (p.id) "/tickets/target" } {
-                        label { "Repository " input type="text" name="repo" value=(repo) placeholder="owner/name" maxlength="140"; }
-                        label { "Token " input type="password" name="token" autocomplete="off" placeholder=(if connected { "stored (leave empty to keep it)" } else { "fine-grained, Issues: read and write" }); }
-                        button type="submit" { "Save" }
+                form.card.wide.form-card method="post" action={ "/p/" (p.id) "/tickets/target" } aria-labelledby="github-h" {
+                    div.section-head {
+                        h2 #github-h { (icon("code")) "GitHub" }
+                        p { @if connected { span.tag.tone-good { (icon("task")) "token stored" } } @else { span.tag { "no token" } } }
                     }
-                    p.muted.small { "The token is stored encrypted (or set " code { "OPENLENS_GITHUB_TOKEN" } ") and shared by every project. OpenLens only posts when you click, and comments on issues it opened. Without it, copy the drafted Markdown into any tracker." }
+                    div.form-grid {
+                        label.field { "Repository" input type="text" name="repo" value=(repo) placeholder="owner/name" maxlength="140"; small { "Where issues are opened, as owner/name." } }
+                        label.field { "Token"
+                            input type="password" name="token" autocomplete="off" placeholder=(if connected { "stored (leave empty to keep it)" } else { "fine-grained, Issues: read and write" });
+                            small { "Stored encrypted (or set " code { "OPENLENS_GITHUB_TOKEN" } ") and shared by every project." }
+                        }
+                    }
+                    (crate::project_settings::form_foot("Save", html! { "OpenLens only posts when you click, and comments on issues it opened. Without it, copy the drafted Markdown into any tracker." }))
                 }
             }
         },
@@ -428,47 +471,53 @@ pub fn tokens(v: &TokensView) -> Markup {
                     pre.snippet { code { (t) } }
                 }
             }
-            section.card.wide {
-                h2.violet { (icon("code")) "Create a token" }
-                form.settings method="post" action="/settings/tokens" {
-                    label { "Label " input type="text" name="label" maxlength="100" placeholder="what it is for" required; }
-                    label { "Scope "
+            form.card.wide.form-card method="post" action="/settings/tokens" aria-labelledby="token-h" {
+                div.section-head { h2 #token-h { (icon("code")) "Create a token" } }
+                div.form-grid {
+                    label.field { "Label" input type="text" name="label" maxlength="100" placeholder="what it is for" required; small { "Shown in the table below, never the token itself." } }
+                    label.field { "Scope"
                         select name="scope" {
                             option value="read" { "read" }
                             option value="write" { "write" }
                             option value="admin" { "admin" }
                         }
+                        small { "read is enough for " code { "openlens-cli mcp" } "." }
                     }
                     @if !v.projects.is_empty() {
-                        fieldset {
+                        fieldset.field.wide {
                             legend { "Projects (none ticked: all)" }
                             @for (id, name) in &v.projects {
                                 label.check { input type="checkbox" name="project" value=(id); " " (name) }
                             }
                         }
                     }
-                    button type="submit" { "Create the token" }
                 }
+                (crate::project_settings::form_foot("Create the token", html! { "The token is shown once, then stored hashed." }))
             }
-            section.card.wide {
-                h2.sky { (icon("shield")) "Tokens" }
-                @if v.tokens.is_empty() { p.muted { "No token yet." } }
-                @else {
-                    div.table-scroll { table.plain {
-                        thead { tr { th { "Label" } th { "Scope" } th { "Projects" } th { "Created" } th { "Last used" } th { span.sr-only { "Actions" } } } }
-                        tbody { @for t in &v.tokens {
-                            tr {
-                                td { (t.label) br; span.small.muted { (t.id) } }
-                                td { span.chip { (t.scope) } }
-                                td.small { @match &t.projects { Some(p) => (p.join(", ")), None => span.muted { "all" } } }
-                                td.small.muted { (when(&t.created_at)) }
-                                td.small.muted { (t.last_used.as_deref().map(when).unwrap_or_else(|| "never".into())) }
-                                td { form method="post" action={ "/settings/tokens/" (t.id) "/revoke" } { button.ghost type="submit" { "Revoke" } } }
-                            }
-                        } }
-                    } }
-                }
+            (crate::tables::TableCard {
+                label: "Tokens",
+                head: html! { h2 { (icon("shield")) "Tokens" } },
+                cols: &[
+                    crate::tables::Col::Shown("Label"), crate::tables::Col::Shown("Scope"),
+                    crate::tables::Col::Shown("Projects"), crate::tables::Col::Shown("Created"),
+                    crate::tables::Col::Shown("Last used"), crate::tables::Col::Hidden("Actions"),
+                ],
+                body: html! {
+                    @if v.tokens.is_empty() { tr { td.muted colspan="6" { "No token yet." } } }
+                    @for t in &v.tokens {
+                        tr {
+                            td { (t.label) br; span.small.muted.mono { (t.id) } }
+                            td { span class={ "tag tone-" (match t.scope.as_str() { "admin" => "bad", "write" => "warn", _ => "info" }) } { (t.scope) } }
+                            td.small { @match &t.projects { Some(p) => (p.join(", ")), None => span.muted { "all" } } }
+                            td.when.muted { (when(&t.created_at)) }
+                            td.when.muted { (t.last_used.as_deref().map(when).unwrap_or_else(|| "never".into())) }
+                            td { form method="post" action={ "/settings/tokens/" (t.id) "/revoke" } { button.ghost type="submit" { "Revoke" } } }
+                        }
+                    }
+                },
+                foot: html! {},
             }
+            .render())
             @let what = "Signs out every browser that is logged in, yours excepted: people log in again with a login link, SSO or the admin token. API tokens and the admin token keep working.";
             (crate::detail::danger_zone("sessions-danger", "Sessions", crate::detail::danger_item("Sign out everywhere",
                 html! { (what) },
@@ -620,9 +669,46 @@ pub fn ai_settings(v: &AiView<'_>) -> Markup {
     )
 }
 
-/// Settings → Storage and backups (#218).
+/// The data directory as a page may print it (#551): its last component
+/// only, since the full path can name a home directory.
+pub(crate) fn data_dir_name(dir: &str) -> String {
+    std::path::Path::new(dir)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .filter(|n| !n.is_empty())
+        .map_or_else(|| "the data directory".to_owned(), ToOwned::to_owned)
+}
+
+/// A local path as a page may print it (#551): inside the data directory,
+/// from the directory's last component on; elsewhere, its last component
+/// only. Never the full path.
+pub(crate) fn shown_path(path: &str, data_dir: &str) -> String {
+    let p = std::path::Path::new(path);
+    if !data_dir.is_empty()
+        && let Ok(rest) = p.strip_prefix(data_dir)
+    {
+        let base = data_dir_name(data_dir);
+        return if rest.as_os_str().is_empty() {
+            base
+        } else {
+            format!("{base}/{}", rest.display())
+        };
+    }
+    match p.file_name().and_then(|n| n.to_str()) {
+        Some(name) if p.components().count() > 1 => format!("…/{name}"),
+        Some(name) => name.to_owned(),
+        None => "—".to_owned(),
+    }
+}
+
+/// Settings → Storage and backups (#218, #551): the S3 copy as a form
+/// card, the cold tier in its own card, the backup plan as a form card
+/// and its runs as a table, then how to restore. Local paths are printed
+/// from the data directory's name on, never in full.
 pub fn storage(v: &StorageView) -> Markup {
     let ro = v.from_env;
+    let dir = data_dir_name(&v.data_dir);
+    let folder = shown_path(&v.plan.folder, &v.data_dir);
     let day = [
         "Monday",
         "Tuesday",
@@ -638,95 +724,118 @@ pub fn storage(v: &StorageView) -> Markup {
         html! {
             div.heading { div {
                 h1 { "Storage and backups" }
-                p.muted { "Local disk (" code { (v.data_dir) } ") holds your data. S3 keeps a copy of closed days, and, only if you turn the cold tier on, becomes the only copy of days older than 120 days. Backups are point-in-time copies you can restore." }
+                p.muted { "The local data directory (" code { (dir) } ") holds your data. S3 keeps a copy of closed days, and, only if you turn the cold tier on, becomes the only copy of days older than 120 days. Backups are point-in-time copies you can restore." }
             } }
             @if v.cold_days > 0 {
                 p.alert role="status" { strong { (v.cold_days) " event days live only on S3." } " Losing the bucket, or a lifecycle rule that expires its objects, loses them. Keep the bucket and its versioning." }
             }
             @if let Some(n) = &v.notice { p.notice role="status" { (n) } }
             @if let Some(e) = &v.error { p.alert role="alert" { (e) } }
-            section.card.wide {
-                h2.sky { (icon("layers")) "S3-compatible copy" }
-                @if ro { p.small { span.chip { "set by environment" } " The " code { "OPENLENS_S3_*" } " variables win; change them where the server runs." } }
-                form.settings method="post" action="/settings/storage/s3" {
-                    label { "Bucket " input type="text" name="bucket" value=[v.bucket.as_deref()] maxlength="63" disabled[ro] required; }
-                    label { "Region " input type="text" name="region" value=[v.region.as_deref()] placeholder="us-east-1" maxlength="40" disabled[ro]; }
-                    label { "Endpoint " input type="url" name="endpoint" value=[v.endpoint.as_deref()] placeholder="AWS: empty · R2, MinIO, Garage: https://…" maxlength="200" disabled[ro]; }
-                    label { "Prefix " input type="text" name="prefix" value=[v.prefix.as_deref()] placeholder="openlens" maxlength="100" disabled[ro]; }
-                    label { "Access key " input type="text" name="access_key" value=[v.access_key.as_deref()] maxlength="200" autocomplete="off" disabled[ro] required; }
-                    label { "Secret key " input type="password" name="secret" placeholder=(if v.secret_set { "stored · leave empty to keep" } else { "" }) maxlength="200" autocomplete="new-password" disabled[ro]; }
-                    @if !ro { button type="submit" name="action" value="save" { "Save" } }
-                    @if v.bucket.is_some() { button.soft type="submit" name="action" value="test" formnovalidate { "Test the connection" } }
-                    @if !ro && v.bucket.is_some() { button.ghost type="submit" name="action" value="remove" formnovalidate { "Remove" } }
+            form.card.wide.form-card method="post" action="/settings/storage/s3" aria-labelledby="s3-h" {
+                div.section-head {
+                    h2 #s3-h { (icon("layers")) "S3-compatible copy" }
+                    p {
+                        @match &v.last_ok {
+                            Some(t) => { span.tag.tone-good { (icon("task")) "Last copy " (t.get(..16).unwrap_or(t).replace('T', " ")) " UTC" } @if let Some(n) = &v.last_objects { " " (n) " objects" } },
+                            None => span.tag { "No copy yet" },
+                        }
+                    }
+                }
+                @if ro { p.small { span.tag.tone-info { "set by environment" } " The " code { "OPENLENS_S3_*" } " variables win; change them where the server runs." } }
+                div.form-grid {
+                    label.field { "Bucket" input type="text" name="bucket" value=[v.bucket.as_deref()] maxlength="63" disabled[ro] required; }
+                    label.field { "Region" input type="text" name="region" value=[v.region.as_deref()] placeholder="us-east-1" maxlength="40" disabled[ro]; }
+                    label.field { "Endpoint" input type="url" name="endpoint" value=[v.endpoint.as_deref()] placeholder="AWS: empty · R2, MinIO, Garage: https://…" maxlength="200" disabled[ro]; small { "Empty for AWS." } }
+                    label.field { "Prefix" input type="text" name="prefix" value=[v.prefix.as_deref()] placeholder="openlens" maxlength="100" disabled[ro]; }
+                    label.field { "Access key" input type="text" name="access_key" value=[v.access_key.as_deref()] maxlength="200" autocomplete="off" disabled[ro] required; }
+                    label.field { "Secret key" input type="password" name="secret" placeholder=(if v.secret_set { "stored · leave empty to keep" } else { "" }) maxlength="200" autocomplete="new-password" disabled[ro]; small { "Stored sealed and never shown again." } }
                 }
                 @if v.secret_set && !v.secret_ok && !ro { p.alert role="alert" { "The stored secret can't be opened (the server's secret key changed, or the store was restored): enter it again." } }
-                p.small {
-                    @match &v.last_ok { Some(t) => { "Last copy " (t.get(..16).unwrap_or(t).replace('T', " ")) " UTC" @if let Some(n) = &v.last_objects { " · " (n) " objects" } }, None => span.muted { "No copy yet." } }
-                    @if let Some(e) = &v.last_error { br; span.status.bad { "Last error" } " " (e) }
+                @if let Some(e) = &v.last_error { p.small { span.tag.tone-bad { (icon("alert")) "Last error" } " " (e) } }
+                div.form-foot {
+                    @if !ro { button.btn.primary type="submit" name="action" value="save" { "Save" } }
+                    @if v.bucket.is_some() { button.btn type="submit" name="action" value="test" formnovalidate { "Test the connection" } }
+                    @if !ro && v.bucket.is_some() { button.btn.ghost type="submit" name="action" value="remove" formnovalidate { "Remove" } }
+                    p { "Copied hourly: every closed day of events, and a daily snapshot of the metadata." }
                 }
-                p.muted.small { "Copied hourly: every closed day of events, and a daily snapshot of the metadata. The secret is stored sealed and never shown again." }
             }
-            section.card.wide #cold {
-                h2.violet { (icon("layers")) "Cold tier: old days on S3 only" }
+            section.card.wide.form-card #cold aria-labelledby="cold-h" {
+                div.section-head {
+                    h2 #cold-h { (icon("layers")) "Cold tier: old days on S3 only" }
+                    p { @if v.cold_on { span.tag.tone-warn { "on" } } @else { span.tag { "off" } } }
+                }
                 p.small { "Off by default. When on, event days older than 120 days leave the disk once S3 holds every file of them, checked. S3 then becomes their " strong { "only" } " copy (D-031). OpenLens first reads the bucket's lifecycle rules and moves nothing if one expires objects in under 400 days, or if they cannot be read." }
                 @if let Some(b) = &v.cold_blocked { p.alert role="alert" { "Nothing moves: " (b) "." } }
                 @if v.cold_from_env {
-                    p.small { span.chip { "set by environment" } " " code { "OPENLENS_S3_COLD" } " is " strong { (if v.cold_on { "on" } else { "off" }) } "." }
+                    p.small { span.tag.tone-info { "set by environment" } " " code { "OPENLENS_S3_COLD" } " is " strong { (if v.cold_on { "on" } else { "off" }) } "." }
                 } @else {
-                    form.settings method="post" action="/settings/storage/cold" {
-                        label.check { input type="checkbox" name="on" checked[v.cold_on]; " Move days older than 120 days to S3 and remove them from the disk" }
-                        button type="submit" { "Save" }
+                    form.form-body method="post" action="/settings/storage/cold" {
+                        label.switch {
+                            input type="checkbox" role="switch" name="on" checked[v.cold_on];
+                            span { b { "Move days older than 120 days to S3 and remove them from the disk" } small { "S3 becomes their only copy." } }
+                        }
+                        div.form-foot { button.btn.primary type="submit" { "Save" } }
                     }
                 }
             }
-            section.card.wide {
-                h2.mint { (icon("clock")) "Backups" }
-                form.settings method="post" action="/settings/storage/backups" {
-                    label { "When "
+            form.card.wide.form-card method="post" action="/settings/storage/backups" aria-labelledby="backups-h" {
+                div.section-head { h2 #backups-h { (icon("clock")) "Backups" } }
+                div.form-grid {
+                    label.field { "When"
                         select name="schedule" {
                             @for (k, l) in [("off", "Off"), ("daily", "Every day"), ("weekly", "Every week")] {
                                 option value=(k) selected[v.plan.schedule == k] { (l) }
                             }
                         }
                     }
-                    label { "At (UTC) " select name="hour" { @for h in 0u8..24 { option value=(h) selected[v.plan.hour == h] { (format!("{h:02}:00")) } } } }
-                    label { "On (weekly) " select name="weekday" { @for (i, d) in day.iter().enumerate() { option value=(i + 1) selected[usize::from(v.plan.weekday) == i + 1] { (d) } } } }
-                    label { "Keep " input type="number" name="keep" min="1" max="60" value=(v.plan.keep); }
-                    label { "Folder " input type="text" name="dir" value=(v.plan.dir) placeholder=(v.plan.folder) maxlength="300"; }
-                    label.check { input type="checkbox" name="to_s3" checked[v.plan.to_s3]; " Also to S3 (.tar.gz)" }
-                    button type="submit" { "Save" }
+                    label.field { "At (UTC)" select name="hour" { @for h in 0u8..24 { option value=(h) selected[v.plan.hour == h] { (format!("{h:02}:00")) } } } }
+                    label.field { "On (weekly)" select name="weekday" { @for (i, d) in day.iter().enumerate() { option value=(i + 1) selected[usize::from(v.plan.weekday) == i + 1] { (d) } } } }
+                    label.field { "Keep" input type="number" name="keep" min="1" max="60" value=(v.plan.keep); small { "Copies, the oldest removed first." } }
+                    label.field { "Folder" input type="text" name="dir" value=(v.plan.dir) placeholder=(folder) maxlength="300"; small { "Empty: " code { (folder) } "." } }
                 }
-                div.actions {
-                    form.inline method="post" action="/settings/storage/backups/run" {
-                        button type="submit" disabled[v.running] { (if v.running { "Backing up…" } else { "Back up now" }) }
-                    }
-                    @if v.has_latest { a.button href="/settings/storage/backups/latest.tar.gz" { (icon("down")) "Download the latest" } }
+                label.switch {
+                    input type="checkbox" role="switch" name="to_s3" checked[v.plan.to_s3];
+                    span { b { "Also to S3 (.tar.gz)" } small { "Uses the S3 copy's bucket." } }
                 }
-                p.muted.small { "Each copy is consistent while the server runs and takes as much room as the data. Failures are emailed to admins when SMTP is set." }
-                @if !v.history.is_empty() {
-                    div.table-scroll { table.plain {
-                        thead { tr { th { "When (UTC)" } th { "Result" } th.num { "Size" } th.num { "Files" } th.num { "Took" } th { "Where" } } }
-                        tbody { @for r in &v.history {
-                            tr {
-                                td.small { (r.at.get(..16).unwrap_or(&r.at).replace('T', " ")) " " span.muted { (r.how) } }
-                                td { @if r.ok { span.status.good { "ok" } } @else { span.status.bad { "failed" } br; span.small { (r.error.as_deref().unwrap_or("")) } } }
-                                td.num { (bytes(r.bytes)) }
-                                td.num { (r.files) }
-                                td.num { (duration(r.secs)) }
-                                td.small.mono { (r.dest) @if let Some(k) = &r.s3 { br; "s3: " (k) } }
-                            }
-                        } }
-                    } }
+                (crate::project_settings::form_foot("Save", html! { "Each copy is consistent while the server runs and takes as much room as the data. Failures are emailed to admins when SMTP is set." }))
+            }
+            div.actions.backup-actions {
+                form.inline method="post" action="/settings/storage/backups/run" {
+                    button type="submit" disabled[v.running] { (if v.running { "Backing up…" } else { "Back up now" }) }
                 }
+                @if v.has_latest { a.button href="/settings/storage/backups/latest.tar.gz" { (icon("down")) "Download the latest" } }
+            }
+            @if !v.history.is_empty() {
+                (crate::tables::TableCard {
+                    label: "Backup runs",
+                    head: html! { h2 { (icon("clock")) "Backup runs" } },
+                    cols: &[
+                        crate::tables::Col::Shown("When (UTC)"), crate::tables::Col::Shown("Result"),
+                        crate::tables::Col::Num("Size"), crate::tables::Col::Num("Files"),
+                        crate::tables::Col::Num("Took"), crate::tables::Col::Shown("Where"),
+                    ],
+                    body: html! { @for r in &v.history {
+                        tr {
+                            td.when { (r.at.get(..16).unwrap_or(&r.at).replace('T', " ")) " " span.muted { (r.how) } }
+                            td { @if r.ok { span.tag.tone-good { (icon("task")) "ok" } } @else { span.tag.tone-bad { (icon("alert")) "failed" } br; span.small { (r.error.as_deref().unwrap_or("")) } } }
+                            td.num { (bytes(r.bytes)) }
+                            td.num { (r.files) }
+                            td.num { (duration(r.secs)) }
+                            td.path { (shown_path(&r.dest, &v.data_dir)) @if let Some(k) = &r.s3 { br; "s3: " (k) } }
+                        }
+                    } },
+                    foot: html! {},
+                }
+                .render())
             }
             section.card.wide {
                 h2.coral { (icon("shield")) "Restore" }
-                p { "Restoring replaces the data, so it is done with the server stopped:" }
+                p { "Restoring replaces the data, so it is done with the server stopped. Below, " code { "<data>" } " is the data directory (" code { (dir) } ", " code { "OPENLENS_DATA_DIR" } " where the server runs):" }
                 pre.snippet { code { "# stop OpenLens, then
-mv " (v.data_dir) " " (v.data_dir) ".old
-cp -a " (v.plan.folder) "/<copy> " (v.data_dir) "
+mv <data> <data>.old
+cp -a <backups>/<copy> <data>
 # start OpenLens" } }
-                p.muted.small { "From S3: download " code { "backups/<copy>.tar.gz" } ", " code { "tar xzf" } " it and use the folder inside. S3 secrets are not in backups: enter them again after a restore." }
+                p.muted.small { code { "<backups>" } " is the backup folder (" code { (folder) } "). From S3: download " code { "backups/<copy>.tar.gz" } ", " code { "tar xzf" } " it and use the folder inside. S3 secrets are not in backups: enter them again after a restore." }
             }
         },
     )

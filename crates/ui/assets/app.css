@@ -1481,3 +1481,42 @@
   .card.ask-more { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 12px 22px; margin: 0 0 16px; }
   .card.ask-more form { margin: 0; }
 }
+
+/* Product and instance screens (#551) */
+@layer components {
+  /* Feature map: the health score as a lead card, its findings ranked. */
+  .map-health { container-type: inline-size; margin: 0 0 16px; }
+  .map-health .score { display: flex; align-items: baseline; gap: 6px; margin: 0; }
+  .map-health .score strong { font-size: var(--step-4); font-weight: 600; line-height: 1; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+  .map-health .score small { color: var(--muted); font-size: var(--step-0); }
+  .findings details.fix { margin-top: 8px; }
+  .findings details.fix > summary { cursor: pointer; display: inline-flex; align-items: center; min-height: 24px; font-size: 13px; font-weight: 500; color: var(--ink-2); }
+  .findings details.fix pre.diff { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+  /* Table cards: a search form or a status in the head. */
+  .table-card .table-head form.inline { margin: 0; }
+  .table-card td.rollout { min-width: 180px; }
+  .table-card td.rollout form.inline { margin: 6px 0 0; }
+  .table-card td.path { font-size: 12px; }
+
+  /* Surveys: the state and the answer type as tags over the results. */
+  .card.survey .section-head h2 { margin: 0; }
+  .card.survey .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 8px 0; font-size: 13px; color: var(--muted); }
+
+  /* Weekly digest: the board's parts, without links. */
+  .digest .kpis .card.kpi { min-height: 112px; }
+  .digest .card.pad h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: var(--step-2); }
+
+  /* Forms: monospace text areas, ticked lists, the actions under a card. */
+  .form-grid .field textarea { width: 100%; box-sizing: border-box; min-height: 120px; }
+  .form-grid .field textarea.mono { font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, monospace; font-size: 12.5px; line-height: 1.5; }
+  .form-grid fieldset.field label.check { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; margin-right: 14px; font-weight: 400; }
+  form.form-foot { margin: 0; }
+  .backup-actions { margin: 0 0 16px; }
+  .card.about .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .card.about .section-head h2 { margin: 0; }
+
+  /* Message pages (not found, not available): one empty-state card. */
+  .card.empty.message { max-width: 760px; margin: 48px auto; }
+  .card.empty.message h1 { margin: 0; font-size: var(--step-2); }
+}

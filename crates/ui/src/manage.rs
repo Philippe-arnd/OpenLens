@@ -5,8 +5,25 @@
 use super::*;
 use crate::tables::Col;
 
-/// Feature flags: switch on/off and change the rollout. Creating flags is
-/// done by agents (API/CLI/MCP) with the code that uses them.
+/// A flag's rollout as a bar and its share (#551): the bar's width is an
+/// SVG attribute (the CSP forbids `style`), 100 % fills the track.
+fn rollout_bar(rollout: u8) -> Markup {
+    let w = f64::from(rollout.min(100)).max(1.5);
+    html! {
+        div.barcell {
+            svg viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true" focusable="false" {
+                rect.bg width="100" height="6" rx="3" {}
+                rect.fg width=(format!("{w:.1}")) height="6" rx="3" {}
+            }
+            span.num { (rollout) " %" }
+        }
+    }
+}
+
+/// Feature flags (#551): a table with an on/off tag and the rollout as a
+/// bar, each row keeping its two forms (the rollout, the switch).
+/// Creating flags is done by agents (API/CLI/MCP) with the code that uses
+/// them, or from the editor.
 pub fn flags(p: &ProjectInfo<'_>, flags: &[openlens_flags::Flag]) -> Markup {
     layout(
         "Flags",
@@ -20,34 +37,48 @@ pub fn flags(p: &ProjectInfo<'_>, flags: &[openlens_flags::Flag]) -> Markup {
                 a.button href={ "/p/" (p.id) "/flags-edit" } { (icon("plus")) "New flag" }
             }
             @if flags.is_empty() {
-                section.card { p { "No flags yet. Your agent creates them together with the code that checks them: "
-                    code { "openlens-cli flags set new-editor --rollout 10" } "." } }
+                section.card.empty aria-labelledby="no-flags" {
+                    (crate::tables::empty_art())
+                    div {
+                        h2 #no-flags { "No flags yet" }
+                        p { "Your agent creates them together with the code that checks them, for example:" }
+                        pre.snippet { code { "openlens-cli flags set new-editor --rollout 10" } }
+                        div.actions { a.btn.primary href={ "/p/" (p.id) "/flags-edit" } { (icon("plus")) "New flag" } }
+                    }
+                }
             } @else {
-                section.card.wide {
-                    table.plain {
-                        thead { tr { th { "Flag" } th { "Who" } th { "Rollout" } th { "On" } th { span.sr-only { "Actions" } } } }
-                        tbody { @for f in flags {
-                            tr {
-                                th scope="row" { a href={ "/p/" (p.id) "/flags-edit?key=" (f.key) } title="Edit" { code { (f.key) } } @if !f.description.is_empty() { br; span.muted.small { (f.description) } } }
-                                td.small { @if f.roles.is_empty() { "every role" } @else { (f.roles.join(", ")) }
-                                    @if !f.accounts.is_empty() { br; span.muted { "+ " (f.accounts.len()) " accounts" } }
-                                    @for r in &f.rules { br; code { (r) } } }
-                                td { form.inline method="post" action={ "/p/" (p.id) "/flags/" (f.key) } {
+                (crate::tables::TableCard {
+                    label: "Flags",
+                    head: html! {},
+                    cols: &[
+                        Col::Shown("Flag"), Col::Shown("Who"), Col::Shown("Rollout"),
+                        Col::Shown("State"), Col::Hidden("Actions"),
+                    ],
+                    body: html! { @for f in flags {
+                        tr {
+                            th scope="row" { a href={ "/p/" (p.id) "/flags-edit?key=" (f.key) } title="Edit" { code { (f.key) } } @if !f.description.is_empty() { br; span.muted.small { (f.description) } } }
+                            td.small { @if f.roles.is_empty() { "every role" } @else { (f.roles.join(", ")) }
+                                @if !f.accounts.is_empty() { br; span.muted { "+ " (f.accounts.len()) " accounts" } }
+                                @for r in &f.rules { br; code { (r) } } }
+                            td.rollout {
+                                (rollout_bar(f.rollout))
+                                form.inline method="post" action={ "/p/" (p.id) "/flags/" (f.key) } {
                                     @if f.enabled { input type="hidden" name="enabled" value="on"; }
                                     input type="number" name="rollout" min="0" max="100" value=(f.rollout) aria-label={ "Rollout percentage of " (f.key) };
                                     " % " button.ghost type="submit" { "Save" }
-                                } }
-                                td { span class=(if f.enabled { "status good" } else { "status muted" }) {
-                                    span aria-hidden="true" { (if f.enabled { "●" } else { "○" }) } " " (if f.enabled { "on" } else { "off" }) } }
-                                td { form.inline method="post" action={ "/p/" (p.id) "/flags/" (f.key) } {
-                                    @if !f.enabled { input type="hidden" name="enabled" value="on"; }
-                                    input type="hidden" name="rollout" value=(f.rollout);
-                                    button type="submit" { (if f.enabled { "Switch off" } else { "Switch on" }) }
-                                } }
+                                }
                             }
-                        } }
-                    }
+                            td { @if f.enabled { span.tag.tone-good { (icon("task")) "on" } } @else { span.tag { (icon("ban")) "off" } } }
+                            td { form.inline method="post" action={ "/p/" (p.id) "/flags/" (f.key) } {
+                                @if !f.enabled { input type="hidden" name="enabled" value="on"; }
+                                input type="hidden" name="rollout" value=(f.rollout);
+                                button type="submit" { (if f.enabled { "Switch off" } else { "Switch on" }) }
+                            } }
+                        }
+                    } },
+                    foot: html! { div.pager { span { (flags.len()) " flags · the rollout is the share of eligible users who get the flag" } } },
                 }
+                .render())
             }
         },
     )
@@ -144,6 +175,23 @@ pub fn flag_edit(
     )
 }
 
+/// The answer types of a survey: (form value, label).
+pub(crate) const SURVEY_KINDS: [(&str, &str); 4] = [
+    ("rating", "Rating 1–5"),
+    ("yes_no", "Yes / no"),
+    ("choice", "One choice"),
+    ("text", "Free text"),
+];
+
+/// The answer type checked in the editor: the stored one, or a rating for
+/// a value the form does not offer, so exactly one option is checked.
+fn survey_kind(kind: &str) -> &'static str {
+    SURVEY_KINDS
+        .iter()
+        .find(|(k, _)| *k == kind)
+        .map_or("rating", |(k, _)| k)
+}
+
 /// Create or edit a micro-survey (#220).
 pub fn survey_edit(
     p: &ProjectInfo<'_>,
@@ -170,26 +218,34 @@ pub fn survey_edit(
                 p.muted { a href={ "/p/" (p.id) "/surveys" } { "← Surveys" } " · one question, right after a moment of value, once per user" }
             } }
             @if let Some(e) = error { p.alert role="alert" { (e) } }
-            section.card.wide {
-                form.settings method="post" action={ "/p/" (p.id) "/surveys-edit" } {
-                    input type="hidden" name="original" value=(if new { "" } else { survey.map_or("", |x| x.key.as_str()) });
-                    label { "Key " input type="text" name="key" value=(s.key) required maxlength="64" pattern="[a-z0-9_-]+" placeholder="writing-usefulness"; }
-                    label.wide { "Question " input type="text" name="question" value=(s.question) required maxlength="200" placeholder="How useful was writing today?"; }
-                    label { "Answer "
-                        select name="kind" {
-                            @for (k, l) in [("rating", "Rating 1–5"), ("yes_no", "Yes / no"), ("choice", "One choice"), ("text", "Free text")] {
-                                option value=(k) selected[s.kind == k] { (l) }
+            // The form card (#551): the answer type is a segmented control,
+            // radio inputs carrying the select's name and values.
+            form.card.wide.form-card method="post" action={ "/p/" (p.id) "/surveys-edit" } aria-labelledby="survey-h" {
+                input type="hidden" name="original" value=(if new { "" } else { survey.map_or("", |x| x.key.as_str()) });
+                div.section-head { h2 #survey-h { (icon("idea")) "Question" } }
+                div.form-grid {
+                    label.field { "Key" input type="text" name="key" value=(s.key) required maxlength="64" pattern="[a-z0-9_-]+" placeholder="writing-usefulness"; small { "Lowercase letters, digits, - and _." } }
+                    label.field.wide { "Question" input type="text" name="question" value=(s.question) required maxlength="200" placeholder="How useful was writing today?"; }
+                    fieldset.field.wide {
+                        legend { "Answer" }
+                        div.seg {
+                            @for (k, l) in SURVEY_KINDS {
+                                label { input type="radio" name="kind" value=(k) checked[survey_kind(&s.kind) == k]; (l) }
                             }
                         }
                     }
-                    label { "Choices " input type="text" name="choices" value=(s.choices.join(", ")) placeholder="for One choice: 2 to 6"; }
-                    label { "After the event " input type="text" name="trigger" value=(s.trigger) required maxlength="100" placeholder="entry_saved"; }
-                    label { "Ask % of users " input type="number" name="sample" min="0" max="100" value=(s.sample); }
-                    label { "Only roles " input type="text" name="roles" value=(s.roles.join(", ")) placeholder="every role"; }
-                    label.check { input type="checkbox" name="enabled" checked[s.enabled]; " On" }
-                    button type="submit" { (if new { "Create" } else { "Save" }) }
+                    label.field { "Choices" input type="text" name="choices" value=(s.choices.join(", ")) placeholder="for One choice: 2 to 6"; small { "One choice only: 2 to 6, comma-separated." } }
+                    label.field { "After the event" input type="text" name="trigger" value=(s.trigger) required maxlength="100" placeholder="entry_saved"; small { "Asked right after this event, once per user." } }
+                    label.field { "Ask % of users" input type="number" name="sample" min="0" max="100" value=(s.sample); }
+                    label.field { "Only roles" input type="text" name="roles" value=(s.roles.join(", ")) placeholder="every role"; small { "Comma-separated. Empty: every role." } }
                 }
-                p.muted.small { "Answers are " code { "$survey" } " events: " a href={ "/p/" (p.id) "/events?event=%24survey" } { "see them in Events" } ", export them from Settings." }
+                label.switch {
+                    input type="checkbox" role="switch" name="enabled" checked[s.enabled];
+                    span { b { "On" } small { "Off: nobody is asked." } }
+                }
+                (crate::project_settings::form_foot(if new { "Create" } else { "Save" }, html! {
+                    "Answers are " code { "$survey" } " events: " a href={ "/p/" (p.id) "/events?event=%24survey" } { "see them in Events" } ", export them from Settings."
+                }))
             }
             @if !new {
                 section.card.wide.danger {
