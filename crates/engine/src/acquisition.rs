@@ -58,22 +58,16 @@ pub async fn acquisition(
     let q = &q.with_params(&f.params()?);
     let src = source(map);
     let w = f.clause(90)?;
+    // The landing's facts are typed columns (#482, D-039).
     let key = match by {
-        "source" => "utm_source",
-        "campaign" => "utm_campaign",
-        "referrer" => "ref_host",
-        _ => "channel",
+        "source" => "acq_utm_source",
+        "campaign" => "acq_utm_campaign",
+        "referrer" => "acq_ref_host",
+        _ => "acq_channel",
     };
-    let prop = |k: &str| format!("regexp_match(properties, '\"\\${k}\":\"([^\"]{{1,200}})\"')[1]");
     let landings = format!(
-        "SELECT distinct_id, {ch} AS ch, {v} AS v FROM {src} WHERE {w} AND event = '$pageview' \
-         AND strpos(properties, '\"$channel\"') > 0 ORDER BY timestamp LIMIT 300000",
-        ch = prop("channel"),
-        v = if key == "channel" {
-            prop("channel")
-        } else {
-            prop(key)
-        },
+        "SELECT distinct_id, acq_channel AS ch, {key} AS v FROM {src} WHERE {w} AND event = '$pageview' \
+         AND acq_channel IS NOT NULL ORDER BY timestamp LIMIT 300000"
     );
     let successes: Vec<String> = map
         .map(|m| {

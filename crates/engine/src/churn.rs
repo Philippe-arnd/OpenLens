@@ -327,10 +327,10 @@ pub async fn churn(
     let friction_sql = format!(
         "WITH l AS (SELECT distinct_id, max(date) AS d FROM {src} WHERE {w} AND {ident} AND {INTERACTION} GROUP BY distinct_id) \
          SELECT e.distinct_id, \
-                max(CASE WHEN e.event = '$click' AND e.properties LIKE '%\"$rage\":true%' THEN 1 ELSE 0 END) AS rage, \
+                max(CASE WHEN e.event = '$click' AND e.click_rage THEN 1 ELSE 0 END) AS rage, \
                 max(CASE WHEN e.event = '$request_failed' THEN 1 ELSE 0 END) AS failed, \
-                max(CASE WHEN e.event = '$vital' AND e.properties LIKE '%\"$rating\":\"poor\"%' THEN 1 ELSE 0 END) AS slow \
-         FROM (SELECT distinct_id, event, properties, date FROM {src} WHERE {w}) e \
+                max(CASE WHEN e.event = '$vital' AND e.vital_rating = 'poor' THEN 1 ELSE 0 END) AS slow \
+         FROM (SELECT distinct_id, event, click_rage, vital_rating, date FROM {src} WHERE {w}) e \
          JOIN l ON e.distinct_id = l.distinct_id AND e.date = l.d GROUP BY e.distinct_id"
     );
     let release_sql = format!(

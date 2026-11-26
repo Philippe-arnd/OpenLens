@@ -396,7 +396,7 @@ pub fn source(map: Option<&FeatureMap>) -> String {
             let (role, feature) = lookups(m);
             format!(
                 "(SELECT uuid, event, distinct_id, session_id, timestamp, received_at, url, path, \
-                 account, plan, environment, release, flags, properties, date, {VITAL_COLUMNS}, \
+                 account, plan, environment, release, flags, properties, date, {VITAL_COLUMNS}, {FACT_COLUMNS}, \
                  {role} AS role, {feature} AS feature FROM events) AS events"
             )
         }
@@ -509,6 +509,10 @@ const BOARD_COLUMNS: &str = "event, distinct_id, session_id, timestamp, path, fe
 const VITAL_COLUMNS: &str = "vital_name, vital_value, vital_device, vital_el, vital_kind, \
      vital_res, vital_ttfb, vital_load_delay, vital_load_time, vital_render_delay, \
      vital_input_delay, vital_processing, vital_presentation";
+
+/// The typed error, acquisition and friction facts (#482), written at ingestion.
+const FACT_COLUMNS: &str = "vital_rating, error_message, error_source, error_stack, acq_channel, \
+     acq_utm_source, acq_utm_campaign, acq_ref_host, click_rage, facts_version";
 
 /// The columns of the board's Web Vitals snapshot: what the 7-day filters
 /// read, the page, and the typed facts.

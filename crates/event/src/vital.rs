@@ -55,32 +55,37 @@ pub fn vital(event: &str, properties: &str) -> Option<Vital> {
         return None;
     }
     let props: Map<String, Value> = serde_json::from_str(properties).ok()?;
-    let name = text(&props, "name", 1, usize::MAX, |c| c.is_ascii_uppercase())?;
+    from_map(&props)
+}
+
+/// The facts of a `$vital` whose properties are already parsed.
+pub(crate) fn from_map(props: &Map<String, Value>) -> Option<Vital> {
+    let name = text(props, "name", 1, usize::MAX, |c| c.is_ascii_uppercase())?;
     let lower = |c: char| c.is_ascii_lowercase();
     let mut parts = [None; 7];
     for (slot, part) in parts.iter_mut().zip(PARTS) {
-        *slot = number(&props, part);
+        *slot = number(props, part);
     }
     Some(Vital {
         name,
-        value: number(&props, "value"),
-        device: text(&props, "device", 1, usize::MAX, lower)
+        value: number(props, "value"),
+        device: text(props, "device", 1, usize::MAX, lower)
             .filter(|d| ["phone", "tablet", "desktop"].contains(&d.as_str())),
-        el: text(&props, "el", 1, 120, plain),
-        kind: text(&props, "el_type", 1, 12, lower).or_else(|| text(&props, "input", 1, 12, lower)),
-        res: text(&props, "res", 1, 200, plain),
+        el: text(props, "el", 1, 120, plain),
+        kind: text(props, "el_type", 1, 12, lower).or_else(|| text(props, "input", 1, 12, lower)),
+        res: text(props, "res", 1, 200, plain),
         parts,
     })
 }
 
 /// A character the JSON text holds as itself: not `"`, `\` or below
 /// U+0020 (those are escaped, which `[^"\\]` does not match).
-fn plain(c: char) -> bool {
+pub(crate) fn plain(c: char) -> bool {
     c != '"' && c != '\\' && c >= ' '
 }
 
 /// `"$<key>":"(…)"`: a string of `min..=max` characters, each allowed.
-fn text(
+pub(crate) fn text(
     props: &Map<String, Value>,
     key: &str,
     min: usize,

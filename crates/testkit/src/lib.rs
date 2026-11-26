@@ -29,6 +29,17 @@ pub fn hostile_capture_bodies() -> Vec<Vec<u8>> {
         b"{\"batch\":[{\"event\":\"x\",\"distinct_id\":\"u\",\"timestamp\":\"+275760-09-13T00:00:00Z\"}],\"sent_at\":\"-262143-01-01T00:00:00Z\"}".to_vec(),
         deep.into_bytes(),
         wide.into_bytes(),
+        // Typed facts (#482): escapes, wrong types, lone surrogates, a
+        // pattern hidden in a string or a nested object.
+        br#"{"batch":[{"event":"$error","distinct_id":"u","properties":{"$message":"\"\\\u0000\u2028","$source":{"a":1},"$stack":["x"]}}]}"#.to_vec(),
+        br#"{"batch":[{"event":"$error","distinct_id":"u","properties":{"$message":"\ud800"}}]}"#.to_vec(),
+        format!(
+            r#"{{"batch":[{{"event":"$pageview","distinct_id":"u","properties":{{"$channel":"{}","$utm_source":"\"\"\"","$ref_host":null,"$utm_campaign":"{}"}}}}]}}"#,
+            "\\\"".repeat(5_000),
+            "é".repeat(300)
+        )
+        .into_bytes(),
+        br#"{"batch":[{"event":"$click","distinct_id":"u","properties":{"$x":"\"$rage\":true","a":{"$rage":true}}}]}"#.to_vec(),
         vec![0xff, 0xfe, 0x00, 0x7b],
     ]
 }
