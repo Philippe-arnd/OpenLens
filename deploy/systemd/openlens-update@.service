@@ -1,0 +1,23 @@
+# One run of openlens-update for the channel in the instance name:
+# openlens-update@latest.service or openlens-update@0.6.service. Started by the timer
+# of the same name. Guide: docs/deploy/systemd.md#hands-off-updates.
+
+[Unit]
+Description=Update OpenLens (channel %i)
+Documentation=https://github.com/Philippe-arnd/OpenLens/blob/main/docs/deploy/systemd.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/openlens-update %i
+# It runs as root (it restarts openlens.service, owns /opt/openlens and may
+# restore the upgrade backup), so it only writes where it must.
+ProtectSystem=strict
+ReadWritePaths=/opt/openlens /usr/local/bin -/var/lib/openlens
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes

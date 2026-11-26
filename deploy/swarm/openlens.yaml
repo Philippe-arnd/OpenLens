@@ -1,0 +1,47 @@
+# OpenLens as a Docker Swarm stack. Guide: docs/deploy/swarm.md.
+#   docker node update --label-add openlens=data <node>
+#   docker stack deploy -c openlens.yaml openlens
+#
+# One replica, on one node: the data volume is local to that node and
+# OpenLens is its only writer, so an update stops the old task before it
+# starts the new one, and goes back to the previous image if the new one
+# fails.
+services:
+  openlens:
+    # A channel: :latest, or a minor such as :0.6 (never :edge).
+    image: ghcr.io/philippe-arnd/openlens:0.6
+    environment:
+      OPENLENS_PUBLIC_URL: https://analytics.example.com
+    ports:
+      - "8686:8686"
+    volumes:
+      - openlens-data:/data
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/openlens", "healthcheck"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      # The first start of a new version copies the data to
+      # backups/upgrade/ before it listens: no failure counts until then.
+      start_period: 15m
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.labels.openlens == data]
+      update_config:
+        order: stop-first
+        failure_action: rollback
+        monitor: 60s
+      rollback_config:
+        order: stop-first
+      restart_policy:
+        condition: any
+        delay: 5s
+      resources:
+        limits:
+          # 1 GiB up to about 2 M events in 90 days, 2G up to about 4 M
+          # (docs/deploy/README.md#requirements).
+          memory: 1G
+
+volumes:
+  openlens-data:

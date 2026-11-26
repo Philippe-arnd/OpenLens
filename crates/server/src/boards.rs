@@ -4,7 +4,8 @@
 //! queries: seconds, and hundreds of MB at a few million events. Every page
 //! that shows part of it used to compute it again. Here:
 //!
-//! - a result is kept per (project, filters, map version) and reused until
+//! - a result (the board and the revenue shown on it, #480) is kept per
+//!   (project, filters, map version) and reused until
 //!   new data lands in that project (its generation, bumped by that
 //!   project's flush, compaction, erasure and retention, #420) and for at
 //!   most [`MAX_AGE`] in any case;
@@ -19,7 +20,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use openlens_engine::{Board, Filters};
+use openlens_engine::{Board, Filters, Revenue};
 use openlens_featuremap::FeatureMap;
 
 use crate::AppState;
@@ -35,11 +36,17 @@ const PARALLEL: usize = 2;
 
 type Key = (String, String, i64);
 
+/// The revenue of the same filters, or why it could not be computed.
+type RevenueResult = Result<Option<Revenue>, String>;
+
 #[derive(Clone)]
 struct Entry {
     generation: u64,
     at: Instant,
     board: Arc<Board>,
+    /// Computed with the board, so a page that shows both is served from
+    /// the cache as a whole (#480).
+    revenue: Arc<RevenueResult>,
 }
 
 /// Shared board results; cheap to clone.
@@ -196,14 +203,28 @@ pub(crate) async fn board(
     f: &Filters,
     map: Option<(&FeatureMap, i64)>,
 ) -> openlens_engine::Result<Board> {
-    let mut b = cached(state, project, f, map).await?;
+    Ok(with_revenue(state, project, f, map).await?.0)
+}
+
+/// [`board`] and the revenue of the same filters (#231), from the cache
+/// when possible: the revenue query reads 30 days of properties, so
+/// running it on every board page made a cached board page as slow as a
+/// cold one (#480).
+pub(crate) async fn with_revenue(
+    state: &AppState,
+    project: &str,
+    f: &Filters,
+    map: Option<(&FeatureMap, i64)>,
+) -> openlens_engine::Result<(Board, RevenueResult)> {
+    let e = cached(state, project, f, map).await?;
+    let mut b = (*e.board).clone();
     b.environments = crate::environments::visible(
         state,
         project,
         std::mem::take(&mut b.environments),
         &f.environment,
     );
-    Ok(b)
+    Ok((b, (*e.revenue).clone()))
 }
 
 async fn cached(
@@ -211,7 +232,7 @@ async fn cached(
     project: &str,
     f: &Filters,
     map: Option<(&FeatureMap, i64)>,
-) -> openlens_engine::Result<Board> {
+) -> openlens_engine::Result<Entry> {
     let cache = &state.boards;
     let key: Key = (
         project.to_owned(),
@@ -225,7 +246,7 @@ async fn cached(
         if !fresh(&e, generation) {
             refresh_later(state, key, f.clone(), map.map(|(m, v)| (m.clone(), v)));
         }
-        return Ok((*e.board).clone());
+        return Ok(e);
     }
     let lock = cache.flight(&key);
     let _computing = lock.lock().await;
@@ -234,10 +255,9 @@ async fn cached(
     if let Some(e) = cache.get(&key)
         && servable(&e, generation)
     {
-        return Ok((*e.board).clone());
+        return Ok(e);
     }
-    let board = compute(state, project, f, map, generation, key).await?;
-    Ok((*board).clone())
+    compute(state, project, f, map, generation, key).await
 }
 
 async fn compute(
@@ -247,29 +267,32 @@ async fn compute(
     map: Option<(&FeatureMap, i64)>,
     generation: u64,
     key: Key,
-) -> openlens_engine::Result<Arc<Board>> {
+) -> openlens_engine::Result<Entry> {
     let cache = &state.boards;
     let _permit = cache.inner.permits.acquire().await.ok();
-    let board = Arc::new(
+    let (board, revenue) = tokio::join!(
         Box::pin(openlens_engine::board_shared(
             &state.query,
             project,
             f,
             map,
             generation,
-        ))
-        .await?,
+        )),
+        openlens_engine::revenue(&state.query, project, map.map(|(m, _)| m), f)
     );
+    let revenue = revenue.map_err(|err| {
+        tracing::warn!(project, %err, "revenue not computed");
+        err.to_string()
+    });
+    let entry = Entry {
+        generation,
+        at: Instant::now(),
+        board: Arc::new(board?),
+        revenue: Arc::new(revenue),
+    };
     cache.inner.computed.fetch_add(1, Ordering::Relaxed);
-    cache.put(
-        key,
-        Entry {
-            generation,
-            at: Instant::now(),
-            board: board.clone(),
-        },
-    );
-    Ok(board)
+    cache.put(key, entry.clone());
+    Ok(entry)
 }
 
 /// Recompute a stale result in the background, once per key at a time.

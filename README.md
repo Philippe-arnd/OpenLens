@@ -139,7 +139,7 @@ docker run -p 8686:8686 -v openlens-data:/data ghcr.io/philippe-arnd/openlens:la
 | Where | How | Guide |
 | --- | --- | --- |
 | **Docker / Compose** | one container, one volume | [docs/deploy/docker.md](docs/deploy/docker.md) |
-| **Binary + systemd** | one file, `x86_64` or `aarch64` Linux | [docs/deploy/binary.md](docs/deploy/binary.md) |
+| **Binary + systemd** | one file, `x86_64` or `aarch64` Linux | [docs/deploy/systemd.md](docs/deploy/systemd.md) |
 | **Kubernetes** | `helm install openlens oci://ghcr.io/philippe-arnd/charts/openlens`, or `kubectl apply -k` | [docs/deploy/kubernetes.md](docs/deploy/kubernetes.md) |
 | **Coolify** | one-click template | [docs/deploy/coolify.md](docs/deploy/coolify.md) |
 

@@ -33,6 +33,7 @@ mod people;
 pub mod relations;
 pub mod replay_rate;
 mod revenue;
+pub mod rollups;
 pub mod stats;
 mod tasks;
 mod variants;
@@ -406,7 +407,7 @@ pub fn source(map: Option<&FeatureMap>) -> String {
 /// that apply its rules in Rust, defined once per set of rules, or the
 /// reference `CASE` expressions when the rules cannot be applied in Rust
 /// with the same result.
-fn lookups(m: &FeatureMap) -> (String, String) {
+pub(crate) fn lookups(m: &FeatureMap) -> (String, String) {
     use std::hash::{Hash, Hasher};
     let (role_sql, feature_sql) = (m.role_sql(), m.feature_sql());
     // The SQL is the rules, written out: same SQL, same functions.

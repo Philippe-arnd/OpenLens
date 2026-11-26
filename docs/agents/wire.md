@@ -2,7 +2,7 @@
 
 You are the agent that maintains a web app. Your goal is that the product manager's **first login shows a populated Focus board**, with no manual setup on their side.
 
-**No OpenLens server yet?** Deploy one first with the [self-hosting guide](../deploy/README.md): [Docker](../deploy/docker.md), [binary](../deploy/binary.md), [Kubernetes](../deploy/kubernetes.md) (Helm or Kustomize) or [Coolify](../deploy/coolify.md). None needs any configuration.
+**No OpenLens server yet?** Deploy one first with the [self-hosting guide](../deploy/README.md): [Docker](../deploy/docker.md), [binary + systemd](../deploy/systemd.md), [Kubernetes](../deploy/kubernetes.md) (Helm or Kustomize) or [Coolify](../deploy/coolify.md). None needs any configuration.
 
 **Available today:** `openlens-cli` (`init`, `features lint|push`, `import`, `verify`, `sourcemaps`, `flags`, `login-link`, `sql`, `guide`, `mcp`), the HTTP API below, the SDK and the dashboard. Everything below is available. Two small reference apps wired this way live in `examples/` (`notes-ssr`: script tag; `tasks-spa`: npm package). Journal, a real app wired outside this repo, is the third check of the M2 exit.
 

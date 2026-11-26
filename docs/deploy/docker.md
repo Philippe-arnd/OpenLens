@@ -34,7 +34,7 @@ volumes:
   openlens-data:
 ```
 
-The image has no shell: the healthcheck uses the binary's own `healthcheck` subcommand. The image is `linux/amd64` for now; on ARM hosts use the [binary](binary.md) until the multi-arch image lands ([#238](https://github.com/Philippe-arnd/OpenLens/issues/238)).
+The image has no shell: the healthcheck uses the binary's own `healthcheck` subcommand. The image is `linux/amd64` for now; on ARM hosts use the [binary](systemd.md) until the multi-arch image lands ([#238](https://github.com/Philippe-arnd/OpenLens/issues/238)).
 
 ## HTTPS and reverse proxy
 
@@ -74,13 +74,35 @@ server {
 
 ## Updates
 
-Follow a minor channel (`:0.2`) and pull it on a schedule, for example a daily cron line:
+Follow a channel: a minor (`:0.2` above; patches only, no behaviour change) or `:latest`. Never `:edge`, which follows `main`. On start, a new version backs up the data (`backups/upgrade/`) and refuses data from a newer release ([README.md](README.md#updates-without-anyone)).
+
+**Hands-off, with a rollback:** [`deploy/docker/openlens-compose-update`](../../deploy/docker/openlens-compose-update) pulls the channel tag of the `openlens` service, recreates it, and waits up to 15 minutes for the healthcheck (the upgrade backup comes first). If the new image exits, restarts or never gets healthy, it goes back to the image that ran before and remembers the failed one, so later runs wait for the next image. With [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) installed, it checks the image signature before the switch ([Verify what you run](README.md#verify-what-you-run)). It needs the healthcheck of the Compose file above, and exits with an error when it rolled back, so cron mails you.
 
 ```sh
-cd /srv/openlens && docker compose pull -q && docker compose up -d
+sudo curl -fsSL -o /usr/local/bin/openlens-compose-update \
+  https://raw.githubusercontent.com/Philippe-arnd/OpenLens/main/deploy/docker/openlens-compose-update
+sudo chmod 755 /usr/local/bin/openlens-compose-update
+# crontab -e, daily at 04:17:
+17 4 * * * /usr/local/bin/openlens-compose-update /srv/openlens
 ```
 
-The upgrade backup and the data-format guard make this safe; to undo, pin the previous tag and restore `backups/upgrade/`. A built-in updater for Docker and the binary is tracked in [#238](https://github.com/Philippe-arnd/OpenLens/issues/238).
+Plain `docker compose pull -q && docker compose up -d` from cron also works, without the rollback.
+
+### Roll back
+
+`openlens-compose-update` goes back to the previous image on its own. By hand: put the previous release in `image:` (for example `:v0.2.1`), then `docker compose up -d`.
+
+If the log then says *this data was written by OpenLens X (data format N)*, the newer release changed the data format: put back the copy it made before it started. The image has no shell, so a throwaway BusyBox container does it; what the backup replaces goes to `/data/.newer`, and the keys, icons and other backups stay:
+
+```sh
+cd /srv/openlens && docker compose stop openlens
+docker run --rm --volumes-from "$(docker compose ps -aq openlens)" busybox:1.37 sh -c '
+  cd /data && b=$(ls -d backups/upgrade/* | tail -n 1) && mkdir -p .newer &&
+  for t in wal events replay rollups sourcemaps cold meta.db meta.db-wal meta.db-shm openlens-version.json cold-manifest.json; do
+    if [ -e "$t" ]; then mv "$t" .newer/; fi
+  done && cp -a "$b"/. /data/'
+docker compose up -d
+```
 
 ## Backups
 

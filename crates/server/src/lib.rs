@@ -566,9 +566,9 @@ fn compact(state: &AppState) -> Result<(), String> {
 /// long history does not hold the heavy lock for long (#322).
 const ROLLUPS_PER_PASS: usize = 7;
 
-/// Roll up the closed days that have no rollup yet (#322): every day at
-/// the first start after an upgrade, a few per pass, then each day once it
-/// is closed. A day erased meanwhile is skipped and done on the next pass.
+/// Roll up the closed days lacking a rollup table (#322, #451), a few per
+/// pass, computing only the tables a day lacks. A day erased meanwhile is
+/// skipped and done on the next pass.
 async fn roll_up(state: &AppState, now: chrono::DateTime<chrono::Utc>) -> usize {
     let projects = match state.meta.projects() {
         Ok(p) => p,
@@ -586,12 +586,18 @@ async fn roll_up(state: &AppState, now: chrono::DateTime<chrono::Utc>) -> usize 
                 continue;
             }
         };
+        if days.is_empty() {
+            continue;
+        }
+        let map = load_map(state, &p.id).await;
+        let feat = openlens_engine::rollups::day_features(map.as_ref().map(|(m, v)| (m, *v)));
         for day in days.into_iter().take(ROLLUPS_PER_PASS) {
             let generation = openlens_storage::rollup::generation();
             let label = day.format("%Y-%m-%d").to_string();
+            let w = openlens_storage::rollup::lacking(&state.data_dir, &p.id, day);
             // One day at a time, never beside a board (#444).
             let quiet = state.boards.exclusive().await;
-            let batches = match state.query.rollup_day(&p.id, &label).await {
+            let batches = match state.query.rollup_day(&p.id, &label, Some(&w), &feat).await {
                 Ok(b) => b,
                 Err(err) => {
                     tracing::warn!(project = %p.id, day = %label, %err, "rollup failed");
