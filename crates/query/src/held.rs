@@ -58,7 +58,7 @@ impl Taken<'_> {
     fn take(&mut self, bytes: usize) -> bool {
         let ok = self
             .budget
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
                 left.checked_sub(bytes)
             })
             .is_ok();
