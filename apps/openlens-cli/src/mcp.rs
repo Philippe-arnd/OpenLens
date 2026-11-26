@@ -251,8 +251,8 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "board",
-                description: "The Focus board numbers (KPIs by role/environment/release, features, roles, role gaps, releases, vitals).",
-                input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"}}))}),
+                description: "The Focus board numbers (KPIs by role/environment/release, features, roles, role gaps, releases, vitals). Period blocks read since the current release by default; `since` (a release) or `from`/`to` (YYYY-MM-DD, project days, at most 400 days, none in the future) pick another period, compared in `window` with the same length before.",
+                input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"},"since":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"}}))}),
             },
             ToolSpec {
                 name: "vitals",
@@ -553,7 +553,12 @@ impl Tools for OpenLensTools {
             "verify" => crate::verify_report(c, &project(args)),
             "insights" | "kpi_report" | "board" => {
                 let mut q = Vec::new();
-                for k in ["env", "role", "release"] {
+                let keys: &[&str] = if name == "board" {
+                    &["env", "role", "release", "since", "from", "to"]
+                } else {
+                    &["env", "role", "release"]
+                };
+                for k in keys {
                     if let Some(v) = s(args, k) {
                         q.push(format!("{k}={}", v.replace(['&', '#', '?', ' '], "")));
                     }
@@ -611,7 +616,12 @@ impl Tools for OpenLensTools {
             }
             "vitals" => {
                 let mut q = Vec::new();
-                for k in ["env", "role", "release"] {
+                let keys: &[&str] = if name == "board" {
+                    &["env", "role", "release", "since", "from", "to"]
+                } else {
+                    &["env", "role", "release"]
+                };
+                for k in keys {
                     if let Some(v) = s(args, k) {
                         q.push(format!("{k}={}", v.replace(['&', '#', '?', ' '], "")));
                     }

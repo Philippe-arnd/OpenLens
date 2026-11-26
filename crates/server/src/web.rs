@@ -358,7 +358,7 @@ async fn board(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
-    Query(q): Query<FilterQuery>,
+    Query(q): Query<crate::api::BoardQuery>,
 ) -> Response {
     let Some(p) = project(&state, id).await else {
         return html(
@@ -367,10 +367,16 @@ async fn board(
         );
     };
     // The board page reads its period blocks since the current release
-    // (D-055).
-    let f = openlens_engine::Filters {
-        window: openlens_engine::Window::Release,
-        ..q.filters(&auth::tz_for(&state, &headers, &p.timezone))
+    // (D-055), or the date range or past release its picker asked for
+    // (D-060).
+    let f = match q.filters(&auth::tz_for(&state, &headers, &p.timezone)) {
+        Ok(f) => f,
+        Err(e) => {
+            return html(
+                StatusCode::BAD_REQUEST,
+                openlens_ui::message("Can't show that", &e.to_string()),
+            );
+        }
     };
     let map = crate::load_map(&state, &p.id).await;
     let host = crate::public_url(&headers);
@@ -467,12 +473,17 @@ async fn board_page(
                 .collect()
         })
         .unwrap_or_default();
-    // The marks cover the active-users chart: the window's days (D-055).
+    // The marks cover the active-users chart: from the window's start to
+    // now (D-055; a range may end in the past, D-060).
     let days = board
         .as_ref()
         .ok()
         .and_then(|b| b.window.as_ref())
-        .map_or(14, |w| w.days);
+        .map_or(14, |w| {
+            chrono::NaiveDateTime::parse_from_str(&w.since, "%Y-%m-%d %H:%M").map_or(w.days, |t| {
+                (chrono::Utc::now() - t.and_utc()).num_days() + 1
+            })
+        });
     let marks = crate::timeline::collect(&state, &p.id, &releases, days);
     match board {
         Ok(b) => html(

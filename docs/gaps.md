@@ -9,5 +9,5 @@ What is missing or behaves differently from what a user might expect. The UI and
 - **Users are identified people.** DAU/WAU/MAU, retention and cohorts count users who called `identify`; visitors who never logged in are shown apart ("not logged in"). A project that never identifies anyone counts every visitor.
 - **Session cut at UTC midnight:** the SDK starts a new session when the UTC day changes, because the browser does not know the project's time zone. KPI days and weeks follow the project's zone (D-017).
 - **Funnels** come from the feature map's declared steps. There is no funnel builder by design (D-014): agents run ad hoc funnels with `sql`.
-- **Journeys** look at the day before a user's first success only.
+- **Journeys** look at the day before a user's first success only, and are made of features: pages without a feature are not shown (D-059).
 - **Insights need history and size:** cards wait for at least 8 users per compared group, and retention-based cards for users older than the churn window. Backfill (`openlens-cli import`) fills the history gap on day one.
