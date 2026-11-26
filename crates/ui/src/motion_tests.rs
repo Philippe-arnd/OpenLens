@@ -14,7 +14,10 @@ struct Decl {
 
 /// The stylesheet read as declarations and blocks (each block's prelude
 /// with the preludes around it). An error when the braces do not balance.
-fn walk(css: &str) -> Result<(Vec<Decl>, Vec<(String, Vec<String>)>), String> {
+/// A block: its prelude and the preludes around it.
+type Block = (String, Vec<String>);
+
+fn walk(css: &str) -> Result<(Vec<Decl>, Vec<Block>), String> {
     let mut decls = Vec::new();
     let mut blocks = Vec::new();
     let mut stack: Vec<String> = Vec::new();
@@ -24,14 +27,14 @@ fn walk(css: &str) -> Result<(Vec<Decl>, Vec<(String, Vec<String>)>), String> {
     let mut chars = css.chars().peekable();
     let flush = |buf: &mut String, stack: &[String], decls: &mut Vec<Decl>| {
         let text = buf.trim();
-        if !stack.is_empty() {
-            if let Some((p, v)) = text.split_once(':') {
-                decls.push(Decl {
-                    prop: p.trim().to_ascii_lowercase(),
-                    value: v.trim().to_string(),
-                    ctx: stack.to_vec(),
-                });
-            }
+        if !stack.is_empty()
+            && let Some((p, v)) = text.split_once(':')
+        {
+            decls.push(Decl {
+                prop: p.trim().to_ascii_lowercase(),
+                value: v.trim().to_string(),
+                ctx: stack.to_vec(),
+            });
         }
         buf.clear();
     };

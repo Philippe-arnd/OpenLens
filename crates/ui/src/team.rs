@@ -110,9 +110,9 @@ fn click_svg(map: &openlens_engine::ClickMap, rage_only: bool) -> Markup {
 /// a ranked list of bars.
 fn ranked_labels(list: &[openlens_engine::Hotspot], rage: bool) -> Markup {
     let n = |h: &openlens_engine::Hotspot| if rage { h.rage } else { h.clicks };
-    let mut v: Vec<&openlens_engine::Hotspot> = list.iter().filter(|h| n(*h) > 0).collect();
-    v.sort_by_key(|h| std::cmp::Reverse(n(*h)));
-    let max = v.first().map_or(1, |h| n(*h)).max(1) as f64;
+    let mut v: Vec<&openlens_engine::Hotspot> = list.iter().filter(|h| n(h) > 0).collect();
+    v.sort_by_key(|h| std::cmp::Reverse(n(h)));
+    let max = v.first().map_or(1, |h| n(h)).max(1) as f64;
     let unit = if rage { " rage" } else { " clicks" };
     html! {
         @if v.is_empty() { p.muted.small { "No clicked element on this page in this window." } }
@@ -122,7 +122,7 @@ fn ranked_labels(list: &[openlens_engine::Hotspot], rage: bool) -> Markup {
                     li {
                         span.rank { (format!("{:02}", i + 1)) }
                         span.label { (h.label) }
-                        (crate::board::bar_with(n(*h) as f64 / max, &format!("{}{unit}", compact(n(*h)))))
+                        (crate::board::bar_with(n(h) as f64 / max, &format!("{}{unit}", compact(n(h)))))
                     }
                 }
             }
