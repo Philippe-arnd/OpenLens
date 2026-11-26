@@ -15,6 +15,7 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Time in staging | On the Releases page: from a build's first event in staging to its first in production |
 | Release verdict | On the Releases page: healthy, regressed or inconclusive, a release against the one before it |
 | Deploy hook | The project's secret URL that platforms post their deploy notifications to |
+| Delivery | On the Releases page: deploy frequency, lead time, change failure rate and time to restore per environment |
 | Map drift | Routes new in the latest release that no feature of the map claims |
 | Counted with | On a feature's releases: the map version in force when the release came out |
 | Period picker | On the board: the form that picks a past release or a date range for the period blocks |

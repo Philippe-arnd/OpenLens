@@ -408,4 +408,39 @@ async fn a_release_from_the_deploy_step_is_a_deploy_with_its_commit_range() {
             .iter()
             .all(|d| d["source"] == "cli" && d["status"] == "succeeded")
     );
+/// Delivery metrics (#523, D-068) from the hook's deploys: a failed
+/// deploy is a failed change, and the card is on the Releases page.
+#[tokio::test]
+async fn deploys_feed_the_delivery_metrics() {
+    let h = harness();
+    let hook = make_hook(&h).await;
+    for body in [
+        r#"{"status": "succeeded", "release": "v1"}"#,
+        r#"{"status": "failed", "release": "v2"}"#,
+        r#"{"status": "succeeded", "release": "v3"}"#,
+    ] {
+        assert_eq!(send(&h, &hook, body.into(), &[]).await.0, StatusCode::OK);
+    }
+    let r = get(&h, "/api/projects/default/delivery?days=7", None, true).await;
+    assert_eq!(r.status(), StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_str(&body_text(r).await).unwrap();
+    let prod = v["environments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["environment"] == "production")
+        .unwrap();
+    assert_eq!(prod["source"], "deploys");
+    assert!(
+        prod["deploys"].as_u64() < prod["changes"].as_u64(),
+        "{prod}"
+    );
+    assert!(prod["failures"].as_u64() > Some(0));
+    assert!(prod["lead_time_secs"].is_null() && prod["lead_time_note"].is_string());
+    let bad = get(&h, "/api/projects/default/delivery?days=0", None, true).await;
+    assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+
+    let cookie = login_cookie(&h).await;
+    let page = body_text(get(&h, "/p/default/releases", Some(&cookie), false).await).await;
+    assert!(page.contains("Deploy frequency") && page.contains("Time to restore"));
 }
