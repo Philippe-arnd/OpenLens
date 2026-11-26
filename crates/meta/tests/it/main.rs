@@ -404,3 +404,38 @@ fn identity_rows_follow_the_alias_rules_and_erasure_removes_them() {
     let erin = erin.iter().find(|p| p.person == "erin").unwrap().id;
     assert!(erin > top && erin != alice);
 }
+
+#[test]
+fn build_fingerprints_stay_bounded_per_day_and_per_project() {
+    use openlens_meta::releases::{MAX_BUILDS, MAX_NEW_BUILDS_PER_DAY};
+    let m = Meta::in_memory().unwrap();
+    let rec =
+        |b: &str, day: &str, at: i64| m.record_build("p", "production", b, None, day, at).unwrap();
+    let first = rec("known", "2026-11-01", 0).unwrap();
+    for i in 1..MAX_NEW_BUILDS_PER_DAY {
+        assert!(rec(&format!("b{i}"), "2026-11-01", i).is_some());
+    }
+    // The day is full: a new fingerprint is refused, a known one keeps its name.
+    assert_eq!(rec("one-too-many", "2026-11-01", 999), None);
+    assert_eq!(rec("known", "2026-11-01", 999), Some(first));
+    assert!(
+        rec("one-too-many", "2026-11-02", 1_000).is_some(),
+        "a new day has room"
+    );
+    // Over the project's cap, the oldest fingerprints go first.
+    let days = MAX_BUILDS / MAX_NEW_BUILDS_PER_DAY + 1;
+    let mut at = 2_000;
+    for d in 0..days {
+        for i in 0..MAX_NEW_BUILDS_PER_DAY {
+            at += 1;
+            rec(&format!("d{d}-{i}"), &format!("2027-01-{:02}", d + 1), at);
+        }
+    }
+    assert_eq!(m.build_release("p", "production", "known").unwrap(), None);
+    let newest = format!("d{}-{}", days - 1, MAX_NEW_BUILDS_PER_DAY - 1);
+    assert!(
+        m.build_release("p", "production", &newest)
+            .unwrap()
+            .is_some()
+    );
+}
