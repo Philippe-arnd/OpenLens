@@ -12,7 +12,9 @@ use serde_json::{Value, json};
 
 use crate::{AppState, auth};
 
+mod tokens;
 mod transfer;
+use tokens::*;
 pub(crate) use transfer::*;
 
 pub(crate) fn routes() -> Router<AppState> {
@@ -26,6 +28,10 @@ pub(crate) fn routes() -> Router<AppState> {
         .route(
             "/api/projects/{project}/environments",
             get(crate::environments::api_list).post(crate::environments::api_relabel),
+        )
+        .route(
+            "/api/projects/{project}/environments/allow",
+            post(crate::allowlist::api_allow),
         )
         .route("/api/projects/{project}/board", get(board))
         .route("/api/projects/{project}/errors", get(errors))
@@ -113,73 +119,6 @@ const IMPORT_MAX_LINES: usize = 20_000;
 
 fn err(status: StatusCode, msg: &str) -> Response {
     crate::apierr::json(status, msg)
-}
-
-#[derive(Deserialize)]
-struct NewToken {
-    scope: String,
-    #[serde(default)]
-    projects: Option<Vec<String>>,
-    #[serde(default)]
-    label: String,
-}
-
-/// `GET /api/tokens`: the scoped API tokens (never their values).
-async fn list_tokens(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Some(r) = guard(&state, &headers) {
-        return r;
-    }
-    match state.meta.api_tokens() {
-        Ok(t) => Json(json!({ "tokens": t })).into_response(),
-        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
-    }
-}
-
-/// `POST /api/tokens` `{scope, projects?, label}`: the token is shown once.
-async fn create_token(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(body): Json<NewToken>,
-) -> Response {
-    if let Some(r) = guard(&state, &headers) {
-        return r;
-    }
-    let projects = body.projects.filter(|p| !p.is_empty());
-    match state
-        .meta
-        .create_api_token(&body.scope, projects.as_deref(), &body.label)
-    {
-        Ok((t, plain)) => {
-            crate::privacy::audit(
-                &state,
-                &headers,
-                None,
-                "token.create",
-                &format!("{} {}", t.id, t.scope),
-            );
-            Json(json!({ "token": plain, "info": t })).into_response()
-        }
-        Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()),
-    }
-}
-
-/// `DELETE /api/tokens/{id}`.
-async fn revoke_token(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-) -> Response {
-    if let Some(r) = guard(&state, &headers) {
-        return r;
-    }
-    match state.meta.revoke_api_token(&id) {
-        Ok(true) => {
-            crate::privacy::audit(&state, &headers, None, "token.revoke", &id);
-            Json(json!({ "revoked": id })).into_response()
-        }
-        Ok(false) => err(StatusCode::NOT_FOUND, "no such token"),
-        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
-    }
 }
 
 fn guard(state: &AppState, headers: &HeaderMap) -> Option<Response> {

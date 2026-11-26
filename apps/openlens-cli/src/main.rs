@@ -512,6 +512,15 @@ fn run(cli: Cli) -> Result<bool, String> {
                         json!({ "host": host, "days": days, "dry_run": dry_run }),
                     )),
                 )?,
+                EnvCmd::Allow {
+                    hosts,
+                    confirm,
+                    project,
+                } => c.call(
+                    "POST",
+                    &format!("/api/projects/{project}/environments/allow"),
+                    Some(Body::Json(json!({ "hosts": hosts, "confirm": confirm }))),
+                )?,
                 EnvCmd::Unrule { host, project } => c.call(
                     "PATCH",
                     &format!("/api/projects/{project}"),

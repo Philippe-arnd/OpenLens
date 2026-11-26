@@ -3,8 +3,10 @@
 
 image:
   repository: ghcr.io/philippe-arnd/openlens
-  # Defaults to the chart's appVersion (the matching OpenLens release).
+  # Defaults to the chart's appVersion (the matching OpenLens release), or
+  # to its minor channel (for example 0.5) with autoUpdate.enabled.
   tag: ""
+  # Always with autoUpdate.enabled.
   pullPolicy: IfNotPresent
 
 # OpenLens is a single writer (write-ahead log + SQLite on one volume):
@@ -71,6 +73,18 @@ backup:
   schedule: "17 3 * * *"
   keep: 3
   existingClaim: ""
+
+# Opt-in hands-off updates (#198): a CronJob runs `kubectl rollout restart`
+# on the StatefulSet, and the new pod pulls the channel tag again (pull
+# policy Always). The image follows a channel: image.tag empty (the chart's
+# minor, patches only) or `latest`; a pinned release, a digest or `edge` is
+# refused. One replica: each run is a short restart, even with no new image.
+# It gets its own ServiceAccount, allowed to read and restart this
+# StatefulSet only. With Argo CD or Flux, use their image automation
+# instead (docs/deploy/kubernetes.md).
+autoUpdate:
+  enabled: false
+  schedule: "47 4 * * *"
 
 nodeSelector: {}
 tolerations: []

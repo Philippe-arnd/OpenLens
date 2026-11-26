@@ -34,7 +34,7 @@ spec:
           containers:
             - name: backup
               image: {{ include "openlens.image" . | quote }}
-              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              imagePullPolicy: {{ include "openlens.pullPolicy" . }}
               args: ["backup", "--into", "{{ if .Values.backup.existingClaim }}/backups{{ else }}/data/backups{{ end }}", "--keep", "{{ int .Values.backup.keep }}"]
               env:
                 - name: OPENLENS_DATA_DIR

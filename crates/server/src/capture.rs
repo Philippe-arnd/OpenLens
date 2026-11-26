@@ -19,6 +19,8 @@ use serde_json::json;
 
 use crate::{AppState, MAX_INFLATED};
 
+mod releases;
+
 pub(crate) fn error(status: StatusCode, msg: &str) -> Response {
     (status, Json(json!({ "error": msg }))).into_response()
 }
@@ -373,8 +375,11 @@ pub(crate) async fn capture(
     crate::identity::ensure(&state, &project.id);
     let st = state.clone();
     let pid = project.id.clone();
-    let events = normalized.events;
+    let mut events = normalized.events;
+    let tz = project.timezone.clone();
     let stored = tokio::task::spawn_blocking(move || -> Result<(), String> {
+        // Automatic release names from the build fingerprint (#495).
+        releases::assign(&st, &pid, &tz, &mut events, Utc::now());
         // Aliases and person ids (#450), before the events are durable.
         crate::identity::record(&st, &pid, &events)?;
         for ev in events.iter().filter(|e| e.event == names::IDENTIFY) {

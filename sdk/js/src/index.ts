@@ -7,7 +7,7 @@
  * No cookies. Input values are never captured.
  */
 
-import { detectEnvironment } from "./env";
+import { buildFingerprint, detectEnvironment, detectRelease, pageAssets } from "./env";
 import { trackVitals } from "./vitals";
 import type { Bridge } from "./replay";
 import { type Decision, decide, validRate } from "./sampling";
@@ -78,6 +78,9 @@ let activeFlags: string[] = [];
 let activeVariants: Record<string, string> = {};
 /** Share of sessions recorded from their start, from `/flags` (#327). */
 let replayRate: number | undefined;
+/** Fingerprint of the build this page runs (`$build`, #495), computed once
+ * per page load in `init`. */
+let build: string | undefined;
 
 /** A micro-survey the server says this user may be asked (see survey.ts). */
 export interface SurveyDef {
@@ -194,6 +197,7 @@ function base(): Props {
     $lib_version: VERSION,
   };
   if (cfg?.release) p.$release = cfg.release;
+  if (build) p.$build = build;
   if (state.dims.role) p.$role = state.dims.role;
   if (state.dims.account) p.$account = state.dims.account;
   if (state.dims.plan) p.$plan = state.dims.plan;
@@ -678,7 +682,12 @@ export function init(config: Config): void {
   const gpc = (navigator as Navigator & { globalPrivacyControl?: boolean }).globalPrivacyControl === true;
   if (navigator.doNotTrack === "1" || gpc || config.consent === "denied") consent = "denied";
   else consent = config.consent ?? "granted";
-  cfg = config;
+  cfg = { ...config, release: config.release || detectRelease() };
+  try {
+    build = buildFingerprint(pageAssets(), location.origin, config.host);
+  } catch {
+    build = undefined;
+  }
   origFetch = window.fetch?.bind(window);
   state = load();
   try {
