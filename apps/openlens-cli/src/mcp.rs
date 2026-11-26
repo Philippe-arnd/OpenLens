@@ -255,6 +255,11 @@ impl Tools for OpenLensTools {
                 input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"},"since":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"},"confirm":{"type":"string"}}))}),
             },
             ToolSpec {
+                name: "board_job",
+                description: "A long board period (a date range or past release that reads more than 30 days of events) computed in the background instead of in one call. `action: start` with the `board` tool's parameters returns the job's `id` (refused while you already have one queued or running; the error names it); `action: status` with `job` returns `state` (queued, running, done, failed, cancelled), `progress` (0 to 1, time against the estimate) and, once done, the `board`; `action: cancel` with `job` stops it. Jobs are kept an hour, for whoever started them.",
+                input_schema: json!({"type":"object","properties":with(json!({"action":{"type":"string","enum":["start","status","cancel"]},"job":{"type":"string"},"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"},"since":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"}})),"required":["action"]}),
+            },
+            ToolSpec {
                 name: "vitals",
                 description: "Web Vitals explained (LCP, INP, CLS, FCP, TTFB), last 7 days: what each means for a visitor, p75, rating, good/poor thresholds, the worst pages at p75, the p75 per device class and the elements most often behind slow measurements (LCP, INP, CLS), the dominant cause with the part of the vital that weighs most (likely_cause), and what to do, most likely cause first.",
                 input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"}}))}),
@@ -613,6 +618,40 @@ impl Tools for OpenLensTools {
                     }
                     _ => v,
                 })
+            }
+            "board_job" => {
+                let base = format!("/api/projects/{}/board/jobs", project(args));
+                let job = || -> Result<String, String> {
+                    let id: String = s(args, "job")
+                        .ok_or("job is required")?
+                        .chars()
+                        .filter(char::is_ascii_alphanumeric)
+                        .collect();
+                    Ok(format!("{base}/{id}"))
+                };
+                let (st, v) = match s(args, "action").as_deref() {
+                    Some("start") => {
+                        let q: Vec<String> = ["env", "role", "release", "since", "from", "to"]
+                            .iter()
+                            .filter_map(|k| {
+                                s(args, k).map(|v| {
+                                    format!("{k}={}", v.replace(['&', '#', '?', ' '], ""))
+                                })
+                            })
+                            .collect();
+                        c.call("POST", &format!("{base}?{}", q.join("&")), None)?
+                    }
+                    Some("status") => c.call("GET", &job()?, None)?,
+                    Some("cancel") => c.call("DELETE", &job()?, None)?,
+                    _ => return Err("action is start, status or cancel".into()),
+                };
+                match v.get("job").and_then(Value::as_str) {
+                    Some(running) if st == 429 => Err(format!(
+                        "{} (your job: {running})",
+                        crate::api_error(st, &v)
+                    )),
+                    _ => ok_or(st, v),
+                }
             }
             "vitals" => {
                 let mut q = Vec::new();

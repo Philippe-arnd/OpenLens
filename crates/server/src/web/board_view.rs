@@ -1,4 +1,5 @@
-//! The board page. Moved out of web.rs as is (#515).
+//! The board page, moved out of web.rs (#515), and the rendering of a
+//! board a background job computed.
 
 use super::*;
 
@@ -38,7 +39,8 @@ pub(super) async fn board(
                 name: &p.name,
                 key: &p.api_key,
             };
-            let run = q.confirmed_url(&p.id);
+            // "Run it" starts a background job (#515).
+            let run = q.params();
             return html(StatusCode::OK, openlens_ui::board_confirm(&info, &e, &run));
         }
         Err(e) => {
@@ -100,22 +102,36 @@ pub(super) async fn board_page(
     host: String,
     admin: bool,
 ) -> Response {
-    let info = openlens_ui::ProjectInfo {
-        id: &p.id,
-        name: &p.name,
-        key: &p.api_key,
-    };
-    let (mut board, revenue) =
+    let (board, revenue) =
         match crate::boards::with_revenue(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v)))
             .await
         {
             Ok((b, r)) => (Ok(b), r.ok().flatten()),
             Err(e) => (Err(e), None),
         };
+    render_board(&state, &p, &f, &host, admin, board, revenue.as_ref())
+}
+
+/// The board page of a board already computed: by [`board_page`], or by
+/// a background job (#515).
+pub(crate) fn render_board(
+    state: &AppState,
+    p: &openlens_meta::Project,
+    f: &openlens_engine::Filters,
+    host: &str,
+    admin: bool,
+    mut board: openlens_engine::Result<openlens_engine::Board>,
+    revenue: Option<&openlens_engine::Revenue>,
+) -> Response {
+    let info = openlens_ui::ProjectInfo {
+        id: &p.id,
+        name: &p.name,
+        key: &p.api_key,
+    };
     if let Ok(b) = board.as_mut() {
-        b.objectives_at_risk = crate::goals::snapshot(&state, &p.id).0;
+        b.objectives_at_risk = crate::goals::snapshot(state, &p.id).0;
         if admin {
-            b.setup = crate::settings::setup_left(&state, &p.id);
+            b.setup = crate::settings::setup_left(state, &p.id);
         }
         let st = openlens_engine::commands::alerts::status(&state.meta, &p.id);
         if st.state == "down" {
@@ -153,21 +169,21 @@ pub(super) async fn board_page(
                 (chrono::Utc::now() - t.and_utc()).num_days() + 1
             })
         });
-    let marks = crate::timeline::collect(&state, &p.id, &releases, days);
+    let marks = crate::timeline::collect(state, &p.id, &releases, days);
     match board {
         Ok(b) => html(
             StatusCode::OK,
             openlens_ui::board(
                 &info,
                 &b,
-                &f,
-                &host,
-                &crate::reword::plain(&state, &b.insights)
+                f,
+                host,
+                &crate::reword::plain(state, &b.insights)
                     .unwrap_or_default()
                     .into_iter()
                     .map(|p| (p.title, p.next_step))
                     .collect::<Vec<_>>(),
-                revenue.as_ref(),
+                revenue,
                 &marks,
             ),
         ),
