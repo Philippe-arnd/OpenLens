@@ -382,6 +382,7 @@ async fn compute(
     let closed = f.window.closed_utc_days(&f.tz, chrono::Utc::now());
     let kept = closed.and_then(|days| cache.inner.closed.get(&key, days));
     let since = cache.inner.closed.mark();
+    let started = Instant::now();
     let (board, revenue) = tokio::join!(
         Box::pin(openlens_engine::board_reusing(
             &state.query,
@@ -414,6 +415,14 @@ async fn compute(
         revenue: Arc::new(revenue),
     };
     cache.inner.computed.fetch_add(1, Ordering::Relaxed);
+    // How long a board took, computed for a page or ahead (D-072): the
+    // `scale` job reads it, since the page may be served from the cache.
+    tracing::info!(
+        project,
+        ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        key = ?key,
+        "board computed"
+    );
     cache.put(key, entry.clone());
     Ok(entry)
 }
