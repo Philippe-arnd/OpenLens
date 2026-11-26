@@ -20,6 +20,7 @@ use crate::{Board, Filters};
 pub mod alerts;
 pub mod goals;
 pub mod releases;
+pub mod tickets;
 
 /// Who may run a command, in the terms of the server's access policy
 /// (`crates/server/src/access.rs`, #294).
@@ -85,6 +86,10 @@ pub const REGISTRY: &[Spec] = &[
     spec::<alerts::SetSettings>(),
     spec::<alerts::Test>(),
     spec::<releases::List>(),
+    spec::<tickets::List>(),
+    spec::<tickets::DraftTicket>(),
+    spec::<tickets::File>(),
+    spec::<tickets::SetTarget>(),
 ];
 
 /// A 12-character id from `s` (the first bytes of its SHA-256, in hex).
@@ -153,6 +158,22 @@ pub trait Host: Sync {
         rule: &str,
         resolved: bool,
     ) -> impl Future<Output = Vec<alerts::Delivery>> + Send;
+    /// Where the project files its GitHub issues, when a repository and a
+    /// token are set.
+    fn github(&self, project: &str) -> Option<tickets::GitHub>;
+    /// One call to GitHub's REST API (`GET`, `POST` or `PATCH` on `url`),
+    /// with `token`: the answer, or why it failed (a status of 300 or more
+    /// is a failure).
+    fn github_call(
+        &self,
+        method: &str,
+        url: &str,
+        token: &str,
+        body: Option<serde_json::Value>,
+    ) -> impl Future<Output = Result<serde_json::Value, String>> + Send;
+    /// Store the GitHub token every project shares, sealed: why it could
+    /// not be sealed.
+    fn set_github_token(&self, token: &str) -> Result<(), String>;
 }
 
 /// Something that happened in a project, on the timeline.
