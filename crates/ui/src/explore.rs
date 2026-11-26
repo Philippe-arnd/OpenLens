@@ -5,7 +5,8 @@
 use super::*;
 
 /// A person's profile (#222): who they are, their role over time, their
-/// recordings, their latest events and errors.
+/// recordings, their latest events and errors. Admins get the privacy
+/// danger zone; `confirm` opens the dialog that forgets them (#545).
 #[allow(clippy::too_many_arguments)]
 pub fn person(
     p: &ProjectInfo<'_>,
@@ -16,60 +17,55 @@ pub fn person(
     events: &[EventRow],
     tz: &str,
     admin: bool,
+    confirm: Option<Confirm>,
 ) -> Markup {
+    use crate::detail::{
+        confirm_dialog, confirm_href, danger_item, danger_zone, entity, typed_form,
+    };
     let errors: Vec<&EventRow> = events
         .iter()
         .filter(|e| openlens_engine::family(&e.event) == "error")
         .collect();
     let tf = |t: &str| local_time(t, tz, false);
+    let page = format!("/p/{}/people/{}", p.id, url_enc(who));
+    let all_events = format!("/p/{}/events?person={}&days=90", p.id, url_enc(who));
+    let facts = html! {
+        @if let Some(x) = person {
+            dl.facts {
+                @if let Some(r) = &x.role { div { dt { "Role" } dd { span.tag.tone-accent { (r) } } } }
+                @if let Some(a) = &x.account { div { dt { "Account" } dd { (a) } } }
+                @if let Some(pl) = &x.plan { div { dt { "Plan" } dd { (pl) } } }
+                div { dt { "First seen" } dd { (tf(&x.first_seen)) } }
+                div { dt { "Last login" } dd { (tf(&x.last_seen)) } }
+            }
+        } @else { p.muted { "Anonymous visitor, never logged in." } }
+    };
     layout(
         "Person",
         Some(p),
         html! {
-            div.heading { div {
-                h1.mono { (who) }
-                p.muted {
-                    @if let Some(x) = person {
-                        @if let Some(r) = &x.role { span.chip { (r) } " " }
-                        @if let Some(a) = &x.account { "account " strong { (a) } " · " }
-                        @if let Some(pl) = &x.plan { "plan " strong { (pl) } " · " }
-                        "first seen " (tf(&x.first_seen)) " · last login " (tf(&x.last_seen))
-                    } @else { "Never logged in (anonymous visitor)." }
-                    " · " a href={ "/p/" (p.id) "/events?person=" (url_enc(who)) "&days=90" } { "All their events →" }
+            (entity(who, html! { span.mono { (who) } }, facts, html! { a.btn href=(all_events) { "All their events" } }))
+            div.kpis {
+                section.card.mini aria-labelledby="p-role" {
+                    h2 #p-role { (icon("users")) "Role over time" }
+                    @if roles.is_empty() { p.empty-line { "No role sent yet." } }
+                    @else { ul { @for (r, since) in roles { li { span.tag.tone-accent { (r) } " since " (tf(since)) } } } }
                 }
-            } }
-            div.grid {
-                section.card {
-                    h2.violet { (icon("users")) "Role over time" }
-                    @if roles.is_empty() { p.muted.small { "No role sent yet." } }
-                    @else { ul.plain-list { @for (r, since) in roles { li { span.chip { (r) } " since " (tf(since)) } } } }
-                }
-                section.card {
-                    h2.sky { (icon("play")) "Recordings" }
-                    @if replays.is_empty() { p.muted.small { "No recorded session." } }
-                    @else { ul.plain-list { @for r in replays.iter().take(20) {
+                section.card.mini aria-labelledby="p-rec" {
+                    h2 #p-rec { (icon("play")) "Recordings" @if !replays.is_empty() { " " span.tag.tone-info { (replays.len()) } } }
+                    @if replays.is_empty() { p.empty-line { "No recorded session." } }
+                    @else { ul { @for r in replays.iter().take(20) {
                         li { a href={ "/p/" (p.id) "/replays/" (r.session_id) } { (icon("play")) " " (local_time(&r.started.format("%Y-%m-%d %H:%M:%S").to_string(), tz, false)) } " · " (duration((r.updated - r.started).num_seconds().max(0) as f64)) }
                     } } }
                 }
-                section.card {
-                    h2.coral { (icon("alert")) "Errors" }
-                    @if errors.is_empty() { p.muted.small { "None in their latest events." } }
-                    @else { ul.plain-list { @for e in errors.iter().take(10) {
-                        li { (tf(&e.timestamp)) " · " span.mono { (e.path.as_deref().unwrap_or("—")) } @if let Some(r) = &e.release { " · " (r) }
+                section.card.mini aria-labelledby="p-err" {
+                    h2 #p-err { (icon("alert")) "Errors" @if !errors.is_empty() { " " span.tag.tone-bad { (errors.len()) } } }
+                    @if errors.is_empty() { p.empty-line { "None in their latest events." } }
+                    @else { ul { @for e in errors.iter().take(10) {
+                        li { span.num { (tf(&e.timestamp)) } " " span.path { (e.path.as_deref().unwrap_or("—")) } @if let Some(r) = &e.release { " " span.muted { "· " (r) } }
                             @if let Some(s) = &e.session_id { " " a.icon-link href={ "/p/" (p.id) "/replays/" (s) "?at=" (e.timestamp) } aria-label="Replay this moment" { (icon("play")) } } }
                     } } }
-                    p.small { a href={ "/p/" (p.id) "/errors" } { "All errors →" } }
-                }
-            }
-            @if admin {
-                section.card.wide.danger {
-                    h2.coral { (icon("shield")) "Privacy" }
-                    p { a.button href={ "/p/" (p.id) "/people/" (url_enc(who)) "/export.json" } { (icon("down")) "Export their data (JSON)" } }
-                    p.small { "Forgetting removes their events (and those of the anonymous ids linked to them), their recordings and their profile, now, and drops anything they send later. There is no undo." }
-                    form.inline method="post" action={ "/p/" (p.id) "/people/" (url_enc(who)) "/forget" } {
-                        label { "Type " code { (who) } " to confirm " input type="text" name="confirm" required autocomplete="off"; }
-                        button.danger type="submit" { "Forget this person" }
-                    }
+                    a href={ "/p/" (p.id) "/errors" } { "All errors" }
                 }
             }
             @if events.is_empty() {
@@ -80,13 +76,26 @@ pub fn person(
                     "Latest events",
                     html! {
                         h2 { (icon("events")) "Latest events" }
-                        a href={ "/p/" (p.id) "/events?person=" (url_enc(who)) "&days=90" } { "All their events" }
+                        a href=(all_events) { "All their events" }
                     },
                     events,
                     tz,
                     crate::tables::EventCols { user: false, role: false, groups: true },
                     html! {},
                 ))
+            }
+            @if admin {
+                (danger_zone("p-priv", "Privacy", html! {
+                    (danger_item("Export their data", html! { "Every event, recording and profile field held for " span.mono { (who) } ", as JSON." },
+                        html! { a.btn href={ (page) "/export.json" } { (icon("down")) "Export JSON" } }))
+                    (danger_item("Forget this person", html! { "Removes their events (and those of the anonymous ids linked to them), their recordings and their profile, now, and drops anything they send later. There is no undo." },
+                        html! { a.btn.danger-btn href=(confirm_href(&page, Confirm::Forget)) { "Forget this person…" } }))
+                }))
+                @if confirm == Some(Confirm::Forget) {
+                    (confirm_dialog(&format!("Forget {who}?"),
+                        html! { "Their events, recordings and profile are deleted now. Anything they send later is dropped. There is no undo." },
+                        typed_form(&format!("{page}/forget"), who, "Forget forever", &page)))
+                }
             }
         },
     )

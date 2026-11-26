@@ -1279,3 +1279,58 @@
     @keyframes pop-in { from { opacity: 0; scale: .6; } }
   }
 }
+
+/* Detail pages and danger zones (#545) */
+@layer components {
+  /* Entity header (Person, Feature page): monogram, title, facts, actions. */
+  .entity { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 20px; margin: 6px 0 20px; }
+  .entity .avatar.lg { width: 56px; height: 56px; border-radius: 16px; font-size: 18px; font-weight: 600;
+    background: color-mix(in oklab, var(--accent) var(--tint), var(--surface)); color: var(--accent); }
+  .entity-main { flex: 1; min-width: min(240px, 100%); display: flex; flex-direction: column; gap: 8px; }
+  .entity h1 { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+    font-size: var(--step-4); font-weight: 600; letter-spacing: -0.03em; line-height: 1.1; overflow-wrap: anywhere; }
+  .entity h1 .mono { letter-spacing: -0.02em; }
+  .entity h1 .tag { font-size: 12.5px; font-weight: 500; letter-spacing: 0; }
+  .entity p { margin: 0; }
+  .entity dl.facts { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 0; font-size: 14px; }
+  .entity .facts div { display: flex; flex-direction: column; gap: 2px; }
+  .entity .facts dt { font-size: 12px; color: var(--muted); }
+  .entity .facts dd { margin: 0; font-weight: 550; font-variant-numeric: tabular-nums; }
+  .entity .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .entity ~ .kpis, .entity ~ .kpis + * { margin-top: 16px; }
+
+  /* Mini cards: the summary blocks of a detail page. */
+  .card.mini { padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
+  .card.mini h2 { margin: 0; display: flex; align-items: center; gap: 8px; font-size: var(--step-1); font-weight: 600; }
+  .card.mini h2 .icon { color: var(--muted); }
+  .card.mini h2 .tag { margin-left: auto; }
+  .card.mini ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+  .card.mini p, .card.mini table { margin: 0; font-size: 13px; }
+  .card.mini > a { font-size: 13px; font-weight: 500; }
+  .empty-line { color: var(--muted); font-size: 13px; }
+
+  /* Danger zone: always the last card of its page. */
+  .card.danger { margin-top: 24px; border-color: color-mix(in oklab, var(--bad) 30%, var(--line)); }
+  .card.danger > h2 { margin: 0 0 4px; display: flex; align-items: center; gap: 8px; font-size: var(--step-2); font-weight: 600; }
+  .card.danger > h2 .icon { color: var(--bad); }
+  .card.danger .item { gap: 12px 24px; padding: 16px 0 4px; }
+  .card.danger .item + .item { margin-top: 12px; }
+  .card.danger .item b { font-weight: 600; }
+  .card.danger .item p { margin: 2px 0 0; max-width: 70ch; color: var(--muted); font-size: 13px; }
+  .btn.danger-btn:hover { border-color: var(--bad); }
+  .btn.danger-solid { background: var(--bad); border-color: var(--bad); color: oklch(99% 0 0); }
+  .btn.danger-solid:hover { background: color-mix(in oklab, var(--bad) 85%, var(--ink)); border-color: transparent; }
+
+  /* Confirmation without script: `?confirm=` renders an open dialog. */
+  .scrim { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 24px; overflow-y: auto;
+    background: color-mix(in oklab, oklch(15% 0.02 285) 45%, transparent); backdrop-filter: blur(2px); }
+  .scrim > dialog.dialog { position: static; inset: auto; margin: 0; max-width: none; max-height: none; width: min(460px, 100%);
+    display: flex; flex-direction: column; gap: 16px; padding: 24px; border: 1px solid var(--line); border-radius: var(--r-l);
+    background: var(--surface); color: var(--ink);
+    box-shadow: 0 24px 60px -20px color-mix(in oklab, oklch(15% 0.02 285) 45%, transparent); }
+  .dialog h2 { margin: 0; font-size: var(--step-2); font-weight: 600; }
+  .dialog p { margin: 0; color: var(--ink-2); }
+  .dialog form { display: flex; flex-direction: column; gap: 16px; margin: 0; }
+  .dialog .field input { width: 100%; }
+  .dialog .actions { justify-content: flex-end; }
+}
