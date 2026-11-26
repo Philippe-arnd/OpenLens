@@ -1,0 +1,70 @@
+# OpenLens as a hardened systemd service. Guide: docs/deploy/systemd.md.
+#
+# Binaries live in /opt/openlens/<tag>/, and /opt/openlens/current points to
+# the one in use (openlens-update moves it). Data: /var/lib/openlens.
+# Optional settings and secrets (docs/deploy/README.md#optional-settings-d-016)
+# go in /etc/openlens/openlens.env, readable by root only. Keep OPENLENS_ADDR
+# and OPENLENS_DATA_DIR here (or in a drop-in): openlens-update reads them
+# from the unit to find the health check and the upgrade backup.
+
+[Unit]
+Description=OpenLens product analytics
+Documentation=https://github.com/Philippe-arnd/OpenLens/blob/main/docs/deploy/systemd.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=openlens
+Group=openlens
+# Created by systemd, owned by the user above, writable despite ProtectSystem.
+StateDirectory=openlens
+StateDirectoryMode=0750
+Environment=OPENLENS_DATA_DIR=/var/lib/openlens
+Environment=OPENLENS_ADDR=127.0.0.1:8686
+EnvironmentFile=-/etc/openlens/openlens.env
+ExecStart=/opt/openlens/current/openlens
+Restart=on-failure
+RestartSec=5
+# The first start after an update copies the data first (backups/upgrade/).
+TimeoutStartSec=infinity
+TimeoutStopSec=60
+LimitNOFILE=65536
+UMask=0077
+
+# Memory: 1 GiB covers about 2 M events in 90 days; give 2G up to about 4 M
+# (docs/deploy/README.md#requirements). OpenLens reads this limit and sizes
+# its query memory to it. Raise it with a drop-in:
+#   systemctl edit openlens  ->  [Service] MemoryMax=2G
+MemoryMax=1G
+
+# Sandbox. /proc stays readable: OpenLens reads /proc/meminfo and its cgroup
+# to size its memory, so no ProcSubset=pid.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

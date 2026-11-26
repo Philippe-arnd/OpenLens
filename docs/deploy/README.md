@@ -5,10 +5,11 @@ OpenLens is **one binary and one data directory**. It needs **no environment var
 | Where | Install | Guide |
 | --- | --- | --- |
 | **Docker / Compose** (any VPS) | one container, one volume | [docker.md](docker.md) |
-| **Binary + systemd** (bare metal, VM, LXC, Raspberry Pi) | a `.tar.gz` from the releases, `x86_64` or `aarch64` | [binary.md](binary.md) |
+| **Binary + systemd** (bare metal, VM, LXC, Raspberry Pi) | a `.tar.gz` from the releases, `x86_64` or `aarch64`, with a hardened unit | [systemd.md](systemd.md) |
 | **Kubernetes** | Helm chart or Kustomize base | [kubernetes.md](kubernetes.md) |
 | **Coolify** | one-click template | [coolify.md](coolify.md) |
-| Other panels (Dokploy, CapRover, Portainer…), Nomad, Swarm, NixOS | use the Docker image and the compose file for now | [#238](https://github.com/Philippe-arnd/OpenLens/issues/238) |
+| **Docker Swarm** | a stack file, one replica | [swarm.md](swarm.md) |
+| Not covered yet: Nomad, NixOS, other panels (Dokploy, CapRover, Dokku, Portainer, Unraid, TrueNAS, YunoHost) | no tested job, module or template yet: run the Docker image with the settings of [docker.md](docker.md) | [#238](https://github.com/Philippe-arnd/OpenLens/issues/238) |
 
 ## Requirements
 - **CPU:** one vCPU is plenty for most apps (ingestion is about 80k events/s per vCPU).
@@ -44,7 +45,13 @@ Releases before 0.6 are not signed. The provenance is SLSA Build level 2: the bu
 
 ## Updates without anyone
 - **Safety net, built in:** on start, OpenLens backs up its data when the version changed (`backups/upgrade/`). It refuses data written by a newer release, so going back to the previous tag (and restoring that copy) undoes an update.
-- **Pulling new images is your platform's job:** Kubernetes and Coolify have recipes in their guides; for Docker and the binary, see their guides. Hands-off updates for every setup are tracked in [#238](https://github.com/Philippe-arnd/OpenLens/issues/238).
+- **Following a channel, with a rollback when the new version is not healthy:**
+  - binary + systemd: `openlens-update` and its daily timer check the checksum and the build provenance before installing, and go back to the previous release (and if needed to the upgrade backup) when the new one is not healthy ([systemd.md](systemd.md#hands-off-updates));
+  - Docker Compose: `openlens-compose-update` from cron, back to the previous image on failure ([docker.md](docker.md#updates));
+  - Swarm: `docker service update --image` from cron, rolled back by Swarm itself ([swarm.md](swarm.md#updates));
+  - Kubernetes and Coolify: see their guides.
+
+  Each one follows `:latest` or a minor channel, never `:edge`. When the previous version refuses the data (a new release changed the data format), only `openlens-update` restores the upgrade backup by itself; the guides say how to do it by hand elsewhere.
 - **The dashboard footer** says *Update available: vX.Y.Z*, from a daily check of GitHub's public releases API. Nothing about the install is sent. `OPENLENS_UPDATE_CHECK=off` disables the check.
 
 ## Backups
