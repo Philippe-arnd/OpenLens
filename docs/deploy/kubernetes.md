@@ -29,6 +29,7 @@ No value is required. The common ones:
 | `ingress.tls`, `ingress.annotations` | off | HTTPS; with cert-manager, add `cert-manager.io/cluster-issuer: <issuer>` |
 | `persistence.size`, `persistence.storageClass` | `10Gi`, cluster default | see *Sizing* below |
 | `image.tag` | the chart's release | to pin or test another release |
+| `autoUpdate.enabled`, `autoUpdate.schedule` | off, `47 4 * * *` | hands-off updates within a channel (step 6) |
 | `adminToken.existingSecret` | generated | to bring your own token Secret |
 | `extraEnvFrom` | none | optional features (step 5) |
 
@@ -111,6 +112,25 @@ helm upgrade openlens <chart> -n openlens --reuse-values \
 The pod restarts with the same volume and token. When the version changes, OpenLens first copies the data to `backups/upgrade/` on the volume, keeping only the latest copy, so leave room for one copy of the data. An older image refuses to start on data written by a newer one: roll back by restoring that copy. **Check:** `rollout status`, then `sql` (`SELECT count(*) FROM events`) returns at least the count from before. CI runs this exact upgrade on a kind cluster for every chart change.
 
 Read the [CHANGELOG](../../CHANGELOG.md) section of the target version first: its **Changed** entries say what behaves differently.
+
+### Hands-off updates
+
+**Helm, opt-in:** `--set autoUpdate.enabled=true` adds a CronJob that runs `kubectl rollout restart` on the StatefulSet every day (04:47 UTC by default, `autoUpdate.schedule`), with the image pull policy set to `Always`, so the new pod pulls its tag again.
+
+- **It follows a channel.** With `image.tag` empty, the image becomes the chart's minor channel (`:0.5` for chart 0.5.x): patches only, no behaviour change. `image.tag=latest` follows every stable release. A pinned release (`v0.5.1`), a digest or `edge` is refused at install, since a restart would bring nothing (or `main`).
+- **Each run restarts the pod**, even when the tag has not moved: one replica on one volume, so the old pod stops before the new one starts. Expect a few seconds without the dashboard each day; the SDK keeps the events and retries. Pick a quiet hour.
+- **Minimal rights.** The Job runs `registry.k8s.io/kubectl` under its own ServiceAccount, whose Role can only read and restart this StatefulSet. The OpenLens pod still gets no service-account token.
+- **No automatic rollback.** The Job waits up to 20 minutes for the new pod to be ready (the upgrade backup comes first) and fails if it is not: watch failed Jobs (`kubectl -n openlens get jobs`). To go back, pin the previous release with `--set autoUpdate.enabled=false,image.tag=vX.Y.Z` (a pinned release with `autoUpdate` on is refused), and restore the upgrade backup if that release refuses the data (step 7).
+- **Moving to the next minor** is a chart upgrade, after reading its **Changed** section.
+
+**Argo CD or Flux:** let them update the image instead of the CronJob, so Git stays the source of truth and a bad image is reverted by a commit. Leave `autoUpdate` off and pin `image.tag` to a release; the tool bumps it within a range:
+
+- [Argo CD Image Updater](https://argocd-image-updater.readthedocs.io/): follow `ghcr.io/philippe-arnd/openlens` with the `semver` strategy and the constraint `~0.5`, and write the result to the Helm parameter `image.tag` (back to the Application, or to Git with the `git` write-back method).
+- [Flux image automation](https://fluxcd.io/flux/guides/image-update/): an `ImageRepository` on `ghcr.io/philippe-arnd/openlens`, an `ImagePolicy` with `semver: {range: "~0.5"}`, and an `ImageUpdateAutomation` that commits the new tag; mark the `image.tag` line of your HelmRelease values with `# {"$imagepolicy": "<namespace>:openlens:tag"}`.
+
+Both read the `vX.Y.Z` tags, which never move, so each update is one recorded change. Their notifications (Argo CD Notifications, Flux's `Alert`) tell you when a sync or a health check fails.
+
+**Kustomize:** no updater ships with the plain manifests; bump `images[].newTag` from your GitOps tool as above.
 
 ## 7. Back up and restore
 
