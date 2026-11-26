@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 /// The hand-made escape this check looks for.
 const NEEDLE: &str = r#"replace('\'', "''")"#;
 
-fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
+/// Every `.rs` file under `dir` (skipping `target`), appended to `out`.
+pub(crate) fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };

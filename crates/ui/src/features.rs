@@ -4,16 +4,9 @@
 
 use super::*;
 
-/// What the last 7 days say about a feature map (#221).
-#[derive(Debug, Default)]
-pub struct MapLive {
-    /// (feature, uses, users).
-    pub uses: Vec<(String, i64, i64)>,
-    /// (success event, hits).
-    pub success_hits: Vec<(String, i64)>,
-    /// Raw role values no role of the map matches.
-    pub unmapped_roles: Vec<String>,
-}
+/// What the last 7 days say about a feature map (#221), computed by the
+/// engine (#509).
+pub use openlens_engine::MapLive;
 
 /// Everything the feature map page shows.
 pub struct MapView<'a> {
