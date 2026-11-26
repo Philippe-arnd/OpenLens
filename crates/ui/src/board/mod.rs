@@ -13,6 +13,8 @@ mod focus;
 mod sections;
 mod tiles;
 
+pub(crate) use charts::bar_with;
+
 /// The board page before its content (#301): the layout and a waiting
 /// panel, sent while a cold board is computed. `wait`: the seconds the
 /// board took to compute last time, when known (D-073). The content
