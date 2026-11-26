@@ -121,3 +121,42 @@ async fn an_explicit_release_wins_and_names_the_fingerprint_from_then_on() {
         Some("v1.4.0")
     );
 }
+
+/// The Releases page and `GET /api/projects/{id}/releases` (#500, D-049)
+/// show each release with its state and a link to the board on it.
+#[tokio::test]
+async fn the_releases_page_and_api_list_releases_with_their_state() {
+    let h = harness();
+    capture(
+        &h,
+        vec![
+            event(1, "production", "aaaa1111", Some("v1.0.0")),
+            event(2, "staging", "bbbb2222", Some("v1.1.0")),
+        ],
+    )
+    .await;
+    openlens_server::flush_now(&h.state).unwrap();
+    let r = get(&h, "/api/projects/default/releases", None, true).await;
+    assert_eq!(r.status(), StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_str(&body_text(r).await).unwrap();
+    let rows = v["releases"].as_array().unwrap();
+    let v1 = rows
+        .iter()
+        .find(|x| x["release"] == "v1.0.0" && x["environment"] == "production")
+        .unwrap();
+    assert_eq!(v1["state"], "live", "all of the day's traffic");
+    let r = get(&h, "/api/projects/default/releases?env=staging", None, true).await;
+    let v: serde_json::Value = serde_json::from_str(&body_text(r).await).unwrap();
+    let staging = v["releases"].as_array().unwrap();
+    assert!(!staging.is_empty());
+    assert!(staging.iter().all(|x| x["environment"] == "staging"));
+    let missing = get(&h, "/api/projects/nope/releases", None, true).await;
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+    let cookie = login_cookie(&h).await;
+    let page = get(&h, "/p/default/releases", Some(&cookie), false).await;
+    assert_eq!(page.status(), StatusCode::OK);
+    let html = body_text(page).await;
+    assert!(html.contains("v1.1.0"), "every environment");
+    assert!(html.contains("/p/default?env=production&amp;release=v1.0.0"));
+}
