@@ -305,9 +305,9 @@ fn api_find(
     headers: &HeaderMap,
     project: &str,
     id: &str,
-) -> Result<(String, Job), Response> {
+) -> Result<(String, Job), Box<Response>> {
     if let Some(r) = crate::api::guard(state, headers) {
-        return Err(r);
+        return Err(Box::new(r));
     }
     let owner = api_owner(state, headers);
     match state
@@ -318,10 +318,10 @@ fn api_find(
     {
         Some(j) => Ok((owner, j)),
         // Someone else's job is not found either (D-063).
-        None => Err(crate::apierr::json(
+        None => Err(Box::new(crate::apierr::json(
             StatusCode::NOT_FOUND,
             "no such board job (kept for an hour, for whoever started it)",
-        )),
+        ))),
     }
 }
 
@@ -334,7 +334,7 @@ pub(crate) async fn api_get(
 ) -> Response {
     match api_find(&state, &headers, &project, &id) {
         Ok((_, j)) => axum::Json(job_json(&j)).into_response(),
-        Err(r) => r,
+        Err(r) => *r,
     }
 }
 
@@ -347,7 +347,7 @@ pub(crate) async fn api_cancel(
 ) -> Response {
     let owner = match api_find(&state, &headers, &project, &id) {
         Ok((owner, _)) => owner,
-        Err(r) => return r,
+        Err(r) => return *r,
     };
     let jobs = &state.caches.board_jobs;
     jobs.cancel(&owner, &id);
