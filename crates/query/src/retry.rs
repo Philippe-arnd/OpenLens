@@ -162,20 +162,26 @@ mod tests {
     #[tokio::test]
     async fn out_of_memory_beside_another_query_runs_again_after_it() {
         let (end, ended) = tokio::sync::oneshot::channel::<()>();
+        let (go, started) = tokio::sync::oneshot::channel::<()>();
         let mut ended = Some(ended);
-        // Another query, running until it is told to end.
+        let mut go = Some(go);
+        // Another query, running until it is told to end. It says when it
+        // runs: `RUNNING` is shared with the other tests of this binary, so
+        // reading it could see their queries instead (#533).
         let other = tokio::spawn(once_more(move || {
             let e = ended.take();
+            let g = go.take();
             async move {
+                if let Some(g) = g {
+                    let _ = g.send(());
+                }
                 if let Some(e) = e {
                     let _ = e.await;
                 }
                 Ok::<_, QueryError>(1)
             }
         }));
-        while RUNNING.load(Ordering::SeqCst) == 0 {
-            tokio::task::yield_now().await;
-        }
+        started.await.unwrap();
         let mut end = Some(end);
         let mut calls = 0;
         let r = once_more(|| {
