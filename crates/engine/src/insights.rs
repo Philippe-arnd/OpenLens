@@ -466,24 +466,25 @@ pub struct Journey {
 /// reaching it for the first time. `sf` is the first use of each feature in
 /// each session over the last 30 days ([`crate::board_sessions::feature_rows`]):
 /// `session_feature_day` for the closed days, the events for the rest
-/// (#452, D-059). The first success is read from the events, filtered on
-/// the success event alone.
+/// (#452, D-059). The first success comes from the success rows `firsts`
+/// (`success_day` for the closed days, the events of the success event
+/// for the rest, D-062).
 pub(crate) async fn journeys(
     q: &QueryEngine,
     project: &str,
-    src: &str,
+    firsts: &crate::board_success::SuccessRows<'_>,
     sf: &str,
     f: &Filters,
     successes: &[(String, String)],
 ) -> Result<Vec<Journey>> {
     let q = &q.with_params(&f.params()?);
-    let w = f.clause(30)?;
     let mut out = Vec::new();
-    let runs = successes.iter().take(4).map(|(feature, ev)| {
+    let mut runs = Vec::new();
+    for (feature, ev) in successes.iter().take(4) {
         let ev_lit = openlens_sqlgen::quote(ev);
+        let rows = firsts.rows_in(f, crate::Span::days(30), &ev_lit)?;
         let sql = format!(
-            "WITH firsts AS (SELECT distinct_id, min(timestamp) AS t FROM {src} WHERE {w} AND event = {ev_lit} \
-                             GROUP BY distinct_id), \
+            "WITH firsts AS (SELECT distinct_id, min(first_ts) AS t FROM {rows} GROUP BY distinct_id), \
              before AS (SELECT sf.distinct_id, sf.first_ts AS timestamp, sf.feature AS place FROM {sf} \
                         JOIN firsts f ON sf.distinct_id = f.distinct_id \
                         WHERE sf.first_ts < f.t AND sf.first_ts >= f.t - INTERVAL '1 day'), \
@@ -499,8 +500,8 @@ pub(crate) async fn journeys(
              LEFT JOIN ranked p3 ON p1.distinct_id = p3.distinct_id AND p3.rn = 3 \
              WHERE p1.rn = 1 GROUP BY p3.place, p2.place, p1.place ORDER BY users DESC, c, b, a LIMIT 3"
         );
-        async move { (feature.clone(), ev.clone(), q.sql(project, &sql).await) }
-    });
+        runs.push(async move { (feature.clone(), ev.clone(), q.sql(project, &sql).await) });
+    }
     for (feature, ev, res) in futures::future::join_all(runs).await {
         for r in res?.rows {
             let users = int(&r, "users");

@@ -217,6 +217,7 @@ async fn each_release_keeps_the_map_version_it_shipped_with() {
 /// per-feature numbers of their events (#483), even once those events are
 /// gone; a rollup made with another map version is not read.
 #[tokio::test]
+#[ignore = "heavy: rolls up every closed day; run by `cargo xtask ci --heavy` (nightly, release tags)"]
 async fn rolled_up_days_give_the_numbers_of_their_events() {
     use openlens_storage::rollup;
     let (d, q) = seeded();

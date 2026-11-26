@@ -85,7 +85,10 @@ pub fn board(
             @if let Some((done, total)) = b.setup.filter(|_| !shared()) {
                 p.notice role="status" { (icon("task")) " Setup: " (done) " of " (total) " required steps done — " a href={ "/p/" (p.id) "/settings" } { "Finish in Settings" } }
             }
-            @if let Some(w) = &b.window { (window_line(w)) }
+            @if let Some(w) = &b.window {
+                (window_line(w))
+                @if let Some(e) = &w.estimate { (crate::cost::cost_line(e)) }
+            }
             (window_picker(p.id, b, f))
             (filter_bar(p.id, b, f, ""))
             (insight_cards(p.id, b, plain))

@@ -38,7 +38,7 @@ use std::process::{Command, ExitCode};
 fn main() -> ExitCode {
     let task = std::env::args().nth(1).unwrap_or_default();
     let result = match task.as_str() {
-        "ci" => ci(),
+        "ci" => ci(std::env::args().nth(2).as_deref() == Some("--heavy")),
         "layers" => check_layers(),
         "demo" => demo(std::env::args().nth(2)),
         "demo-site" => demo_site::demo_site(&std::env::args().skip(2).collect::<Vec<_>>()),
@@ -76,7 +76,10 @@ fn run(program: &str, args: &[&str]) -> Result<(), String> {
     }
 }
 
-fn ci() -> Result<(), String> {
+/// The CI gate. `heavy` also runs the ignored tests (equivalence tests
+/// that roll up every closed day): nightly and on release tags, so a pull
+/// request waits 5 minutes at most.
+fn ci(heavy: bool) -> Result<(), String> {
     run("cargo", &["fmt", "--all", "--check"])?;
     run(
         "cargo",
@@ -89,7 +92,20 @@ fn ci() -> Result<(), String> {
             "warnings",
         ],
     )?;
-    run("cargo", &["test", "--workspace", "--all-targets"])?;
+    if heavy {
+        run(
+            "cargo",
+            &[
+                "test",
+                "--workspace",
+                "--all-targets",
+                "--",
+                "--include-ignored",
+            ],
+        )?;
+    } else {
+        run("cargo", &["test", "--workspace", "--all-targets"])?;
+    }
     check_layers()?;
     env_docs::check()?;
     file_length::check()?;

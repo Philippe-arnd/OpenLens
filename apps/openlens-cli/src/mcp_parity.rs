@@ -59,6 +59,7 @@ const PENDING: &[&str] = &[
     "explore.audience",
     "explore.flows",
     "explore.live",
+    "board.estimate",
 ];
 
 /// Tools that are not engine commands yet: their logic still sits behind

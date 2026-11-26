@@ -10,6 +10,7 @@ use openlens_engine::Filters;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use crate::board_query::BoardQuery;
 use crate::{AppState, auth};
 
 mod tokens;
@@ -34,6 +35,10 @@ pub(crate) fn routes() -> Router<AppState> {
             post(crate::allowlist::api_allow),
         )
         .route("/api/projects/{project}/board", get(board))
+        .route(
+            "/api/projects/{project}/board/estimate",
+            get(crate::board_query::api_estimate),
+        )
         .route("/api/projects/{project}/errors", get(errors))
         .route("/api/projects/{project}/breakdown", get(breakdown))
         .route("/api/projects/{project}/people/{distinct_id}", get(person))
@@ -125,7 +130,7 @@ fn err(status: StatusCode, msg: &str) -> Response {
     crate::apierr::json(status, msg)
 }
 
-fn guard(state: &AppState, headers: &HeaderMap) -> Option<Response> {
+pub(crate) fn guard(state: &AppState, headers: &HeaderMap) -> Option<Response> {
     if auth::has_bearer(state, headers) {
         None
     } else {
@@ -133,7 +138,7 @@ fn guard(state: &AppState, headers: &HeaderMap) -> Option<Response> {
     }
 }
 
-async fn known_project(
+pub(crate) async fn known_project(
     state: &AppState,
     id: &str,
 ) -> Result<openlens_meta::Project, Box<Response>> {
@@ -441,42 +446,6 @@ impl FilterQuery {
     }
 }
 
-/// The board's query: the filters, and `window=fixed` for the fixed 7-,
-/// 14- and 30-day windows instead of the release window (D-055), or
-/// `since=<release>` or `from=&to=` (`YYYY-MM-DD`, the project's days) for
-/// a past release or a date range (D-060). The board page reads the same.
-#[derive(Deserialize, Default)]
-pub(crate) struct BoardQuery {
-    #[serde(flatten)]
-    pub(crate) f: FilterQuery,
-    window: Option<String>,
-    since: Option<String>,
-    from: Option<String>,
-    to: Option<String>,
-}
-
-impl BoardQuery {
-    /// The board's filters: the window asked for, else the release window
-    /// unless `window=fixed`.
-    pub(crate) fn filters(&self, tz: &str) -> Result<Filters, openlens_engine::EngineError> {
-        let f = self.f.filters(tz);
-        let asked = openlens_engine::Window::asked(
-            self.since.as_deref(),
-            self.from.as_deref(),
-            self.to.as_deref(),
-            &f.tz,
-            chrono::Utc::now(),
-        )?;
-        Ok(Filters {
-            window: asked.unwrap_or(match self.window.as_deref().map(str::trim) {
-                Some("fixed") => openlens_engine::Window::Fixed,
-                _ => openlens_engine::Window::Release,
-            }),
-            ..f
-        })
-    }
-}
-
 async fn board(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -495,7 +464,14 @@ async fn board(
         Err(e) => return err(StatusCode::BAD_REQUEST, &e.to_string()),
     };
     let map = crate::load_map(&state, &p.id).await;
-    match crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))).await {
+    let map = map.as_ref().map(|(m, v)| (m, *v));
+    // A long date range or past release runs once confirmed (D-061).
+    match crate::board_query::unconfirmed(&state, &p.id, &q, &f, map).await {
+        Ok(None) => {}
+        Ok(Some(e)) => return crate::board_query::conflict(&e),
+        Err(e) => return err(StatusCode::BAD_REQUEST, &e),
+    }
+    match crate::boards::board(&state, &p.id, &f, map).await {
         Ok(b) => Json(b).into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()),
     }
