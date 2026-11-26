@@ -72,27 +72,21 @@ pub fn person(
                     }
                 }
             }
-            section.card.wide {
-                h2.mint { (icon("events")) "Latest events" }
-                @if events.is_empty() { p.muted { "No event in 90 days." } }
-                @else {
-                    div.table-scroll { table.plain.events {
-                        thead { tr { th { "When (" (tz_label(tz)) ")" } th { "Event" } th { "Page" } th { "Feature" } th { "Release" } th { span.sr-only { "Replay" } } } }
-                        tbody { @for r in events {
-                            @let fam = openlens_engine::family(&r.event);
-                            tr {
-                                td.muted.mono { (local_time(&r.timestamp, tz, true)) }
-                                td { span class={ "chip fam " (fam) } { (icon(family_icon(fam))) span.sr-only { (family_label(fam)) ": " } (r.event) } }
-                                td.mono { (r.path.as_deref().unwrap_or("—")) }
-                                td { (r.feature.as_deref().unwrap_or("—")) }
-                                td { (r.release.as_deref().unwrap_or("—")) }
-                                td { @if let Some(s) = &r.session_id {
-                                    a.icon-link href={ "/p/" (p.id) "/replays/" (s) "?at=" (r.timestamp) } title="Replay this moment" aria-label="Replay this moment" { (icon("play")) }
-                                } }
-                            }
-                        } }
-                    } }
-                }
+            @if events.is_empty() {
+                section.card.wide { h2.mint { (icon("events")) "Latest events" } p.muted { "No event in 90 days." } }
+            } @else {
+                (crate::tables::event_table(
+                    p.id,
+                    "Latest events",
+                    html! {
+                        h2 { (icon("events")) "Latest events" }
+                        a href={ "/p/" (p.id) "/events?person=" (url_enc(who)) "&days=90" } { "All their events" }
+                    },
+                    events,
+                    tz,
+                    crate::tables::EventCols { user: false, role: false, groups: true },
+                    html! {},
+                ))
             }
         },
     )
