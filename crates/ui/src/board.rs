@@ -69,13 +69,14 @@ pub fn board(
         (None, Some(v)) => v.clone(),
         (None, None) => "everyone".into(),
     };
+    let period = |fixed: &str| period(b, fixed);
     layout(
         "Focus board",
         Some(p),
         html! {
             div.heading {
                 h1 { "Focus board" }
-                p.muted { "What " (scope) " did lately in " strong { (f.environment) } ". " @if !shared() { a href={ "/p/" (p.id) "/digest" } { "This week vs last →" } " · " a href={ "/p/" (p.id) "/breakdown?by=role&env=" (url_enc(&f.environment)) } { "Break down →" } } }
+                p.muted { "What " (scope) " did " (period("lately")) " in " strong { (f.environment) } ". " @if !shared() { a href={ "/p/" (p.id) "/digest" } { "This week vs last →" } " · " a href={ "/p/" (p.id) "/breakdown?by=role&env=" (url_enc(&f.environment)) } { "Break down →" } } }
             }
             @if let Some(d) = &b.app_down { @if !shared() { p.alert role="alert" { (icon("alert")) " " (d) " — " a href={ "/p/" (p.id) "/uptime" } { "Uptime" } } } }
             @if !b.objectives_at_risk.is_empty() && !shared() {
@@ -84,6 +85,7 @@ pub fn board(
             @if let Some((done, total)) = b.setup.filter(|_| !shared()) {
                 p.notice role="status" { (icon("task")) " Setup: " (done) " of " (total) " required steps done — " a href={ "/p/" (p.id) "/settings" } { "Finish in Settings" } }
             }
+            @if let Some(w) = &b.window { (window_line(w)) }
             (filter_bar(p.id, b, f, ""))
             (insight_cards(p.id, b, plain))
             section.tiles aria-label="Key numbers" {
@@ -109,14 +111,14 @@ pub fn board(
                 }))
                 (tile_to(&detail_url(p.id, "/audience", f), "mint", "spark", "Stickiness", &pct(b.users.stickiness), "last 30 days"))
                 (tile_to(&detail_url(p.id, "/events", f), "sky", "clock", "Avg session", &duration(b.sessions.avg_secs), &format!("{} sessions · {} bounce", compact(b.sessions.count), pct(b.sessions.bounce_rate))))
-                (tile_to(&detail_url(p.id, "/features", f), "sun", "task", "Tasks per user per day", &format!("{:.1}", b.sessions.tasks_per_user_day), "feature uses, last 7 days"))
-                (tile_to(&detail_url(p.id, "/errors", f), "coral", "alert", "Sessions with errors", &pct(b.sessions.error_rate), "last 7 days"))
+                (tile_to(&detail_url(p.id, "/features", f), "sun", "task", "Tasks per user per day", &format!("{:.1}", b.sessions.tasks_per_user_day), &format!("feature uses, {}", period("last 7 days"))))
+                (tile_to(&detail_url(p.id, "/errors", f), "coral", "alert", "Sessions with errors", &pct(b.sessions.error_rate), &period("last 7 days")))
             }
             div.grid {
                 section.card {
                     h2.violet { (icon("pulse")) (to(&detail_url(p.id, "/audience", f), "Active users")) }
                     (sparkline_marked(&b.dau_series, marks))
-                    p.muted.small { "Last 14 days. Hover a bar for the day" @if !marks.is_empty() && !shared() { ", a dot for what changed (" a href={ "/p/" (p.id) "/timeline" } { "timeline" } ")" } "." }
+                    p.muted.small { (b.window.as_ref().map_or("Last 14 days", |w| w.label.as_str())) ". Hover a bar for the day" @if !marks.is_empty() && !shared() { ", a dot for what changed (" a href={ "/p/" (p.id) "/timeline" } { "timeline" } ")" } "." }
                 }
                 section.card {
                     h2.sky { (icon("bolt")) (to(&detail_url(p.id, "/pages", f), "Web Vitals (p75)")) }
@@ -149,7 +151,7 @@ pub fn board(
                 (feature_pulse(p.id, f, b, feats.is_empty()))
                 @if !unused.is_empty() {
                     section.card {
-                        h2.coral { (icon("ban")) (to(&detail_url(p.id, "/features", f), "Never used (last 30 days)")) }
+                        h2.coral { (icon("ban")) (to(&detail_url(p.id, "/features", f), &format!("Never used, {}", period("last 30 days")))) }
                         ul.tags { @for x in &unused { li { (feature_link(p.id, &x.key, x.name.as_deref().unwrap_or(&x.key), true, f)) } } }
                         p.muted.small { "Declared in the feature map, but nobody reached them. Hidden, broken, or not needed?" }
                     }
@@ -165,7 +167,7 @@ pub fn board(
                 section.card {
                     h2.mint { (icon("shield")) (to(&detail_url(p.id, "/audience", f), "Who uses the app")) }
                     (bars(&roles))
-                    p.muted.small { "Distinct users per role, last 30 days." }
+                    p.muted.small { "Distinct users per role, " (period("last 30 days")) "." }
                 }
                 (role_matrix(p.id, f, b))
                 (retention_grid(p.id, f, b))
@@ -416,7 +418,13 @@ pub(crate) fn family_label(fam: &str) -> &'static str {
 /// adopt it, how often and on how many days they come back to it, and how
 /// many reach its success event.
 pub(crate) fn feature_pulse(pid: &str, f: &Filters, b: &Board, empty: bool) -> Markup {
-    let mau = b.users.mau.max(1) as f64;
+    // Adoption is over the active users of the same period: the last 30
+    // days (MAU), or the release window (D-055).
+    let mau = b
+        .window
+        .as_ref()
+        .map_or(b.users.mau, |w| w.current.users)
+        .max(1) as f64;
     let ratio = |a: i64, n: i64| a as f64 / n.max(1) as f64;
     html! {
         section.card.wide {
@@ -454,7 +462,7 @@ pub(crate) fn feature_pulse(pid: &str, f: &Filters, b: &Board, empty: bool) -> M
                         }
                     } }
                 }
-                p.muted.small { "Last 30 days. Adoption is the share of active users (MAU) who used the feature; completion is the share of them who reached its success event; task time runs from the first use to that event (within 30 minutes)." }
+                p.muted.small { (b.window.as_ref().map_or("Last 30 days", |w| w.label.as_str())) ". Adoption is the share of active users (" (if b.window.is_some() { "in that period" } else { "MAU" }) ") who used the feature; completion is the share of them who reached its success event; task time runs from the first use to that event (within 30 minutes)." }
             }
         }
     }
@@ -553,7 +561,79 @@ pub(crate) fn role_matrix(pid: &str, f: &Filters, b: &Board) -> Markup {
                     }
                 } }
             }
-            p.muted.small { "Share of each role's users who used the feature, last 30 days. Empty cells are features a role never touches." }
+            p.muted.small { "Share of each role's users who used the feature, " (period(b, "last 30 days")) ". Empty cells are features a role never touches." }
         }
+    }
+}
+
+/// What a period block covers, in a sentence: the release window's label
+/// (D-055), or the block's fixed window `fixed` ("last 7 days").
+pub(crate) fn period(b: &Board, fixed: &str) -> String {
+    let Some(w) = &b.window else {
+        return fixed.to_owned();
+    };
+    let mut c = w.label.chars();
+    c.next()
+        .map_or_else(String::new, |first| first.to_lowercase().chain(c).collect())
+}
+
+/// The release window against the same length before it (D-055): users,
+/// sessions and sessions with errors.
+pub(crate) fn window_line(w: &openlens_engine::BoardWindow) -> Markup {
+    let change = |now: i64, before: i64| {
+        if before == 0 {
+            return if now == 0 { "no change" } else { "new" }.to_owned();
+        }
+        let d = (now - before) as f64 / before as f64 * 100.0;
+        format!("{}{d:.0}%", if d >= 0.0 { "+" } else { "" })
+    };
+    let (now, before) = (&w.current, &w.previous);
+    let days = if w.days == 1 {
+        "day".to_owned()
+    } else {
+        format!("{} days", w.days)
+    };
+    html! {
+        p.muted.small {
+            strong { (w.label) } ", against the " (days) " before: "
+            (compact(now.users)) " users (" (change(now.users, before.users)) "), "
+            (compact(now.sessions.count)) " sessions (" (change(now.sessions.count, before.sessions.count)) "), "
+            (pct(now.sessions.error_rate)) " of sessions with errors (was " (pct(before.sessions.error_rate)) ")."
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use openlens_engine::{BoardWindow, Period};
+
+    #[test]
+    fn the_board_names_the_window_it_reads() {
+        let mut b = Board::default();
+        assert_eq!(period(&b, "last 7 days"), "last 7 days", "fixed windows");
+        b.window = Some(BoardWindow {
+            release: Some("v2.1".into()),
+            days: 4,
+            label: "Since v2.1 (4 days)".into(),
+            current: Period {
+                users: 12,
+                ..Period::default()
+            },
+            previous: Period {
+                users: 10,
+                ..Period::default()
+            },
+            ..BoardWindow::default()
+        });
+        assert_eq!(period(&b, "last 7 days"), "since v2.1 (4 days)");
+        let line = b
+            .window
+            .as_ref()
+            .map(|w| window_line(w).into_string())
+            .unwrap_or_default();
+        assert!(line.contains("Since v2.1 (4 days)"), "{line}");
+        assert!(line.contains("against the 4 days before"), "{line}");
+        assert!(line.contains("users (+"), "more users than before: {line}");
     }
 }

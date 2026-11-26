@@ -436,6 +436,29 @@ impl FilterQuery {
             tz: some(&self.tz)
                 .filter(|t| t.parse::<chrono_tz::Tz>().is_ok())
                 .unwrap_or_else(|| tz.to_owned()),
+            window: openlens_engine::Window::Fixed,
+        }
+    }
+}
+
+/// The board's query: the filters, and `window=fixed` for the fixed 7-,
+/// 14- and 30-day windows instead of the release window (D-055).
+#[derive(Deserialize, Default)]
+struct BoardQuery {
+    #[serde(flatten)]
+    f: FilterQuery,
+    window: Option<String>,
+}
+
+impl BoardQuery {
+    /// The board's filters: the release window unless `window=fixed`.
+    fn filters(&self, tz: &str) -> Filters {
+        Filters {
+            window: match self.window.as_deref().map(str::trim) {
+                Some("fixed") => openlens_engine::Window::Fixed,
+                _ => openlens_engine::Window::Release,
+            },
+            ..self.f.filters(tz)
         }
     }
 }
@@ -444,7 +467,7 @@ async fn board(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(project): Path<String>,
-    axum::extract::Query(q): axum::extract::Query<FilterQuery>,
+    axum::extract::Query(q): axum::extract::Query<BoardQuery>,
 ) -> Response {
     if let Some(r) = guard(&state, &headers) {
         return r;
