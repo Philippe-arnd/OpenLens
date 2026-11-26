@@ -142,6 +142,8 @@ docker run -p 8686:8686 -v openlens-data:/data ghcr.io/philippe-arnd/openlens:la
 | **Binary + systemd** | one file, `x86_64` or `aarch64` Linux | [docs/deploy/systemd.md](docs/deploy/systemd.md) |
 | **Kubernetes** | `helm install openlens oci://ghcr.io/philippe-arnd/charts/openlens`, or `kubectl apply -k` | [docs/deploy/kubernetes.md](docs/deploy/kubernetes.md) |
 | **Coolify** | one-click template | [docs/deploy/coolify.md](docs/deploy/coolify.md) |
+| **Swarm, Nomad, NixOS** | a stack file, a job, a module | [swarm](docs/deploy/swarm.md), [nomad](docs/deploy/nomad.md), [nixos](docs/deploy/nixos.md) |
+| **Dokploy, CapRover, Dokku, Portainer, Unraid, TrueNAS** | the Docker image | [docs/deploy/panels.md](docs/deploy/panels.md) |
 
 The [self-hosting guide](docs/deploy/README.md) covers requirements, release channels, updates, backups and settings for all of them.
 

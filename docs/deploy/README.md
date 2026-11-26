@@ -5,11 +5,16 @@ OpenLens is **one binary and one data directory**. It needs **no environment var
 | Where | Install | Guide |
 | --- | --- | --- |
 | **Docker / Compose** (any VPS) | one container, one volume | [docker.md](docker.md) |
-| **Binary + systemd** (bare metal, VM, LXC, Raspberry Pi) | a `.tar.gz` from the releases, `x86_64` or `aarch64`, with a hardened unit | [systemd.md](systemd.md) |
+| **Binary + systemd** (bare metal, VM, LXC, Raspberry Pi) | a `.tar.gz` from the releases, `x86_64` or `aarch64`, with a hardened unit; `install.sh` does it in one command | [systemd.md](systemd.md) |
 | **Kubernetes** | Helm chart or Kustomize base | [kubernetes.md](kubernetes.md) |
 | **Coolify** | one-click template | [coolify.md](coolify.md) |
 | **Docker Swarm** | a stack file, one replica | [swarm.md](swarm.md) |
-| Not covered yet: Nomad, NixOS, other panels (Dokploy, CapRover, Dokku, Portainer, Unraid, TrueNAS, YunoHost) | no tested job, module or template yet: run the Docker image with the settings of [docker.md](docker.md) | [#238](https://github.com/Philippe-arnd/OpenLens/issues/238) |
+| **Nomad** | a job with one allocation and a host volume | [nomad.md](nomad.md) |
+| **NixOS** | a flake and the module `services.openlens` | [nixos.md](nixos.md) |
+| **Dokploy, CapRover, Dokku, Portainer, Unraid, TrueNAS** | the Docker image; a template for CapRover and Unraid | [panels.md](panels.md) |
+| Not covered yet: YunoHost | needs an app package of its own: run the Docker image with the settings of [docker.md](docker.md) | [#487](https://github.com/Philippe-arnd/OpenLens/issues/487) |
+
+The Nomad job, the NixOS module and the panel recipes follow each tool's public documentation; they are not yet tested on the tools themselves in CI ([#486](https://github.com/Philippe-arnd/OpenLens/issues/486)).
 
 ## Requirements
 - **CPU:** one vCPU is plenty for most apps (ingestion is about 80k events/s per vCPU).
@@ -24,7 +29,7 @@ The image `ghcr.io/philippe-arnd/openlens` is public. Binaries for `x86_64` and 
 | Tag | What it follows |
 | --- | --- |
 | `:latest` | the newest stable release |
-| `:0.2` | patches of one minor version: fixes, no behaviour change (recommended for hands-off updates) |
+| `:0.6` | patches of one minor version: fixes, no behaviour change (recommended for hands-off updates) |
 | `:vX.Y.Z` | one release, never moves |
 | `:edge` | `main`, for testing only |
 
@@ -49,8 +54,11 @@ Releases before 0.6 are not signed. The provenance is SLSA Build level 2: the bu
   - binary + systemd: `openlens-update` and its daily timer check the checksum and the build provenance before installing, and go back to the previous release (and if needed to the upgrade backup) when the new one is not healthy ([systemd.md](systemd.md#hands-off-updates));
   - Docker Compose: `openlens-compose-update` from cron, back to the previous image on failure ([docker.md](docker.md#updates));
   - Swarm: `docker service update --image` from cron, rolled back by Swarm itself ([swarm.md](swarm.md#updates));
+  - Nomad: `openlens-nomad-update` from cron runs the job on the digest behind the channel, reverted by Nomad on failure ([nomad.md](nomad.md#updates));
+  - NixOS: the system's own upgrades, with the release tag pinned in the flake; `nixos-rebuild switch --rollback` goes back ([nixos.md](nixos.md#updates));
   - Kubernetes: the chart's opt-in `autoUpdate` CronJob restarts the pod on its channel tag (no automatic rollback), or Argo CD Image Updater / Flux bump the tag in Git ([kubernetes.md](kubernetes.md#hands-off-updates));
-  - Coolify: the template follows the minor channel; a redeploy pulls it ([coolify.md](coolify.md#updates)).
+  - Coolify: the template follows the minor channel; a redeploy pulls it ([coolify.md](coolify.md#updates));
+  - other panels: a redeploy pulls the channel tag again ([panels.md](panels.md)).
 
   Each one follows `:latest` or a minor channel, never `:edge`. When the previous version refuses the data (a new release changed the data format), only `openlens-update` restores the upgrade backup by itself; the guides say how to do it by hand elsewhere.
 - **The dashboard footer** says *Update available: vX.Y.Z*, from a daily check of GitHub's public releases API. Nothing about the install is sent. `OPENLENS_UPDATE_CHECK=off` disables the check.

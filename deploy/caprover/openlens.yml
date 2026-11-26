@@ -1,0 +1,35 @@
+# OpenLens as a CapRover one-click app. Guide: docs/deploy/panels.md#caprover.
+# In CapRover: Apps → One-Click Apps/Databases → TEMPLATE (the last entry),
+# paste this file, then Next.
+captainVersion: 4
+services:
+  $$cap_appname:
+    # A channel: a minor such as 0.6 (patches only) or latest; never edge.
+    image: ghcr.io/philippe-arnd/openlens:$$cap_openlens_channel
+    restart: always
+    volumes:
+      - $$cap_appname-data:/data
+    environment:
+      OPENLENS_PUBLIC_URL: https://$$cap_appname.$$cap_root_domain
+    caproverExtra:
+      containerHttpPort: "8686"
+caproverOneClickApp:
+  variables:
+    - id: $$cap_openlens_channel
+      label: Image channel
+      defaultValue: "0.6"
+      description: A minor such as 0.6 follows its patches only; latest follows every release. Never edge.
+      validRegex: /^(latest|[0-9]+\.[0-9]+)$/
+  instructions:
+    start: >-
+      OpenLens, self-hosted product analytics: one container, one volume, no
+      variable to fill in. It runs as one instance: do not scale it above 1.
+    end: >-
+      OpenLens is starting. Turn on HTTPS for the app (HTTP Settings → Enable
+      HTTPS, then Force HTTPS), then read the app's logs: the first start
+      prints a single-use owner link, valid one hour.
+      Guide: https://github.com/Philippe-arnd/OpenLens/blob/main/docs/deploy/panels.md#caprover
+  displayName: OpenLens
+  isOfficial: false
+  description: Self-hosted product analytics, wired by agents. One binary, one data directory, no setup.
+  documentation: https://github.com/Philippe-arnd/OpenLens/blob/main/docs/deploy/panels.md#caprover
