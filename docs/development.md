@@ -18,9 +18,11 @@ cargo xtask bench http://127.0.0.1:PORT KEY   # ingestion load test, see docs/be
 ```
 
 ## CI
-- **PR gate** (about 3 min): `cargo xtask ci` plus the SDK build, size budget and freshness. Browser e2e runs on PRs only when the SDK or capture changes.
-- **Nightly and on demand** (`gh workflow run ci.yml`):
+- **PR gate** (5 minutes at most, so active development never waits longer): `cargo xtask ci`, the SDK build, size budget and freshness, the RustSec advisories, and shellcheck of the deploy scripts. Nothing heavier runs on a pull request or on a push to `main`.
+- **Heavy pipelines: release tags (`v*`), nightly and on demand** (`gh workflow run ci.yml`, `k8s.yml`, `deploy-recipes.yml`):
   - the browser e2e;
+  - the chart on kind (`k8s.yml`);
+  - the self-hosting recipes in containers (`deploy-recipes.yml`);
   - every dashboard page in Chromium, light and dark, under the real CSP, which fails on any console error;
   - the reference apps in `examples/`, which must reach a green `verify`.
 - The screenshots are in the `dashboard-screens` artifact: `gh run download <run-id> -n dashboard-screens`.
@@ -118,3 +120,6 @@ Nobody should have to babysit dependencies:
 - **Auto Merge** (`.github/workflows/auto-merge.yml`, the shared `reusable-auto-merge.yml`) merges a Renovate PR once `cargo xtask ci`, `sdk` and the RustSec check are green, and the browser e2e too when it ran. A failing PR gets one issue labelled `renovate-ci-failure`, closed when the PR is fixed. A major update, including a 0.x minor of a crate, gets the `major-update` label and waits for a person or an agent.
 - **Lockfile maintenance merges itself too** (#349): the weekly `Cargo.lock` refresh goes through the same gate, after the 3-day wait. A signed image or binary proves where it was built, not that each transitive update was read; the defences are the wait, RustSec on every PR and nightly, `cargo deny` licences, and the stable tag, which still needs the release train's checks. A human review there would put a person back in a loop M9 removes.
 - **RustSec:** `cargo deny check advisories` runs on every PR and nightly. On `main` it keeps one `security-advisory` issue open while it fails. An ignore in `deny.toml` needs its reason, and `advisory-ignores.yml` checks every ignored advisory again on the 1st of each month: one that now has a fix opens an issue (#196).
+- **A red `main`** (push, nightly or on demand) keeps one issue labelled `main-broken` open: a new failure comments on it, and CI closes it once every job it lists has passed again (#200). A first attempt that fails is re-run once, failed jobs only, by `flaky.yml`, and only the second attempt files `main-broken`. A job that failed and then passed on the same commit is flaky: it gets a comment on the one open `flaky` issue (opened if needed), for a fix of the cause, never a retry or an `#[ignore]`.
+- **Self-healing routine** (#200, D-045): a scheduled agent reads the `security-advisory`, `main-broken`, `renovate-ci-failure` and `flaky` issues and opens a fix PR for each, which a person merges. Its prompt and limits are [docs/agents/self-healing.md](agents/self-healing.md); it stays off until its identity is set up (#243).
+- **Self-hosting recipes** (#486): `deploy-recipes.yml` runs the systemd unit in a Debian 12 container with systemd, the Compose file of `docker.md` with `openlens-compose-update` (update, and a crashing image rolled back), and the Swarm stack (update and rollback), nightly on the `edge` image and on changes to `deploy/`.

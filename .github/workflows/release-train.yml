@@ -108,6 +108,9 @@ jobs:
           # Plain-manifest and chart defaults name the release just cut.
           sed -i "s/^appVersion: .*/appVersion: \"$TAG\"/; s/^version: .*/version: $V/" deploy/helm/openlens/Chart.yaml
           sed -i -E "s/^(\s*newTag:) .*/\\1 $TAG/" deploy/k8s/example/kustomization.yaml
+          # The Coolify template and the Swarm stack follow the minor
+          # channel of the newest release (#198): new installs start there.
+          sed -i -E "s#(ghcr.io/philippe-arnd/openlens):[0-9]+\.[0-9]+\$#\\1:$major.$minor#" deploy/coolify/openlens.yaml deploy/swarm/openlens.yaml
           scripts/render-k8s.sh
           branch="release/develop-$next"
           git checkout -q -b "$branch"

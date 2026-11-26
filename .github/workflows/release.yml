@@ -80,14 +80,19 @@ jobs:
           images: ghcr.io/philippe-arnd/openlens
           # Channels (#198): `latest` = newest stable release (set by the
           # semver tags, never by main or a pre-release), `0.2` = patches of
-          # a minor, `edge` = main. Installs that update themselves follow
-          # `latest` or a minor channel, never `edge`.
+          # a minor, `0` = every release of a major, `edge` = main. Installs
+          # that update themselves follow `latest`, a minor or a major
+          # channel, never `edge`. The action's README suggests skipping
+          # `{{major}}` while the major is 0; we publish `:0` on purpose
+          # (the same as `latest` until 1.0, then `:1` follows 1.x).
+          # Pre-releases only get their own version, never a channel.
           tags: |
             type=raw,value=edge,enable={{is_default_branch}}
             type=sha,prefix=
             type=ref,event=tag
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
       - name: publish (reuses the cached layers), with an SBOM attached to the image (#349)
         id: push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
