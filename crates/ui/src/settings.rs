@@ -593,7 +593,7 @@ pub fn ai_settings(v: &AiView<'_>) -> Markup {
                         button.btn.primary type="submit" name="action" value="save" { "Save and check" }
                         button.btn type="submit" name="action" value="test" { "Test" }
                         @if v.key_set { button.btn.ghost type="submit" name="action" value="forget" { "Remove the key" } }
-                        p { "Saving checks the provider with a first call." }
+                        p { "Test sends one short request to the provider to check the key." }
                     }
                 }
             }
