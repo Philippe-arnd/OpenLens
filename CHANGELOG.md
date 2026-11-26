@@ -5,6 +5,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 ## [Unreleased]
 
 ### Changed
+- The default board is computed ahead only after the start-up work (identity backfill, first compaction and rollup pass), so the two no longer add up in memory.
 - **The board page says how long it will wait** (#535, D-073): when its board is not cached and took a second or more to compute last time (or was never computed), the page shows a *Computing the board…* panel with *about N s* (the last compute time) or *a few seconds*, a small animation (none under reduced motion) and `role="status"`; it hides itself in CSS when the board arrives, with no script. A cached board, or one that took under a second last time, is sent whole with no panel.
 - Task times resolve the feature map only for events within 30 minutes before a success; the default board page of each project is computed ahead in the background after startup and after new data while it is being looked at (#452, D-072). The numbers are unchanged.
 - A board no longer holds its rollup rows in memory (#452, D-074): that copy, added in this release, saved little time and almost doubled the peak memory when several boards were computed together (430 to about 780 MB at 4 M events), and made boards fail under a 1 GiB limit; every board query reads the rollup files again. A board that fails because a query ran out of memory is computed once more, alone, after the other boards, instead of failing. The numbers are unchanged.
