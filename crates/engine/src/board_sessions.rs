@@ -17,7 +17,7 @@ use super::*;
 /// The board's per-session-day rows: which days come from the rollup, and
 /// how to read the rest from the events.
 pub(crate) struct SessionRows<'a> {
-    /// The board's event source (the snapshot, or the projected events).
+    /// The board's event source: the events, with the map's roles and features.
     pub src: &'a str,
     /// The canonical role of a raw `role`: the map's lookup, or `role`.
     pub role: String,

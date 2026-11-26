@@ -18,7 +18,7 @@ The Nomad job, the NixOS module and the panel recipes follow each tool's public 
 
 ## Requirements
 - **CPU:** one vCPU is plenty for most apps (ingestion is about 80k events/s per vCPU).
-- **Memory:** 1 GiB for up to about 2 M events in 90 days, 2 GiB up to about 4 M (measured: the board's first load takes about 1 s at 1 M, 2.5 s at 2 M, 3 s at 4 M; [benchmarks](../benchmarks.md#at-scale-under-a-memory-cap-460-2026-11-26)). Larger apps need more, and the board gets slow (D-023). See [kubernetes.md](kubernetes.md#sizing) for the details, which apply everywhere.
+- **Memory:** 1 GiB for up to about 2 M events in 90 days, 2 GiB up to about 4 M (measured: the board's first load takes about 1 s at 1 M, 2.5 s at 2 M, 3 s at 4 M; [benchmarks](../benchmarks.md#at-scale-under-a-memory-cap-460-2026-11-26)). These figures were measured while the board kept the 90-day window in memory, which it no longer does (D-051); the `scale` job will measure them again, larger apps included. See [kubernetes.md](kubernetes.md#sizing) for the details, which apply everywhere.
 - **Disk:** about 11 bytes per event (events kept 400 days) plus replays (kept 30 days). Leave room for one extra copy of the data: it is made before each upgrade.
 - **A public HTTPS URL** for the browser SDK, through the reverse proxy you already use (recipes in [docker.md](docker.md#https-and-reverse-proxy)). Set `OPENLENS_PUBLIC_URL` to it so login links and emails point to the right place.
 
