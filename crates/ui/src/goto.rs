@@ -23,10 +23,10 @@ fn places() -> Vec<(&'static str, &'static str)> {
     };
     for g in NAV {
         if let Some((first, _, _)) = g.tabs.first() {
-            add(g.label, *first);
+            add(g.label, first);
         }
         for (path, label, _) in g.tabs {
-            add(*label, *path);
+            add(label, path);
         }
     }
     out
