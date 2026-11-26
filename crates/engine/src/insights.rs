@@ -726,8 +726,10 @@ pub(crate) async fn funnels(
         let lit = |e: &str| openlens_sqlgen::quote(e);
         // Each step carries the first step's time (t0) so every later step
         // must happen within a day of starting.
+        // Only the steps' events are read (#502): no step looks at others.
+        let names = steps.iter().map(|s| lit(s)).collect::<Vec<_>>().join(", ");
         let mut ctes = vec![format!(
-            "ev AS (SELECT distinct_id, timestamp, event FROM {src} WHERE {w}), \
+            "ev AS (SELECT distinct_id, timestamp, event FROM {src} WHERE {w} AND event IN ({names})), \
              s0 AS (SELECT distinct_id, min(timestamp) AS t, min(timestamp) AS t0 FROM ev WHERE event = {} GROUP BY distinct_id)",
             lit(&steps[0])
         )];

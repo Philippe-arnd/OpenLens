@@ -16,12 +16,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use arrow::datatypes::DataType;
-use datafusion::datasource::MemTable;
 use datafusion::datasource::file_format::parquet::ParquetFormat;
 use datafusion::datasource::listing::{
     ListingOptions, ListingTable, ListingTableConfig, ListingTableUrl,
 };
-use datafusion::execution::memory_pool::{FairSpillPool, MemoryConsumer, MemoryReservation};
+use datafusion::execution::memory_pool::FairSpillPool;
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::prelude::{SQLOptions, SessionConfig, SessionContext};
 use futures::StreamExt;
@@ -33,7 +32,6 @@ mod identity;
 use identity::{AliasCache, person_of_udf};
 pub use identity::{IdentityFn, IdentityRows, IdentitySource, PersonRow};
 mod internal;
-mod rebatch;
 mod retry;
 mod rollup;
 pub use openlens_storage::rollup::last_closed;
@@ -45,10 +43,6 @@ use serde::Serialize;
 /// How long the anonymous-id table of a project is reused before it is
 /// read again. Events are flushed every ~10 s, so this stays fresh enough.
 const ALIAS_TTL: Duration = Duration::from_secs(30);
-/// Rows per batch of a snapshot.
-const SNAPSHOT_BATCH_ROWS: usize = 8192;
-/// How long a shared snapshot outlives its last user (#418).
-const SNAPSHOT_LINGER: Duration = Duration::from_secs(15);
 
 /// The `events` table as callers see it: `raw_events` with every
 /// anonymous id found in `person_aliases` replaced by its user, through
@@ -120,7 +114,6 @@ impl Default for Limits {
         Self {
             max_rows: 10_000,
             timeout: Duration::from_secs(15),
-            // Queries and the board snapshot share it (#329).
             memory: 768 * 1024 * 1024,
         }
     }
@@ -135,38 +128,6 @@ pub struct QueryResult {
     pub rows: Vec<serde_json::Map<String, serde_json::Value>>,
     /// True when `max_rows` cut the result.
     pub truncated: bool,
-}
-
-/// An in-memory table and its reservation in the pool, freed together
-/// when the last engine copy that uses it is dropped.
-#[derive(Debug)]
-struct SnapData {
-    table: Arc<MemTable>,
-    _reservation: MemoryReservation,
-}
-
-/// An in-memory table of one project.
-type Snapshot = (String, String, Arc<SnapData>);
-
-/// What a shared snapshot key last produced (#418).
-#[derive(Debug, Default)]
-enum Last {
-    #[default]
-    Nothing,
-    /// Too large for memory, at this time: do not try again for a minute.
-    TooBig(std::time::Instant),
-    /// Built, alive while some engine copy uses it.
-    Built(std::sync::Weak<SnapData>),
-}
-
-/// (project, name, sql, the params the sql reads, caller's share key).
-type SnapKey = (String, String, String, Vec<(String, String)>, u64);
-
-/// Snapshots shared between concurrent callers with the same key (#418).
-#[derive(Debug, Default)]
-struct SharedSnaps {
-    slots: std::sync::Mutex<HashMap<SnapKey, Arc<tokio::sync::Mutex<Last>>>>,
-    built: std::sync::atomic::AtomicU64,
 }
 
 /// Per segment file: (size, modified, what it holds). A segment is never
@@ -208,12 +169,6 @@ pub struct QueryEngine {
     /// DataFusion's Parquet metadata cache is reused across queries and
     /// requests (segments are immutable, so cached footers never go stale).
     runtime: Option<Arc<datafusion::execution::runtime_env::RuntimeEnv>>,
-    /// In-memory tables added by [`QueryEngine::snapshot`], for one project.
-    /// Each holds its bytes reserved in the memory pool (#329) until the
-    /// last copy of the engine that uses it is dropped.
-    snapshots: Arc<Vec<Snapshot>>,
-    /// Snapshots shared by [`QueryEngine::shared_snapshot`] (#418).
-    shared: Arc<SharedSnaps>,
     /// Per project: the identity tables and when they were read.
     aliases: AliasCache,
     /// The identity tables kept at ingestion (#450), when the caller has them.
@@ -247,8 +202,6 @@ impl QueryEngine {
             runtime,
             facts: FactsCache::default(),
             facts_read: Arc::default(),
-            snapshots: Arc::default(),
-            shared: Arc::default(),
             aliases: AliasCache::default(),
             identity_source: None,
             identity_scans: Arc::default(),
@@ -288,206 +241,6 @@ impl QueryEngine {
         self.timeouts
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         QueryError::Timeout(limit)
-    }
-
-    /// A copy of this engine where `name` is also a table for `project`:
-    /// the result of `sql`, computed once and kept in memory. Used to run
-    /// many queries over the same expensive projection (the board).
-    ///
-    /// Returns `Ok(None)` when the result has more than `max_rows` rows, so
-    /// the caller falls back to querying the files directly and memory stays
-    /// bounded.
-    pub async fn snapshot(
-        &self,
-        project: &str,
-        name: &str,
-        sql: &str,
-        max_rows: usize,
-    ) -> Result<Option<QueryEngine>, QueryError> {
-        let this = self.clone();
-        let (project, name, sql) = (project.to_owned(), name.to_owned(), sql.to_owned());
-        offload(async move {
-            let data =
-                retry::once_more(|| this.build_snapshot(&project, &name, &sql, max_rows)).await?;
-            Ok(data.map(|d| this.with_snapshot(&project, &name, d)))
-        })
-        .await
-    }
-
-    /// [`QueryEngine::snapshot`], shared (#418): callers with the same
-    /// project, name, SQL, bound values the SQL reads and `share` key wait
-    /// for one build and use the same table. It lives as long as one of
-    /// them still uses it, plus [`SNAPSHOT_LINGER`], then is freed; a result too large for memory is
-    /// remembered for a minute. `share` is the caller's data generation, so
-    /// a snapshot never outlives new data.
-    pub async fn shared_snapshot(
-        &self,
-        project: &str,
-        name: &str,
-        sql: &str,
-        max_rows: usize,
-        share: u64,
-    ) -> Result<Option<QueryEngine>, QueryError> {
-        let used: Vec<(String, String)> = self
-            .params
-            .iter()
-            .filter(|(k, _)| sql.contains(&format!("${k}")))
-            .map(|(k, v)| (k.to_owned(), v.to_owned()))
-            .collect();
-        let key: SnapKey = (
-            project.to_owned(),
-            name.to_owned(),
-            sql.to_owned(),
-            used,
-            share,
-        );
-        let slot = {
-            let mut slots = self
-                .shared
-                .slots
-                .lock()
-                .map_err(|_| QueryError::Storage("snapshot slots poisoned".into()))?;
-            if slots.len() > 64 {
-                slots.retain(|_, l| Arc::strong_count(l) > 1);
-            }
-            slots.entry(key).or_default().clone()
-        };
-        let this = self.clone();
-        let (project, name, sql) = (project.to_owned(), name.to_owned(), sql.to_owned());
-        offload(async move {
-            let mut last = slot.lock().await;
-            match &*last {
-                Last::Built(w) => {
-                    if let Some(d) = w.upgrade() {
-                        return Ok(Some(this.with_snapshot(&project, &name, d)));
-                    }
-                }
-                Last::TooBig(at) if at.elapsed() < Duration::from_secs(60) => return Ok(None),
-                _ => {}
-            }
-            let data =
-                retry::once_more(|| this.build_snapshot(&project, &name, &sql, max_rows)).await?;
-            *last = match &data {
-                Some(d) => {
-                    // Boards waiting for a compute permit start after the
-                    // first ones finish: keep the table a few seconds more.
-                    let linger = d.clone();
-                    tokio::spawn(async move {
-                        tokio::time::sleep(SNAPSHOT_LINGER).await;
-                        drop(linger);
-                    });
-                    Last::Built(Arc::downgrade(d))
-                }
-                None => Last::TooBig(std::time::Instant::now()),
-            };
-            Ok(data.map(|d| this.with_snapshot(&project, &name, d)))
-        })
-        .await
-    }
-
-    /// How many snapshots [`QueryEngine::shared_snapshot`] built since the
-    /// start (`openlens_board_snapshots_total`).
-    pub fn snapshots_built(&self) -> u64 {
-        self.shared.built.load(std::sync::atomic::Ordering::Relaxed)
-    }
-
-    fn with_snapshot(&self, project: &str, name: &str, data: Arc<SnapData>) -> QueryEngine {
-        let mut snaps: Vec<_> = self
-            .snapshots
-            .iter()
-            .filter(|(p, n, _)| !(p == project && n == name))
-            .cloned()
-            .collect();
-        snaps.push((project.to_owned(), name.to_owned(), data));
-        QueryEngine {
-            snapshots: Arc::new(snaps),
-            ..self.clone()
-        }
-    }
-
-    async fn build_snapshot(
-        &self,
-        project: &str,
-        name: &str,
-        sql: &str,
-        max_rows: usize,
-    ) -> Result<Option<Arc<SnapData>>, QueryError> {
-        if name.is_empty() || !name.bytes().all(|b| b.is_ascii_lowercase() || b == b'_') {
-            return Err(QueryError::Rejected("invalid snapshot name".into()));
-        }
-        let run = async {
-            let ctx = self.context(project).await?;
-            let options = SQLOptions::new()
-                .with_allow_ddl(false)
-                .with_allow_dml(false)
-                .with_allow_statements(false);
-            let df = ctx
-                .sql_with_options(sql, options)
-                .await
-                .map_err(|e| QueryError::Rejected(e.to_string()))?;
-            let df = bind(df, &self.params)?;
-            let schema = Arc::new(df.schema().as_arrow().clone());
-            let mut stream = df
-                .execute_stream()
-                .await
-                .map_err(|e| QueryError::Rejected(e.to_string()))?;
-            let mut batches = Vec::new();
-            let mut rows = 0usize;
-            while let Some(batch) = stream.next().await {
-                let batch = batch.map_err(|e| QueryError::Rejected(e.to_string()))?;
-                rows += batch.num_rows();
-                if rows > max_rows {
-                    return Ok(None);
-                }
-                batches.push(batch);
-            }
-            let received = batches.len();
-            let batches = rebatch::rebatch(&schema, batches, SNAPSHOT_BATCH_ROWS)?;
-            // The snapshot counts against the same memory cap as the
-            // queries (#329): when the pool cannot hold it, read the files.
-            let Some(runtime) = &self.runtime else {
-                return Ok(None);
-            };
-            let bytes: usize = batches
-                .iter()
-                .map(datafusion::arrow::record_batch::RecordBatch::get_array_memory_size)
-                .sum();
-            let reservation =
-                MemoryConsumer::new(format!("snapshot {name}")).register(&runtime.memory_pool);
-            tracing::debug!(
-                name,
-                rows,
-                received,
-                kept = batches.len(),
-                bytes,
-                "snapshot built"
-            );
-            if reservation.try_grow(bytes).is_err() {
-                tracing::debug!(
-                    bytes,
-                    "snapshot does not fit in the memory pool; reading the files"
-                );
-                return Ok(None);
-            }
-            let table = MemTable::try_new(schema, vec![batches])
-                .map_err(|e| QueryError::Storage(e.to_string()))?;
-            Ok(Some((table, reservation)))
-        };
-        let table = match tokio::time::timeout(self.limits.timeout, run).await {
-            Ok(r) => r?,
-            Err(_) => return Err(self.timed_out(self.limits.timeout)),
-        };
-        if table.is_some() {
-            self.shared
-                .built
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        }
-        Ok(table.map(|(t, reservation)| {
-            Arc::new(SnapData {
-                table: Arc::new(t),
-                _reservation: reservation,
-            })
-        }))
     }
 
     /// Register the project's stored events as `raw_events` on `ctx`.
@@ -562,12 +315,6 @@ impl QueryEngine {
                 ListingTable::try_new(config).map_err(|e| QueryError::Storage(e.to_string()))?;
             ctx.register_table(name, Arc::new(t))
                 .map_err(|e| QueryError::Storage(e.to_string()))?;
-        }
-        for (p, name, t) in self.snapshots.iter() {
-            if p == project {
-                ctx.register_table(name.as_str(), t.table.clone())
-                    .map_err(|e| QueryError::Storage(e.to_string()))?;
-            }
         }
         Ok(ctx)
     }

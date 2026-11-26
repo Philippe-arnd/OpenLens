@@ -167,7 +167,7 @@ Measured on 2026-11-22, on one core of a 4-vCPU VPS ([docs/benchmarks.md](docs/b
 
 - **Ingestion:** about **80,000 events/s on one vCPU**, p99 under 9 ms (measured by hand; the nightly benchmark tracks it on GitHub's runners).
 - **Storage:** about **11 bytes per event** on disk (2.3 M events took 25 MB).
-- **Board:** computed in about **0.8 s on 368k events and 3.7 s on 2.2 M** (one vCPU, with identities), then served from memory until new data lands, so most page views wait for no computation. A board takes up to 4 M events of the 90-day window in memory (about 160 bytes each) when the 768 MB query memory pool can hold them, and reads the files otherwise. The [nightly benchmark](.github/workflows/perf.yml) re-measures ingestion and the board every night.
+- **Board:** computed in about **0.8 s on 368k events and 3.7 s on 2.2 M** (one vCPU, with identities), then served from memory until new data lands, so most page views wait for no computation. A board keeps no copy of the events: closed days come from daily rollups and each query reads its own window of days (D-051). The [nightly benchmark](.github/workflows/perf.yml) re-measures ingestion and the board every night.
 - **SDK:** **5.5 kB** gzipped. The replay recorder loads separately, once the page is idle.
 - **Footprint:** one process, 256 MiB requested on Kubernetes, and no Kafka, ClickHouse or Redis to run next to it.
 

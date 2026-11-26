@@ -45,7 +45,7 @@ mod variants;
 pub mod vital_parts;
 pub mod vitals;
 pub use acquisition::{AcquisitionRow, Touch, acquisition};
-pub use board::{board, board_shared, filter_options};
+pub use board::{board, filter_options};
 pub use churn::{AtRisk, ChurnReport, churn};
 pub use digest::{Delta, Digest, digest, digest_markdown};
 pub use errors::{ErrorGroup, error_groups};
