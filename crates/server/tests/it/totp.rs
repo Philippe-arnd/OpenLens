@@ -159,7 +159,7 @@ async fn code_login(h: &Harness, challenge: &str, code: &str) -> (StatusCode, Op
 #[tokio::test]
 async fn a_second_factor_guards_password_sign_in() {
     let h = harness();
-    let (email, pw) = ("[EMAIL_REDACTED]", "violet tram seven");
+    let (email, pw) = ("ana@example.com", "violet tram seven");
     let (_, s1) = member(&h, email, pw).await;
     // Not enrolled: the password alone signs in, as before.
     let (s, c, ch) = password_login(&h, email, pw).await;
@@ -244,7 +244,7 @@ async fn a_second_factor_guards_password_sign_in() {
 async fn an_admin_reset_clears_the_second_factor() {
     let h = harness();
     let token = login_cookie(&h).await;
-    let (email, pw) = ("[EMAIL_REDACTED]", "violet tram seven");
+    let (email, pw) = ("bo@example.com", "violet tram seven");
     let (id, s1) = member(&h, email, pw).await;
     enrol(&h, &s1, pw).await;
     assert!(h.state.meta.totp_enabled(&id).unwrap());

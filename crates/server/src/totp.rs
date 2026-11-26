@@ -299,7 +299,7 @@ mod tests {
 
     #[test]
     fn the_qr_code_is_inline_svg() {
-        let svg = qr_svg(&otpauth_uri("[EMAIL_REDACTED]", "MZXW6YTBOI")).unwrap();
+        let svg = qr_svg(&otpauth_uri("ana@example.com", "MZXW6YTBOI")).unwrap();
         assert!(svg.starts_with("<svg") && svg.ends_with("</svg>"));
     }
 }

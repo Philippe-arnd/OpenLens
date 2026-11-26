@@ -67,7 +67,7 @@ impl Meta {
             Ok(c.execute(
                 "UPDATE users SET totp_at = ?3, totp_step = ?2, totp_recovery = ?4, password_at = ?3 \
                  WHERE id = ?1 AND totp_secret IS NOT NULL AND totp_at IS NULL",
-                params![id, step, recovery.join(","), at],
+                params![id, step, at, recovery.join(",")],
             )? == 1)
         })
     }
