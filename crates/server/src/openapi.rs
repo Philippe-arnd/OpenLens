@@ -41,6 +41,12 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "Re-label a host's past events (`host`, `days` up to 90, `dry_run`) with the current host rules; returns the moves per old and new environment.",
     ),
     (
+        "POST",
+        "/api/projects/{project}/environments/allow",
+        "admin",
+        "Preview a host allow-list (`hosts`, exact or `*.suffix`, at most 50; empty turns it off) over the last 24 h: the hosts outside it and their events. With `confirm: true` the list is saved; it drops other hosts' events only while a listed host has sent events in the last 7 days.",
+    ),
+    (
         "GET",
         "/api/projects/{project}/vitals",
         "read",

@@ -48,7 +48,8 @@ pub struct Environments {
 
 /// The SQL of a page address's host, as [`host_of`] reads it (IPv6
 /// literals aside).
-const HOST_SQL: &str = "lower(split_part(split_part(split_part(url, '/', 3), '?', 1), ':', 1))";
+pub(super) const HOST_SQL: &str =
+    "lower(split_part(split_part(split_part(url, '/', 3), '?', 1), ':', 1))";
 
 /// The environments of `project` over the last [`WINDOW_DAYS`] days
 /// (engine command `environments`).

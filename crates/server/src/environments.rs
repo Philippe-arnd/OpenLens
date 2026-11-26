@@ -31,7 +31,7 @@ pub(crate) struct ProjectEnv {
     pub(crate) seeded: bool,
 }
 
-fn load(state: &AppState, project: &str) -> ProjectEnv {
+pub(crate) fn load(state: &AppState, project: &str) -> ProjectEnv {
     let rules = state.meta.project_setting(project, RULES).ok().flatten();
     let seeded = state
         .meta
@@ -65,14 +65,16 @@ pub(crate) fn save(state: &AppState, project: &str, rules: &Rules) -> Result<(),
     r
 }
 
-/// Apply the project's rules to a captured batch: events of an ignored
-/// host are dropped, the others get the environment the rules give them.
+/// Apply the project's rules to a captured batch: events of a host
+/// outside an active allow-list (#485) or of an ignored host are dropped,
+/// the others get the environment the rules give them.
 /// Starts the upgrade seed the first time a project is seen.
 pub(crate) fn apply(state: &AppState, project: &str, events: &mut Vec<Event>) {
     let p = current(state, project);
     if !p.seeded {
         spawn_seed(state, project);
     }
+    crate::allowlist::screen(state, project, &p.rules.allow, events);
     events.retain_mut(|e| {
         match env::resolve(&p.rules, p.seeded, e.url.as_deref(), &e.environment) {
             Resolution::Keep => true,
@@ -183,6 +185,7 @@ pub(crate) async fn api_list(
             "hidden": e.hidden,
             "monitors": e.monitors,
             "seeded": p.seeded,
+            "allow": crate::allowlist::report(&state, &project, &p.rules.allow),
         }))
         .into_response(),
         Err(e) => bad(StatusCode::BAD_REQUEST, &e.to_string()),
