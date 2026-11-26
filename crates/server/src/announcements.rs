@@ -520,12 +520,19 @@ fn failed(e: Error) -> Response {
 }
 
 /// A JSON body as the command's input, with the project of the path.
-fn body_as<T: serde::de::DeserializeOwned>(mut v: Value, project: &str) -> Result<T, Response> {
+fn body_as<T: serde::de::DeserializeOwned>(
+    mut v: Value,
+    project: &str,
+) -> Result<T, Box<Response>> {
     if let Some(o) = v.as_object_mut() {
         o.insert("project".into(), json!(project));
     }
-    serde_json::from_value(v)
-        .map_err(|e| crate::apierr::json(StatusCode::UNPROCESSABLE_ENTITY, e.to_string()))
+    serde_json::from_value(v).map_err(|e| {
+        Box::new(crate::apierr::json(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            e.to_string(),
+        ))
+    })
 }
 
 #[derive(Deserialize, Default)]
@@ -568,7 +575,7 @@ async fn api_create(
     };
     let input: CreateInput = match body_as(v, &p.id) {
         Ok(i) => i,
-        Err(r) => return r,
+        Err(r) => return *r,
     };
     match ann::Create::run(&state, &Caller::default(), input).await {
         Ok(a) => {
@@ -601,7 +608,7 @@ async fn api_change(
     }
     let input: UpdateInput = match body_as(v, &p.id) {
         Ok(i) => i,
-        Err(r) => return r,
+        Err(r) => return *r,
     };
     match ann::Update::run(&state, &Caller::default(), input).await {
         Ok(a) => {
@@ -635,7 +642,7 @@ async fn api_add_update(
     }
     let input: AddUpdateInput = match body_as(v, &p.id) {
         Ok(i) => i,
-        Err(r) => return r,
+        Err(r) => return *r,
     };
     match ann::AddUpdate::run(&state, &Caller::default(), input).await {
         Ok(a) => {
