@@ -4,7 +4,7 @@ Dokploy, CapRover, Dokku, Portainer, Unraid and TrueNAS all run the one Docker i
 
 Whatever the panel, the rules are those of [docker.md](docker.md):
 
-- **The image:** `ghcr.io/philippe-arnd/openlens`, on a channel: a minor such as `:0.6` (patches only) or `:latest`, never `:edge`. It is `linux/amd64` for now.
+- **The image:** `ghcr.io/philippe-arnd/openlens`, on a channel: a minor such as `:0.6` (patches only) or `:latest`, never `:edge`. Its platforms are listed in [README.md](README.md#image-and-release-channels).
 - **One volume at `/data`,** writable by the image's user (uid 65532). A new named volume gets the right owner by itself; a host folder needs `chown 65532:65532`, or the container run as the folder's owner.
 - **One instance.** OpenLens is the only writer of its data: never scale it above 1, and update it by stopping the old container before starting the new one, which is what a plain redeploy does.
 - **Port 8686,** behind the panel's proxy with HTTPS. Set `OPENLENS_PUBLIC_URL` to the public address.
