@@ -150,6 +150,13 @@ pub struct Caches {
     pub(crate) env_rules: Bounded<String, std::sync::Arc<crate::environments::ProjectEnv>>,
     /// Projects whose environment upgrade seed is running now.
     pub(crate) env_seeding: Bounded<String, ()>,
+    /// The last two probes of each monitored environment (#410), keyed
+    /// `project|env`.
+    pub(crate) env_checks: Bounded<String, Vec<bool>>,
+    /// Replay rate per project (#327): counted at most once a day.
+    pub(crate) replay_rates: Bounded<String, crate::replay::RateEntry>,
+    /// Projects whose identity backfill (#450) ran or is running.
+    pub(crate) identity_checked: Bounded<String, ()>,
 }
 
 impl Default for Caches {
@@ -171,6 +178,9 @@ impl Default for Caches {
             login_emails: Bounded::new(10_000, 60 * MIN),
             env_rules: Bounded::new(10_000, MIN),
             env_seeding: Bounded::new(10_000, 10 * MIN),
+            env_checks: Bounded::new(10_000, 10 * MIN),
+            replay_rates: Bounded::new(10_000, 25 * 60 * MIN),
+            identity_checked: Bounded::new(10_000, 10 * MIN),
         }
     }
 }
@@ -194,6 +204,8 @@ impl Caches {
             ("share_pages", n(self.share_pages.len())),
             ("login_emails", n(self.login_emails.len())),
             ("env_rules", n(self.env_rules.len())),
+            ("env_checks", n(self.env_checks.len())),
+            ("replay_rates", n(self.replay_rates.len())),
         ]
     }
 }

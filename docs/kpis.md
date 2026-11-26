@@ -49,11 +49,22 @@ Generated from `crates/engine/src/vitals.rs`; a test fails when this section and
 
 A vital that is not good opens *Why and what to do* on the board: for LCP, INP and CLS, the worst pages at p75 (pages with at least 8 measurements in the last 7 days), then the causes and actions below, most likely first. For LCP, when TTFB is measured on the same pages and is more than half of LCP, the server cause comes first.
 
+The SDK also says where each vital comes from (raw facts, no text): the element (a short CSS selector), LCP's resource path and four parts, INP's interaction type and three parts, the element that moved most for CLS, and the device class. When at least 8 slow measurements of the worst pages carry the parts, the part that weighs most picks the cause, and the elements most often behind them are listed:
+
+- LCP waiting for the first byte: The server is slow to send the first byte of the page.
+- LCP load delay (the element's resource starts downloading late): The main image is found late: added by a script, lazy-loaded, or queued behind other downloads.
+- LCP load time (the element's resource downloads): The main image takes long to download.
+- LCP render delay (loaded, not yet drawn): Styles and scripts keep the browser from drawing the page.
+- INP input delay (the page is busy when the visitor acts): The page is busy running scripts when the visitor acts.
+- INP processing (the event handlers run): The code that answers a click or key press does too much at once.
+- INP presentation (drawing the next frame): Drawing the next frame takes long.
+
 **LCP: likely causes and what to do**
 
-1. The main image or text block is found late or downloads slowly. Put the main image in the HTML itself (not added by a script), do not lazy-load it, and give it fetchpriority="high". Make the main image lighter: a modern format, sized for the screen, served from a CDN with long caching.
-2. Styles and scripts keep the browser from drawing the page. Inline the styles the first screen needs and defer the scripts it does not need. Render the first screen on the server instead of in the browser.
-3. The server is slow to send the first byte of the page. Cache the page's HTML (or put a CDN in front of it), remove redirects, and speed up the server work behind the page.
+1. The main image is found late: added by a script, lazy-loaded, or queued behind other downloads. Preload the main image (or put it in the HTML itself, not added by a script), do not lazy-load it, and give it fetchpriority="high".
+2. The main image takes long to download. Make the main image lighter: a modern format, sized for the screen, served from a CDN with long caching.
+3. Styles and scripts keep the browser from drawing the page. Inline the styles the first screen needs and defer the scripts it does not need. Render the first screen on the server instead of in the browser.
+4. The server is slow to send the first byte of the page. Cache the page's HTML (or put a CDN in front of it), remove redirects, and speed up the server work behind the page.
 
 **INP: likely causes and what to do**
 

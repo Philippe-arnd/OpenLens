@@ -111,7 +111,7 @@ async fn linked_ids(state: &AppState, project: &str, who: &str) -> Vec<String> {
         "SELECT DISTINCT regexp_match(properties, '\"\\$anon_distinct_id\":\"([^\"]+)\"')[1] AS anon \
          FROM raw_events WHERE event = '$identify' AND distinct_id = {person}"
     );
-    state
+    let mut ids: Vec<String> = state
         .query
         .with_params(&params)
         .sql(project, &sql)
@@ -123,7 +123,18 @@ async fn linked_ids(state: &AppState, project: &str, who: &str) -> Vec<String> {
                 .filter(|a| a != who)
                 .collect()
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
+    // And those recorded at ingestion (#450), even if their `$identify`
+    // is no longer in the files.
+    let (meta, p, w) = (state.meta.clone(), project.to_owned(), who.to_owned());
+    if let Ok(Ok(kept)) = tokio::task::spawn_blocking(move || meta.aliases_of(&p, &w)).await {
+        for a in kept {
+            if !ids.contains(&a) {
+                ids.push(a);
+            }
+        }
+    }
+    ids
 }
 
 #[derive(Deserialize, Default)]

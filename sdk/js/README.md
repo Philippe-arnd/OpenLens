@@ -40,13 +40,13 @@ Framework recipes (Next.js, Nuxt, SvelteKit, Astro, Remix), strict CSP and ad-bl
 - **Form submits**, also inside web components. Input values are never captured.
 - **Sessions:** a new one after 30 minutes of inactivity or a UTC day change. Tabs of the same app share the visitor and the session.
 - **Errors** (`$error`): uncaught errors and unhandled rejections, at most 5 of the same message per page.
-- **Web Vitals** (`$vital`): LCP, INP, CLS, FCP and TTFB, each rated good, needs-improvement or poor.
+- **Web Vitals** (`$vital`): LCP, INP, CLS, FCP and TTFB, each rated good, needs-improvement or poor. Each also says where it comes from, without any text: the element (a short CSS selector, `$el`), LCP's element type, resource path and four parts (`$el_type`, `$res`, `$ttfb`, `$load_delay`, `$load_time`, `$render_delay`), INP's interaction type and three parts (`$input`, `$input_delay`, `$processing`, `$presentation`), and the device class (`$device`). Elements under `data-openlens-ignore` are not named; under `data-openlens-mask`, only their tag names are sent.
 - **Failed requests** (`$request_failed`): fetch/XHR 5xx and network errors, sent as path and status only.
 - **Environment** (`$environment`), detected from the hostname:
   - localhost → `development`;
   - `staging.` → `staging`;
   - preview hosts → `preview`;
-  - anything else → `production`.
+  - anything else → `unknown`: the server's host rules then decide (Settings → Environments), and an unclassified host is never counted as production.
 - **Release** (`$release`), from `init`, `data-release` or `<meta name="openlens-release">`.
 
 **Delivery:** events are batched every 5 s and on page hide. A failed send (offline, 5xx, 429) is retried with the same event ids. Crawlers and monitoring robots are not captured.
@@ -73,6 +73,7 @@ Flags are fetched at init and after `identify`. The active flags travel with eve
 - `consent: "pending"` holds events until `setConsent(true)` is called.
 - `data-openlens-ignore`: nothing in that subtree is captured.
 - **Session replay** is on by default. Once the page is idle and consent is granted, the recorder (`/r.js`, rrweb under MIT) loads from your OpenLens server.
+- Not every session is recorded: the server sets a rate for about 300 recordings a day. A session left out keeps its last minute or two in memory and sends it only after an error or a rage click, then records the rest of the session.
 - Every input value and every text is masked in replays; `data-openlens-unmask` shows the text of a subtree (menus, labels).
 - `data-openlens-mask` masks text, both in replays and in the `$text`/`$href` of clicks. Outside `data-feature`, a click text with an `@` or more than 6 digits in a row is not sent.
 - `data-openlens-block` subtrees are not recorded at all.

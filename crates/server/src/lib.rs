@@ -26,6 +26,7 @@ mod features;
 mod flags;
 mod goals;
 mod icon;
+pub mod identity;
 mod llm;
 mod llm_presets;
 mod manage;
@@ -380,6 +381,8 @@ async fn run_jobs(state: AppState, digest: Job, digest_first: Duration) {
     use tokio::time::{MissedTickBehavior, interval_at};
     tokio::spawn(update_check());
     let heavy = Arc::new(tokio::sync::Mutex::new(()));
+    // Identity tables filled from the files once, after an upgrade (#450).
+    tokio::spawn(identity::backfill_all(state.clone()));
     let every = |first: Duration, period: Duration| {
         let mut t = interval_at(tokio::time::Instant::now() + first, period);
         t.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -778,6 +781,30 @@ pub(crate) async fn load_map(
         .ok()?
         .ok()??;
     openlens_featuremap::parse(&yaml).map.map(|m| (m, version))
+}
+
+/// The stored versions of a project's map (the newest 50) with when each
+/// was saved, for the numbers counted with the version in force (#283).
+pub(crate) async fn map_history(state: &AppState, project: &str) -> Vec<openlens_engine::MapAt> {
+    let meta = state.meta.clone();
+    let p = project.to_owned();
+    tokio::task::spawn_blocking(move || {
+        let versions = meta.feature_map_versions(&p).unwrap_or_default();
+        versions
+            .into_iter()
+            .filter_map(|v| {
+                let saved = chrono::DateTime::parse_from_rfc3339(&v.created_at).ok()?;
+                let yaml = meta.feature_map_version(&p, v.version).ok()??;
+                Some(openlens_engine::MapAt {
+                    version: v.version,
+                    saved: saved.with_timezone(&chrono::Utc),
+                    map: openlens_featuremap::parse(&yaml).map?,
+                })
+            })
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
 }
 
 /// Run one alert pass now (tests and tools; the server runs it every

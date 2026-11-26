@@ -30,11 +30,13 @@ mod aggregate;
 pub mod functions;
 mod host;
 mod identity;
-use identity::{alias_lookup, person_of_udf};
+use identity::{AliasCache, person_of_udf};
+pub use identity::{IdentityFn, IdentityRows, IdentitySource, PersonRow};
 mod internal;
 mod rebatch;
 mod retry;
 mod rollup;
+mod typed;
 pub use aggregate::MIN_USERS;
 use serde::Serialize;
 
@@ -46,78 +48,26 @@ const SNAPSHOT_BATCH_ROWS: usize = 8192;
 /// How long a shared snapshot outlives its last user (#418).
 const SNAPSHOT_LINGER: Duration = Duration::from_secs(15);
 
-/// `person_aliases(anon, person)`: anonymous ids that were later identified.
-///
-/// The SDK sends `$anon_distinct_id` on `$identify`, so events sent before
-/// login (often the first page view) can be given to the user instead of
-/// counting as an extra visitor. When an anonymous id was identified as
-/// several users, the smallest id wins.
-const ALIAS_SQL: &str = "SELECT anon, min(person) AS person FROM (\
-     SELECT regexp_match(properties, '\"\\$anon_distinct_id\":\"([^\"]{1,200})\"')[1] AS anon, \
-     distinct_id AS person FROM raw_events WHERE event = '$identify') \
-     WHERE anon IS NOT NULL AND anon <> person GROUP BY anon";
-
 /// The `events` table as callers see it: `raw_events` with every
 /// anonymous id found in `person_aliases` replaced by its user, through
 /// the scalar function `person_of` (a lookup in the cached alias map, not
-/// a join: a join would build its hash table on the events). Derived
-/// from the data, so it also fixes what was stored before, and nothing is
-/// rewritten.
-fn events_view_sql() -> String {
+/// a join: a join would build its hash table on the events), when `merge`
+/// is set. Derived from the data, so it also fixes what was stored before,
+/// and nothing is rewritten. The typed columns read the text on rows
+/// stored before they existed (#449, see `typed`).
+fn events_view_sql(merge: bool) -> String {
     let cols: Vec<String> = openlens_storage::event_schema()
         .fields()
         .iter()
         .map(|f| {
-            if f.name() == "distinct_id" {
+            if merge && f.name() == "distinct_id" {
                 "person_of(r.distinct_id) AS distinct_id".to_owned()
             } else {
-                format!("r.{}", f.name())
+                typed::select(f.name())
             }
         })
         .collect();
     format!("SELECT {}, r.date FROM raw_events r", cols.join(", "))
-}
-
-/// `persons(person, first_seen, internal)`: every identified user, their
-/// first `$identify` over all time (not just a query's window, so "first
-/// seen" is the real first visit of a returning user), and whether the app
-/// marked them as the team's own (`identify(id, { internal: true })`).
-const PERSONS_SQL: &str = "SELECT distinct_id AS person, min(timestamp) AS first_seen, \
-     max(CASE WHEN properties LIKE '%\"$internal\":true%' THEN 1 ELSE 0 END) = 1 AS internal \
-     FROM raw_events WHERE event = '$identify' GROUP BY distinct_id";
-
-/// The identity tables of one project, read together.
-#[derive(Debug, Clone)]
-struct Identity {
-    /// `person_aliases`; `None` when no anonymous id was linked.
-    aliases: Option<Arc<MemTable>>,
-    /// `persons`; may be empty.
-    persons: Arc<MemTable>,
-    /// The people of `persons` marked internal, for `is_internal`.
-    internal: internal::Internal,
-    /// The same aliases as a lookup, anon id to user, shared by every query.
-    lookup: Arc<HashMap<String, String>>,
-}
-
-type AliasCache = Arc<std::sync::Mutex<HashMap<String, (Instant, Identity)>>>;
-
-/// Run `sql` and keep its result as an in-memory table, with its rows.
-async fn collect(
-    ctx: &SessionContext,
-    sql: &str,
-) -> Result<(Arc<MemTable>, Vec<arrow::array::RecordBatch>), QueryError> {
-    let df = ctx
-        .sql(sql)
-        .await
-        .map_err(|e| QueryError::Storage(e.to_string()))?;
-    let schema = Arc::new(df.schema().as_arrow().clone());
-    let batches = df
-        .collect()
-        .await
-        .map_err(|e| QueryError::Storage(e.to_string()))?;
-    let table = MemTable::try_new(schema, vec![batches.clone()])
-        .map_err(|e| QueryError::Storage(e.to_string()))?;
-    Ok((Arc::new(table), batches))
 }
 
 /// The DataFusion runtime shared by every query.
@@ -261,6 +211,13 @@ pub struct QueryEngine {
     shared: Arc<SharedSnaps>,
     /// Per project: the identity tables and when they were read.
     aliases: AliasCache,
+    /// The identity tables kept at ingestion (#450), when the caller has them.
+    identity_source: Option<IdentitySource>,
+    /// Times the identity tables were derived from the files (#450).
+    identity_scans: Arc<std::sync::atomic::AtomicU64>,
+    /// Bumped by every identity change, so a read that overlapped one is
+    /// not cached (#450).
+    identity_gen: Arc<std::sync::atomic::AtomicU64>,
     /// One long (cold) query at a time per engine, so the board and
     /// ingestion never wait behind two of them (#326). Shared by every copy
     /// of the engine: one per process in the server. Not a process-wide
@@ -288,6 +245,9 @@ impl QueryEngine {
             snapshots: Arc::default(),
             shared: Arc::default(),
             aliases: AliasCache::default(),
+            identity_source: None,
+            identity_scans: Arc::default(),
+            identity_gen: Arc::default(),
             cold_turn: Arc::new(tokio::sync::Semaphore::new(1)),
             timeouts: Arc::default(),
             params: Arc::default(),
@@ -525,14 +485,15 @@ impl QueryEngine {
         }))
     }
 
-    async fn context(&self, project: &str) -> Result<SessionContext, QueryError> {
+    /// Register the project's stored events as `raw_events` on `ctx`.
+    fn register_raw(
+        &self,
+        ctx: &SessionContext,
+        project: &str,
+    ) -> Result<Arc<ListingTable>, QueryError> {
         let dir = openlens_storage::project_dir(&self.root, project)
             .map_err(|e| QueryError::Storage(e.to_string()))?;
         std::fs::create_dir_all(&dir).map_err(|e| QueryError::Storage(e.to_string()))?;
-
-        let ctx = self.session()?;
-        functions::register(&ctx);
-
         let url = ListingTableUrl::parse(format!("{}/", dir.display()))
             .map_err(|e| QueryError::Storage(e.to_string()))?;
         let options = ListingOptions::new(Arc::new(ParquetFormat::default()))
@@ -546,29 +507,34 @@ impl QueryEngine {
         let table: Arc<ListingTable> = Arc::new(table);
         ctx.register_table("raw_events", table.clone())
             .map_err(|e| QueryError::Storage(e.to_string()))?;
+        Ok(table)
+    }
+
+    async fn context(&self, project: &str) -> Result<SessionContext, QueryError> {
+        let ctx = self.session()?;
+        functions::register(&ctx);
+        self.register_raw(&ctx, project)?;
         let identity = self.identity(project, &ctx).await?;
         ctx.register_table("persons", identity.persons)
             .map_err(|e| QueryError::Storage(e.to_string()))?;
         ctx.register_udf(internal::is_internal_udf(identity.internal));
-        match identity.aliases {
-            // Nobody to merge: `events` is the stored table, at no cost.
-            None => {
-                ctx.register_table("events", table)
-                    .map_err(|e| QueryError::Storage(e.to_string()))?;
-            }
+        let merge = match identity.aliases {
+            // Nobody to merge: no lookup per row.
+            None => false,
             Some(aliases) => {
                 ctx.register_udf(person_of_udf(identity.lookup));
                 ctx.register_table("person_aliases", aliases)
                     .map_err(|e| QueryError::Storage(e.to_string()))?;
-                let view = ctx
-                    .sql(&events_view_sql())
-                    .await
-                    .map_err(|e| QueryError::Storage(e.to_string()))?
-                    .into_view();
-                ctx.register_table("events", view)
-                    .map_err(|e| QueryError::Storage(e.to_string()))?;
+                true
             }
-        }
+        };
+        let view = ctx
+            .sql(&events_view_sql(merge))
+            .await
+            .map_err(|e| QueryError::Storage(e.to_string()))?
+            .into_view();
+        ctx.register_table("events", view)
+            .map_err(|e| QueryError::Storage(e.to_string()))?;
         // The rollups of closed days (#322), read-only like the events.
         let rdir = openlens_storage::rollup::rollups_dir(&self.root, project)
             .map_err(|e| QueryError::Storage(e.to_string()))?;
@@ -593,30 +559,6 @@ impl QueryEngine {
             }
         }
         Ok(ctx)
-    }
-
-    /// The `person_aliases` and `persons` tables of `project`, read at most
-    /// every [`ALIAS_TTL`].
-    async fn identity(&self, project: &str, ctx: &SessionContext) -> Result<Identity, QueryError> {
-        if let Ok(cache) = self.aliases.lock()
-            && let Some((at, t)) = cache.get(project)
-            && at.elapsed() < ALIAS_TTL
-        {
-            return Ok(t.clone());
-        }
-        let (aliases, alias_batches) = collect(ctx, ALIAS_SQL).await?;
-        let (persons, person_rows) = collect(ctx, PERSONS_SQL).await?;
-        let lookup = alias_lookup(&alias_batches);
-        let identity = Identity {
-            aliases: (!lookup.is_empty()).then_some(aliases),
-            persons,
-            internal: internal::internal_set(&person_rows),
-            lookup: Arc::new(lookup),
-        };
-        if let Ok(mut cache) = self.aliases.lock() {
-            cache.insert(project.to_owned(), (Instant::now(), identity.clone()));
-        }
-        Ok(identity)
     }
 
     /// The number of stored rows and the environments seen, as

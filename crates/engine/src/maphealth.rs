@@ -4,7 +4,10 @@
 //! routes, dead features, success events that never fire or fire on every
 //! use, `data-feature` values the map does not declare, and `requires`
 //! that usage contradicts. Plus the per-feature numbers (30 days against
-//! the 30 before), roll-ups by area and the adoption ladder.
+//! the 30 before), roll-ups by area and the adoption ladder. Since #283,
+//! also features cut too big or too small and steps out of order
+//! (`mapshape`), routes new in the latest release that no feature claims
+//! (`drift`) and the relations inferred between features (`relations`).
 //!
 //! Scoring (documented in docs/agents/analyze.md): 100, minus up to 40
 //! for coverage (40 × the share of pages and clicks without a feature),
@@ -27,7 +30,7 @@ const MAX_FINDINGS: usize = 50;
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Finding {
     /// `coverage`, `overlap`, `dead`, `success_never`, `success_always`,
-    /// `undeclared`, `requires`.
+    /// `undeclared`, `requires`, `too_big`, `too_small`, `step_order`, `drift`.
     pub kind: &'static str,
     /// `error` or `warning`.
     pub level: &'static str,
@@ -123,6 +126,8 @@ pub struct MapHealth {
     pub areas: Vec<AreaHealth>,
     /// The adoption ladder, from `requires`.
     pub ladder: Vec<Rung>,
+    /// Relations inferred from sessions (#283), most shared sessions first.
+    pub relations: Vec<crate::relations::Relation>,
 }
 
 /// Turn a path into a route pattern: ids (digits, long hex, uuids) become `:id`.
@@ -143,7 +148,7 @@ pub fn route_for(path: &str) -> String {
 }
 
 /// A key for a new feature from a route: `/billing/:id/invoices` → `billing-invoices`.
-fn key_for(route: &str) -> String {
+pub(crate) fn key_for(route: &str) -> String {
     let k: Vec<String> = route
         .split('/')
         .filter(|s| !s.is_empty() && !s.starts_with(':') && *s != "*")
@@ -176,6 +181,10 @@ pub struct Usage {
     pub tagged: Vec<(String, i64)>,
     /// (user, feature) pairs, last 30 days, for features in a `requires`.
     pub pairs: Vec<(String, String)>,
+    /// What each session did with the features (#283).
+    pub sessions: crate::mapsessions::Sessions,
+    /// The newest release's routes (#283).
+    pub drift: crate::drift::Observed,
 }
 
 fn finding(
@@ -332,6 +341,12 @@ pub fn assess(m: &FeatureMap, u: &Usage) -> MapHealth {
             *unmapped.entry(route_for(path)).or_default() += n;
         }
     }
+    let drift = crate::drift::findings(&u.drift);
+    // A new route is reported as drift, the more specific finding.
+    unmapped.retain(|r, _| !drift.iter().any(|(d, _)| d == r));
+    findings.extend(drift.into_iter().map(|(_, f)| f));
+    out.relations = crate::relations::infer(m, &u.sessions);
+    findings.extend(crate::mapshape::findings(m, &u.sessions, &out.relations));
     let mut unmapped: Vec<(String, i64)> = unmapped.into_iter().collect();
     unmapped.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
     for (route, n) in unmapped.iter().take(10) {
@@ -608,6 +623,11 @@ pub async fn map_health(
             }
         }
     }
+    let (s, d) = futures::join!(
+        crate::mapsessions::load(q, project, m, f),
+        crate::drift::load(q, project, m, f)
+    );
+    (u.sessions, u.drift) = (s?, d?);
     Ok(assess(m, &u))
 }
 
@@ -631,8 +651,11 @@ pub struct FeatureContext {
     pub required_by: Vec<String>,
     /// Other features in its area.
     pub area_peers: Vec<String>,
-    /// Use per release, newest first (#411), last 90 days.
+    /// Use per release, newest first (#411), last 90 days, each counted
+    /// with the map version in force (#283).
     pub releases: Vec<FeatureRelease>,
+    /// Inferred relations it is part of (#283).
+    pub relations: Vec<crate::relations::Relation>,
     /// Errors in the sessions that used it (#411), most users first, last 30 days.
     pub errors: Vec<FeatureError>,
     /// Latest sessions that used it (#411; the page keeps those with a replay).
@@ -641,20 +664,7 @@ pub struct FeatureContext {
     pub flags: Vec<FeatureFlag>,
 }
 
-/// One release's use of a feature.
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct FeatureRelease {
-    /// The release (`untagged` when none was sent).
-    pub release: String,
-    /// When its events started.
-    pub first_seen: String,
-    /// Users.
-    pub users: i64,
-    /// Uses.
-    pub uses: i64,
-    /// Users who reached the success event.
-    pub success_users: i64,
-}
+pub use crate::inforce::FeatureRelease;
 
 /// An error message seen in sessions that used a feature.
 #[derive(Debug, Clone, Default, Serialize)]
@@ -694,10 +704,12 @@ pub struct FeatureFlag {
 }
 
 /// [`FeatureContext`] for `key` (its current key or a former one).
+/// `history` holds the stored map versions, for the releases (#283).
 pub async fn feature_context(
     q: &QueryEngine,
     project: &str,
     m: &FeatureMap,
+    history: &[crate::inforce::MapAt],
     f: &Filters,
     key: &str,
 ) -> Result<Option<FeatureContext>> {
@@ -724,14 +736,7 @@ pub async fn feature_context(
         "SELECT path, count(*) AS n FROM {src} WHERE {w30} AND feature = {k} AND path IS NOT NULL \
          GROUP BY path ORDER BY n DESC LIMIT 10"
     );
-    let w90 = f.clause(90)?;
     let ok = succ.as_deref().unwrap_or("NULL");
-    let releases = format!(
-        "SELECT coalesce(release, 'untagged') AS release, CAST(min(timestamp) AS VARCHAR) AS first_seen, \
-         count(DISTINCT distinct_id) AS u, count(*) AS n, \
-         count(DISTINCT CASE WHEN event = {ok} THEN distinct_id END) AS s \
-         FROM {src} WHERE {w90} AND feature = {k} GROUP BY 1 ORDER BY first_seen DESC LIMIT 10"
-    );
     let errors = format!(
         "SELECT coalesce(regexp_match(properties, '\"\\$message\":\"((?:[^\"\\\\]|\\\\.)*)\"')[1], '(no message)') AS msg, \
          count(*) AS n, count(DISTINCT distinct_id) AS u, last_value(session_id ORDER BY timestamp) AS last_session \
@@ -755,7 +760,7 @@ pub async fn feature_context(
     let (r, p, rel, err, ses, fl) = futures::join!(
         q.sql(project, &roles),
         q.sql(project, &pages),
-        q.sql(project, &releases),
+        crate::inforce::releases(q, project, m, history, f, &key),
         q.sql(project, &errors),
         q.sql(project, &sessions),
         q.sql(project, &flags)
@@ -797,16 +802,12 @@ pub async fn feature_context(
             .filter(|x| area.is_some() && x.area == area && x.key != key)
             .map(|x| x.key.clone())
             .collect(),
-        releases: rel?
-            .rows
+        releases: rel?,
+        relations: health
+            .relations
             .iter()
-            .map(|x| FeatureRelease {
-                release: text(x, "release").unwrap_or_default(),
-                first_seen: text(x, "first_seen").unwrap_or_default(),
-                users: int(x, "u"),
-                uses: int(x, "n"),
-                success_users: int(x, "s"),
-            })
+            .filter(|x| x.first == key || x.then == key)
+            .cloned()
             .collect(),
         errors: err?
             .rows

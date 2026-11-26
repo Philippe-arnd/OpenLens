@@ -26,6 +26,7 @@ Screenshots and observation notes stay in the gitignored `plan/` folder. They ar
 | 2026-11-21 | rrweb README and event format (MIT; used as a dependency, not reimplemented) | recorder and replayer options, masking options | sdk/js replay, player |
 | 2026-11-21 | web.dev public pages on Core Web Vitals | LCP, INP, CLS, FCP, TTFB thresholds (good / needs improvement / poor) | sdk/js vitals, kpis.md |
 | 2026-11-26 | web.dev public guides on optimising LCP, INP and CLS | LCP sub-parts (first byte, load delay, load time, render delay), the three parts of an interaction, common causes of layout shifts and their fixes, rewritten in our own words | engine vitals.rs, kpis.md |
+| 2026-11-26 | W3C Event Timing, Largest Contentful Paint and Layout Instability specs; web.dev guides on LCP sub-parts, INP phases and debugging layout shifts | entry fields (`element`, `url`, `interactionId`, `processingStart/End`, `sources`), how LCP splits into four parts and an interaction into three, which shift source to blame | sdk/js attribution.ts, engine vital_parts.rs |
 | 2026-11-21 | W3C/WHATWG specs: Beacon, Fetch keepalive, History API, Page Visibility, Performance Timeline | delivery on page hide, SPA route detection | sdk/js |
 | 2026-11-21 | Apache Parquet and Arrow specs, DataFusion user guide | storage layout, SQL surface, listing tables | storage, query |
 | 2026-11-21 | MCP specification (public) | stdio transport, tools list and call shapes | openlens-cli mcp |

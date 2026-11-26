@@ -8,7 +8,71 @@ function detectEnvironment(host) {
   if (/(^|[.-])(preview|pr-\d+|review)([.-]|$)/.test(h) || h.endsWith(".vercel.app") || h.endsWith(".netlify.app")) {
     return "preview";
   }
-  return "production";
+  return "unknown";
+}
+
+// src/attribution.ts
+var MAX_SELECTOR = 120;
+function stable(name) {
+  if (!/^[a-zA-Z][\w-]{0,39}$/.test(name) || /\d/.test(name)) return false;
+  if (/^(css|sc|jsx|svelte|emotion|chakra|mui|tw)-/i.test(name)) return false;
+  const tail = name.split(/[-_]+/).pop() || "";
+  return tail === name || !(/[a-z]/.test(tail) && /[A-Z]/.test(tail));
+}
+function step(el2, masked) {
+  const tag = el2.tagName.toLowerCase();
+  if (masked) return tag;
+  if (el2.id && stable(el2.id)) return `${tag}#${el2.id}`;
+  const cls = (el2.getAttribute("class") || "").split(/\s+/).filter(stable).slice(0, 2);
+  return tag + cls.map((c) => "." + c).join("");
+}
+function hidden(el2) {
+  let h = 0;
+  for (let n = el2; n; n = n.parentElement) {
+    if (n.hasAttribute("data-openlens-ignore")) return 2;
+    if (n.hasAttribute("data-openlens-mask")) h = 1;
+  }
+  return h;
+}
+function selector(el2) {
+  const h = hidden(el2);
+  if (!el2 || h > 1) return "";
+  const up = [];
+  for (let n = el2; n; n = n.parentElement) up.push(n);
+  const masked = h > 0;
+  const parts = [];
+  for (const n of up.slice(0, 3)) {
+    const s = step(n, masked);
+    if (parts.length && [s, ...parts].join(" > ").length > MAX_SELECTOR) break;
+    parts.unshift(s);
+    if (s.includes("#")) break;
+  }
+  return parts.join(" > ").slice(-MAX_SELECTOR);
+}
+function resourcePath(url, page) {
+  try {
+    const u = new URL(url, page);
+    if (!/^https?:$/.test(u.protocol)) return u.protocol;
+    const p = u.host === new URL(page).host ? u.pathname : u.host + u.pathname;
+    return p.slice(0, 200);
+  } catch {
+    return "";
+  }
+}
+function lcpParts(lcp, ttfb, loadStart, loadEnd) {
+  const t = Math.min(Math.max(ttfb, 0), lcp);
+  const start = loadStart ? Math.min(Math.max(loadStart, t), lcp) : t;
+  const end = loadEnd ? Math.min(Math.max(loadEnd, start), lcp) : start;
+  return [t, start - t, end - start, lcp - end].map(Math.round);
+}
+function inpParts(start, procStart, procEnd, duration) {
+  const end = start + duration;
+  const a = Math.min(Math.max(procStart, start), end);
+  const b = Math.min(Math.max(procEnd, a), end);
+  return [a - start, b - a, end - b].map(Math.round);
+}
+function deviceClass(coarse, shortSide) {
+  return !coarse ? "desktop" : shortSide < 600 ? "phone" : "tablet";
 }
 
 // src/vitals.ts
@@ -31,32 +95,69 @@ function observe(type, cb, extra) {
   } catch {
   }
 }
+var el = (n) => selector(n instanceof Element ? n : null);
+function lcpFacts(e, lcp, ttfb) {
+  var _a;
+  const f = {};
+  const s = el(e.element);
+  if (s) f.$el = s;
+  const tag = (_a = e.element) == null ? void 0 : _a.tagName;
+  f.$el_type = !e.url ? "text" : tag === "IMG" || tag === "image" ? "image" : tag === "VIDEO" ? "video" : "background";
+  let res;
+  if (e.url && !hidden(e.element)) {
+    f.$res = resourcePath(e.url, location.href);
+    res = performance.getEntriesByName(e.url, "resource")[0];
+  }
+  const p = lcpParts(lcp, ttfb, res && (res.requestStart || res.startTime), res == null ? void 0 : res.responseEnd);
+  ["$ttfb", "$load_delay", "$load_time", "$render_delay"].forEach((k, i) => f[k] = p[i]);
+  return f;
+}
 function trackVitals(report) {
   if (typeof PerformanceObserver === "undefined") return;
   const values = {};
+  const facts = {};
   const nav = performance.getEntriesByType("navigation")[0];
-  if (nav && nav.responseStart > 0) values.TTFB = nav.responseStart;
+  const ttfb = nav && nav.responseStart > 0 ? nav.responseStart : 0;
+  if (ttfb) values.TTFB = ttfb;
   observe("paint", (es) => {
     for (const e of es) if (e.name === "first-contentful-paint") values.FCP = e.startTime;
   });
   observe("largest-contentful-paint", (es) => {
     const last = es[es.length - 1];
-    if (last) values.LCP = last.startTime;
+    if (!last) return;
+    values.LCP = last.startTime;
+    facts.LCP = lcpFacts(last, last.startTime, ttfb);
   });
   let win = 0;
   let winStart = 0;
   let lastTs = 0;
+  let top = 0;
+  let topEl = "";
   observe("layout-shift", (es) => {
     var _a;
     for (const e of es) {
       if (e.hadRecentInput) continue;
       if (e.startTime - lastTs > 1e3 || e.startTime - winStart > 5e3) {
         win = 0;
+        top = 0;
         winStart = e.startTime;
       }
       win += e.value;
       lastTs = e.startTime;
-      values.CLS = Math.max((_a = values.CLS) != null ? _a : 0, win);
+      if (e.value > top) {
+        top = e.value;
+        let big;
+        let area = -1;
+        for (const s of e.sources || []) {
+          const a = s.currentRect.width * s.currentRect.height;
+          if (a > area) [area, big] = [a, s.node];
+        }
+        topEl = el(big);
+      }
+      if (win > ((_a = values.CLS) != null ? _a : 0)) {
+        values.CLS = win;
+        facts.CLS = topEl ? { $el: topEl } : {};
+      }
     }
   });
   observe(
@@ -64,11 +165,22 @@ function trackVitals(report) {
     (es) => {
       var _a;
       for (const e of es) {
-        if (e.interactionId) values.INP = Math.max((_a = values.INP) != null ? _a : 0, e.duration);
+        if (!e.interactionId || e.duration <= ((_a = values.INP) != null ? _a : -1)) continue;
+        values.INP = e.duration;
+        const p = inpParts(e.startTime, e.processingStart, e.processingEnd, e.duration);
+        const f = { $input: e.name.startsWith("key") ? "keyboard" : "pointer", $input_delay: p[0], $processing: p[1], $presentation: p[2] };
+        const s = el(e.target);
+        if (s) f.$el = s;
+        facts.INP = f;
       }
     },
     { durationThreshold: 40 }
   );
+  let device = "";
+  try {
+    device = deviceClass(matchMedia("(pointer: coarse)").matches, Math.min(screen.width, screen.height));
+  } catch {
+  }
   let sent = false;
   const flush2 = (force) => {
     if (sent || !force && document.visibilityState !== "hidden") return;
@@ -77,11 +189,21 @@ function trackVitals(report) {
       const v = values[name];
       if (v === void 0) continue;
       const value = name === "CLS" ? Math.round(v * 1e3) / 1e3 : Math.round(v);
-      report(name, value, rate(name, value));
+      report(name, value, rate(name, value), { ...facts[name], ...device ? { $device: device } : {} });
     }
   };
   addEventListener("visibilitychange", () => flush2(false), true);
   addEventListener("pagehide", () => flush2(true), true);
+}
+
+// src/sampling.ts
+function decide(prev, sid, rate2, rand) {
+  if (prev && prev.sid === sid) return prev;
+  if (rate2 === void 0) return void 0;
+  return { sid, on: rand() < rate2 };
+}
+function validRate(v) {
+  return typeof v === "number" && v >= 0 && v <= 1 ? v : void 0;
 }
 
 // src/unload.ts
@@ -176,6 +298,7 @@ var timer;
 var lastPath = "";
 var activeFlags = [];
 var activeVariants = {};
+var replayRate;
 var activeSurveys = [];
 var surveyOpen = false;
 function uuid() {
@@ -270,7 +393,7 @@ function base() {
   return p;
 }
 function track(event, props) {
-  var _a;
+  var _a, _b, _c;
   if (!cfg || consent === "denied") return;
   const now = Date.now();
   refresh();
@@ -286,6 +409,11 @@ function track(event, props) {
   });
   if (queue.length > MAX_QUEUE) queue = queue.slice(-MAX_QUEUE);
   if (queue.length >= 20) flush();
+  if (event === "$error" || (props == null ? void 0 : props.$rage) === true) {
+    state.rs = { sid: state.sid, on: true };
+    save();
+    (_c = (_b = window.__openlensReplay) == null ? void 0 : _b.wake) == null ? void 0 : _c.call(_b);
+  }
   maybeSurvey(event);
 }
 function maybeSurvey(event) {
@@ -315,10 +443,10 @@ function maybeSurvey(event) {
   setTimeout(() => {
     if (w.__openlensSurveyShow) w.__openlensSurveyShow();
     else {
-      const el = document.createElement("script");
-      el.src = `${host}/s.js`;
-      el.async = true;
-      document.head.appendChild(el);
+      const el2 = document.createElement("script");
+      el2.src = `${host}/s.js`;
+      el2.async = true;
+      document.head.appendChild(el2);
     }
   }, 1200);
 }
@@ -336,11 +464,20 @@ function loadFlags() {
     if (v !== void 0 && v !== null && v !== "") q.set(`p.${k.toLowerCase()}`, String(v).slice(0, 100));
   }
   origFetch(`${cfg.host.replace(/\/$/, "")}/flags?${q}`).then((r) => r.ok ? r.json() : null).then((j) => {
-    var _a2;
+    var _a2, _b2, _c, _d;
     if (Array.isArray(j == null ? void 0 : j.surveys)) activeSurveys = j.surveys;
+    const rate2 = j ? (_a2 = validRate(j.replay_rate)) != null ? _a2 : 1 : void 0;
+    if (rate2 !== void 0) {
+      replayRate = rate2;
+      try {
+        store().setItem(`${storageKey()}_rate`, String(rate2));
+      } catch {
+      }
+      (_c = (_b2 = window.__openlensReplay) == null ? void 0 : _b2.wake) == null ? void 0 : _c.call(_b2);
+    }
     if (j == null ? void 0 : j.flags) {
       activeFlags = j.flags;
-      activeVariants = (_a2 = j.variants) != null ? _a2 : {};
+      activeVariants = (_d = j.variants) != null ? _d : {};
       try {
         store().setItem(`${storageKey()}_flags`, JSON.stringify(activeFlags));
         store().setItem(`${storageKey()}_variants`, JSON.stringify(activeVariants));
@@ -372,9 +509,11 @@ function reset() {
   save();
 }
 function setConsent(granted) {
+  var _a, _b;
   consent = granted ? "granted" : "denied";
   if (!granted) {
     queue = [];
+    (_b = (_a = window.__openlensReplay) == null ? void 0 : _a.wake) == null ? void 0 : _b.call(_a);
     if (cfg && !cfg.cookieless) {
       try {
         clearParked(localStorage);
@@ -468,29 +607,29 @@ function utm() {
   }
   return out;
 }
-function lineage(el, path) {
-  const from = path ? path.indexOf(el) : -1;
+function lineage(el2, path) {
+  const from = path ? path.indexOf(el2) : -1;
   if (from >= 0) return path.slice(from).filter((x) => x instanceof Element);
   const out = [];
-  for (let n = el; n; n = n instanceof ShadowRoot ? n.host : n.parentNode) {
+  for (let n = el2; n; n = n instanceof ShadowRoot ? n.host : n.parentNode) {
     if (n instanceof Element) out.push(n);
   }
   return out;
 }
-function describe(el, path) {
+function describe(el2, path) {
   var _a;
-  const up = lineage(el, path);
-  const p = { $tag: el.tagName.toLowerCase() };
+  const up = lineage(el2, path);
+  const p = { $tag: el2.tagName.toLowerCase() };
   const f = up.find((x) => x.hasAttribute("data-feature"));
   if (f) p.$feature = f.getAttribute("data-feature");
-  if (el.id) p.$id = el.id;
-  const isInput = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+  if (el2.id) p.$id = el2.id;
+  const isInput = el2 instanceof HTMLInputElement || el2 instanceof HTMLTextAreaElement;
   const masked = up.some((x) => x.hasAttribute("data-openlens-mask"));
   if (!isInput && !masked) {
-    const text = (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60);
+    const text = (el2.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60);
     if (text && (f || !personal(text))) p.$text = text;
   }
-  const href = masked ? null : el.getAttribute("href");
+  const href = masked ? null : el2.getAttribute("href");
   if (href) p.$href = (_a = href.split("?")[0]) == null ? void 0 : _a.slice(0, 200);
   return p;
 }
@@ -537,12 +676,12 @@ function autocapture() {
   document.addEventListener("submit", onSubmit, true);
   const fields = /* @__PURE__ */ new WeakMap();
   const fieldOf = (e) => {
-    const el = e.composedPath()[0];
-    if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)) return null;
-    if (el instanceof HTMLInputElement && ["password", "hidden", "submit", "button", "reset", "image", "file"].includes(el.type)) return null;
-    const form = el.form;
-    if (!form || lineage(el).some((x) => x.hasAttribute("data-openlens-ignore") || x.hasAttribute("data-openlens-mask"))) return null;
-    return { el, form };
+    const el2 = e.composedPath()[0];
+    if (!(el2 instanceof HTMLInputElement || el2 instanceof HTMLTextAreaElement || el2 instanceof HTMLSelectElement)) return null;
+    if (el2 instanceof HTMLInputElement && ["password", "hidden", "submit", "button", "reset", "image", "file"].includes(el2.type)) return null;
+    const form = el2.form;
+    if (!form || lineage(el2).some((x) => x.hasAttribute("data-openlens-ignore") || x.hasAttribute("data-openlens-mask"))) return null;
+    return { el: el2, form };
   };
   document.addEventListener(
     "focusin",
@@ -598,7 +737,7 @@ function autocapture() {
     const r = e.reason;
     report("unhandledrejection", r instanceof Error ? r.message : String(r), r instanceof Error ? r.stack : void 0);
   });
-  trackVitals((name, value, rating) => track("$vital", { $name: name, $value: value, $rating: rating }));
+  trackVitals((name, value, rating, facts) => track("$vital", { ...facts, $name: name, $value: value, $rating: rating }));
   const own = (u) => !!cfg && u.startsWith(cfg.host);
   const failed = (method, rawUrl, status) => {
     let path = rawUrl;
@@ -636,7 +775,7 @@ function autocapture() {
   };
 }
 function init(config) {
-  var _a, _b;
+  var _a, _b, _c;
   if (cfg || typeof window === "undefined") return;
   if (!config.host || !config.key) return;
   const gpc = navigator.globalPrivacyControl === true;
@@ -648,6 +787,7 @@ function init(config) {
   try {
     activeFlags = JSON.parse(store().getItem(`${storageKey()}_flags`) || "[]");
     activeVariants = JSON.parse(store().getItem(`${storageKey()}_variants`) || "{}");
+    replayRate = validRate(Number((_c = store().getItem(`${storageKey()}_rate`)) != null ? _c : NaN));
   } catch {
     activeFlags = [];
     activeVariants = {};
@@ -687,6 +827,15 @@ function startReplay() {
       refresh();
       touchSession(Date.now());
       save();
+    },
+    sampled: () => {
+      refresh();
+      const d = decide(state.rs, state.sid, replayRate, Math.random);
+      if (d && d !== state.rs) {
+        state.rs = d;
+        save();
+      }
+      return d == null ? void 0 : d.on;
     }
   };
   const load2 = () => {

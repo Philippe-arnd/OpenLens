@@ -505,6 +505,45 @@ fn run(cli: Cli) -> Result<bool, String> {
                     &format!("/api/projects/{project}"),
                     Some(Body::Json(json!({ "remove_environment_rule": host }))),
                 )?,
+                EnvCmd::Alias { from, to, project } => c.call(
+                    "PATCH",
+                    &format!("/api/projects/{project}"),
+                    Some(Body::Json(
+                        json!({ "environment_alias": { "from": from, "to": to } }),
+                    )),
+                )?,
+                EnvCmd::Unalias { from, project } => c.call(
+                    "PATCH",
+                    &format!("/api/projects/{project}"),
+                    Some(Body::Json(json!({ "remove_environment_alias": from }))),
+                )?,
+                EnvCmd::Hide { env, project } => c.call(
+                    "PATCH",
+                    &format!("/api/projects/{project}"),
+                    Some(Body::Json(json!({ "hide_environment": env }))),
+                )?,
+                EnvCmd::Show { env, project } => c.call(
+                    "PATCH",
+                    &format!("/api/projects/{project}"),
+                    Some(Body::Json(json!({ "show_environment": env }))),
+                )?,
+                EnvCmd::Monitor {
+                    env,
+                    url,
+                    level,
+                    project,
+                } => c.call(
+                    "PATCH",
+                    &format!("/api/projects/{project}"),
+                    Some(Body::Json(
+                        json!({ "environment_monitor": { "env": env, "url": url, "level": level } }),
+                    )),
+                )?,
+                EnvCmd::Unmonitor { env, project } => c.call(
+                    "PATCH",
+                    &format!("/api/projects/{project}"),
+                    Some(Body::Json(json!({ "remove_environment_monitor": env }))),
+                )?,
             };
             out(&v);
             Ok(status == 200)

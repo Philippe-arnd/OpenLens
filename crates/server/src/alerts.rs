@@ -3,6 +3,11 @@
 //! incidents that open and close with one message each, by email, webhook
 //! (Slack- and Discord-compatible) or ntfy. Rules are on by default and
 //! each can be switched off or tuned per project (minimum config).
+//!
+//! A non-production environment with a monitor (#410, Settings →
+//! Environments) gets its own probe and certificate check, as incidents
+//! `env:<env>:down|cert|cert_expired`, announced only at the `notify`
+//! level; at `log` they are recorded on Uptime and never sent.
 
 use serde::{Deserialize, Serialize};
 
@@ -133,7 +138,11 @@ pub(crate) fn status(state: &AppState, project: &str) -> Status {
     };
     Status {
         state: st,
-        since: open.first().map(|o| o.1),
+        since: open
+            .iter()
+            .find(|o| o.0 == "down" || o.0 == "traffic")
+            .or(open.first())
+            .map(|o| o.1),
         open,
     }
 }
@@ -158,6 +167,9 @@ fn probe(url: &str) -> (bool, Option<u16>, Option<i64>, Option<String>) {
 }
 
 fn label(rule: &str) -> &'static str {
+    if let Some((_, check)) = openlens_engine::environments::split_incident_rule(rule) {
+        return label(check);
+    }
     match rule {
         "down" => "is down",
         "traffic" => "gets no traffic",
@@ -172,7 +184,20 @@ fn label(rule: &str) -> &'static str {
 
 /// Urgent rules are never held by quiet hours.
 fn urgent(rule: &str) -> bool {
+    let rule = openlens_engine::environments::split_incident_rule(rule).map_or(rule, |(_, c)| c);
     rule == "down" || rule == "cert_expired" || rule == "test"
+}
+
+/// Is an incident of this rule announced? Production's always are; a
+/// monitored environment's only at the `notify` level (#410).
+fn announced(state: &AppState, project: &str, rule: &str) -> bool {
+    use openlens_engine::environments::{NOTIFY, split_incident_rule};
+    split_incident_rule(rule).is_none_or(|(env, _)| {
+        crate::environments::current(state, project)
+            .rules
+            .level(env)
+            == NOTIFY
+    })
 }
 
 /// Is it within the project's quiet hours now?
@@ -352,10 +377,21 @@ pub(crate) async fn track(
     let m = &state.meta;
     let now = chrono::Utc::now().timestamp();
     let open = m.open_incident(project, rule).ok().flatten();
+    let env_name;
+    let name = match openlens_engine::environments::split_incident_rule(rule) {
+        Some((env, _)) => {
+            env_name = format!("{name} ({env})");
+            env_name.as_str()
+        }
+        None => name,
+    };
+    // At the `log` level an incident is recorded, never announced.
+    let announce = announced(state, project, rule);
     match (open, failing) {
         (None, true) => {
             let _ = m.start_incident(project, rule, now, cause);
         }
+        (Some(_), true) if !announce => {}
         (Some((id, started, notified)), true) => {
             let since = chrono::DateTime::from_timestamp(started, 0)
                 .map_or_else(String::new, |t| t.format("%Y-%m-%d %H:%M").to_string());
@@ -433,6 +469,7 @@ pub(crate) async fn tick(state: &AppState, minute: u64) {
                 .await;
             }
         }
+        Box::pin(environments(state, &p, &s, minute)).await;
         if s.regressions && minute % 60 == 1 {
             Box::pin(regressions(state, &p)).await;
         }
@@ -486,6 +523,71 @@ pub(crate) async fn tick(state: &AppState, minute: u64) {
             && let Some((stopped, cause)) = Box::pin(traffic_stopped(state, &p.id)).await
         {
             Box::pin(track(state, &p.id, &p.name, "traffic", stopped, &cause, 0)).await;
+        }
+    }
+}
+
+/// The probe and certificate check of each monitored non-production
+/// environment (#410): down after two failed checks in a row, as for
+/// production, with the project's health path and switches. Their checks
+/// are kept in memory, apart from production's uptime history.
+async fn environments(state: &AppState, p: &openlens_meta::Project, s: &Settings, minute: u64) {
+    use openlens_engine::environments::incident_rule;
+    let monitors = crate::environments::current(state, &p.id)
+        .rules
+        .monitors
+        .clone();
+    for m in monitors {
+        if s.down {
+            let url = format!("{}{}", m.url, s.health_path);
+            let target = url.clone();
+            let (ok, _, _, err) = tokio::task::spawn_blocking(move || probe(&target))
+                .await
+                .unwrap_or((false, None, None, Some("probe crashed".into())));
+            let key = format!("{}|{}", p.id, m.env);
+            let mut last = state.caches.env_checks.get(&key).unwrap_or_default();
+            last.push(ok);
+            if last.len() > 2 {
+                last.remove(0);
+            }
+            state.caches.env_checks.insert(key, last.clone());
+            let failing = last.len() == 2 && last.iter().all(|ok| !ok);
+            if failing || ok {
+                let cause = err.unwrap_or_else(|| "the probe failed".into());
+                track(
+                    state,
+                    &p.id,
+                    &p.name,
+                    &incident_rule(&m.env, "down"),
+                    failing,
+                    &format!("{url}: {cause}"),
+                    i64::from(s.down_wait) * 60,
+                )
+                .await;
+            }
+        }
+        if s.cert && minute % 60 == 2 && m.url.starts_with("https://") {
+            let o = m.url.clone();
+            if let Ok(Ok(at)) = tokio::task::spawn_blocking(move || crate::tls::expiry(&o)).await {
+                let days = (at - chrono::Utc::now().timestamp()) / 86400;
+                let when = chrono::DateTime::from_timestamp(at, 0)
+                    .map_or_else(String::new, |t| t.format("%Y-%m-%d").to_string());
+                for (check, failing, cause) in [
+                    (
+                        "cert",
+                        (0..=14).contains(&days),
+                        format!("{}: the certificate expires on {when} ({days} days)", m.url),
+                    ),
+                    (
+                        "cert_expired",
+                        days < 0,
+                        format!("{}: the certificate expired on {when}", m.url),
+                    ),
+                ] {
+                    let rule = incident_rule(&m.env, check);
+                    Box::pin(track(state, &p.id, &p.name, &rule, failing, &cause, 0)).await;
+                }
+            }
         }
     }
 }

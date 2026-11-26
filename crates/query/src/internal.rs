@@ -13,7 +13,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use arrow::array::{Array, ArrayRef, BooleanArray, BooleanBuilder, RecordBatch, StringArray};
+use arrow::array::{Array, ArrayRef, BooleanBuilder, StringArray};
 use arrow::datatypes::DataType;
 use datafusion::error::DataFusionError;
 use datafusion::logical_expr::{ColumnarValue, ScalarUDF, Volatility, create_udf};
@@ -23,32 +23,6 @@ pub(crate) const IS_INTERNAL: &str = "is_internal";
 
 /// Ids marked internal.
 pub(crate) type Internal = Arc<HashSet<String>>;
-
-/// The people of `persons` (`person`, `internal`) marked internal.
-pub(crate) fn internal_set(batches: &[RecordBatch]) -> Internal {
-    let mut set = HashSet::new();
-    for b in batches {
-        let (Some(person), Some(flag)) = (b.column_by_name("person"), b.column_by_name("internal"))
-        else {
-            continue;
-        };
-        let (Ok(person), Some(flag)) = (
-            arrow::compute::cast(person, &DataType::Utf8),
-            flag.as_any().downcast_ref::<BooleanArray>(),
-        ) else {
-            continue;
-        };
-        let Some(person) = person.as_any().downcast_ref::<StringArray>() else {
-            continue;
-        };
-        for (p, f) in person.iter().zip(flag.iter()) {
-            if let (Some(p), Some(true)) = (p, f) {
-                set.insert(p.to_owned());
-            }
-        }
-    }
-    Arc::new(set)
-}
 
 /// `is_internal(id)`: true for an internal person, false otherwise (NULL
 /// for a NULL id, as `NOT IN` would leave it).

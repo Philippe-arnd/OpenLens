@@ -15,6 +15,7 @@ use serde_json::{Map, Value};
 mod acquisition;
 pub mod churn;
 mod digest;
+mod drift;
 pub mod environments;
 mod errors;
 mod events;
@@ -22,14 +23,20 @@ mod explore;
 pub mod flows;
 pub mod forms;
 pub mod goals;
+pub mod inforce;
 mod insights;
 pub mod maphealth;
+pub mod mapsessions;
+pub mod mapshape;
 mod pages;
 mod people;
+pub mod relations;
+pub mod replay_rate;
 mod revenue;
 pub mod stats;
 mod tasks;
 mod variants;
+pub mod vital_parts;
 pub mod vitals;
 pub use acquisition::{AcquisitionRow, Touch, acquisition};
 pub use churn::{AtRisk, ChurnReport, churn};
@@ -38,6 +45,7 @@ pub use errors::{ErrorGroup, error_groups};
 pub use events::*;
 pub use explore::*;
 pub use flows::{Flow, FlowLink, FlowQuery, flows};
+pub use inforce::MapAt;
 pub use insights::{CohortStats, FlagCohort, Funnel, FunnelStep, Insight, Journey, Readiness};
 pub use maphealth::{FeatureContext, MapHealth, feature_context, map_health};
 pub use pages::{
@@ -45,9 +53,12 @@ pub use pages::{
     sessions_on_path, survey_results,
 };
 pub use people::*;
+pub use relations::Relation;
+pub use replay_rate::{ReplayRate, replay_rate};
 pub use revenue::{Money, Revenue, revenue};
 pub use tasks::{RetentionRow, TaskTime};
 pub use variants::*;
+pub use vital_parts::{Culprit, DeviceVital};
 pub use vitals::{PageVital, VitalGuide, VitalReport, vitals, vitals_guide};
 
 /// Engine errors.
@@ -384,7 +395,7 @@ pub fn source(map: Option<&FeatureMap>) -> String {
             let (role, feature) = lookups(m);
             format!(
                 "(SELECT uuid, event, distinct_id, session_id, timestamp, received_at, url, path, \
-                 account, plan, environment, release, flags, properties, date, \
+                 account, plan, environment, release, flags, properties, date, {VITAL_COLUMNS}, \
                  {role} AS role, {feature} AS feature FROM events) AS events"
             )
         }
@@ -479,8 +490,8 @@ pub(crate) const INTERACTION: &str =
     "(event IN ('$pageview', '$click', '$submit', '$feature', '$survey') OR event NOT LIKE '$%')";
 
 /// Largest 90-day window the board keeps in memory; beyond it, each query
-/// reads the files. The snapshot holds only the columns the board reads
-/// (properties only for `$vital`), so a row costs about 160 bytes: 4 M rows
+/// reads the files. The snapshot holds only the columns the board reads,
+/// and no `properties` (#449), so a row costs less than 160 bytes: 4 M rows
 /// stay under ~650 MB (#190). The snapshot also reserves its bytes in the
 /// query memory pool (768 MB, shared with every query): when the pool
 /// cannot hold it, the board reads the files instead (#329).
@@ -488,10 +499,23 @@ const BOARD_SNAPSHOT_ROWS: usize = 4_000_000;
 
 /// The columns of the board snapshot. `uuid`, `url`, `received_at`,
 /// `account` and `plan` are not read by any board query, and `properties`
-/// (most of an event's bytes) only for Web Vitals.
+/// (most of an event's bytes) by none since Web Vitals have their own
+/// columns and snapshot (#449).
 const BOARD_COLUMNS: &str = "event, distinct_id, session_id, timestamp, path, feature, role, \
-     environment, release, flags, date, \
-     CASE WHEN event = '$vital' THEN properties END AS properties";
+     environment, release, flags, date";
+
+/// The typed columns of a `$vital` (#449), written at ingestion.
+const VITAL_COLUMNS: &str = "vital_name, vital_value, vital_device, vital_el, vital_kind, \
+     vital_res, vital_ttfb, vital_load_delay, vital_load_time, vital_render_delay, \
+     vital_input_delay, vital_processing, vital_presentation";
+
+/// The columns of the board's Web Vitals snapshot: what the 7-day filters
+/// read, the page, and the typed facts.
+fn vital_snapshot_columns() -> String {
+    format!(
+        "event, distinct_id, timestamp, path, role, environment, release, date, {VITAL_COLUMNS}"
+    )
+}
 
 /// What the filter bar of a page needs, without the board (#329): the
 /// environments, the roles (with the unmatched ones apart, as on the
@@ -610,6 +634,33 @@ async fn board_with(
     };
     let (q, src) = match &snap {
         Some(s) => (s, "board_events".to_owned()),
+        None => (q, projected.clone()),
+    };
+    // Web Vitals look at 7 days of `$vital` rows only: their own small
+    // snapshot of the typed columns, so the 90-day one carries no
+    // `properties` (#449).
+    let vital_window = Filters {
+        role: None,
+        release: None,
+        ..f.clone()
+    }
+    .clause(7)?;
+    let vital_sql = format!(
+        "SELECT {} FROM {projected} WHERE {vital_window} AND event = '$vital'",
+        vital_snapshot_columns()
+    );
+    let vsnap = match share {
+        Some(g) => {
+            q.shared_snapshot(project, "board_vitals", &vital_sql, BOARD_SNAPSHOT_ROWS, g)
+                .await?
+        }
+        None => {
+            q.snapshot(project, "board_vitals", &vital_sql, BOARD_SNAPSHOT_ROWS)
+                .await?
+        }
+    };
+    let (q, vsrc) = match &vsnap {
+        Some(s) => (s, "board_vitals".to_owned()),
         None => (q, projected),
     };
     let ident = identified(any_person(q, project).await?);
@@ -670,7 +721,7 @@ async fn board_with(
     let dau_sql = format!(
         "SELECT {day} AS date, count(DISTINCT distinct_id) AS n FROM {src} WHERE {w14} AND {ident} GROUP BY 1 ORDER BY 1"
     );
-    let vitals_sql = vitals::p75_sql(&src, &w7);
+    let vitals_sql = vitals::p75_sql(&vsrc, &w7);
     let features_sql = format!(
         "SELECT feature AS key, count(*) AS uses, count(DISTINCT distinct_id) AS users, \
          count(DISTINCT concat(distinct_id, '|', {day})) AS user_days \
@@ -920,10 +971,13 @@ async fn board_with(
         .iter()
         .any(|v| v.rating != "good" && vitals_guide(&v.name).is_some_and(|g| g.pages))
     {
-        let pages = vitals::pages(q, project, &src, f).await?;
-        b.vitals_why = vitals::explain(&b.vitals, &pages, true);
+        let (pages, attr) = futures::join!(
+            vitals::pages(q, project, &vsrc, f),
+            vital_parts::attribution(q, project, &vsrc, f)
+        );
+        b.vitals_why = vitals::explain(&b.vitals, &pages?, &attr?, true);
     } else {
-        b.vitals_why = vitals::explain(&b.vitals, &[], true);
+        b.vitals_why = vitals::explain(&b.vitals, &[], &vital_parts::Attribution::default(), true);
     }
     if let Some(c) = insights::slow_pages(&b.vitals, &b.vitals_why) {
         cards.push(c);

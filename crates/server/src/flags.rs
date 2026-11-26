@@ -3,6 +3,8 @@
 //! - `GET /flags?key=pk_…&distinct_id=…&role=…&account=…` (public, capture
 //!   key): the keys of the flags that are on for that user. The raw role is
 //!   resolved to its canonical role with the feature map before targeting.
+//!   It also carries `replay_rate`, the share of sessions the SDK records
+//!   from their start (#327).
 //! - Admin (bearer): `GET /api/projects/{id}/flags`,
 //!   `PUT|DELETE /api/projects/{id}/flags/{key}`.
 //! - Dashboard: `POST /p/{id}/flags/{key}` (session, same-origin) to switch
@@ -162,10 +164,17 @@ pub(crate) async fn public(
         .filter(|s| s.eligible(&subject))
         .map(|s| s.public())
         .collect();
+    // The share of sessions to record from their start (#327, D-035).
+    let replay = crate::replay::rate(&state, &project.id, &project.timezone).await;
     (
         StatusCode::OK,
         cors,
-        Json(json!({ "flags": on, "variants": variants, "surveys": surveys })),
+        Json(json!({
+            "flags": on,
+            "variants": variants,
+            "surveys": surveys,
+            "replay_rate": replay.rate,
+        })),
     )
         .into_response()
 }

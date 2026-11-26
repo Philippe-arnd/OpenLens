@@ -51,6 +51,65 @@ pub(super) enum EnvCmd {
         #[arg(long, default_value = "default")]
         project: String,
     },
+    /// Store an environment the app sends under another name:
+    /// `live-eu production`, or `sandbox ignore` to drop its events.
+    Alias {
+        /// The name the app sends.
+        from: String,
+        /// The environment to store it as, or `ignore`.
+        to: String,
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+    },
+    /// Remove an alias.
+    Unalias {
+        /// The name the alias renames.
+        from: String,
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+    },
+    /// Hide an environment from the selector (its events are kept and
+    /// still readable by name).
+    Hide {
+        /// The environment.
+        env: String,
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+    },
+    /// Show a hidden environment again.
+    Show {
+        /// The environment.
+        env: String,
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+    },
+    /// Check a non-production environment at its own address every
+    /// minute (and its certificate), with its own alert level.
+    Monitor {
+        /// The environment (not production: its address is the app
+        /// address).
+        env: String,
+        /// `https://staging.example.com`.
+        url: String,
+        /// `log` (recorded on Uptime only) or `notify` (announced).
+        #[arg(long, default_value = "log")]
+        level: String,
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+    },
+    /// Stop checking an environment.
+    Unmonitor {
+        /// The environment.
+        env: String,
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -226,8 +285,8 @@ pub(super) enum Command {
         #[command(subcommand)]
         action: TokensCmd,
     },
-    /// The environments of a project and the host rules that classify
-    /// them (D-034).
+    /// The environments of a project: host rules, aliases, hidden
+    /// environments and per-environment checks (D-034).
     Env {
         #[command(subcommand)]
         action: EnvCmd,

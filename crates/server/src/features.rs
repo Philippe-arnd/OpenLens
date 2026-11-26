@@ -342,16 +342,20 @@ pub(crate) async fn feature_or_download(
         return gone();
     };
     let f = q.filters.filters(&p.timezone);
-    let ctx = match openlens_engine::feature_context(&state.query, &p.id, &m, &f, &current).await {
-        Ok(Some(c)) => c,
-        Ok(None) => return gone(),
-        Err(e) => {
-            return html_page(
-                StatusCode::BAD_REQUEST,
-                openlens_ui::message("Can't show that", &e.to_string()),
-            );
-        }
-    };
+    let history = crate::map_history(&state, &p.id).await;
+    let ctx =
+        match openlens_engine::feature_context(&state.query, &p.id, &m, &history, &f, &current)
+            .await
+        {
+            Ok(Some(c)) => c,
+            Ok(None) => return gone(),
+            Err(e) => {
+                return html_page(
+                    StatusCode::BAD_REQUEST,
+                    openlens_ui::message("Can't show that", &e.to_string()),
+                );
+            }
+        };
     let peers: Vec<&openlens_featuremap::Feature> = m
         .features
         .iter()
@@ -530,8 +534,16 @@ pub(crate) async fn api_feature(
         Ok(x) => x,
         Err(r) => return *r,
     };
-    match openlens_engine::feature_context(&state.query, &p.id, &m, &q.filters(&p.timezone), &key)
-        .await
+    let history = crate::map_history(&state, &p.id).await;
+    match openlens_engine::feature_context(
+        &state.query,
+        &p.id,
+        &m,
+        &history,
+        &q.filters(&p.timezone),
+        &key,
+    )
+    .await
     {
         Ok(Some(c)) => axum::Json(c).into_response(),
         Ok(None) => crate::apierr::json(

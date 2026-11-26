@@ -61,10 +61,12 @@ pub(super) async fn replays_page(
     let pid = p.id.clone();
     let who = q.u.clone();
     let view = openlens_replay::View::from_query(q.sort.as_deref(), q.active.as_deref());
-    let list = tokio::task::spawn_blocking(move || {
-        openlens_replay::list_view(&root, &pid, who.as_deref(), view)
-    })
-    .await;
+    let (list, rate) = tokio::join!(
+        tokio::task::spawn_blocking(move || {
+            openlens_replay::list_view(&root, &pid, who.as_deref(), view)
+        }),
+        crate::replay::rate(&state, &p.id, &p.timezone)
+    );
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
         name: &p.name,
@@ -80,6 +82,7 @@ pub(super) async fn replays_page(
                 view,
                 &auth::tz_for(&state, &headers, &p.timezone),
                 &state.meta.replay_comment_counts(&p.id).unwrap_or_default(),
+                &rate,
             ),
         ),
         _ => html(

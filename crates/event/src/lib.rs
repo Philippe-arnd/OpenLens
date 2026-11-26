@@ -12,6 +12,9 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+pub mod vital;
+pub use vital::{Vital, vital};
+
 /// Limits applied to every incoming batch. They are deliberately generous for
 /// real SDK traffic and small enough that one request cannot exhaust memory.
 pub mod limits {
