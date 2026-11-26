@@ -178,6 +178,7 @@ const ROUTES: &[(&str, &str, Access)] = &[
     ("POST", "/api/projects/{project}/goals", Api),
     ("GET", "/api/projects/{project}/environments", Api),
     ("POST", "/api/projects/{project}/environments", Api),
+    ("POST", "/api/projects/{project}/environments/allow", Api),
     ("GET", "/api/audit", Api),
     ("GET", "/api/tokens", Api),
     ("POST", "/api/tokens", Api),

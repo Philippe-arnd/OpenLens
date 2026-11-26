@@ -4,7 +4,7 @@
 
 use super::*;
 
-fn page(host: &str, uuid: u32, env: Option<&str>) -> serde_json::Value {
+pub(super) fn page(host: &str, uuid: u32, env: Option<&str>) -> serde_json::Value {
     let mut props = serde_json::json!({ "$current_url": format!("https://{host}/board") });
     if let Some(e) = env {
         props["$environment"] = e.into();
@@ -27,14 +27,14 @@ fn stored_before_upgrade(h: &Harness, events: Vec<serde_json::Value>) {
     openlens_server::flush_now(&h.state).unwrap();
 }
 
-async fn capture(h: &Harness, events: Vec<serde_json::Value>) -> serde_json::Value {
+pub(super) async fn capture(h: &Harness, events: Vec<serde_json::Value>) -> serde_json::Value {
     let body = serde_json::json!({ "key": h.key, "batch": events }).to_string();
     let (status, v) = post(h, "/capture", body.into_bytes(), false).await;
     assert_eq!(status, StatusCode::OK, "{v}");
     v
 }
 
-async fn api(
+pub(super) async fn api(
     h: &Harness,
     method: &str,
     uri: &str,

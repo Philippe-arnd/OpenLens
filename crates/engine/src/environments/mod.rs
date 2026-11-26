@@ -21,16 +21,24 @@
 //!   environment selector;
 //! - monitors: a checked address and an alert level for a non-production
 //!   environment (production keeps the project's app address and every
-//!   alert).
+//!   alert);
+//! - a host allow-list (#485, `allow`): events of other hosts are
+//!   dropped, once a listed host has proven itself.
 
 use openlens_event::{
     DEFAULT_ENVIRONMENT, UNKNOWN_ENVIRONMENT, host_of, normalize_environment, sdk_guess,
 };
 use serde::{Deserialize, Serialize};
 
+mod allow;
 mod list;
 mod relabel;
 
+pub use allow::{
+    ACTIVE_DAYS, AllowPreview, AllowReport, AllowState, AllowStatus, HostCount, MAX_ALLOWED,
+    PREVIEW_HOURS, allow_report, allow_status, allows, check_allowed, preview_allowed_hosts,
+    set_allowed_hosts,
+};
 pub use list::{Environments, HostRow, environments, seed_rules};
 pub use relabel::{
     MAX_RELABEL_DAYS, RELABEL_DAYS, RelabelMove, Relabelled, check_relabel, covers, relabel_target,
@@ -118,6 +126,9 @@ pub struct Rules {
     /// Monitored non-production environments.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub monitors: Vec<Monitor>,
+    /// The host allow-list (#485): empty is off.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow: Vec<String>,
 }
 
 /// A host pattern as stored: lowercase, an exact host or `*.suffix`.
@@ -229,6 +240,8 @@ impl Rules {
                 && check_level(&m.level).is_ok_and(|l| l == m.level)
         });
         r.monitors.truncate(MAX_MONITORS);
+        let stored = std::mem::take(&mut r.allow);
+        r.allow = check_allowed(&stored).unwrap_or_default();
         r
     }
 
