@@ -62,7 +62,7 @@ fn level_class(level: &str) -> &'static str {
         "outage" => "bad",
         "degraded" => "warn",
         "resolved" => "good",
-        _ => "muted",
+        _ => "info",
     }
 }
 
@@ -87,23 +87,24 @@ fn notice(p: &ProjectInfo<'_>, n: &NoticeRow, admin: bool) -> Markup {
     let base = format!("/p/{}/uptime/announcements/{}", p.id, n.id);
     html! {
         li id={ "a" (n.id) } {
-            span class={ "status " (level_class(&n.level)) } { (n.level) }
-            @if n.pinned { " " span.chip { "pinned" } }
-            " " strong { (n.title) }
-            span.muted.small { " · " (n.components) " · " (n.start) @if let Some(e) = &n.end { " → " (e) } @else { " → ongoing" } }
+            div.notice-head {
+                span class={ "tag tone-" (level_class(&n.level)) } { (n.level) }
+                @if n.pinned { span.tag.tone-accent { "pinned" } }
+                strong { (n.title) }
+                span.muted.small { (n.components) " · " (n.start) @if let Some(e) = &n.end { " → " (e) } @else { " → ongoing" } }
+            }
             @if !n.body.is_empty() { p.comment-body { (linked(&n.body)) } }
             @if !n.updates.is_empty() {
-                ol.plain-list.small { @for (t, state, text) in &n.updates {
+                ol.notice-updates { @for (t, state, text) in &n.updates {
                     li { strong { (state) } span.muted { " · " (t) } " — " span.comment-body { (linked(text)) } }
                 } }
             }
             @if admin {
-                div.small {
-                    a href=(base) { "Edit or write an update" }
+                div.row-actions {
+                    a.btn.sm href=(base) { "Edit or write an update" }
                     @if n.active && n.level != "resolved" {
-                        " "
-                        form.inline method="post" action={ (base) "/close" } {
-                            button.ghost type="submit" { (if n.level == "information" { "End it" } else { "Mark resolved" }) }
+                        form method="post" action={ (base) "/close" } {
+                            button.btn.sm type="submit" { (if n.level == "information" { "End it" } else { "Mark resolved" }) }
                         }
                     }
                 }
@@ -118,33 +119,35 @@ pub fn notices(p: &ProjectInfo<'_>, v: &NoticesView) -> Markup {
     let admin = viewer_is_admin();
     let base = format!("/p/{}/uptime/announcements", p.id);
     html! {
-        section.card.wide {
-            h2.violet { (icon("flag")) "Announcements, last 90 days" }
+        section.card.table-card.wide {
+            h2 { (icon("flag")) "Announcements, last 90 days" }
             @if admin && !v.offers.is_empty() {
-                ul.plain-list { @for o in &v.offers {
-                    li {
-                        span.status.bad { "incident" } " " (o.what) span.muted.small { " · since " (o.since) } " "
+                ul.notice-list { @for o in &v.offers {
+                    li { div.notice-head {
+                        span.tag.tone-bad { "incident" } (o.what) span.muted.small { "since " (o.since) }
                         @if o.kind == "write_update" {
-                            a href={ (base) "/new?incident=" (o.incident) } { "Write an update" }
+                            a.btn.sm.primary href={ (base) "/new?incident=" (o.incident) } { "Write an update" }
                         } @else if let Some(a) = o.announcement {
-                            "The probe closed it. "
-                            form.inline method="post" action={ (base) "/" (a) "/close" } {
-                                button type="submit" { "Mark resolved" }
+                            span.muted.small { "The probe closed it." }
+                            form method="post" action={ (base) "/" (a) "/close" } {
+                                button.btn.sm.primary type="submit" { "Mark resolved" }
                             }
                         }
-                    }
+                    } }
                 } }
             }
-            @if v.items.is_empty() { p.muted { "None. An announcement tells users what is going on: a slowdown, an outage and its updates, a maintenance." } }
+            @if v.items.is_empty() { p.muted.pad { "None. An announcement tells users what is going on: a slowdown, an outage and its updates, a maintenance." } }
             @else {
-                ul.plain-list { @for n in &v.items { (notice(p, n, admin)) } }
+                ul.notice-list { @for n in &v.items { (notice(p, n, admin)) } }
             }
             @if admin {
-                p { a href={ (base) "/new" } { (icon("plus")) "Write an announcement" } }
-                form.inline method="post" action={ (base) "/send" } {
-                    input type="hidden" name="send" value=(if v.send { "off" } else { "on" });
-                    span.small.muted { "Sent to the alert channels: " strong { (if v.send { "yes" } else { "no" }) } " " }
-                    button.ghost type="submit" { (if v.send { "Stop sending them" } else { "Send them too" }) }
+                div.form-foot.pad {
+                    a.btn.primary href={ (base) "/new" } { (icon("plus")) "Write an announcement" }
+                    form method="post" action={ (base) "/send" } {
+                        input type="hidden" name="send" value=(if v.send { "off" } else { "on" });
+                        button.btn.ghost type="submit" { (if v.send { "Stop sending them" } else { "Send them too" }) }
+                    }
+                    p { "Sent to the alert channels: " strong { (if v.send { "yes" } else { "no" }) } }
                 }
             }
         }
@@ -202,60 +205,75 @@ pub fn notice_page(p: &ProjectInfo<'_>, f: &NoticeForm) -> Markup {
             @if let Some(e) = &f.error { p.alert role="alert" { (e) } }
             @if let Some(t) = &f.incident_text { p { "Follows the incident: " strong { (t) } } }
             @if f.id.is_some() {
-                section.card.wide {
+                form.card.form-card.wide method="post" action={ (action) "/updates" } {
                     h2 { (icon("clock")) "Write an update" }
                     @if !f.updates.is_empty() {
-                        ol.plain-list.small { @for (t, state, text) in &f.updates {
+                        ol.notice-updates { @for (t, state, text) in &f.updates {
                             li { strong { (state) } span.muted { " · " (t) } " — " span.comment-body { (linked(text)) } }
                         } }
                     }
-                    form.settings method="post" action={ (action) "/updates" } {
-                        label { "State "
+                    div.form-grid {
+                        label.field { "State"
                             select name="state" { @for s in states { option value=(s) { (s) } } }
+                            small { "A resolved update also marks the announcement resolved and ends it." }
                         }
-                        label.wide { "What is happening "
+                        label.field.wide { "What is happening"
                             textarea name="body" rows="4" required maxlength="4000" {}
+                            small { "Plain text; links are kept." }
                         }
-                        button type="submit" { "Post the update" }
                     }
-                    p.muted.small { "A resolved update also marks the announcement resolved and ends it." }
+                    div.form-foot { button.btn.primary type="submit" { "Post the update" } }
                 }
             }
-            section.card.wide {
+            form.card.form-card.wide method="post" action=(action) {
                 @if f.id.is_some() { h2 { (icon("gear")) "Edit" } }
-                form.settings method="post" action=(action) {
-                    @if let Some(i) = f.incident { input type="hidden" name="incident" value=(i); }
-                    label.wide { "Title " input type="text" name="title" value=(f.title) required maxlength="200" placeholder="Slower exports this afternoon"; }
-                    label.wide { "Text "
-                        textarea name="body" rows="5" maxlength="4000" { (f.body) }
+                @if let Some(i) = f.incident { input type="hidden" name="incident" value=(i); }
+                div.form-grid {
+                    label.field.wide { "Title"
+                        input type="text" name="title" value=(f.title) required maxlength="200" placeholder="Slower exports this afternoon";
                     }
-                    label { "Level "
+                    label.field.wide { "Text"
+                        textarea name="body" rows="5" maxlength="4000" { (f.body) }
+                        small { "Plain text, up to 4,000 characters; links are kept." }
+                    }
+                    label.field { "Level"
                         select name="level" { @for l in levels { option value=(l) selected[l == f.level] { (l) } } }
                     }
                     @if f.id.is_none() && f.incident.is_some() {
-                        label { "First update "
+                        label.field { "First update"
                             select name="state" { @for s in states { option value=(s) { (s) } } }
                         }
                     }
-                    label { "Components " input type="text" name="components" value=(f.components) maxlength="400" placeholder="production"; }
-                    label { "Start " input type="datetime-local" name="start" value=(f.start); }
-                    label { "End " input type="datetime-local" name="end" value=(f.end); }
-                    label.check { input type="checkbox" name="pinned" checked[f.pinned]; " Pin it at the top (information only; unpins the others)" }
-                    button type="submit" { (if f.id.is_some() { "Save" } else { "Post" }) }
+                    label.field { "Components"
+                        input type="text" name="components" value=(f.components) maxlength="400" placeholder="production";
+                        small { "production or environment names, comma-separated." }
+                    }
+                    label.field { "Start"
+                        input type="datetime-local" name="start" value=(f.start);
+                        small { "In your time zone. Empty: now." }
+                    }
+                    label.field { "End"
+                        input type="datetime-local" name="end" value=(f.end);
+                        small { "Empty: until it is closed." }
+                    }
                 }
-                p.muted.small { "Components: production or environment names, comma-separated. Start empty: now. Times are in your time zone." }
+                label.check { input type="checkbox" name="pinned" checked[f.pinned]; " Pin it at the top (information only; unpins the others)" }
+                div.form-foot { button.btn.primary type="submit" { (if f.id.is_some() { "Save" } else { "Post" }) } }
             }
             @if let Some(id) = f.id {
-                section.card.wide.danger {
-                    h2.coral { (icon("alert")) "Close or delete" }
+                section.card.danger.wide {
+                    h2 { (icon("alert")) "Close or delete" }
                     @if f.active {
-                        form.settings method="post" action={ (base) "/" (id) "/close" } {
-                            label.wide { "Closing word (optional) " input type="text" name="body" maxlength="4000" placeholder="Fixed: exports are back to normal."; }
-                            button type="submit" { "Mark resolved" }
+                        form.item method="post" action={ (base) "/" (id) "/close" } {
+                            label.field { "Closing word (optional)"
+                                input type="text" name="body" maxlength="4000" placeholder="Fixed: exports are back to normal.";
+                            }
+                            button.btn type="submit" { "Mark resolved" }
                         }
                     }
-                    form.inline method="post" action={ (base) "/" (id) "/delete" } {
-                        button.ghost type="submit" { "Delete it" }
+                    form.item method="post" action={ (base) "/" (id) "/delete" } {
+                        div { strong { "Delete it" } p.muted.small { "It disappears from the Uptime page, the status page and its feed." } }
+                        button.btn.danger-btn type="submit" { "Delete" }
                     }
                 }
             }
