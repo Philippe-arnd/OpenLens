@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import { OpenLens } from "../src/index.js";
+import { OpenLens, detectRelease } from "../src/index.js";
 
 function server(handler) {
   return new Promise((resolve) => {
@@ -52,4 +52,26 @@ test("never throws when the server is down", async () => {
   await ol.shutdown();
   assert.equal(await ol.isEnabled("beta", "u1"), false);
   assert.ok(errors.length >= 1);
+});
+
+test("release defaults to the host's commit, shortened, and an explicit one wins", () => {
+  const sha = "0123456789ABCDEF0123456789abcdef01234567";
+  const short = sha.slice(0, 12).toLowerCase();
+  assert.equal(detectRelease({ GITHUB_SHA: sha }), short);
+  assert.equal(detectRelease({ RENDER_GIT_COMMIT: "abc", GITHUB_SHA: sha, npm_package_version: "1.2.3" }), short, "earlier variable first");
+  assert.equal(detectRelease({ SOURCE_COMMIT: "", npm_package_version: "1.2.3" }), "1.2.3");
+  assert.equal(detectRelease({}), undefined);
+  const saved = process.env.SOURCE_COMMIT;
+  process.env.SOURCE_COMMIT = sha;
+  try {
+    const auto = new OpenLens({ host: "http://x", key: "k", flushInterval: 60000 });
+    const explicit = new OpenLens({ host: "http://x", key: "k", release: "v2", flushInterval: 60000 });
+    clearInterval(auto.timer);
+    clearInterval(explicit.timer);
+    assert.equal(auto.release, short);
+    assert.equal(explicit.release, "v2");
+  } finally {
+    if (saved === undefined) delete process.env.SOURCE_COMMIT;
+    else process.env.SOURCE_COMMIT = saved;
+  }
 });

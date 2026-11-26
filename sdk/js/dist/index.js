@@ -10,6 +10,44 @@ function detectEnvironment(host) {
   }
   return "unknown";
 }
+function detectRelease(script) {
+  const fromScript = script == null ? void 0 : script.dataset.release;
+  if (fromScript) return fromScript;
+  for (const name of ["openlens-release", "release"]) {
+    const meta = document.querySelector(`meta[name="${name}"]`);
+    if (meta == null ? void 0 : meta.content) return meta.content;
+  }
+  return void 0;
+}
+var OWN_BUNDLES = ["/c.js", "/r.js", "/s.js"];
+function buildFingerprint(urls, origin, host) {
+  const own = host ? OWN_BUNDLES.map((b) => host.replace(/\/$/, "") + b) : [];
+  const kept = /* @__PURE__ */ new Set();
+  for (const raw of urls) {
+    let u;
+    try {
+      u = new URL(raw, origin);
+    } catch {
+      continue;
+    }
+    if (u.origin !== origin || own.includes(u.origin + u.pathname)) continue;
+    kept.add(u.pathname + u.search);
+  }
+  if (kept.size === 0) return void 0;
+  const text = [...kept].sort().join("\n");
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+function pageAssets() {
+  const urls = [];
+  document.querySelectorAll("script[src]").forEach((s) => urls.push(s.src));
+  document.querySelectorAll('link[rel~="stylesheet"][href]').forEach((l) => urls.push(l.href));
+  return urls;
+}
 
 // src/attribution.ts
 var MAX_SELECTOR = 120;
@@ -299,6 +337,7 @@ var lastPath = "";
 var activeFlags = [];
 var activeVariants = {};
 var replayRate;
+var build;
 var activeSurveys = [];
 var surveyOpen = false;
 function uuid() {
@@ -383,6 +422,7 @@ function base() {
     $lib_version: VERSION
   };
   if (cfg == null ? void 0 : cfg.release) p.$release = cfg.release;
+  if (build) p.$build = build;
   if (state.dims.role) p.$role = state.dims.role;
   if (state.dims.account) p.$account = state.dims.account;
   if (state.dims.plan) p.$plan = state.dims.plan;
@@ -781,7 +821,12 @@ function init(config) {
   const gpc = navigator.globalPrivacyControl === true;
   if (navigator.doNotTrack === "1" || gpc || config.consent === "denied") consent = "denied";
   else consent = (_a = config.consent) != null ? _a : "granted";
-  cfg = config;
+  cfg = { ...config, release: config.release || detectRelease() };
+  try {
+    build = buildFingerprint(pageAssets(), location.origin, config.host);
+  } catch {
+    build = void 0;
+  }
   origFetch = (_b = window.fetch) == null ? void 0 : _b.bind(window);
   state = load();
   try {
