@@ -604,7 +604,7 @@ function autocapture(): void {
     report("unhandledrejection", r instanceof Error ? r.message : String(r), r instanceof Error ? r.stack : undefined);
   });
 
-  trackVitals((name, value, rating) => track("$vital", { $name: name, $value: value, $rating: rating }));
+  trackVitals((name, value, rating, facts) => track("$vital", { ...facts, $name: name, $value: value, $rating: rating }));
 
   // Failed requests: path and status only, never bodies. Our own calls are skipped.
   const own = (u: string) => !!cfg && u.startsWith(cfg.host);

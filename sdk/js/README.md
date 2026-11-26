@@ -40,7 +40,7 @@ Framework recipes (Next.js, Nuxt, SvelteKit, Astro, Remix), strict CSP and ad-bl
 - **Form submits**, also inside web components. Input values are never captured.
 - **Sessions:** a new one after 30 minutes of inactivity or a UTC day change. Tabs of the same app share the visitor and the session.
 - **Errors** (`$error`): uncaught errors and unhandled rejections, at most 5 of the same message per page.
-- **Web Vitals** (`$vital`): LCP, INP, CLS, FCP and TTFB, each rated good, needs-improvement or poor.
+- **Web Vitals** (`$vital`): LCP, INP, CLS, FCP and TTFB, each rated good, needs-improvement or poor. Each also says where it comes from, without any text: the element (a short CSS selector, `$el`), LCP's element type, resource path and four parts (`$el_type`, `$res`, `$ttfb`, `$load_delay`, `$load_time`, `$render_delay`), INP's interaction type and three parts (`$input`, `$input_delay`, `$processing`, `$presentation`), and the device class (`$device`). Elements under `data-openlens-ignore` are not named; under `data-openlens-mask`, only their tag names are sent.
 - **Failed requests** (`$request_failed`): fetch/XHR 5xx and network errors, sent as path and status only.
 - **Environment** (`$environment`), detected from the hostname:
   - localhost → `development`;
