@@ -170,10 +170,13 @@ jobs:
       - name: a crashing image is rolled back and remembered
         run: |
           good=$(docker image inspect -f '{{.Id}}' "$LOCAL")
+          # Keep the good image under its own tag: once the build below takes
+          # "$LOCAL", an untagged image can be removed by the image store.
+          docker tag "$LOCAL" openlens-good:ci
           printf 'FROM %s\nENTRYPOINT ["/usr/local/bin/openlens", "backup"]\n' "$LOCAL" | docker build -q -t "$LOCAL" -
           bad=$(docker image inspect -f '{{.Id}}' "$LOCAL")
           docker push -q "$LOCAL"
-          docker tag "$good" "$LOCAL"
+          docker tag openlens-good:ci "$LOCAL"
           if deploy/docker/openlens-compose-update "$DIR"; then echo "::error::a crashing image must fail the update"; exit 1; fi
           running=$(docker inspect -f '{{.Image}}' "$(docker compose -f "$DIR/compose.yaml" ps -q openlens)")
           [ "$running" = "$good" ] || { echo "::error::not rolled back: $running"; exit 1; }
