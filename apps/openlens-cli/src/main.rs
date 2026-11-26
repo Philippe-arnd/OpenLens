@@ -6,11 +6,14 @@
 //! `OPENLENS_TOKEN` (no config file, D-014).
 
 mod agent_kit;
+mod announce;
+use announce::AnnounceCmd;
 #[cfg(test)]
 mod agent_kit_tests;
 mod convert;
 mod lint;
 mod mcp;
+mod mcp_announcements;
 mod mcp_commands;
 #[cfg(test)]
 mod mcp_parity;
@@ -577,6 +580,7 @@ fn run(cli: Cli) -> Result<bool, String> {
             out(&v);
             Ok(status == 200)
         }
+        Command::Announce { action } => announce::run(&client()?, action),
         Command::Status { project } => {
             let (status, v) =
                 client()?.call("GET", &format!("/api/projects/{project}/status"), None)?;

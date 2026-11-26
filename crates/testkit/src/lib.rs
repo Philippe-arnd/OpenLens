@@ -44,6 +44,27 @@ pub fn hostile_capture_bodies() -> Vec<Vec<u8>> {
     ]
 }
 
+/// Hostile plain texts a person may post (announcement titles and bodies,
+/// #562): markup and scripts that must be shown as text, quotes that
+/// would close an attribute, control characters, and lengths at and past
+/// the limits. Every page that shows posted text keeps these inert.
+pub fn hostile_texts() -> Vec<String> {
+    vec![
+        "<script>alert('x')</script>".into(),
+        "<img src=x onerror=alert(1)>".into(),
+        "\"><svg onload=alert(1)>".into(),
+        "<a href=\"javascript:alert(1)\">link</a>".into(),
+        "</textarea><script>alert(1)</script>".into(),
+        "&lt;b&gt; already escaped &amp;".into(),
+        "line\u{0000}null".into(),
+        "bell\u{0007} and escape\u{001b}[31m".into(),
+        "\u{202e}reversed".into(),
+        "é".repeat(4_000),
+        "x".repeat(4_001),
+        String::new(),
+    ]
+}
+
 use chrono::{DateTime, Duration, Utc};
 use openlens_event::Event;
 

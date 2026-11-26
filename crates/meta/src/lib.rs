@@ -62,6 +62,8 @@ pub struct Person {
 }
 
 mod access;
+/// Status announcements and their updates (#562).
+pub mod announcements;
 mod collab;
 mod config;
 mod forget;
@@ -612,6 +614,7 @@ impl Meta {
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
         conn.execute_batch(SCHEMA)?;
         migrate(&conn)?;
+        conn.execute_batch(announcements::SCHEMA)?;
         let readers = (0..READERS)
             .map(|_| {
                 let r = Connection::open_with_flags(
@@ -648,6 +651,7 @@ impl Meta {
         conn.set_transaction_behavior(TransactionBehavior::Immediate);
         conn.execute_batch(SCHEMA)?;
         migrate(&conn)?;
+        conn.execute_batch(announcements::SCHEMA)?;
         Ok(Self {
             conn: Mutex::new(conn),
             readers: Vec::new(),

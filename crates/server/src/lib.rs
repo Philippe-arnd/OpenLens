@@ -6,6 +6,7 @@
 mod access;
 mod alerts;
 mod allowlist;
+mod announcements;
 mod api;
 mod apierr;
 mod ask;
@@ -161,6 +162,7 @@ pub fn router(state: AppState) -> Router {
         .merge(releases::routes())
         .merge(delivery::routes())
         .merge(hooks::routes())
+        .merge(announcements::routes())
         .layer(axum::middleware::from_fn(csrf::layer))
         .layer(axum::middleware::from_fn(trusted_headers_layer))
         // Pages, the API and Ask (a few model rounds) get two minutes.

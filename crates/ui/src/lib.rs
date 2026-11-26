@@ -9,6 +9,7 @@
 
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 
+mod announcements;
 mod audience;
 mod board;
 mod board_job;
@@ -28,6 +29,9 @@ mod settings;
 mod team;
 mod totp;
 mod world;
+pub use announcements::{
+    NoticeForm, NoticeRow, NoticesView, OfferRow, linked, notice_page, notices,
+};
 pub use audience::*;
 pub use board::*;
 pub use board_job::{JobView, board_job};

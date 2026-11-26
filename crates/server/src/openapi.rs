@@ -300,6 +300,48 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
     ),
     (
         "GET",
+        "/api/projects/{project}/announcements",
+        "read",
+        "Status announcements of the last `days` (default 90, at most 400), newest first, each with its dated updates oldest first; the pinned notice; what the Uptime page proposes about recent incidents (`write_update`, `mark_resolved`); whether they are sent to the alert channels.",
+    ),
+    (
+        "POST",
+        "/api/projects/{project}/announcements",
+        "write",
+        "Post an announcement: `title`, `body` (plain text, at most 4000 characters), `level` (information, degraded, outage, resolved), `components` (production or environment names), `start`/`end` (RFC 3339, Unix seconds or `YYYY-MM-DD HH:MM` in the project's zone), `pinned` (information only), `incident` (an id), `state` (its first update).",
+    ),
+    (
+        "PATCH",
+        "/api/projects/{project}/announcements/{id}",
+        "write",
+        "Change an announcement: only the fields given change (`end: \"\"` removes the end).",
+    ),
+    (
+        "DELETE",
+        "/api/projects/{project}/announcements/{id}",
+        "write",
+        "Delete an announcement and its updates.",
+    ),
+    (
+        "POST",
+        "/api/projects/{project}/announcements/{id}/updates",
+        "write",
+        "Post a dated update: `state` (investigating, identified, monitoring, resolved) and `body`. A resolved update also resolves and ends the announcement.",
+    ),
+    (
+        "POST",
+        "/api/projects/{project}/announcements/{id}/close",
+        "write",
+        "End an announcement now (Mark resolved), with an optional closing `body`.",
+    ),
+    (
+        "PUT",
+        "/api/projects/{project}/announcements/send",
+        "write",
+        "Also send announcements, their updates and their end to the alert channels (`send`, off by default).",
+    ),
+    (
+        "GET",
         "/api/projects/{project}/alerts",
         "read",
         "Alert settings (a webhook URL or ntfy topic that is set reads `(set)`).",
