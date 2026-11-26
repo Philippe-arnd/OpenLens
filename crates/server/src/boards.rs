@@ -22,6 +22,13 @@
 //! - a board that failed is not kept, and the failure is logged (D-071):
 //!   an intermittent failure (a query out of memory beside the others)
 //!   looked like a cache that never served the second request.
+//! - the default board page of each project (production, release window,
+//!   no role or release) is computed ahead in the background
+//!   ([`prewarm`], D-072): after startup, and after new data while its
+//!   boards were asked for in the last [`WATCHED`], so the page is served
+//!   from the cache instead of computing for seconds.
+//! - how long each key took to compute last is kept ([`ready`], D-073),
+//!   so a cold board page can say how long it will wait.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -39,6 +46,9 @@ const STALE: Duration = Duration::from_secs(10);
 const MAX_AGE: Duration = Duration::from_secs(300);
 /// Results kept, all projects and filters together.
 const CAPACITY: usize = 64;
+/// How long after a project's board was last asked for its default board
+/// is still computed ahead of new data (D-072).
+const WATCHED: Duration = Duration::from_secs(900);
 
 type Key = (String, String, i64);
 
@@ -75,6 +85,13 @@ struct Inner {
     quiet: tokio::sync::RwLock<()>,
     /// Period blocks of windows of closed days (#516, D-064).
     closed: crate::closed_days::ClosedDays,
+    /// When each project's boards were last asked for (D-072).
+    viewed: Mutex<HashMap<String, Instant>>,
+    /// Projects whose default board was computed ahead once (D-072).
+    prewarmed: Mutex<std::collections::HashSet<String>>,
+    /// How long each key took to compute last (D-073): kept past its
+    /// entry, so a cold page can show the wait to expect.
+    took: Mutex<HashMap<Key, Duration>>,
 }
 
 impl Default for BoardCache {
@@ -88,6 +105,9 @@ impl Default for BoardCache {
                 refreshing: Mutex::new(std::collections::HashSet::new()),
                 quiet: tokio::sync::RwLock::new(()),
                 closed: crate::closed_days::ClosedDays::default(),
+                viewed: Mutex::new(HashMap::new()),
+                prewarmed: Mutex::new(std::collections::HashSet::new()),
+                took: Mutex::new(HashMap::new()),
             }),
         }
     }
@@ -170,6 +190,20 @@ impl BoardCache {
         map.insert(key, entry);
     }
 
+    fn took(&self, key: &Key) -> Option<Duration> {
+        self.inner.took.lock().ok()?.get(key).copied()
+    }
+
+    fn set_took(&self, key: Key, d: Duration) {
+        let Ok(mut m) = self.inner.took.lock() else {
+            return;
+        };
+        if m.len() >= CAPACITY * 4 && !m.contains_key(&key) {
+            m.clear();
+        }
+        m.insert(key, d);
+    }
+
     fn flight(&self, key: &Key) -> Arc<tokio::sync::Mutex<()>> {
         match self.inner.flights.lock() {
             Ok(mut m) => {
@@ -191,24 +225,125 @@ fn servable(e: &Entry, generation: u64) -> bool {
     fresh(e, generation) || (e.at.elapsed() < STALE && e.at.elapsed() < MAX_AGE)
 }
 
+/// The cache key of a board.
+fn key_of(project: &str, f: &Filters, map: Option<(&FeatureMap, i64)>) -> Key {
+    (
+        project.to_owned(),
+        format!("{f:?}"),
+        map.map_or(0, |(_, v)| v),
+    )
+}
+
+/// Compute the default board page of each project ahead (#452, D-072):
+/// production, the release window (D-055), no role or release, in the
+/// project's zone, as `GET /p/{id}` asks for it. A project's board is
+/// computed once after startup, then after new data only while its boards
+/// were asked for in the last [`WATCHED`]. It is skipped while a rollup
+/// pass runs ([`BoardCache::exclusive`]) or while that board is already
+/// being computed, and when it is fresh; the next call tries again.
+/// Projects are taken one at a time. Run every few seconds by the
+/// background jobs.
+pub(crate) async fn prewarm(state: &AppState) {
+    let meta = state.meta.clone();
+    let projects = match tokio::task::spawn_blocking(move || meta.projects()).await {
+        Ok(Ok(p)) => p,
+        Ok(Err(err)) => {
+            tracing::warn!(%err, "default boards not computed ahead");
+            return;
+        }
+        Err(err) => {
+            tracing::warn!(%err, "default boards not computed ahead");
+            return;
+        }
+    };
+    let cache = &state.boards;
+    for p in projects {
+        let once = cache
+            .inner
+            .prewarmed
+            .lock()
+            .is_ok_and(|s| s.contains(&p.id));
+        let watched = cache
+            .inner
+            .viewed
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&p.id).copied())
+            .is_some_and(|t| t.elapsed() < WATCHED);
+        if once && !watched {
+            continue;
+        }
+        let Ok(f) = crate::board_query::BoardQuery::default().filters(&p.timezone) else {
+            continue;
+        };
+        let map = crate::load_map(state, &p.id).await;
+        let m = map.as_ref().map(|(m, v)| (m, *v));
+        let key = key_of(&p.id, &f, m);
+        let generation = cache.generation(&p.id);
+        let done = |cache: &BoardCache| {
+            if let Ok(mut s) = cache.inner.prewarmed.lock() {
+                s.insert(p.id.clone());
+            }
+        };
+        if cache.get(&key).is_some_and(|e| fresh(&e, generation)) {
+            done(cache);
+            continue;
+        }
+        // Never beside a rollup pass: it has the lock, or waits for it.
+        if cache.inner.quiet.try_read().is_err() {
+            continue;
+        }
+        // Already being computed (a page, a refresh): nothing to add.
+        let lock = cache.flight(&key);
+        let Ok(_computing) = lock.try_lock() else {
+            continue;
+        };
+        if let Err(err) = compute(state, &p.id, &f, m, generation, key).await {
+            tracing::warn!(project = %p.id, %err, "default board not computed ahead");
+        }
+        done(cache);
+    }
+}
+
+/// Whether a board page is served from the cache, and if not, how long
+/// its board took to compute last time (D-073).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Ready {
+    /// Served from the cache now, without computing.
+    pub hit: bool,
+    /// The last compute time of this board, when it was computed before.
+    pub estimate: Option<Duration>,
+}
+
 /// Whether the board for these filters can be served from the cache now,
-/// without computing (#301: a cold one streams the page shell first).
+/// and the last time it took to compute (#301: a cold one streams the page
+/// shell first; D-073: with a waiting panel when it may last).
+pub(crate) fn ready(
+    state: &AppState,
+    project: &str,
+    f: &Filters,
+    map: Option<(&FeatureMap, i64)>,
+) -> Ready {
+    let key = key_of(project, f, map);
+    let generation = state.boards.generation(project);
+    Ready {
+        hit: state
+            .boards
+            .get(&key)
+            .is_some_and(|e| servable(&e, generation)),
+        estimate: state.boards.took(&key),
+    }
+}
+
+/// Whether the board for these filters can be served from the cache now,
+/// without computing.
 pub(crate) fn warm(
     state: &AppState,
     project: &str,
     f: &Filters,
     map: Option<(&FeatureMap, i64)>,
 ) -> bool {
-    let key: Key = (
-        project.to_owned(),
-        format!("{f:?}"),
-        map.map_or(0, |(_, v)| v),
-    );
-    let generation = state.boards.generation(project);
-    state
-        .boards
-        .get(&key)
-        .is_some_and(|e| servable(&e, generation))
+    ready(state, project, f, map).hit
 }
 
 /// The board of `project` for these filters, from the cache when possible,
@@ -250,11 +385,13 @@ async fn cached(
     map: Option<(&FeatureMap, i64)>,
 ) -> openlens_engine::Result<Entry> {
     let cache = &state.boards;
-    let key: Key = (
-        project.to_owned(),
-        format!("{f:?}"),
-        map.map_or(0, |(_, v)| v),
-    );
+    let key = key_of(project, f, map);
+    if let Ok(mut m) = cache.inner.viewed.lock() {
+        if m.len() > CAPACITY * 4 {
+            m.retain(|_, t| t.elapsed() < WATCHED);
+        }
+        m.insert(project.to_owned(), Instant::now());
+    }
     let generation = cache.generation(project);
     if let Some(e) = cache.get(&key)
         && servable(&e, generation)
@@ -290,6 +427,7 @@ async fn compute(
     let closed = f.window.closed_utc_days(&f.tz, chrono::Utc::now());
     let kept = closed.and_then(|days| cache.inner.closed.get(&key, days));
     let since = cache.inner.closed.mark();
+    let started = Instant::now();
     let (board, revenue) = tokio::join!(
         Box::pin(openlens_engine::board_reusing(
             &state.query,
@@ -322,6 +460,16 @@ async fn compute(
         revenue: Arc::new(revenue),
     };
     cache.inner.computed.fetch_add(1, Ordering::Relaxed);
+    let took = started.elapsed();
+    cache.set_took(key.clone(), took);
+    // How long a board took, computed for a page or ahead (D-072): the
+    // `scale` job reads it, since the page may be served from the cache.
+    tracing::info!(
+        project,
+        ms = u64::try_from(took.as_millis()).unwrap_or(u64::MAX),
+        key = ?key,
+        "board computed"
+    );
     cache.put(key, entry.clone());
     Ok(entry)
 }
@@ -365,7 +513,65 @@ fn refresh_later(state: &AppState, key: Key, f: Filters, map: Option<(FeatureMap
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use super::BoardCache;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_default_board_is_computed_ahead_once_never_beside_a_rollup_pass() {
+        let dir = tempfile::tempdir().unwrap();
+        let meta = openlens_meta::Meta::in_memory().unwrap();
+        let p = meta.create_project("Ahead", None).unwrap();
+        let (writer, _) =
+            openlens_storage::Writer::open(dir.path(), openlens_storage::FlushPolicy::default())
+                .unwrap();
+        let state = crate::AppState {
+            meta: Arc::new(meta),
+            writer: Arc::new(Mutex::new(writer)),
+            query: openlens_query::QueryEngine::new(dir.path(), openlens_query::Limits::default()),
+            data_dir: dir.path().to_path_buf(),
+            admin_token_hash: "x".into(),
+            session_key: "k".into(),
+            boards: Default::default(),
+            flushing: Default::default(),
+            metrics: Default::default(),
+            disk_space: crate::disk_space,
+            session_gen: Default::default(),
+            caches: Default::default(),
+        };
+        // A rollup pass runs: the board waits for the next call.
+        {
+            let _pass = state.boards.exclusive().await;
+            super::prewarm(&state).await;
+            assert_eq!(state.boards.computed(), 0);
+        }
+        super::prewarm(&state).await;
+        assert_eq!(state.boards.computed(), 1);
+        // The board page's own request is served from the cache.
+        let f = crate::board_query::BoardQuery::default()
+            .filters(&p.timezone)
+            .unwrap();
+        assert!(super::warm(&state, &p.id, &f, None));
+        // New data, but nobody asked for the board since: not again.
+        state.boards.bump(&p.id);
+        super::prewarm(&state).await;
+        assert_eq!(state.boards.computed(), 1);
+        // Asked for lately (as `cached` marks it): computed ahead of the
+        // new data.
+        state
+            .boards
+            .inner
+            .viewed
+            .lock()
+            .unwrap()
+            .insert(p.id.clone(), std::time::Instant::now());
+        super::prewarm(&state).await;
+        assert_eq!(state.boards.computed(), 2);
+        assert!(super::warm(&state, &p.id, &f, None));
+        // Its compute time is kept, for the next cold page (D-073).
+        let r = super::ready(&state, &p.id, &f, None);
+        assert!(r.hit && r.estimate.is_some(), "{r:?}");
+    }
 
     #[test]
     fn a_bump_only_ages_its_own_project() {

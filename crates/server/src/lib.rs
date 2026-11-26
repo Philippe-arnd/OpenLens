@@ -358,6 +358,16 @@ async fn run_jobs(state: AppState, digest: Job, digest_first: Duration) {
             roll_up(&st, chrono::Utc::now()).await;
         }
     });
+    // Default boards computed ahead (D-072): from start, every 10 s,
+    // after new data while someone looks at them.
+    let st = state.clone();
+    let mut t = every(Duration::ZERO, Duration::from_secs(10));
+    tokio::spawn(async move {
+        loop {
+            t.tick().await;
+            boards::prewarm(&st).await;
+        }
+    });
     // S3 copy: 5 minutes after start, then hourly.
     let (st, lock) = (state.clone(), heavy.clone());
     let mut t = every(Duration::from_secs(300), Duration::from_secs(3600));

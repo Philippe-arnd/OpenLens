@@ -1,9 +1,10 @@
 //! Task durations and resurrected users (docs/kpis.md).
 
 use chrono::Datelike;
+use openlens_featuremap::FeatureMap;
 use openlens_query::QueryEngine;
 
-use crate::{Filters, Result, float, int, lit, text};
+use crate::{Filters, Result, float, int, lit, source_from, text};
 
 /// Time to complete one feature's tasks, last 30 days.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -22,10 +23,17 @@ pub struct TaskTime {
 /// most 30 minutes apart (longer means the task was abandoned and the
 /// success belongs to a later attempt). One query for every declared
 /// feature with a success event.
+///
+/// The success events are a scan filtered on their names, like the
+/// board's success events (D-051). A feature's other events count only
+/// within 30 minutes before one of the same person's successes, so only
+/// those events have their feature resolved from the map: the others are
+/// dropped first, on their own columns (#452, D-072). The definition and
+/// the numbers are unchanged.
 pub(crate) async fn task_times(
     q: &QueryEngine,
     project: &str,
-    src: &str,
+    map: Option<&FeatureMap>,
     f: &Filters,
     successes: &[(String, String)],
 ) -> Result<Vec<TaskTime>> {
@@ -34,15 +42,30 @@ pub(crate) async fn task_times(
         return Ok(Vec::new());
     }
     let w = f.clause(30)?;
+    let since = (chrono::Utc::now() - chrono::Duration::days(30)).format("%Y-%m-%d");
     let pairs = successes
         .iter()
         .map(|(k, s)| Ok(format!("({}, {})", lit(k)?, lit(s)?)))
         .collect::<Result<Vec<_>>>()?
         .join(", ");
+    let events = successes
+        .iter()
+        .map(|(_, s)| lit(s))
+        .collect::<Result<Vec<_>>>()?
+        .join(", ");
+    let src = source_from(map, "events");
+    // The events of a person within 30 minutes before one of their
+    // successes, read with their own columns, before the map resolves
+    // their feature.
+    let near = source_from(map, "near");
     let sql = format!(
         "WITH m AS (SELECT column1 AS feature, column2 AS success FROM (VALUES {pairs})), \
-         ev AS (SELECT distinct_id, timestamp, event, feature FROM {src} WHERE {w}), \
-         s AS (SELECT ev.distinct_id, ev.timestamp AS ts, m.feature FROM ev JOIN m ON ev.event = m.success), \
+         s0 AS (SELECT distinct_id, timestamp AS ts, event FROM {src} WHERE {w} AND event IN ({events})), \
+         s AS (SELECT s0.distinct_id, s0.ts, m.feature FROM s0 JOIN m ON s0.event = m.success), \
+         near AS (SELECT x.* FROM events x WHERE x.date >= '{since}' AND EXISTS \
+                  (SELECT 1 FROM s0 WHERE s0.distinct_id = x.distinct_id AND x.timestamp <= s0.ts \
+                   AND x.timestamp >= s0.ts - INTERVAL '30 minutes')), \
+         ev AS (SELECT distinct_id, timestamp, event, feature FROM {near} WHERE {w}), \
          e AS (SELECT ev.distinct_id, ev.timestamp AS ts, ev.feature FROM ev JOIN m ON ev.feature = m.feature \
                WHERE ev.event <> m.success), \
          t AS (SELECT s.feature, s.distinct_id, s.ts, \
