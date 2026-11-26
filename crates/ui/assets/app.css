@@ -697,4 +697,48 @@
   .shared-banner .pill { margin-left: auto; padding: 2px 10px; border-radius: var(--r-pill); font-size: 12px; font-weight: 500;
     color: var(--accent); background: color-mix(in oklab, var(--accent) var(--tint), transparent);
     border: 1px solid color-mix(in oklab, var(--accent) 30%, var(--line)); }
+
+/* Context bar (#542) */
+@layer components {
+  .context { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 22px; }
+  .context .chip { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; box-sizing: border-box; padding: 0 10px 0 12px;
+    border: 1px solid var(--line); border-radius: var(--r-pill); background: var(--surface); color: var(--ink);
+    font: inherit; font-size: 13px; font-weight: 450; text-decoration: none; cursor: pointer; box-shadow: var(--shadow); transition: none; }
+  .context .chip:hover { transform: none; border-color: color-mix(in oklab, var(--ink) 22%, var(--line)); }
+  .context .chip span { color: var(--muted); }
+  .context .chip .icon { width: 14px; height: 14px; color: var(--muted); }
+  .context .chip .chev { font-size: 10px; }
+  .context .chip:has(+ .pop:popover-open) { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 16%, transparent); }
+  .context .chip.is-off { box-shadow: none; background: transparent; border-style: dashed; color: var(--muted); }
+  .context .pop { width: min(340px, calc(100vw - 32px)); box-sizing: border-box; padding: 14px; border: 1px solid var(--line); border-radius: var(--r);
+    background: var(--surface); color: var(--ink); box-shadow: var(--shadow), 0 12px 32px -12px color-mix(in oklab, var(--ink) 30%, transparent); }
+  .context .pop form { display: flex; flex-direction: column; gap: 12px; margin: 0; }
+  .context .pop h3 { margin: 0; font-size: 12px; font-weight: 550; color: var(--muted); letter-spacing: 0; }
+  .context .pop p { margin: 0; }
+  .context .seg { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 4px; margin: 0; padding: 3px; border: 0;
+    border-radius: 10px; background: var(--line-2); }
+  .context .seg label { position: relative; display: grid; place-items: center; min-height: 32px; padding: 0 6px; border-radius: 8px;
+    font-size: 12.5px; color: var(--ink-2); cursor: pointer; text-align: center; }
+  .context .seg label:has(input:checked) { background: var(--surface); color: var(--ink); font-weight: 550; box-shadow: var(--shadow); }
+  .context .seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .context .seg input { position: absolute; opacity: 0; pointer-events: none; }
+  .context .range { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .context .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  .context .field input, .context .field select { min-height: 34px; box-sizing: border-box; width: 100%; border-radius: var(--r-s); background: var(--bg); font-size: 13px; }
+  .context .pop-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); }
+  .context .pop-foot button { padding: 6px 14px; font-size: 13px; background: var(--accent); color: var(--on-accent); }
+  .context .pop-foot button:hover { transform: none; }
+  /* Each chip anchors its own popover (ids: the CSP forbids style=). */
+  #ctx-period-btn { anchor-name: --ctx-period; }
+  #ctx-env-btn { anchor-name: --ctx-env; }
+  #ctx-role-btn { anchor-name: --ctx-role; }
+  #ctx-release-btn { anchor-name: --ctx-release; }
+  #ctx-period { position-anchor: --ctx-period; }
+  #ctx-env { position-anchor: --ctx-env; }
+  #ctx-role { position-anchor: --ctx-role; }
+  #ctx-release { position-anchor: --ctx-release; }
+  /* Without anchor positioning the popover keeps its centred top-layer place. */
+  @supports (position-area: block-end) {
+    .context .pop { inset: auto; margin: 8px 0 0; position-area: block-end span-inline-end; position-try-fallbacks: flip-inline; }
+  }
 }

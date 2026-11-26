@@ -99,8 +99,7 @@ pub fn board(
                 @if let Some(e) = &w.estimate { (crate::cost::cost_line(e)) }
             }
             (crate::cost::unavailable_note(&b.unavailable_days))
-            (window_picker(p.id, b, f))
-            (filter_bar(p.id, b, f, ""))
+            (context_bar(p.id, b, f, "", true))
             (insight_cards(p.id, b, plain))
             section.tiles aria-label="Key numbers" {
                 (tile_to(&detail_url(p.id, "/audience", f), "violet", "users", "Daily active users", &{
@@ -651,50 +650,6 @@ pub(crate) fn window_line(w: &openlens_engine::BoardWindow) -> Markup {
     }
 }
 
-/// The period picker (#513, D-060): since a release of the environment,
-/// or a date range, in a GET form so the URL can be shared. The other
-/// filters ride along as hidden fields.
-pub(crate) fn window_picker(project: &str, b: &Board, f: &Filters) -> Markup {
-    use openlens_engine::Window;
-    if shared() {
-        return html! {};
-    }
-    // The environment's releases (`releases.list`), or the board's latest
-    // ones when the window was not resolved (a board filtered on a release).
-    let releases: Vec<&str> = match b.window.as_ref().filter(|w| !w.releases.is_empty()) {
-        Some(w) => w.releases.iter().map(String::as_str).collect(),
-        None => b.releases.iter().map(|r| r.release.as_str()).collect(),
-    };
-    let (since, from, to) = match &f.window {
-        Window::Since { release } => (Some(release.as_str()), None, None),
-        Window::Range { from, to } => (None, Some(from.to_string()), Some(to.to_string())),
-        Window::Fixed | Window::Release => (None, None, None),
-    };
-    html! {
-        form.filters method="get" action={ "/p/" (project) } aria-label="Period" {
-            input type="hidden" name="env" value=(f.environment);
-            @if let Some(r) = &f.role { input type="hidden" name="role" value=(r); }
-            @if let Some(r) = &f.release { input type="hidden" name="release" value=(r); }
-            @if f.internal { input type="hidden" name="internal" value="1"; }
-            label { "Period "
-                select name="since" {
-                    option value="" selected[since.is_none()] { "Current release" }
-                    @for r in &releases {
-                        option value=(r) selected[since == Some(*r)] { "Since " (r) }
-                    }
-                }
-            }
-            // The browser shows a date field in its own locale; the hint
-            // gives the format the rest of the UI prints (#557).
-            label { "Or from " input type="date" name="from" value=[from] aria-describedby="period-date-format"; }
-            label { "To " input type="date" name="to" value=[to] aria-describedby="period-date-format"; }
-            span.muted.small #period-date-format { "Dates as YYYY-MM-DD" }
-            button type="submit" { "Show" }
-        }
-        p.muted.small { "Filled dates win over the release: clear them to pick one. A range covers at most 400 days, none before the 400 days kept; an empty end is today. It is compared with the same length just before." }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -744,40 +699,42 @@ mod tests {
             },
             ..Filters::default()
         };
-        let html = window_picker("p1", &b, &f).into_string();
+        let bar = context_bar("p1", &b, &f, "", true).into_string();
+        let html = crate::components::tests::pop_form(&bar, "Period");
         assert!(html.contains(r#"method="get""#), "{html}");
         assert!(html.contains(r#"name="from" value="2026-10-01""#), "{html}");
         assert!(html.contains(r#"name="to" value="2026-10-31""#), "{html}");
         assert!(html.contains(r#"name="role" value="admin""#), "{html}");
         assert!(
-            html.contains(r#"<option value="v1">Since v1</option>"#),
+            html.contains(r#"<input type="radio" name="since" value="v1">Since v1"#),
             "{html}"
         );
-        assert!(!html.contains("<script"), "no JavaScript");
+        assert!(!bar.contains("<script"), "no JavaScript");
         // Both date fields point at the format hint (#557), which exists.
         assert_eq!(
-            html.matches(r#"type="date""#).count(),
-            html.matches(r#"aria-describedby="period-date-format""#)
+            bar.matches(r#"type="date""#).count(),
+            bar.matches(r#"aria-describedby="period-date-format""#)
                 .count(),
-            "{html}"
+            "{bar}"
         );
         assert!(
             html.contains(r#"id="period-date-format">Dates as YYYY-MM-DD<"#),
             "{html}"
         );
-        // A past release is selected, and the dates are left empty.
+        // A past release is checked, and the dates are left empty.
         let f = Filters {
             window: openlens_engine::Window::Since {
                 release: "v1".into(),
             },
             ..Filters::default()
         };
-        let html = window_picker("p1", &b, &f).into_string();
-        assert!(html.contains(r#"<option value="v1" selected>"#), "{html}");
+        let bar = context_bar("p1", &b, &f, "", true).into_string();
+        let html = crate::components::tests::pop_form(&bar, "Period");
+        assert!(html.contains(r#"value="v1" checked"#), "{html}");
         assert!(!html.contains(r#"name="from" value"#), "{html}");
-        // The filter bar carries the window along.
-        let bar = filter_bar("p1", &b, &f, "").into_string();
-        assert!(bar.contains(r#"name="since" value="v1""#), "{bar}");
+        // The other chips carry the window along.
+        let env = crate::components::tests::pop_form(&bar, "Environment");
+        assert!(env.contains(r#"name="since" value="v1""#), "{env}");
     }
 
     #[test]
