@@ -128,6 +128,8 @@ jobs:
     name: publish ghcr.io/philippe-arnd/openlens (linux/amd64 + linux/arm64)
     needs: image
     runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
@@ -205,3 +207,42 @@ jobs:
         run: |
           gh issue create -R "$GITHUB_REPOSITORY" --title "Docker image broken on ${GITHUB_SHA::7}" \
             --body "Publishing the multi-platform image failed. Run: $RUN"
+
+  # SLSA Build level 3 provenance of the published image (#473): made by
+  # slsa-github-generator's reusable workflow, which runs isolated from this
+  # one (its own jobs, its own OIDC identity) and only receives the digest, so
+  # nothing in this workflow can forge it. It is pushed next to the image as a
+  # cosign attestation; check it with `slsa-verifier verify-image` (see
+  # docs/deploy/README.md#verify-what-you-run). The cosign signature and the
+  # GitHub attestation above stay: installs already check them.
+  provenance:
+    name: SLSA level 3 provenance of the image
+    needs: publish
+    permissions:
+      actions: read # the generator reads this run's workflow
+      id-token: write # keyless signing of the provenance
+      packages: write # pushes the provenance to ghcr.io
+    # Pinned by tag, not by commit, on purpose: the generator checks the ref
+    # it is called at against its own release tags (and slsa-verifier checks
+    # the builder's tag), so a commit SHA makes it fail. Renovate must leave
+    # this tag form alone.
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.1.0
+    with:
+      image: ghcr.io/philippe-arnd/openlens
+      digest: ${{ needs.publish.outputs.digest }}
+      registry-username: ${{ github.actor }}
+    secrets:
+      registry-password: ${{ secrets.GITHUB_TOKEN }}
+
+  provenance-failed:
+    name: report a failed image provenance
+    needs: provenance
+    if: failure() && needs.provenance.result == 'failure'
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue create -R "$GITHUB_REPOSITORY" --title "Image provenance (SLSA L3) failed on ${GITHUB_SHA::7}" \
+            --body "The image is published and signed, but its SLSA level 3 provenance was not made. Run: $RUN"

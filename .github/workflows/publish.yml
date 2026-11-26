@@ -122,6 +122,8 @@ jobs:
       attestations: write
     env:
       TAG: ${{ needs.prepare.outputs.tag }}
+    outputs:
+      subjects: ${{ steps.subjects.outputs.subjects }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -154,6 +156,10 @@ jobs:
           upload-release-assets: false
       - name: checksums
         run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - name: subjects of the SLSA level 3 provenance (every asset and SHA256SUMS, as sha256sum lines, base64)
+        id: subjects
+        working-directory: dist
+        run: echo "subjects=$({ cat SHA256SUMS; sha256sum SHA256SUMS; } | base64 -w0)" >> "$GITHUB_OUTPUT"
       - name: build provenance of every asset (#349; check with `gh attestation verify <file> -R Philippe-arnd/OpenLens`)
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
@@ -198,3 +204,45 @@ jobs:
             pre=""; [ "${{ needs.prepare.outputs.pre }}" = true ] && pre="--prerelease"
             gh release create "$TAG" dist/* --title "OpenLens $TAG" --notes-file notes.md --verify-tag $pre
           fi
+
+  # SLSA Build level 3 provenance of every asset (#473): made by
+  # slsa-github-generator's reusable workflow, isolated from this one (its own
+  # jobs and OIDC identity); it only receives the assets' hashes, so nothing
+  # in the build or in this workflow can forge it. One file for the whole
+  # release, `openlens-<tag>.intoto.jsonl`, checked with `slsa-verifier
+  # verify-artifact` (docs/deploy/README.md#verify-what-you-run). The GitHub
+  # attestation made in `assets` stays: openlens-update checks it.
+  provenance:
+    needs: [prepare, assets]
+    permissions:
+      actions: read # the generator reads this run's workflow
+      id-token: write # keyless signing of the provenance
+      contents: write # asked by the generator's upload job, which is off here (upload-assets: false)
+    # Pinned by tag, not by commit, on purpose: the generator checks the ref
+    # it is called at against its own release tags (and slsa-verifier checks
+    # the builder's tag), so a commit SHA makes it fail. Renovate must leave
+    # this tag form alone.
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: ${{ needs.assets.outputs.subjects }}
+      provenance-name: openlens-${{ needs.prepare.outputs.tag }}.intoto.jsonl
+      upload-assets: false
+
+  # Attached by us rather than by the generator, after the release exists,
+  # with --clobber: a re-published tag gets the provenance of its new assets.
+  provenance-upload:
+    needs: [prepare, release, provenance]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: ${{ needs.provenance.outputs.provenance-name }}
+          path: provenance
+      - env:
+          NAME: ${{ needs.provenance.outputs.provenance-name }}
+        run: gh release upload "$TAG" "provenance/$NAME" --clobber -R "$GITHUB_REPOSITORY"
