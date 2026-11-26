@@ -414,7 +414,11 @@ impl Command for List {
     type Input = ProjectInput;
     type Output = Evaluated;
 
-    async fn run<H: Host>(host: &H, caller: &Caller, input: ProjectInput) -> Result<Evaluated, Error> {
+    async fn run<H: Host>(
+        host: &H,
+        caller: &Caller,
+        input: ProjectInput,
+    ) -> Result<Evaluated, Error> {
         let p = project(host, &input.project).await?;
         let tz = caller.tz.clone().unwrap_or_else(|| p.timezone.clone());
         evaluate(host, &p, &tz).await
@@ -516,7 +520,11 @@ impl Command for SetObjective {
     type Input = SetObjectiveInput;
     type Output = Objective;
 
-    async fn run<H: Host>(host: &H, _: &Caller, input: SetObjectiveInput) -> Result<Objective, Error> {
+    async fn run<H: Host>(
+        host: &H,
+        _: &Caller,
+        input: SetObjectiveInput,
+    ) -> Result<Objective, Error> {
         let bad = |m: &str| Error::Invalid(m.to_owned());
         let p = project(host, &input.project).await?;
         let title: String = input.title.trim().chars().take(140).collect();
