@@ -341,6 +341,36 @@ pub(super) enum Command {
         /// Build output directory; every `*.map` file under it is uploaded.
         dir: PathBuf,
     },
+    /// Record a release from the deploy step, after the deploy: its
+    /// commit range (from `--from`, else the environment's previous
+    /// deployed commit, to `--commit`), its source maps with
+    /// `--sourcemaps`, and with `--wait` its verdict (polled for 30
+    /// minutes). The release shows on the Releases page like a succeeded
+    /// deploy.
+    Release {
+        /// Release name, the same the SDK sends.
+        name: String,
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+        /// The commit deployed (7 to 64 hex digits).
+        #[arg(long)]
+        commit: Option<String>,
+        /// The commit the range starts after.
+        #[arg(long)]
+        from: Option<String>,
+        /// Environment deployed to.
+        #[arg(long, default_value = "production")]
+        env: String,
+        /// Build output directory; every `*.map` file under it is
+        /// uploaded for this release.
+        #[arg(long)]
+        sourcemaps: Option<PathBuf>,
+        /// Wait for the release's verdict; exits non-zero when it is
+        /// regressed or does not come in time.
+        #[arg(long)]
+        wait: bool,
+    },
     /// Print the rule to add to the app's AGENTS.md / CLAUDE.md so its agents
     /// keep the feature map current.
     Rules,

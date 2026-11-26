@@ -210,6 +210,11 @@ impl Tools for OpenLensTools {
                 input_schema: json!({"type":"object","properties":proj}),
             },
             ToolSpec {
+                name: "record_release",
+                description: "Record a release from the deploy step, after the deploy: its name (the one the SDK sends), the commit deployed and the commit its range starts after (default: the environment's previous deployed commit). It shows in `releases` as a succeeded deploy. In CI prefer `openlens-cli release` or the openlens-release GitHub Action, which also upload the source maps.",
+                input_schema: json!({"type":"object","properties":with(json!({"release":{"type":"string"},"commit":{"type":"string","description":"7 to 64 hex digits"},"from":{"type":"string","description":"7 to 64 hex digits"},"environment":{"type":"string","default":"production"}})),"required":["release"]}),
+            },
+            ToolSpec {
                 name: "create_ticket",
                 description: "Turn a finding into a ticket for the app's backlog: kind insight (subject '<card kind>:<card subject>'), error (subject = the error group fingerprint), goal (subject = goal id) or map (subject '<finding kind>:<feature>'). Returns the prefilled Markdown (problem, evidence, hypothesis, success metric, acceptance criteria); with to='github', opens the GitHub issue, or updates the one already open for that finding. OpenLens then measures the metric 14 days after the release that ships it and comments on the issue.",
                 input_schema: json!({"type":"object","properties":with(json!({"kind":{"type":"string","enum":["insight","error","goal","map"]},"subject":{"type":"string"},"to":{"type":"string","enum":["markdown","github"]}})),"required":["kind","subject"]}),
@@ -473,6 +478,18 @@ impl Tools for OpenLensTools {
                 let (st, v) = c.call(
                     "POST",
                     &format!("/api/projects/{}/tickets", project(args)),
+                    Some(Body::Json(body)),
+                )?;
+                ok_or(st, v)
+            }
+            "record_release" => {
+                let mut body = args.clone();
+                if let Some(o) = body.as_object_mut() {
+                    o.remove("project");
+                }
+                let (st, v) = c.call(
+                    "POST",
+                    &format!("/api/projects/{}/releases", project(args)),
                     Some(Body::Json(body)),
                 )?;
                 ok_or(st, v)

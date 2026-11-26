@@ -21,6 +21,7 @@ const TOOL_OF: &[(&str, &str)] = &[
     ("tickets.draft", "create_ticket"),
     ("tickets.file", "create_ticket"),
     ("deploys.rotate_hook", "deploy_hook"),
+    ("releases.record", "record_release"),
 ];
 
 /// Commands with no MCP tool yet. Cut this list down by adding the tool.
