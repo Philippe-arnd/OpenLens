@@ -286,6 +286,11 @@ pub struct Report {
     /// checks and never change the verdict. Absent when none did.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dependencies: Vec<crate::dependencies::DependencyChange>,
+    /// The release's notes from the git host (#574, D-092): its merged
+    /// pull requests grouped, or why they are not there. Shown, never
+    /// judged. Filled by `releases.report`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes: Option<crate::release_git::ReleaseNotes>,
 }
 
 /// The board's *release regression* rule (#227), shared by the verdict:
@@ -515,6 +520,7 @@ pub fn compare(
         dependencies: previous
             .map(|p| crate::dependencies::shown(&c.dependencies, &p.dependencies))
             .unwrap_or_default(),
+        notes: None,
     }
 }
 

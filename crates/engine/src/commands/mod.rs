@@ -32,6 +32,7 @@ pub mod goto;
 pub mod in_flight;
 pub mod jobs;
 pub mod maintenance;
+pub mod release_notes;
 pub mod releases;
 pub mod routes;
 pub mod runtime;
@@ -107,6 +108,8 @@ pub const REGISTRY: &[Spec] = &[
     spec::<alerts::Test>(),
     spec::<releases::List>(),
     spec::<releases::ReleaseReport>(),
+    // A release's notes from the git host (#574).
+    spec::<release_notes::Notes>(),
     spec::<tickets::List>(),
     spec::<tickets::DraftTicket>(),
     spec::<tickets::File>(),

@@ -220,6 +220,7 @@ pub fn releases(
             @if let Some(d) = delivery {
                 (crate::delivery::delivery_card(d))
             }
+            (crate::release_notes::notes_card(&r.notes))
             (hook_card(p, r, hook))
         },
     )
@@ -268,6 +269,7 @@ mod tests {
             releases: vec![row, failed],
             deploys: Vec::new(),
             deploy_hook: None,
+            notes: Default::default(),
         };
         let hook = HookView {
             admin: true,
@@ -330,6 +332,7 @@ mod tests {
             releases: vec![new, old],
             deploys: Vec::new(),
             deploy_hook: None,
+            notes: Default::default(),
         };
         let hook = HookView {
             admin: false,

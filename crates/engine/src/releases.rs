@@ -135,6 +135,10 @@ pub struct Releases {
     pub deploys: Vec<DeployRow>,
     /// When the project's deploy hook URL was made, if it has one.
     pub deploy_hook: Option<String>,
+    /// Release notes from the git host (#574, D-092) of the newest
+    /// releases recorded with a commit range, or why there are none.
+    /// Filled by `releases.list`.
+    pub notes: crate::release_git::ListedNotes,
 }
 
 /// Users of one release on one day of one environment.
@@ -421,6 +425,7 @@ pub async fn releases(
         releases,
         deploys: rows,
         deploy_hook: None,
+        notes: crate::release_git::ListedNotes::default(),
     })
 }
 
