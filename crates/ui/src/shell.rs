@@ -1,7 +1,7 @@
 //! The shell (#540): the sidebar (brand, project switcher, Go to…, the
 //! nine sections, the user menu), the sticky top bar with the breadcrumb
-//! and a place for the page's context, the section tabs under it, and the
-//! signals line. No script: the user menu is a native `popover`, the
+//! and a place for the page's context, and the section tabs under it. No
+//! script: the user menu is a native `popover`, the
 //! sections have `accesskey` 1–9 (v2.1 order, #621).
 //!
 //! Moved out of `lib.rs` (the file-length check) when the shell changed.
@@ -306,51 +306,6 @@ fn project_mark(p: &ProjectInfo<'_>) -> Markup {
             img.picon src={ "/p/" (p.id) "/icon" } alt="" width="24" height="24";
         } @else {
             span.monogram aria-hidden="true" { (initial(p.name)) }
-        }
-    }
-}
-
-/// One pill of the signals line (#540): something that needs attention,
-/// with where to act on it.
-pub(crate) struct Signal {
-    /// `bad`, `warn` or `todo`.
-    pub(crate) tone: &'static str,
-    /// What it says.
-    pub(crate) text: String,
-    /// Steps done of the total: a small meter instead of the dot.
-    pub(crate) progress: Option<(usize, usize)>,
-    /// Where to act.
-    pub(crate) href: String,
-    /// The link's text.
-    pub(crate) link: &'static str,
-}
-
-/// Width of the signal meter, in SVG units.
-const METER: usize = 44;
-
-/// The signals line: the page's alerts and pending setup as compact pills
-/// in one status region. Nothing when there is nothing to say. A meter's
-/// width is an SVG attribute (the CSP forbids `style`).
-pub(crate) fn signals(items: &[Signal]) -> Markup {
-    if items.is_empty() {
-        return html! {};
-    }
-    html! {
-        div.signals role="status" {
-            @for s in items {
-                span class={ "signal " (s.tone) } {
-                    @if let Some((done, total)) = s.progress {
-                        svg.meter viewBox={ "0 0 " (METER) " 4" } width=(METER) height="4" aria-hidden="true" focusable="false" {
-                            rect.track width=(METER) height="4" rx="2" {}
-                            rect.done width=(METER * done.min(total) / total.max(1)) height="4" rx="2" {}
-                        }
-                    } @else {
-                        span.dot aria-hidden="true" {}
-                    }
-                    span { (s.text) }
-                    a href=(s.href) { (s.link) }
-                }
-            }
         }
     }
 }
@@ -773,41 +728,22 @@ mod tests {
     }
 
     #[test]
-    fn the_setup_meter_grows_with_the_steps_done() {
-        let width = |done: usize| {
-            let s = signals(&[Signal {
-                tone: "todo",
-                text: "Setup".into(),
-                progress: Some((done, 3)),
-                href: "/x".into(),
-                link: "Finish",
-            }])
-            .into_string();
-            let at = s.find("class=\"done\" width=\"").unwrap() + "class=\"done\" width=\"".len();
-            s[at..].split('"').next().unwrap().parse::<usize>().unwrap()
-        };
-        assert!(width(0) < width(1) && width(1) < width(3));
-        assert_eq!(width(9), width(3), "never wider than the track");
-        assert!(signals(&[]).into_string().is_empty());
-    }
-
-    #[test]
     fn pages_carry_no_inline_style_and_no_script() {
         let b = Board {
             total_events: 10,
-            app_down: Some("No traffic since 15:54".into()),
-            objectives_at_risk: vec!["Activation".into()],
+            alerts: Some(openlens_engine::commands::alerts::Status {
+                state: "down",
+                since: Some(1_700_000_000),
+                open: vec![("traffic".into(), 1_700_000_000, "No traffic".into())],
+                maintenance: Vec::new(),
+            }),
             setup: Some((1, 3)),
             ..Board::default()
         };
         let board = crate::board(&demo(), &b, &Filters::default(), "http://x", &[], None, &[])
             .into_string();
-        // The alerts and the setup are one status line of pills.
-        assert_eq!(
-            board.matches("class=\"signals\" role=\"status\"").count(),
-            1
-        );
-        assert_eq!(board.matches("class=\"signal ").count(), 3);
+        // The alerts and the setup are one status strip (#614).
+        assert_eq!(board.matches(r#"class="card now""#).count(), 1);
         assert!(board.contains("class=\"topbar\"") && board.contains("aria-label=\"Breadcrumb\""));
         let pages = [
             board,

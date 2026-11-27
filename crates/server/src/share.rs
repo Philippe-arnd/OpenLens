@@ -188,12 +188,19 @@ pub(crate) async fn view(
                     ..openlens_engine::Filters::default()
                 };
                 let map = crate::load_map(&state, &p.id).await;
-                let Ok(b) =
+                let Ok(mut b) =
                     crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v)))
                         .await
                 else {
                     return not_found();
                 };
+                // The status strip's App and Incidents cells (#614).
+                b.alerts = Some(openlens_engine::commands::alerts::status(
+                    &state.meta,
+                    &p.id,
+                ));
+                b.in_flight =
+                    openlens_engine::commands::in_flight::in_flight(&state.meta, &p.id, &b);
                 openlens_ui::render_shared(|| openlens_ui::board(&info, &b, &f, "", &[], None, &[]))
             };
             let h = markup.into_string();

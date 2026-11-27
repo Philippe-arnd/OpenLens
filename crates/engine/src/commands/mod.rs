@@ -29,6 +29,7 @@ pub mod explore;
 pub mod flags;
 pub mod goals;
 pub mod goto;
+pub mod in_flight;
 pub mod jobs;
 pub mod maintenance;
 pub mod releases;

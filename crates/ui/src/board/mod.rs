@@ -1,8 +1,9 @@
 //! The Focus board (#543: the v2 layout) and its sections.
 //!
-//! `focus`: what to focus on (the lead insight, the ranked list);
-//! `tiles`: the key numbers; `charts`: active users per day, the feature
-//! pulse, the retention line, who uses what and the release comparison;
+//! `now`: the status strip, "Production right now" (#614); `focus`: what
+//! to focus on (the lead insight, the ranked list); `tiles`: the key
+//! numbers; `charts`: active users per day, the feature pulse, the
+//! retention line, who uses what and the release comparison;
 //! `sections`: the other cards (Web Vitals, revenue, role gaps, funnels,
 //! flags, paths to value), closed disclosures after the release
 //! comparison (#588).
@@ -11,6 +12,9 @@ use crate::*;
 
 mod charts;
 mod focus;
+mod in_flight;
+mod lead;
+mod now;
 mod sections;
 mod tiles;
 
@@ -45,10 +49,10 @@ pub fn board_shell(p: &ProjectInfo<'_>, wait: Option<u64>) -> Markup {
     )
 }
 
-/// The Focus board (#543, #588): the signals, the page head, what to
-/// focus on, the key numbers, active users and the feature pulse side by
-/// side, the retention line (#619) and the release comparison (closed), then the
-/// other cards as closed disclosures. `plain`: optional plain-language `(title, next step)` per
+/// The Focus board (#543, #588): the page head, the status strip
+/// (#614), what to focus on, the key numbers, active users and the
+/// feature pulse side by side, the retention line (#619) and the release
+/// comparison (closed), then the other cards as closed disclosures. `plain`: optional plain-language `(title, next step)` per
 /// insight (same order), shown instead of the original, which stays as
 /// the tooltip.
 pub fn board(
@@ -75,7 +79,6 @@ pub fn board(
         context_bar(p.id, b, f, "", true),
         html! {
             div.board {
-                @if !shared() { (signals(&board_signals(p.id, b))) }
                 div.page-head {
                     div {
                         h1 { "Focus board" }
@@ -92,10 +95,12 @@ pub fn board(
                         }
                     }
                 }
+                (now::strip(p.id, f, b))
                 (focus::focus(p.id, f, b, plain))
                 (tiles::key_numbers(p.id, f, b))
                 div.split {
                     (charts::active_users(p.id, f, b, marks))
+                    (in_flight::in_flight(p.id, b))
                     (charts::feature_pulse(p.id, f, b))
                 }
                 (charts::retention_line(p.id, f, b))
@@ -114,40 +119,6 @@ pub fn board(
             }
         },
     )
-}
-
-/// What the board flags (#540): the app is down, objectives at risk, the
-/// setup left to do; one pill each on the signals line.
-fn board_signals(pid: &str, b: &Board) -> Vec<Signal> {
-    let mut out = Vec::new();
-    if let Some(d) = &b.app_down {
-        out.push(Signal {
-            tone: "bad",
-            text: d.clone(),
-            progress: None,
-            href: format!("/p/{pid}/uptime"),
-            link: "Uptime",
-        });
-    }
-    if !b.objectives_at_risk.is_empty() {
-        out.push(Signal {
-            tone: "warn",
-            text: format!("Objectives at risk: {}", b.objectives_at_risk.join(" · ")),
-            progress: None,
-            href: format!("/p/{pid}/goals"),
-            link: "Goals",
-        });
-    }
-    if let Some((done, total)) = b.setup {
-        out.push(Signal {
-            tone: "todo",
-            text: format!("Setup: {done} of {total} required steps done"),
-            progress: Some((done, total)),
-            href: format!("/p/{pid}/settings"),
-            link: "Finish in Settings",
-        });
-    }
-    out
 }
 
 /// What a period block covers, in a sentence: the release window's label

@@ -155,26 +155,18 @@ pub(crate) fn render_board(
         name: &p.name,
         key: &p.api_key,
     };
+    // The status strip (#614): the app's state and open incidents, and
+    // for admins the setup steps; read from the metadata, no query.
     if let Ok(b) = board.as_mut() {
-        b.objectives_at_risk = crate::goals::snapshot(state, &p.id).0;
+        // Stored rows only (goals, tickets, flags), no query (#617).
+        b.in_flight = openlens_engine::commands::in_flight::in_flight(&state.meta, &p.id, b);
         if admin {
-            b.setup = crate::settings::setup_left(state, &p.id);
+            b.setup = Some(crate::settings::setup_count(state, &p.id));
         }
-        let st = openlens_engine::commands::alerts::status(&state.meta, &p.id);
-        if st.state == "down" {
-            b.app_down = st.open.first().map(|(rule, since, _)| {
-                let when = chrono::DateTime::from_timestamp(*since, 0)
-                    .map_or_else(String::new, |t| t.format("%Y-%m-%d %H:%M UTC").to_string());
-                format!(
-                    "{} since {when}",
-                    if rule == "traffic" {
-                        "No traffic"
-                    } else {
-                        "The app is down"
-                    }
-                )
-            });
-        }
+        b.alerts = Some(openlens_engine::commands::alerts::status(
+            &state.meta,
+            &p.id,
+        ));
     }
     let releases: Vec<(String, String)> = board
         .as_ref()

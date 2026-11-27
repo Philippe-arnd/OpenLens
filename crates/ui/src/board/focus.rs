@@ -2,7 +2,9 @@
 //! tag, evidence, a before/after comparison when the board holds both
 //! values, the next step, one primary action), the others as a ranked
 //! list (rank, title, tag and evidence, links; #588: no next step there).
-//! On a share link, the actions that need a login are left out.
+//! A regressed latest release leads instead, as its verdict (#615, `lead`),
+//! and the list shows four rows, the rest behind "Show all". On a share
+//! link, the actions that need a login are left out.
 
 use crate::*;
 use openlens_engine::Insight;
@@ -30,7 +32,7 @@ fn tag(kind: &str) -> Markup {
 }
 
 /// Where an insight's ticket is drafted.
-fn ticket(pid: &str, c: &Insight) -> String {
+pub(super) fn ticket(pid: &str, c: &Insight) -> String {
     format!(
         "/p/{pid}/tickets/new?kind=insight&subject={}",
         url_enc(&format!("{}:{}", c.kind, c.subject))
@@ -185,8 +187,88 @@ pub(crate) fn compare(sides: &[Side; 2], worse: bool) -> Markup {
     }
 }
 
+/// The top insight as the lead card: rank, tag, evidence, a comparison
+/// when the board holds both values, the next step and its actions.
+fn insight_lead(
+    pid: &str,
+    f: &Filters,
+    b: &Board,
+    c: &Insight,
+    pl: Option<&(String, String)>,
+) -> Markup {
+    html! {
+        article.card.lead {
+            div.lead-top {
+                span.rank aria-hidden="true" { "01" }
+                (tag(c.kind))
+                @if !c.subject.is_empty() { span.muted.small.mono { (c.subject) } }
+            }
+            div.lead-text {
+                @if let Some((t, _)) = pl {
+                    h2 title={ "Original: " (c.title) } { span.sr-only { "Insight 1: " } (t) } // no_detail: the actions below
+                } @else {
+                    h2 { span.sr-only { "Insight 1: " } (c.title) } // no_detail: the actions below
+                }
+                p.evidence { (c.evidence) }
+            }
+            @if let Some((sides, worse)) = compared(b, c) { (compare(&sides, worse)) }
+            div.next {
+                (icon("idea"))
+                div {
+                    strong { "Next step" }
+                    p title=[pl.map(|_| format!("Original: {}", c.next_step))] { (pl.map_or(c.next_step.as_str(), |x| x.1.as_str())) }
+                }
+            }
+            @if !shared() {
+                div.actions {
+                    a.btn.primary href=(ticket(pid, c)) { "Create ticket" }
+                    @for (j, (href, label)) in links(pid, f, b, c).iter().enumerate() {
+                        a class=(if j == 0 { "btn" } else { "btn ghost" }) href=(href) { (label) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Rows the ranked list shows before "Show all" (#615).
+const RANKED_ROWS: usize = 4;
+
+/// One ranked row: its rank on the page, the insight and its plain
+/// wording when it has one.
+fn row(
+    pid: &str,
+    f: &Filters,
+    b: &Board,
+    rank: usize,
+    c: &Insight,
+    pl: Option<&(String, String)>,
+) -> Markup {
+    html! {
+        li.row {
+            span.rank aria-hidden="true" { (format!("{rank:02}")) }
+            div {
+                @if let Some((t, _)) = pl {
+                    h3 title={ "Original: " (c.title) } { span.sr-only { "Insight " (rank) ": " } (t) }
+                } @else {
+                    h3 { span.sr-only { "Insight " (rank) ": " } (c.title) }
+                }
+                div.meta { (tag(c.kind)) span { (c.evidence) } }
+                @if !shared() {
+                    div.links {
+                        @for (href, label) in links(pid, f, b, c) { a href=(href) { (label) } }
+                        a href=(ticket(pid, c)) { "Create ticket" }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// The section: an eyebrow with the count, the lead and the ranked list;
-/// an explained card while there is nothing to rank.
+/// an explained card while there is nothing to rank. A regressed latest
+/// release leads as its verdict (#615), and its regression card is then
+/// not repeated; otherwise the top insight leads.
 pub(super) fn focus(pid: &str, f: &Filters, b: &Board, plain: &[(String, String)]) -> Markup {
     // The plain wording when it differs from the original (which then
     // stays as the tooltip).
@@ -195,10 +277,20 @@ pub(super) fn focus(pid: &str, f: &Filters, b: &Board, plain: &[(String, String)
             .get(i)
             .filter(|x| x.0 != c.title || x.1 != c.next_step)
     };
+    let verdict = b.release_lead();
+    let ranked = b.ranked_insights();
+    let (lead, rest) = match (&verdict, ranked.split_first()) {
+        (Some(_), _) => (None, ranked.as_slice()),
+        (None, Some((first, rest))) => (Some(*first), rest),
+        (None, None) => (None, ranked.as_slice()),
+    };
+    let count = ranked.len() + usize::from(verdict.is_some());
+    // Ranks on the page: the lead is 01, the list follows.
+    let first_rank = 2;
     html! {
         section.focus aria-labelledby="focus-h" {
-            h2.eyebrow id="focus-h" { "What to focus on" @if !b.insights.is_empty() { " " span.count { (b.insights.len()) } } } // no_detail: the cards below carry their links
-            @if b.insights.is_empty() {
+            h2.eyebrow id="focus-h" { "What to focus on" @if count > 0 { " " span.count { (count) } } } // no_detail: the cards below carry their links
+            @if count == 0 {
                 div.card.pad.focus-empty {
                     @if b.readiness.judged_users < b.readiness.needed {
                         p { strong { "Insights need a little history." } " They compare users who stayed with users who left, so they wait until "
@@ -210,60 +302,24 @@ pub(super) fn focus(pid: &str, f: &Filters, b: &Board, plain: &[(String, String)
                 }
             } @else {
                 div.focus-grid {
-                    @if let Some(c) = b.insights.first() {
-                        @let pl = wording(0, c);
-                        article.card.lead {
-                            div.lead-top {
-                                span.rank aria-hidden="true" { "01" }
-                                (tag(c.kind))
-                                @if !c.subject.is_empty() { span.muted.small.mono { (c.subject) } }
-                            }
-                            div.lead-text {
-                                @if let Some((t, _)) = pl {
-                                    h2 title={ "Original: " (c.title) } { span.sr-only { "Insight 1: " } (t) } // no_detail: the actions below
-                                } @else {
-                                    h2 { span.sr-only { "Insight 1: " } (c.title) } // no_detail: the actions below
-                                }
-                                p.evidence { (c.evidence) }
-                            }
-                            @if let Some((sides, worse)) = compared(b, c) { (compare(&sides, worse)) }
-                            div.next {
-                                (icon("idea"))
-                                div {
-                                    strong { "Next step" }
-                                    p title=[pl.map(|_| format!("Original: {}", c.next_step))] { (pl.map_or(c.next_step.as_str(), |x| x.1.as_str())) }
-                                }
-                            }
-                            @if !shared() {
-                                div.actions {
-                                    a.btn.primary href=(ticket(pid, c)) { "Create ticket" }
-                                    @for (j, (href, label)) in links(pid, f, b, c).iter().enumerate() {
-                                        a class=(if j == 0 { "btn" } else { "btn ghost" }) href=(href) { (label) }
-                                    }
-                                }
-                            }
-                        }
+                    @if let Some(l) = &verdict {
+                        (super::lead::card(pid, f, l))
+                    } @else if let Some((i, c)) = lead {
+                        (insight_lead(pid, f, b, c, wording(i, c)))
                     }
-                    @if b.insights.len() > 1 {
+                    @if !rest.is_empty() {
                         div.card.ranked {
-                            ol start="2" {
-                                @for (i, c) in b.insights.iter().enumerate().skip(1) {
-                                    @let pl = wording(i, c);
-                                    li.row {
-                                        span.rank aria-hidden="true" { (format!("{:02}", i + 1)) }
-                                        div {
-                                            @if let Some((t, _)) = pl {
-                                                h3 title={ "Original: " (c.title) } { span.sr-only { "Insight " (i + 1) ": " } (t) }
-                                            } @else {
-                                                h3 { span.sr-only { "Insight " (i + 1) ": " } (c.title) }
-                                            }
-                                            div.meta { (tag(c.kind)) span { (c.evidence) } }
-                                            @if !shared() {
-                                                div.links {
-                                                    @for (href, label) in links(pid, f, b, c) { a href=(href) { (label) } }
-                                                    a href=(ticket(pid, c)) { "Create ticket" }
-                                                }
-                                            }
+                            ol start=(first_rank) {
+                                @for (n, (i, c)) in rest.iter().take(RANKED_ROWS).enumerate() {
+                                    (row(pid, f, b, first_rank + n, c, wording(*i, c)))
+                                }
+                            }
+                            @if rest.len() > RANKED_ROWS {
+                                details {
+                                    summary { "Show all " (count) }
+                                    ol start=(first_rank + RANKED_ROWS) {
+                                        @for (n, (i, c)) in rest.iter().enumerate().skip(RANKED_ROWS) {
+                                            (row(pid, f, b, first_rank + n, c, wording(*i, c)))
                                         }
                                     }
                                 }
