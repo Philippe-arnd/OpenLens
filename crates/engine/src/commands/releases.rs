@@ -6,6 +6,10 @@
 //! Each release of the environment judged also has its verdict (#522,
 //! D-067): `releases.list` carries it with its reasons, `releases.report`
 //! the whole comparison of one release ([`crate::verdict`]).
+//!
+//! Both carry the release notes the git host gave (#574, D-093):
+//! `releases.list` those of the newest releases recorded with a range,
+//! `releases.report` the release's own, or why they are not there.
 
 use serde::{Deserialize, Serialize};
 
@@ -103,6 +107,7 @@ impl Command for List {
 
     async fn run<H: Host>(host: &H, caller: &Caller, input: ListInput) -> Result<Releases, Error> {
         let (mut r, p) = list(host, caller, &input).await?;
+        r.notes = crate::release_git::listed(host, &p.id);
         // One environment is judged: the one asked for, or production.
         let judged = input
             .environment
@@ -183,10 +188,12 @@ impl Command for ReleaseReport {
             )));
         }
         let reports = judge(host, &p.id, &env, &r).await?;
-        reports
+        let mut report = reports
             .into_iter()
             .find(|x| x.release == release)
-            .ok_or_else(|| Error::Invalid(format!("No release {release} in {env}.")))
+            .ok_or_else(|| Error::Invalid(format!("No release {release} in {env}.")))?;
+        report.notes = Some(crate::release_git::notes(host, &p.id, &env, &release));
+        Ok(report)
     }
 }
 

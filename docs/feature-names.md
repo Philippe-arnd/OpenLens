@@ -18,6 +18,7 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Runtime health | In `runtime` and `release_report`: process restarts per day, memory (RSS) and event-loop delay per release, from the Node SDK |
 | Key action | A server route a feature of the map declares under `server:`; its regression is named in the verdict and its alert is urgent |
 | Deploy hook | The project's secret URL that platforms post their deploy notifications to |
+| Release notes | On the Releases page and in `release_report`: a release's merged pull requests, read from GitHub and grouped Added, Fixed, Changed |
 | Delivery | On the Releases page: deploy frequency, lead time, change failure rate and time to restore per environment |
 | Map drift | Routes new in the latest release that no feature of the map claims |
 | Counted with | On a feature's releases: the map version in force when the release came out |

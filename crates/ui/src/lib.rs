@@ -36,6 +36,7 @@ mod manage;
 mod people;
 mod profile;
 mod project_settings;
+mod release_notes;
 mod releases;
 mod routes_page;
 mod settings;

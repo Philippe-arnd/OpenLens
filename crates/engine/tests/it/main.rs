@@ -21,6 +21,7 @@ mod journeys;
 mod maintenance;
 mod map_lookups;
 mod map_shape;
+mod release_git;
 mod releases;
 mod server_errors;
 mod slo;

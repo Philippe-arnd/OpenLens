@@ -53,6 +53,9 @@ mod pages;
 mod people;
 pub mod reads;
 pub mod relations;
+/// The git host link, read side: commits, pull requests and notes per
+/// release (#574, D-093).
+pub mod release_git;
 pub mod releases;
 pub mod replay_rate;
 mod revenue;

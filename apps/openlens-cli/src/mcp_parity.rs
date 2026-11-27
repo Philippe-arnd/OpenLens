@@ -18,6 +18,8 @@ const TOOL_OF: &[(&str, &str)] = &[
     ("goals.set", "set_goal"),
     ("releases.list", "releases"),
     ("releases.report", "release_report"),
+    // `release_report` carries the release's notes (#574).
+    ("releases.notes", "release_report"),
     ("releases.delivery", "delivery"),
     ("routes.list", "routes"),
     ("dependencies.list", "routes"),

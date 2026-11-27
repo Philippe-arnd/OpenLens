@@ -175,6 +175,13 @@ pub(crate) async fn tick(state: &AppState, minute: u64) {
         if minute % 60 == 4 {
             Box::pin(openlens_engine::commands::tickets::hourly(state, &p)).await;
         }
+        // Release notes (#574, D-093): read a few recorded releases'
+        // commit ranges from GitHub; a failure is retried next hour.
+        if minute % 60 == 5 {
+            for e in Box::pin(openlens_engine::release_git::pass(state, &p.id)).await {
+                tracing::warn!(project = %p.id, "release notes not read: {e}");
+            }
+        }
         if s.cert
             && minute % 60 == 2
             && let Some(origin) = state.meta.project_setting(&p.id, "app_url").ok().flatten()
