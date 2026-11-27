@@ -81,7 +81,13 @@ mod tests {
     fn a_dependency_regression_is_shown_in_the_backend_group_and_never_regresses_the_release() {
         let prev = side("v1", host(0, 5));
         let same = compare("production", &side("v2", host(0, 5)), Some(&prev), 30, &[]);
-        let r = compare("production", &side("v2", host(400, 12)), Some(&prev), 30, &[]);
+        let r = compare(
+            "production",
+            &side("v2", host(400, 12)),
+            Some(&prev),
+            30,
+            &[],
+        );
         assert_ne!(r.verdict, Some(Verdict::Regressed), "{:?}", r.reasons);
         assert_eq!(r.verdict, same.verdict, "{:?}", r.reasons);
         assert!(crate::board_verdict::lead(&r).is_none());
@@ -93,8 +99,9 @@ mod tests {
             .collect();
         assert!(shown.len() >= 2, "fails more and got slower: {g:?}");
         assert!(
-            shown.iter().all(|x| x.outcome == Outcome::Info
-                && x.label.contains("usually not the release")),
+            shown
+                .iter()
+                .all(|x| x.outcome == Outcome::Info && x.label.contains("usually not the release")),
             "{g:?}"
         );
         assert!(g.rows.iter().all(|x| x.outcome != Outcome::Worse), "{g:?}");

@@ -276,7 +276,9 @@ fn wording(r: &Report, c: &Check) -> (String, String, Option<String>) {
                 "{since}, the server process keeps restarting: {:.1} restarts a day, {:.1} on {}",
                 c.current,
                 c.previous.unwrap_or(0.0),
-                r.previous_release.as_deref().unwrap_or("the release before")
+                r.previous_release
+                    .as_deref()
+                    .unwrap_or("the release before")
             ),
             format!(
                 "Read the server's logs on {rel} just before a restart: find what makes the process exit (an uncaught error, memory running out)."

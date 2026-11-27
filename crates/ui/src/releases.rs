@@ -458,7 +458,10 @@ mod tests {
         // With stats: the line, each number next to v1, no explanation.
         let html = page(Some(rt));
         let card = &html[html.find("ver-h").unwrap_or(0)..];
-        assert!(card.contains("Largest RSS") && card.contains("on v1"), "{card}");
+        assert!(
+            card.contains("Largest RSS") && card.contains("on v1"),
+            "{card}"
+        );
         assert!(!card.contains("captureRuntime"), "{card}");
         assert!(!html.contains("style=") && !html.contains("<script"));
     }

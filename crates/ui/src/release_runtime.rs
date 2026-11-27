@@ -101,4 +101,3 @@ pub(crate) fn compact_line(rt: Option<&RuntimeShown>) -> Markup {
         }
     }
 }
-
