@@ -71,6 +71,7 @@ pub(crate) fn required(method: &Method, path: &str) -> Scope {
         "/api/login-links",
         "/api/users",
         "/api/tokens",
+        "/api/capacity",
     ]
     .iter()
     .any(|p| path == *p || path.starts_with(&format!("{p}/")));

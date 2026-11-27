@@ -199,6 +199,34 @@ fn retention_drops_days_older_than_the_window_only() {
     );
 }
 
+/// The measured cost of events (#606, D-088): every day counts in the
+/// total, only closed days in the daily cost.
+#[test]
+fn the_daily_cost_of_events_counts_closed_days_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let now = Utc::now();
+    let put = |day: chrono::DateTime<Utc>, bytes: usize| {
+        let d = root.join(format!("events/project=p/date={}", day.format("%Y-%m-%d")));
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("x.parquet"), vec![0u8; bytes]).unwrap();
+    };
+    put(now - Duration::days(1), 7_000);
+    put(now - Duration::days(2), 5_000);
+    // Long ago: in the total, not in the cost.
+    put(now - Duration::days(60), 100);
+    // Today is not closed yet.
+    put(now, 50_000);
+    let u = openlens_storage::disk_use(root, "p", now).unwrap();
+    assert_eq!(u.total, 62_100);
+    assert_eq!(u.per_day(), 6_000);
+    assert!(openlens_storage::tree_bytes(root, 8) >= u.total);
+    assert_eq!(
+        openlens_storage::disk_use(root, "nobody", now).unwrap(),
+        openlens_storage::DiskUse::default()
+    );
+}
+
 /// The SDK resends a failed batch with the same uuids: it is stored once,
 /// also when the resend comes after a restart (compaction removes it).
 #[test]

@@ -189,6 +189,9 @@ pub struct Caches {
     /// When the server started or last forgot an OTLP series (Unix ns): a
     /// series first seen that started before may have been counted.
     pub(crate) otlp_forgot: std::sync::atomic::AtomicU64,
+    /// What the disk holds per project (#606, D-088), and when it was
+    /// measured: measured again at most hourly, by the maintenance pass.
+    pub(crate) capacity: Mutex<Option<(Instant, openlens_engine::capacity::Usage)>>,
 }
 
 impl Default for Caches {
@@ -223,6 +226,7 @@ impl Default for Caches {
             board_jobs: crate::board_jobs::BoardJobs::default(),
             otlp_series: Bounded::new(crate::otlp::SERIES_CAP, crate::otlp::SERIES_TTL),
             otlp_forgot: std::sync::atomic::AtomicU64::new(crate::otlp::now_ns()),
+            capacity: Mutex::default(),
         }
     }
 }

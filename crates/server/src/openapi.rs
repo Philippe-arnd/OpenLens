@@ -572,6 +572,12 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
     ),
     ("GET", "/api/users", "admin", "Dashboard users."),
     (
+        "GET",
+        "/api/capacity",
+        "admin",
+        "What the disk budget gives (D-088): recordings kept per project a day, with its floor (300), ceiling and reason; replay and event retention, fixed whatever the disk (D-015); the budget (80 % of the data volume minus other files, or `OPENLENS_DISK_BUDGET`), the volume, what OpenLens uses, and each project's bytes a day and share. `derived` is false when the floor applies because the volume or the disk could not be measured.",
+    ),
+    (
         "PATCH",
         "/api/users/{id}",
         "admin",

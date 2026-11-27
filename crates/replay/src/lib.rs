@@ -386,6 +386,82 @@ pub fn exists(root: &Path, project: &str, session: &str) -> bool {
     session_dir(root, project, session).is_ok_and(|d| d.join("info.json").is_file())
 }
 
+/// Days the measured cost of recordings is averaged over (#606, D-088).
+pub const COST_DAYS: i64 = 7;
+
+/// What a project's recordings take on disk (#606, D-088).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DiskUse {
+    /// Bytes of every recording.
+    pub total: u64,
+    /// Bytes of the recordings whose last chunk is in the last
+    /// [`COST_DAYS`].
+    pub recent: u64,
+    /// The days those recordings span (1 to [`COST_DAYS`]; 0 with none).
+    pub recent_days: u32,
+    /// How many recordings those are.
+    pub recent_count: u64,
+}
+
+impl DiskUse {
+    /// Bytes a day, from the recent recordings (0 with none).
+    #[must_use]
+    pub fn per_day(&self) -> u64 {
+        if self.recent_days == 0 {
+            0
+        } else {
+            self.recent / u64::from(self.recent_days)
+        }
+    }
+
+    /// Bytes of one recording, from the recent ones (0 with none).
+    #[must_use]
+    pub fn per_recording(&self) -> u64 {
+        self.recent.checked_div(self.recent_count).unwrap_or(0)
+    }
+}
+
+/// The bytes of a project's recordings: all of them, and those whose last
+/// chunk is in the last [`COST_DAYS`], with the days these span (a new
+/// project's two days count as two, not seven).
+pub fn disk_use(root: &Path, project: &str, now: DateTime<Utc>) -> Result<DiskUse> {
+    let dir = project_dir(root, project)?;
+    let mut out = DiskUse::default();
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Ok(out);
+    };
+    let since: std::time::SystemTime = (now - chrono::Duration::days(COST_DAYS)).into();
+    let mut oldest: Option<std::time::SystemTime> = None;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let valid = entry.file_name().to_str().is_some_and(valid_id);
+        if !valid || !path.is_dir() {
+            continue;
+        }
+        let Ok(chunks) = chunk_files(&path) else {
+            continue;
+        };
+        let info = fs::metadata(path.join("info.json")).map_or(0, |m| m.len());
+        let bytes = chunks.iter().fold(info, |n, c| n.saturating_add(c.2));
+        out.total = out.total.saturating_add(bytes);
+        let Some(last) = chunks.iter().map(|c| c.3).max() else {
+            continue;
+        };
+        if last >= since {
+            out.recent = out.recent.saturating_add(bytes);
+            out.recent_count += 1;
+            oldest = Some(oldest.map_or(last, |o| o.min(last)));
+        }
+    }
+    if let Some(o) = oldest {
+        let now: std::time::SystemTime = now.into();
+        let secs = now.duration_since(o).map_or(0, |d| d.as_secs());
+        let days = secs.div_ceil(86_400).clamp(1, COST_DAYS.unsigned_abs());
+        out.recent_days = u32::try_from(days).unwrap_or(1);
+    }
+    Ok(out)
+}
+
 /// One recording's owner and all its events in chunk order, as one JSON
 /// array, or `None` if it does not exist.
 pub fn load(root: &Path, project: &str, session: &str) -> Result<Option<(Info, String)>> {

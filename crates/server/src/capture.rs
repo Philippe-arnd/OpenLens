@@ -213,8 +213,9 @@ pub(crate) fn too_many() -> Response {
 }
 
 /// Writes stop below this share of free space on the data volume, so the
-/// WAL, compaction and backups still have room. Fixed (D-014).
-const MIN_FREE_SHARE: f64 = 0.05;
+/// WAL, compaction and backups still have room. Fixed (D-014); the disk
+/// budget never reaches into it (D-088).
+const MIN_FREE_SHARE: f64 = openlens_engine::capacity::MIN_FREE_SHARE;
 
 /// Whether `available` of `total` bytes is too little to accept writes.
 pub(crate) fn space_low(available: u64, total: u64) -> bool {

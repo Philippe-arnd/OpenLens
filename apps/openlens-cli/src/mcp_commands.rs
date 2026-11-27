@@ -115,6 +115,11 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
             input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"}}))}),
         },
         ToolSpec {
+            name: "capacity",
+            description: "What this OpenLens instance keeps, as its disk allows (D-088): recordings kept per project a day, with `value`, `floor` (300: never less), `ceiling` and a `reason`; replay retention (30 days) and event retention (400 days), fixed whatever the disk (D-015, `derived` false); the disk budget (80 % of the data volume minus other files, or `OPENLENS_DISK_BUDGET`) and where it comes from, the volume, free and used bytes, and each project's bytes a day and share of the budget. `derived` is false when the floor applies because the volume or the disk could not be measured; `reason` says why. Instance-wide: needs the admin token.",
+            input_schema: json!({"type":"object","properties":{}}),
+        },
+        ToolSpec {
             name: "delete_goal",
             description: "Remove a goal (its id from `goals`). Objectives that used it as a key result keep the others.",
             input_schema: json!({"type":"object","properties":with(json!({"goal":{"type":"string"}})),"required":["goal"]}),
@@ -399,6 +404,7 @@ pub(crate) fn call(c: &Client, name: &str, args: &Value) -> Option<Result<Value,
     Some(match name {
         "routes" => routes(c, args),
         "runtime" => get(c, &query(args, "/runtime", &["env"])),
+        "capacity" => get(c, "/api/capacity"),
         "delete_goal" => required(args, "goal").and_then(|g| {
             let path = at(args, &format!("/goals/{}", enc(&g)));
             send(c, "DELETE", &path, None)

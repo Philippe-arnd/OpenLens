@@ -153,7 +153,9 @@ pub(crate) async fn rate(state: &AppState, project: &str, tz: &str) -> openlens_
     if !count {
         return current;
     }
-    match openlens_engine::replay_rate(&state.query, project, tz).await {
+    // Recordings a day as the disk allows (#606, D-088).
+    let budget = crate::capacity::current(state).replays_per_day.value;
+    match openlens_engine::replay_rate(&state.query, project, tz, budget).await {
         Ok(r) => {
             state.caches.replay_rates.insert(
                 project.to_owned(),
