@@ -325,9 +325,12 @@ mod tests {
                 "card without a detail: {line}"
             );
         }
-        // The section heads of the other cards go through `head(…)`, which
-        // is `to(…)`.
-        assert!(include_str!("board/sections.rs").contains("h2 id=(id) { (to(href, title)) }"));
+        // The other cards are disclosures (#588) through `disclose(…)`,
+        // whose body ends with the link to their page.
+        let sections = include_str!("board/sections.rs");
+        assert!(
+            sections.contains(r#"@if !shared() { p.small { a href=(href) { (more) " →" } } }"#)
+        );
         let f = Filters {
             environment: "production".into(),
             role: Some("admin".into()),
