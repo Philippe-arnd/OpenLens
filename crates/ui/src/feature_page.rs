@@ -170,6 +170,17 @@ pub fn feature_page(v: &FeaturePage<'_>) -> Markup {
                     }
                 }
             } @else if v.tab == "releases" {
+                @if !v.ctx.touched_by.is_empty() {
+                    section.card.wide aria-labelledby="touched-by-h" {
+                        h2 #touched-by-h { "Changed by these releases" }
+                        ul {
+                            @for (release, files) in &v.ctx.touched_by {
+                                li { code { (release) } " " span.muted.small { (files) " changed file" @if *files != 1 { "s" } " in its code paths" } }
+                            }
+                        }
+                        p.muted.small { "From each release's changed files, read from GitHub, matched against the feature's code paths in the map version in force for that release." }
+                    }
+                }
                 section.card.wide {
                     h2.coral { (icon("release")) "Use per release" }
                     @if v.ctx.releases.is_empty() { p.muted { "Not used in the last 90 days." } }

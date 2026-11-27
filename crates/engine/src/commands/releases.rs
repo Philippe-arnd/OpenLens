@@ -9,7 +9,11 @@
 //!
 //! Both carry the release notes the git host gave (#574, D-093):
 //! `releases.list` those of the newest releases recorded with a range,
-//! `releases.report` the release's own, or why they are not there.
+//! `releases.report` the release's own, or why they are not there. The
+//! notes carry the features each release touched (#576), which the
+//! verdict judges and lists first.
+
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -82,11 +86,28 @@ async fn judge<H: Host>(
 ) -> Result<Vec<Report>, Error> {
     let map = host.feature_map(project).await;
     let goals = super::goals::load(host.meta(), project);
+    // Keys as the current map names them (a feature renamed since keeps
+    // its place).
+    let current_key = |k: String| match &map {
+        Some((m, _)) => m.current_key(&k).map_or_else(|| k.clone(), str::to_owned),
+        None => k,
+    };
+    let touched: HashMap<String, Vec<String>> =
+        crate::release_features::by_release(host.meta(), project, environment)
+            .into_iter()
+            .map(|(release, fs)| {
+                (
+                    release,
+                    fs.into_iter().map(|f| current_key(f.key)).collect(),
+                )
+            })
+            .collect();
     let scope = Scope {
         environment,
         tz: &r.timezone,
         map: map.as_ref().map(|(m, v)| (m, *v)),
         goals: &goals,
+        touched: &touched,
     };
     verdict_read::judge(
         host.query(),

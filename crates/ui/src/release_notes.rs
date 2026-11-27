@@ -1,13 +1,37 @@
 //! The release notes card of the Releases page (#574, D-093): for the
 //! newest releases recorded with a commit range, the merged pull requests
-//! the git host gave, grouped Added, Fixed, Changed, with "and K more";
-//! or why there are none. From `releases.list`'s notes.
+//! the git host gave, grouped Added, Fixed, Changed, with "and K more",
+//! and the features its changed files touched (#576); or why there are
+//! none. From `releases.list`'s notes.
 
 use super::*;
+use openlens_engine::release_features::{ReleaseTouched, TouchedState};
 use openlens_engine::release_git::{ListedNotes, NotesState, ReleaseNotes};
 
 fn more(n: i64, what: &str) -> Markup {
     html! { @if n > 0 { li.muted { "and " (n) " more " (what) } } }
+}
+
+/// The features a release touched (#576), or why they are not known.
+fn touched(t: &ReleaseTouched) -> Markup {
+    html! {
+        h3 { "Features touched" }
+        @if t.state == TouchedState::Ready {
+            @if t.features.is_empty() {
+                p.small { "No feature: none of its changed files is in a feature's code paths." }
+            } @else {
+                ul {
+                    @for f in &t.features {
+                        li { code { (f.key) } " " span.muted.small { (f.files) " file" @if f.files != 1 { "s" } } }
+                    }
+                    (more(t.features_more, "features"))
+                }
+            }
+            @if let Some(gap) = &t.note { p.muted.small { (gap) } }
+        } @else if let Some(r) = &t.reason {
+            p.muted.small { (r) }
+        }
+    }
 }
 
 fn one(n: &ReleaseNotes) -> Markup {
@@ -50,6 +74,7 @@ fn one(n: &ReleaseNotes) -> Markup {
                     }
                 }
             }
+            @if let Some(t) = &n.touched { (touched(t)) }
             @if n.prs_more > 0 || n.commits_more > 0 || n.files_more > 0 {
                 ul.small {
                     (more(n.prs_more, "pull requests"))
@@ -99,6 +124,7 @@ mod tests {
             files_more: 0,
             first_commit_at: None,
             fetched_at: None,
+            touched: None,
         }
     }
 
@@ -123,6 +149,33 @@ mod tests {
         .into_string();
         assert!(html.contains("https://github.com/o/r/pull/42"));
         assert!(html.contains("and 30 more pull requests"));
+    }
+
+    #[test]
+    fn the_features_touched_are_listed_with_the_files_in_no_feature() {
+        let mut n = notes(NotesState::Ready, None);
+        n.touched = Some(ReleaseTouched {
+            state: TouchedState::Ready,
+            reason: None,
+            map_version: Some(3),
+            features: vec![openlens_engine::release_features::TouchedFeature {
+                key: "export".into(),
+                files: 2,
+            }],
+            features_more: 0,
+            files: 5,
+            unmatched: 3,
+            skipped: 0,
+            note: Some("3 changed files match no feature.".into()),
+        });
+        let html = notes_card(&ListedNotes {
+            unavailable: None,
+            releases: vec![n],
+        })
+        .into_string();
+        assert!(html.contains("Features touched"));
+        assert!(html.contains("export"));
+        assert!(html.contains("3 changed files match no feature"));
     }
 
     #[test]

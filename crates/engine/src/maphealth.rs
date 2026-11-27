@@ -649,6 +649,10 @@ pub struct FeatureContext {
     /// Use per release, newest first (#411), last 90 days, each counted
     /// with the map version in force (#283).
     pub releases: Vec<FeatureRelease>,
+    /// The releases whose code change touched it (#576), newest first:
+    /// `(release, changed files matching its code paths)`. Empty when no
+    /// release was matched (no git host link, or no `paths` declared).
+    pub touched_by: Vec<(String, i64)>,
     /// Inferred relations it is part of (#283).
     pub relations: Vec<crate::relations::Relation>,
     /// Errors in the sessions that used it (#411), most users first, last 30 days.
@@ -696,6 +700,28 @@ pub struct FeatureFlag {
     pub users: i64,
     /// Of whom reached the success event.
     pub success_users: i64,
+}
+
+/// The releases that touched `key` (#576), under it or a former key.
+fn touched_by(
+    history: &crate::inforce::History,
+    key: &str,
+    def: Option<&openlens_featuremap::Feature>,
+) -> Vec<(String, i64)> {
+    let names: Vec<&str> = std::iter::once(key)
+        .chain(
+            def.into_iter()
+                .flat_map(|d| d.renamed_from.iter().map(String::as_str)),
+        )
+        .collect();
+    history
+        .touched
+        .iter()
+        .filter_map(|(release, fs)| {
+            let f = fs.iter().find(|f| names.contains(&f.key.as_str()))?;
+            Some((release.clone(), f.files))
+        })
+        .collect()
 }
 
 /// [`FeatureContext`] for `key` (its current key or a former one).
@@ -804,6 +830,7 @@ pub async fn feature_context(
             .map(|x| x.key.clone())
             .collect(),
         releases: rel?,
+        touched_by: touched_by(history, &key, def.as_ref()),
         relations: health
             .relations
             .iter()

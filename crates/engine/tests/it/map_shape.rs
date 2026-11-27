@@ -278,6 +278,7 @@ async fn each_release_keeps_the_map_version_it_shipped_with() {
         versions: versions[1..].to_vec(),
         recorded: rows,
         older: vec![(1, old.clone())],
+        touched: Vec::new(),
     };
     let kept = openlens_engine::feature_context(&q, "p", &new, &later, &Filters::default(), "cart")
         .await

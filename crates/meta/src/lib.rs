@@ -78,6 +78,8 @@ pub mod jobs;
 pub mod maintenance;
 /// Read-only connections next to the writer (#344).
 mod projects;
+/// The features each release touched, from its changed files (#576).
+pub mod release_features;
 /// The feature map version each release shipped with (#483).
 pub mod release_maps;
 /// What the git host said about each recorded release (#574, D-093).
@@ -641,6 +643,7 @@ impl Meta {
         conn.execute_batch(status_page::SCHEMA)?;
         conn.execute_batch(jobs::SCHEMA)?;
         conn.execute_batch(release_reads::SCHEMA)?;
+        conn.execute_batch(release_features::SCHEMA)?;
         let readers = (0..READERS)
             .map(|_| {
                 let r = Connection::open_with_flags(
@@ -682,6 +685,7 @@ impl Meta {
         conn.execute_batch(status_page::SCHEMA)?;
         conn.execute_batch(jobs::SCHEMA)?;
         conn.execute_batch(release_reads::SCHEMA)?;
+        conn.execute_batch(release_features::SCHEMA)?;
         Ok(Self {
             conn: Mutex::new(conn),
             readers: Vec::new(),

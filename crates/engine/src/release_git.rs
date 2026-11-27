@@ -138,6 +138,10 @@ pub struct ReleaseNotes {
     /// When it was read (RFC 3339, UTC).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fetched_at: Option<String>,
+    /// The features its changed files touched, or why they are not known
+    /// (#576, [`crate::release_features`]); once the notes are ready.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub touched: Option<crate::release_features::ReleaseTouched>,
 }
 
 impl ReleaseNotes {
@@ -159,6 +163,7 @@ impl ReleaseNotes {
             files_more: 0,
             first_commit_at: None,
             fetched_at: None,
+            touched: None,
         }
     }
 }
@@ -494,6 +499,8 @@ pub async fn pass<H: Host>(host: &H, project: &str) -> Vec<String> {
             }
         }
     }
+    // The features each read release touched (#576), matched once.
+    failures.extend(crate::release_features::attribute(host.meta(), project));
     failures
 }
 
@@ -586,6 +593,14 @@ pub fn notes<H: Host>(host: &H, project: &str, environment: &str, release: &str)
         files_more: (r.files_total - r.files.len() as i64).max(0),
         first_commit_at: r.first_commit_at.and_then(rfc3339),
         fetched_at: s.fetched_at.and_then(rfc3339),
+        touched: Some(crate::release_features::touched(
+            host.meta(),
+            project,
+            environment,
+            release,
+            (from.as_str(), to.as_str()),
+            (r.files_total - r.files.len() as i64).max(0),
+        )),
     }
 }
 
