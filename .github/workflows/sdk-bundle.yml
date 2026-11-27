@@ -1,0 +1,57 @@
+name: SDK bundle
+
+# The browser SDK bundle (sdk/js/dist) is committed: the server embeds it.
+# On a pull request from a branch of this repository that changes the SDK,
+# this rebuilds it and commits it to the branch when it differs, so no one
+# has to build it on their own machine. The CI job `sdk` still fails on a
+# stale bundle; the commit pushed here starts a new CI run when it is pushed
+# with RELEASE_TOKEN (pushes made with the workflow token start none).
+on:
+  pull_request:
+    paths:
+      - "sdk/js/src/**"
+      - "sdk/js/scripts/**"
+      - "sdk/js/package.json"
+      - "sdk/js/package-lock.json"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sdk-bundle-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  rebuild:
+    name: rebuild and commit the SDK bundle
+    # Never for forks: their code must not run with a write token.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+      - working-directory: sdk/js
+        run: |
+          npm ci
+          npm run build
+      - name: commit the bundle if it changed
+        env:
+          HAS_TOKEN: ${{ secrets.RELEASE_TOKEN != '' }}
+        run: |
+          if git diff --quiet -- sdk/js/dist; then
+            echo "The committed bundle is up to date."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add sdk/js/dist
+          git commit -m "chore(sdk): rebuild the browser SDK bundle"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+          if [ "$HAS_TOKEN" != "true" ]; then
+            echo "::warning::Bundle committed with the workflow token: no CI run starts for it. Add a RELEASE_TOKEN secret (contents: write), or push any commit to the branch to run CI."
+          fi
