@@ -11,8 +11,9 @@ export interface Options {
   fetch?: typeof fetch;
 }
 /** Request context the middleware puts on `req.openlens`. */
-export interface RequestContext { traceId?: string; sessionId?: string; distinctId?: string }
+export interface RequestContext { traceId?: string; sessionId?: string }
 export interface ExceptionContext extends RequestContext {
+  distinctId?: string;
   route?: string;
   method?: string;
   properties?: Record<string, unknown>;
@@ -20,7 +21,8 @@ export interface ExceptionContext extends RequestContext {
 export interface RequestRecord { method: string; route: string; status: number; ms: number }
 export declare const SERVER_ID: "$server";
 export declare const STATS_WINDOW_MS: number;
-export declare const BUCKETS_MS: number[];
+export declare const BOUNDS_S: number[];
+export declare const SESSION_HEADER: "x-openlens-session";
 export declare class OpenLens {
   constructor(opts: Options);
   capture(distinctId: string, event: string, properties?: Record<string, unknown>): void;
@@ -31,7 +33,7 @@ export declare class OpenLens {
   captureException(err: unknown, ctx?: ExceptionContext): void;
   /** Report uncaught exceptions and unhandled rejections (opt-in). */
   captureUncaught(): void;
-  /** Count one request in its route's 10-minute stats (any framework). */
+  /** Count one request in its route's 10-minute stats (any framework); `ms` in milliseconds. */
   recordRequest(r: RequestRecord): void;
   /** Express middleware: route stats and `req.openlens`. `user` reads the signed-in user's id. */
   express(opts?: { user?: (req: any) => string | undefined | null }): (req: any, res: any, next: (err?: unknown) => void) => void;

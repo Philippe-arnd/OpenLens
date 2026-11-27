@@ -786,7 +786,7 @@ function autocapture() {
       path = u.host === location.host ? u.pathname : u.host + u.pathname;
     } catch {
     }
-    track("$request_failed", { $method: method.toUpperCase(), $path: path.slice(0, 300), $status: status, $trace_id: trace });
+    track("$request_failed", { $method: method.toUpperCase(), $path: path.slice(0, 300), $status: status, trace_id: trace });
   };
   if (origFetch) {
     const f = origFetch;
@@ -798,7 +798,7 @@ function autocapture() {
       if (!own(url) && traced(url)) {
         try {
           const h = new Headers((_a = init2 == null ? void 0 : init2.headers) != null ? _a : input instanceof Request ? input.headers : void 0);
-          trace = traceHeaders((k) => h.get(k), (k, v) => h.set(k, v));
+          trace = linkHeaders((k) => h.get(k), (k, v) => h.set(k, v));
           init2 = { ...init2, headers: h };
         } catch {
         }
@@ -821,7 +821,7 @@ function autocapture() {
       let trace;
       if (traced(u)) {
         try {
-          trace = traceHeaders(() => null, (k, v) => this.setRequestHeader(k, v));
+          linkHeaders(() => null, (k, v) => this.setRequestHeader(k, v));
         } catch {
         }
       }
@@ -842,25 +842,12 @@ function traced(rawUrl) {
     return false;
   }
 }
-function hex(bytes2) {
-  const a = new Uint8Array(bytes2);
-  crypto.getRandomValues(a);
-  return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
-}
-function traceHeaders(get, set) {
-  var _a, _b;
-  const own = /^[0-9a-f]{2}-([0-9a-f]{32})-/.exec((_a = get("traceparent")) != null ? _a : "");
-  let trace = own == null ? void 0 : own[1];
-  if (!trace) {
-    trace = hex(16);
-    set("traceparent", `00-${trace}-${hex(8)}-01`);
-  }
-  if (!(cfg == null ? void 0 : cfg.cookieless)) {
-    const ids = `openlens-session=${encodeURIComponent(state.sid)},openlens-distinct=${encodeURIComponent((_b = state.uid) != null ? _b : state.anon)}`;
-    const prev = get("baggage");
-    set("baggage", prev ? `${prev},${ids}` : ids);
-  }
-  return trace;
+function linkHeaders(get, set) {
+  var _a;
+  if (!(cfg == null ? void 0 : cfg.cookieless) && !get("x-openlens-session")) set("x-openlens-session", state.sid);
+  const m = /^[0-9a-f]{2}-([0-9a-f]{32})-[0-9a-f]{16}-[0-9a-f]{2}$/.exec(((_a = get("traceparent")) != null ? _a : "").trim());
+  const id = m == null ? void 0 : m[1];
+  return id && !/^0+$/.test(id) ? id : void 0;
 }
 function init(config) {
   var _a, _b, _c;

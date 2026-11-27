@@ -7,11 +7,15 @@
 /** Distinct id of server events tied to no user: left out of user counts (#593). */
 export const SERVER_ID = "$server";
 /** Length of one request-stats window (#593, decision 1): one event per
- * (method, route, status class) per window, never one per request. */
+ * (method, route, status code) per window, never one per request. */
 export const STATS_WINDOW_MS = 10 * 60 * 1000;
-/** Upper bounds (ms) of the request duration histogram; one more bucket holds the rest. */
-export const BUCKETS_MS = [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000];
-/** Distinct (method, route, status class) keys kept per window: a bound on memory. */
+/** Explicit bounds (seconds) of the `http.server.request.duration` histogram:
+ * OpenTelemetry's defaults for it (#601). One more bucket holds the rest. */
+export const BOUNDS_S = [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10];
+/** The header that carries the OpenLens session id: ours, so no tracing
+ * instrumentation forwards it to other services (#601). */
+export const SESSION_HEADER = "x-openlens-session";
+/** Distinct (method, route, status code) keys kept per window: a bound on memory. */
 const MAX_STATS_KEYS = 500;
 /** Same error message sent at most this many times per minute. */
 const MAX_SAME_ERROR = 5;
@@ -131,9 +135,11 @@ export class OpenLens {
       if (stack) props.$stack = stack;
       const source = appFrame(stack);
       if (source) props.$source = source;
-      if (ctx.route) props.$route = String(ctx.route).slice(0, 300);
-      if (ctx.method) props.$method = String(ctx.method).toUpperCase().slice(0, 10);
-      if (ctx.traceId) props.$trace_id = ctx.traceId;
+      // OpenTelemetry semantic-convention names next to OpenLens's own (#601).
+      props["exception.type"] = (e.name || "Error").slice(0, 200);
+      if (ctx.route) props["http.route"] = String(ctx.route).slice(0, 300);
+      if (ctx.method) props["http.request.method"] = String(ctx.method).toUpperCase().slice(0, 10);
+      if (ctx.traceId) props.trace_id = ctx.traceId;
       this.push("$error", ctx.distinctId || SERVER_ID, props, ctx.sessionId);
     } catch (e) {
       this.onError(e);
@@ -174,22 +180,22 @@ export class OpenLens {
       const start = now - (now % STATS_WINDOW_MS);
       const method = String(r.method || "GET").toUpperCase().slice(0, 10);
       const route = String(r.route).slice(0, 300);
-      const status = Number(r.status) || 0;
-      const cls = status >= 100 && status < 600 ? `${Math.floor(status / 100)}xx` : "0xx";
-      const key = `${start} ${method} ${route} ${cls}`;
+      const raw = Math.trunc(Number(r.status) || 0);
+      const status = raw >= 100 && raw < 600 ? raw : 0;
+      const key = `${start} ${method} ${route} ${status}`;
       let s = this.stats.get(key);
+      const secs = Math.max(0, Number(r.ms) || 0) / 1000;
       if (!s) {
         if (this.stats.size >= MAX_STATS_KEYS) return;
-        s = { start, method, route, cls, count: 0, errors: 0, sum: 0, max: 0, buckets: new Array(BUCKETS_MS.length + 1).fill(0) };
+        s = { start, method, route, status, count: 0, sum: 0, min: secs, max: 0, buckets: new Array(BOUNDS_S.length + 1).fill(0) };
         this.stats.set(key, s);
       }
-      const ms = Math.max(0, Number(r.ms) || 0);
       s.count += 1;
-      if (status >= 500) s.errors += 1;
-      s.sum += ms;
-      if (ms > s.max) s.max = ms;
-      let i = BUCKETS_MS.findIndex((b) => ms <= b);
-      if (i < 0) i = BUCKETS_MS.length;
+      s.sum += secs;
+      if (secs < s.min) s.min = secs;
+      if (secs > s.max) s.max = secs;
+      let i = BOUNDS_S.findIndex((b) => secs <= b);
+      if (i < 0) i = BOUNDS_S.length;
       s.buckets[i] += 1;
     } catch (e) {
       this.onError(e);
@@ -198,9 +204,10 @@ export class OpenLens {
 
   /**
    * Express (4 and 5) middleware: route stats for every request, and
-   * `req.openlens` = { traceId, sessionId, distinctId } read from the
-   * `traceparent` and `baggage` headers the browser SDK adds. Mount it
-   * first; mount `expressErrors()` last.
+   * `req.openlens` = { traceId, sessionId }: the trace id of the incoming
+   * W3C `traceparent` (read, never written) and the session the browser
+   * SDK sends in `x-openlens-session`. Mount it first; mount
+   * `expressErrors()` last.
    */
   express(opts = {}) {
     return (req, res, next) => {
@@ -210,8 +217,8 @@ export class OpenLens {
       } catch {
         req.openlens = {};
       }
-      // The signed-in user, when the app says how to read it, wins over
-      // the id the browser sent (read when the error happens: auth runs later).
+      // The signed-in user, when the app says how to read it (read when
+      // the error happens: auth runs later). No user id travels in a header.
       if (typeof opts.user === "function") req.openlens.user = () => safeCall(opts.user, req);
       res.on("finish", () => {
         const ms = Number(process.hrtime.bigint() - t0) / 1e6;
@@ -227,7 +234,7 @@ export class OpenLens {
     return (err, req, _res, next) => {
       const ctx = req.openlens || {};
       const user = ctx.user ? ctx.user() : undefined;
-      this.captureException(err, { ...ctx, distinctId: user || ctx.distinctId, route: routeOf(req), method: req.method });
+      this.captureException(err, { ...ctx, distinctId: user, route: routeOf(req), method: req.method });
       next(err);
     };
   }
@@ -267,18 +274,22 @@ export class OpenLens {
     for (const [key, s] of this.stats) {
       if (!all && s.start >= open) continue;
       this.stats.delete(key);
+      // One data point of OpenTelemetry's `http.server.request.duration`
+      // histogram, with its semantic-convention attributes (#601).
       this.push(
         "$request_stats",
         SERVER_ID,
         {
-          $method: s.method,
-          $route: s.route,
-          $status_class: s.cls,
-          $count: s.count,
-          $errors: s.errors,
-          $sum_ms: Math.round(s.sum),
-          $max_ms: Math.round(s.max),
-          $buckets: s.buckets,
+          $metric: "http.server.request.duration",
+          $unit: "s",
+          "http.request.method": s.method,
+          "http.route": s.route,
+          "http.response.status_code": s.status,
+          count: s.count,
+          sum: round6(s.sum),
+          min: round6(s.min),
+          max: round6(s.max),
+          bucket_counts: s.buckets,
           $window_s: STATS_WINDOW_MS / 1000,
         },
         undefined,
@@ -319,30 +330,20 @@ function routeOf(req) {
   return `${req.baseUrl || ""}${p}` || "/";
 }
 
-/** W3C trace context (`traceparent`) and the OpenLens baggage entries. */
+/** The trace id of a W3C `traceparent` (version 00 layout; `ff` and
+ * all-zero ids are invalid) and the OpenLens session header. */
 export function requestContext(headers) {
   const ctx = {};
-  const tp = String(headers.traceparent || "");
-  const m = /^[0-9a-f]{2}-([0-9a-f]{32})-[0-9a-f]{16}-[0-9a-f]{2}$/.exec(tp.trim());
-  if (m && !/^0+$/.test(m[1])) ctx.traceId = m[1];
-  for (const part of String(headers.baggage || "").slice(0, 8192).split(",")) {
-    const i = part.indexOf("=");
-    if (i < 0) continue;
-    const k = part.slice(0, i).trim();
-    const v = decodeSafe(part.slice(i + 1).split(";")[0].trim()).slice(0, 200);
-    if (!v) continue;
-    if (k === "openlens-session") ctx.sessionId = v;
-    else if (k === "openlens-distinct") ctx.distinctId = v;
-  }
+  const tp = String(headers.traceparent || "").trim();
+  const m = /^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$/.exec(tp);
+  if (m && m[1] !== "ff" && !/^0+$/.test(m[2]) && !/^0+$/.test(m[3])) ctx.traceId = m[2];
+  const sid = String(headers[SESSION_HEADER] || "").trim();
+  if (/^[A-Za-z0-9_-]{1,100}$/.test(sid)) ctx.sessionId = sid;
   return ctx;
 }
 
-function decodeSafe(v) {
-  try {
-    return decodeURIComponent(v);
-  } catch {
-    return "";
-  }
+function round6(v) {
+  return Math.round(v * 1e6) / 1e6;
 }
 
 function safeCall(fn, req) {

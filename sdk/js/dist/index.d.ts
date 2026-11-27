@@ -33,9 +33,9 @@ export interface Config {
     /** Record sessions for replay, inputs masked (default true). Loads `/r.js` lazily. */
     replay?: boolean;
     /** Other origins (`https://api.example.com`) whose requests carry the
-     * trace headers that tie a server error to this session (#593, D-082).
-     * The page's own origin always does; another origin must allow the
-     * `traceparent` and `baggage` headers in its CORS answer. */
+     * `x-openlens-session` header that ties a server error to this session
+     * (#593, #601). The page's own origin always does; another origin must
+     * allow that header in its CORS answer. */
     traceOrigins?: string[];
 }
 export interface Dimensions {

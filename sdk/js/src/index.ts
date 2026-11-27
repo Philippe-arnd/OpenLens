@@ -41,9 +41,9 @@ export interface Config {
   /** Record sessions for replay, inputs masked (default true). Loads `/r.js` lazily. */
   replay?: boolean;
   /** Other origins (`https://api.example.com`) whose requests carry the
-   * trace headers that tie a server error to this session (#593, D-082).
-   * The page's own origin always does; another origin must allow the
-   * `traceparent` and `baggage` headers in its CORS answer. */
+   * `x-openlens-session` header that ties a server error to this session
+   * (#593, #601). The page's own origin always does; another origin must
+   * allow that header in its CORS answer. */
   traceOrigins?: string[];
 }
 
@@ -651,7 +651,7 @@ function autocapture(): void {
     } catch {
       // keep the raw value
     }
-    track("$request_failed", { $method: method.toUpperCase(), $path: path.slice(0, 300), $status: status, $trace_id: trace });
+    track("$request_failed", { $method: method.toUpperCase(), $path: path.slice(0, 300), $status: status, trace_id: trace });
   };
   if (origFetch) {
     const f = origFetch;
@@ -662,7 +662,7 @@ function autocapture(): void {
       if (!own(url) && traced(url)) {
         try {
           const h = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
-          trace = traceHeaders((k) => h.get(k), (k, v) => h.set(k, v));
+          trace = linkHeaders((k) => h.get(k), (k, v) => h.set(k, v));
           init = { ...init, headers: h };
         } catch {
           // leave the request as the app wrote it
@@ -686,8 +686,8 @@ function autocapture(): void {
       let trace: string | undefined;
       if (traced(u)) {
         try {
-          // The app cannot read back what it set, so ours never overrides it.
-          trace = traceHeaders(() => null, (k, v) => this.setRequestHeader(k, v));
+          // XHR headers cannot be read back: only the session header is added.
+          linkHeaders(() => null, (k, v) => this.setRequestHeader(k, v));
         } catch {
           // not opened, or a header the browser refuses
         }
@@ -700,7 +700,7 @@ function autocapture(): void {
   } as typeof XMLHttpRequest.prototype.open;
 }
 
-/** Should this request carry the trace headers? Same origin, or one the
+/** Should this request carry the session header? Same origin, or one the
  * app listed in `traceOrigins`, and only with consent (#593). */
 function traced(rawUrl: string): boolean {
   if (!cfg || consent !== "granted") return false;
@@ -712,28 +712,16 @@ function traced(rawUrl: string): boolean {
   }
 }
 
-function hex(bytes: number): string {
-  const a = new Uint8Array(bytes);
-  crypto.getRandomValues(a);
-  return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-/** Add W3C `traceparent` (unless the app already set one, whose trace id
- * is kept) and `baggage` with the session and user ids. Returns the trace id. */
-function traceHeaders(get: (k: string) => string | null, set: (k: string, v: string) => void): string | undefined {
-  const own = /^[0-9a-f]{2}-([0-9a-f]{32})-/.exec(get("traceparent") ?? "");
-  let trace = own?.[1];
-  if (!trace) {
-    trace = hex(16);
-    set("traceparent", `00-${trace}-${hex(8)}-01`);
-  }
-  // Cookieless mode has no ids of its own to send (the server derives them).
-  if (!cfg?.cookieless) {
-    const ids = `openlens-session=${encodeURIComponent(state.sid)},openlens-distinct=${encodeURIComponent(state.uid ?? state.anon)}`;
-    const prev = get("baggage");
-    set("baggage", prev ? `${prev},${ids}` : ids);
-  }
-  return trace;
+/** Add the `x-openlens-session` header (none in cookieless mode, which
+ * has no session id of its own) and return the trace id of the app's own
+ * W3C `traceparent`, if it set one. OpenLens reads trace context and never
+ * writes it: a `traceparent` of ours would decide the sampling of the
+ * app's OpenTelemetry, and `baggage` is forwarded to other services (#601). */
+function linkHeaders(get: (k: string) => string | null, set: (k: string, v: string) => void): string | undefined {
+  if (!cfg?.cookieless && !get("x-openlens-session")) set("x-openlens-session", state.sid);
+  const m = /^[0-9a-f]{2}-([0-9a-f]{32})-[0-9a-f]{16}-[0-9a-f]{2}$/.exec((get("traceparent") ?? "").trim());
+  const id = m?.[1];
+  return id && !/^0+$/.test(id) ? id : undefined;
 }
 
 /** Start OpenLens. Safe to call once; later calls are ignored. */
