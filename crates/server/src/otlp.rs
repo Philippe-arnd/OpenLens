@@ -742,21 +742,21 @@ pub(crate) async fn ingest(
 
     // Up to 8 MB to gunzip and decode: off the async threads.
     let (h, pid) = (headers.clone(), project.id.clone());
-    let parsed = tokio::task::spawn_blocking(move || -> Result<Parsed, Response> {
-        let raw = capture::inflate(&h, &body).map_err(|r| rewrap(enc, &r))?;
+    let parsed = tokio::task::spawn_blocking(move || -> Result<Parsed, Box<Response>> {
+        let raw = capture::inflate(&h, &body).map_err(|r| Box::new(rewrap(enc, &r)))?;
         if raw.len() > MAX_BODY {
-            return Err(fail(
+            return Err(Box::new(fail(
                 enc,
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "body too large once decompressed",
-            ));
+            )));
         }
-        read(enc, &raw, &pid).map_err(|Bad(msg)| fail(enc, StatusCode::BAD_REQUEST, msg))
+        read(enc, &raw, &pid).map_err(|Bad(msg)| Box::new(fail(enc, StatusCode::BAD_REQUEST, msg)))
     })
     .await;
     let parsed = match parsed {
         Ok(Ok(p)) => p,
-        Ok(Err(r)) => return r,
+        Ok(Err(r)) => return *r,
         Err(_) => return fail(enc, StatusCode::INTERNAL_SERVER_ERROR, "decode task failed"),
     };
     // A data point costs one event of the key's budget; direct local
