@@ -555,6 +555,44 @@ fn a_recorded_release_starts_its_range_after_the_previous_one() {
         m.first_commits("default", 0).unwrap(),
         vec![("v3".to_owned(), 25)]
     );
+    // The GitHub read of a range (#574) gives the first commit of a
+    // release recorded without it; the deploy step's own time still wins.
+    use openlens_meta::release_reads::{GitRead, ReleaseRange};
+    let range = |release: &str, from: &str, to: &str| ReleaseRange {
+        environment: "production".into(),
+        release: release.into(),
+        from: from.into(),
+        to: to.into(),
+    };
+    m.record_release(
+        "default",
+        &d("v4", "ddddddd", "succeeded", 40),
+        &Range {
+            from: Some("ccccccc"),
+            first_commit_at: None,
+        },
+        40,
+    )
+    .unwrap();
+    for (release, from, to, at) in [
+        ("v4", "ccccccc", "ddddddd", 35),
+        ("v3", "aaaaaaa", "ccccccc", 5),
+    ] {
+        let read = GitRead {
+            first_commit_at: Some(at),
+            ..GitRead::default()
+        };
+        m.store_release_read("default", &range(release, from, to), &read, 50)
+            .unwrap();
+    }
+    let kept: std::collections::HashMap<String, i64> =
+        m.first_commits("default", 0).unwrap().into_iter().collect();
+    assert_eq!(kept.get("v4"), Some(&35), "{kept:?}");
+    assert_eq!(
+        kept.get("v3"),
+        Some(&25),
+        "the deploy step's time wins: {kept:?}"
+    );
 }
 
 /// #510: a write transaction that meets the write lock held waits for it

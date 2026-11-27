@@ -191,18 +191,28 @@ impl Meta {
         })
     }
 
-    /// When the first commit of each release recorded at or after `since`
-    /// (Unix seconds) was made, for the releases whose deploy step said
-    /// it: `(release, first commit time)`, the latest record of each
-    /// release in any environment (#633).
+    /// When the first commit of each release deployed at or after `since`
+    /// (Unix seconds) was made: `(release, first commit time)`, oldest
+    /// first, so that the last pair of a release is the one to keep. The
+    /// time the deploy step recorded (#633) wins over the one the git
+    /// host read gave (#574), for releases recorded without the CLI's
+    /// time; within each, the latest record wins.
     pub fn first_commits(&self, project: &str, since: i64) -> Result<Vec<(String, i64)>> {
         self.read(|c| {
             let mut st = c.prepare(
-                "SELECT release, first_commit_at FROM deploys \
-                 WHERE project = ?1 AND at >= ?2 AND release IS NOT NULL \
-                 AND first_commit_at IS NOT NULL ORDER BY at, rowid LIMIT ?3",
+                "SELECT release, t FROM ( \
+                   SELECT g.release AS release, g.first_commit_at AS t, 0 AS rank, \
+                          coalesce(g.fetched_at, 0) AS at, g.rowid AS rid \
+                   FROM release_reads g WHERE g.project = ?1 AND g.first_commit_at IS NOT NULL \
+                   AND EXISTS (SELECT 1 FROM deploys d WHERE d.project = ?1 \
+                               AND d.release = g.release AND d.at >= ?2) \
+                   UNION ALL \
+                   SELECT release, first_commit_at, 1, at, rowid FROM deploys \
+                   WHERE project = ?1 AND at >= ?2 AND release IS NOT NULL \
+                   AND first_commit_at IS NOT NULL \
+                 ) ORDER BY rank, at, rid LIMIT ?3",
             )?;
-            let rows = st.query_map(params![project, since, MAX_DEPLOYS], |r| {
+            let rows = st.query_map(params![project, since, 2 * MAX_DEPLOYS], |r| {
                 Ok((r.get(0)?, r.get(1)?))
             })?;
             Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)

@@ -34,7 +34,7 @@ pub const DEFAULT_DAYS: i64 = WINDOW_DAYS;
 /// (environment, release, day) rows read at most (latest days first).
 const MAX_DAILY: usize = 20_000;
 /// Why lead time is unknown when no commit range was recorded.
-pub const NO_COMMITS: &str = "unknown: no release recorded when its first commit was made (`openlens-cli release --commit` reads it from the git history)";
+pub const NO_COMMITS: &str = "unknown: no release recorded when its first commit was made (`openlens-cli release --commit` reads it from the git history; with a GitHub link, the hourly read of each recorded range finds it too)";
 
 /// Where an environment's changes come from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
