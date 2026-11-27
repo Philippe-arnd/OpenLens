@@ -241,7 +241,8 @@ pub(crate) async fn rotate_api(
 }
 
 /// `POST /api/projects/{id}/releases` (bearer, write): record a release
-/// named by the deploy step, `{release, commit?, from?, environment?}`,
+/// named by the deploy step, `{release, commit?, from?, environment?,
+/// first_commit_at?, dry_run?}`,
 /// as a succeeded deploy with its commit range (`releases.record`).
 pub(crate) async fn record_api(
     State(state): State<AppState>,
@@ -255,7 +256,7 @@ pub(crate) async fn record_api(
     let Ok(Json(mut input)) = body else {
         return crate::apierr::json(
             StatusCode::BAD_REQUEST,
-            "send JSON: {release, commit?, from?, environment?}",
+            "send JSON: {release, commit?, from?, environment?, first_commit_at?, dry_run?}",
         );
     };
     input.project = id;

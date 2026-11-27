@@ -37,7 +37,7 @@ pub(crate) const KPI: &[(&str, &str)] = &[
     ),
     (
         "Lead time",
-        "Median time from a release's first commit to live. Unknown until the commit range of each release is recorded (`openlens-cli release`).",
+        "Median time from a release's first commit to live. The first commit's time is read from git by `openlens-cli release --commit`; unknown for releases recorded without it.",
     ),
     (
         "Change failure rate",

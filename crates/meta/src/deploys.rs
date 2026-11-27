@@ -5,7 +5,8 @@
 //! like API tokens and share links. Deploys are a small table, at most
 //! [`MAX_DEPLOYS`] per project (oldest first out). A release recorded by
 //! its deploy step (`openlens-cli release`, #521, D-066) is a succeeded
-//! deploy that also keeps the first commit of its range.
+//! deploy that also keeps the first commit of its range, and when that
+//! commit was made when the deploy step knows it (#633).
 
 use super::*;
 
@@ -33,6 +34,16 @@ pub struct Deploy {
     pub at: i64,
     /// The format it came in (`github`, `vercel`, `plain`…).
     pub source: String,
+}
+
+/// The commit range of a recorded release: `from..commit`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Range<'a> {
+    /// The commit the range starts after.
+    pub from: Option<&'a str>,
+    /// When the first commit of the range was made (Unix seconds), as
+    /// the deploy step's git checkout says (#633).
+    pub first_commit_at: Option<i64>,
 }
 
 impl Meta {
@@ -88,26 +99,26 @@ impl Meta {
 
     /// Record a deploy, then cut the project back to [`MAX_DEPLOYS`].
     pub fn record_deploy(&self, project: &str, d: &Deploy, received_at: i64) -> Result<()> {
-        self.insert_deploy(project, d, None, received_at)
+        self.insert_deploy(project, d, &Range::default(), received_at)
     }
 
     /// Record a release named by its deploy step (`openlens-cli release`,
-    /// #521): a deploy whose commit range starts after `from`.
+    /// #521): a deploy with its commit range.
     pub fn record_release(
         &self,
         project: &str,
         d: &Deploy,
-        from: Option<&str>,
+        range: &Range<'_>,
         received_at: i64,
     ) -> Result<()> {
-        self.insert_deploy(project, d, from, received_at)
+        self.insert_deploy(project, d, range, received_at)
     }
 
     fn insert_deploy(
         &self,
         project: &str,
         d: &Deploy,
-        from: Option<&str>,
+        range: &Range<'_>,
         received_at: i64,
     ) -> Result<()> {
         if d.environment.is_empty() || d.status.is_empty() {
@@ -116,8 +127,8 @@ impl Meta {
         self.with(|c| {
             let tx = c.unchecked_transaction()?;
             tx.execute(
-                "INSERT INTO deploys (project, environment, release, sha, status, at, source, received_at, from_sha) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                "INSERT INTO deploys (project, environment, release, sha, status, at, source, received_at, from_sha, first_commit_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
                     project,
                     d.environment,
@@ -127,7 +138,8 @@ impl Meta {
                     d.at,
                     d.source,
                     received_at,
-                    from
+                    range.from,
+                    range.first_commit_at
                 ],
             )?;
             tx.execute(
@@ -176,6 +188,24 @@ impl Meta {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?)
+        })
+    }
+
+    /// When the first commit of each release recorded at or after `since`
+    /// (Unix seconds) was made, for the releases whose deploy step said
+    /// it: `(release, first commit time)`, the latest record of each
+    /// release in any environment (#633).
+    pub fn first_commits(&self, project: &str, since: i64) -> Result<Vec<(String, i64)>> {
+        self.read(|c| {
+            let mut st = c.prepare(
+                "SELECT release, first_commit_at FROM deploys \
+                 WHERE project = ?1 AND at >= ?2 AND release IS NOT NULL \
+                 AND first_commit_at IS NOT NULL ORDER BY at, rowid LIMIT ?3",
+            )?;
+            let rows = st.query_map(params![project, since, MAX_DEPLOYS], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
         })
     }
 

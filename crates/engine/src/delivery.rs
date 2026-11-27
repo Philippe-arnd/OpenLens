@@ -34,7 +34,7 @@ pub const DEFAULT_DAYS: i64 = WINDOW_DAYS;
 /// (environment, release, day) rows read at most (latest days first).
 const MAX_DAILY: usize = 20_000;
 /// Why lead time is unknown when no commit range was recorded.
-pub const NO_COMMITS: &str = "unknown: no commit range recorded (`openlens-cli release` records the first commit of each release)";
+pub const NO_COMMITS: &str = "unknown: no release recorded when its first commit was made (`openlens-cli release --commit` reads it from the git history)";
 
 /// Where an environment's changes come from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -212,10 +212,12 @@ pub fn from_deploys(deploys: &[(&Deploy, Option<String>)]) -> Vec<Change> {
     let mut out: Vec<Change> = Vec::new();
     for (d, release) in deploys {
         match Status::parse(&d.status) {
+            // A deploy not tied to traffic yet keeps the release it names
+            // (a release recorded before its first user, #633).
             Some(Status::Succeeded) => out.push(Change {
                 at: d.at,
                 live_at: d.at,
-                release: release.clone(),
+                release: release.clone().or_else(|| d.release.clone()),
                 shipped: true,
                 failed: false,
                 restored_at: None,

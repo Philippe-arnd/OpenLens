@@ -485,7 +485,7 @@ fn a_deploy_hook_secret_is_kept_hashed_and_deploys_stay_bounded() {
 
 #[test]
 fn a_recorded_release_starts_its_range_after_the_previous_one() {
-    use openlens_meta::deploys::Deploy;
+    use openlens_meta::deploys::{Deploy, Range};
     let m = Meta::in_memory().unwrap();
     m.ensure_default_project(None).unwrap();
     let d = |release: &str, commit: &str, status: &str, at: i64| Deploy {
@@ -500,8 +500,13 @@ fn a_recorded_release_starts_its_range_after_the_previous_one() {
         m.previous_commit("default", "production", None).unwrap(),
         None
     );
-    m.record_release("default", &d("v1", "aaaaaaa", "succeeded", 10), None, 10)
-        .unwrap();
+    m.record_release(
+        "default",
+        &d("v1", "aaaaaaa", "succeeded", 10),
+        &Range::default(),
+        10,
+    )
+    .unwrap();
     m.record_deploy("default", &d("v2", "bbbbbbb", "failed", 20), 20)
         .unwrap();
     // A failed deploy is not where the next range starts, and a release
@@ -524,7 +529,10 @@ fn a_recorded_release_starts_its_range_after_the_previous_one() {
     m.record_release(
         "default",
         &d("v3", "ccccccc", "succeeded", 30),
-        from.as_deref(),
+        &Range {
+            from: from.as_deref(),
+            first_commit_at: Some(25),
+        },
         30,
     )
     .unwrap();
@@ -540,6 +548,12 @@ fn a_recorded_release_starts_its_range_after_the_previous_one() {
         m.deploys("default", 0).unwrap().len(),
         3,
         "a release is a deploy"
+    );
+    // Only the release whose deploy step said when its first commit was
+    // made has a first commit time (#633).
+    assert_eq!(
+        m.first_commits("default", 0).unwrap(),
+        vec![("v3".to_owned(), 25)]
     );
 }
 

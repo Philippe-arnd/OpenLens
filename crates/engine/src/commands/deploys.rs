@@ -107,6 +107,16 @@ pub struct RecordReleaseInput {
     /// deployed commit when absent.
     #[serde(default)]
     pub from: Option<String>,
+    /// When the first commit of the range was made (Unix seconds), read
+    /// by the deploy step from its git checkout: the start of the
+    /// release's lead time (#633).
+    #[serde(default)]
+    pub first_commit_at: Option<i64>,
+    /// Resolve the range and check the input without recording anything:
+    /// `openlens-cli release` asks where the range starts before it reads
+    /// the first commit's time from git (#633).
+    #[serde(default)]
+    pub dry_run: bool,
 }
 
 /// A release as recorded.
@@ -120,8 +130,13 @@ pub struct RecordedRelease {
     pub commit: Option<String>,
     /// The commit its range starts after, if known: `from..commit`.
     pub from: Option<String>,
+    /// When the first commit of the range was made, if given.
+    pub first_commit_at: Option<i64>,
     /// When it was recorded (Unix seconds).
     pub at: i64,
+    /// Nothing was recorded: the input was only checked (`dry_run`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub dry_run: bool,
 }
 
 /// `releases.record`: record a release with its commit range, as a
@@ -168,15 +183,24 @@ impl Command for RecordRelease {
         if from.is_some() && from == commit {
             return Err(Error::Invalid("from and commit are the same commit".into()));
         }
-        host.meta()
-            .record_release(&p.id, &d, from.as_deref(), now)
-            .map_err(|e| Error::Storage(e.to_string()))?;
+        let first_commit_at = checked_first_commit(i.first_commit_at, commit.as_deref(), now)?;
+        if !i.dry_run {
+            let range = openlens_meta::deploys::Range {
+                from: from.as_deref(),
+                first_commit_at,
+            };
+            host.meta()
+                .record_release(&p.id, &d, &range, now)
+                .map_err(|e| Error::Storage(e.to_string()))?;
+        }
         Ok(RecordedRelease {
             release,
             environment: d.environment,
             commit,
             from,
+            first_commit_at,
             at: d.at,
+            dry_run: i.dry_run,
         })
     }
 }
@@ -190,4 +214,31 @@ fn checked_commit(raw: Option<&str>, what: &str) -> Result<Option<String>, Error
             .map(Some)
             .ok_or_else(|| Error::Invalid(format!("{what} must be a commit: 7 to 64 hex digits"))),
     }
+}
+
+/// Slack for the deploy step's clock: a first commit up to this far in
+/// the future is accepted (and its lead time counts as zero).
+const CLOCK_SLACK_SECS: i64 = 3_600;
+
+/// The first commit's time given by the caller: it needs the deployed
+/// commit, and must be after 2000-01-01 and not in the future.
+fn checked_first_commit(
+    at: Option<i64>,
+    commit: Option<&str>,
+    now: i64,
+) -> Result<Option<i64>, Error> {
+    let Some(at) = at else {
+        return Ok(None);
+    };
+    if commit.is_none() {
+        return Err(Error::Invalid(
+            "first_commit_at needs the commit deployed".into(),
+        ));
+    }
+    if !(946_684_800..=now.saturating_add(CLOCK_SLACK_SECS)).contains(&at) {
+        return Err(Error::Invalid(
+            "first_commit_at must be a Unix time in seconds, not in the future".into(),
+        ));
+    }
+    Ok(Some(at))
 }
