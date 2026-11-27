@@ -34,7 +34,7 @@ Open (or label) an issue with `release-hold` and say why. Remove the label to le
 - A draft arrives by itself on Monday (`release-notes.yml`, PR "Release notes for vX.Y.Z (draft)"): edit that PR rather than starting from nothing. `scripts/release/draft-notes.sh X.Y.Z` prints the same draft locally.
 
 ## Hotfix on an older minor
-1. `git checkout -b release/X.Y vX.Y.Z` (the last tag of that minor), cherry-pick the fix, set the version to `X.Y.(Z+1)` in `Cargo.toml` and the SDK manifests, add a CHANGELOG section.
+1. `git checkout -b release/X.Y vX.Y.Z` (the last tag of that minor), cherry-pick the fix, set the version to `X.Y.(Z+1)` in `Cargo.toml`, the SDK manifests and `VERSION` in `sdk/js/src/index.ts` (then `npm run build` in `sdk/js`), add a CHANGELOG section.
 2. Push the branch, tag `vX.Y.(Z+1)` on it, then run *Release* (`publish.yml`) with `tag` set, `release.yml` and `k8s.yml` on the tag (a tag pushed with a workflow token starts nothing).
 
 ## A release is done when

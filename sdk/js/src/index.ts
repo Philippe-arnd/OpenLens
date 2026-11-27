@@ -69,7 +69,7 @@ interface State {
   rs?: Decision;
 }
 
-const VERSION = "0.1.0";
+const VERSION = "0.8.0";
 const SESSION_GAP = 30 * 60 * 1000;
 const MAX_QUEUE = 500;
 
