@@ -153,9 +153,9 @@ fn the_board_reads_in_the_mockup_order() {
     for w in order.windows(2) {
         assert!(at(w[0]) < at(w[1]), "{} before {}", w[0], w[1]);
     }
-    // The cohorts are open, the release comparison and the secondary
-    // cards closed.
-    assert!(html.contains("<details class=\"card disclose\" open>"));
+    // The cohorts left for People › Retention (#619): no disclosure is
+    // open; the release comparison and the secondary cards are closed.
+    assert!(!html.contains("<details class=\"card disclose\" open>"));
     assert_eq!(
         html.matches(r#"<details class="card disclose secondary">"#)
             .count(),
@@ -224,7 +224,7 @@ fn insight(kind: &'static str, subject: &str) -> Insight {
 }
 
 /// A board with three insights, a window compared with the one before,
-/// a few days of active users, two releases and two cohorts.
+/// a few days of active users, two releases and three cohorts.
 fn full() -> Board {
     let now = Sessions {
         count: 600,
@@ -288,20 +288,31 @@ fn full() -> Board {
                 tasks_per_session: 2.76,
             },
         ],
-        retention: vec![
-            RetentionRow {
-                week: "2026-10-05".into(),
-                users: 41,
-                weeks: vec![1.0, 0.5],
-            },
-            RetentionRow {
-                week: "2026-10-12".into(),
-                users: 29,
-                weeks: vec![0.04],
-            },
-        ],
+        retention_trend: openlens_engine::retention_trend(&cohorts()),
+        retention: cohorts(),
         ..Board::default()
     }
+}
+
+/// Three weekly cohorts; the newest is still living its week 1.
+fn cohorts() -> Vec<RetentionRow> {
+    vec![
+        RetentionRow {
+            week: "2026-10-05".into(),
+            users: 41,
+            weeks: vec![0.61, 0.5],
+        },
+        RetentionRow {
+            week: "2026-10-12".into(),
+            users: 29,
+            weeks: vec![0.24, 0.2],
+        },
+        RetentionRow {
+            week: "2026-10-19".into(),
+            users: 12,
+            weeks: vec![0.93],
+        },
+    ]
 }
 
 fn page(b: &Board) -> String {
@@ -546,4 +557,40 @@ fn a_success_that_fires_on_entry_shows_no_task_time_but_its_finding() {
         render_shared(|| charts::feature_pulse("p1", &Filters::default(), &b)).into_string();
     assert!(!shared.contains("/features#"), "{shared}");
     assert!(!shared.contains("Task time: median 0"), "{shared}");
+}
+
+#[test]
+fn the_board_keeps_one_retention_line_and_the_table_moves() {
+    let b = full();
+    let t = b.retention_trend.clone().unwrap();
+    let html = page(&b);
+    let line = between(&html, r#"id="ret-h""#, "</section>");
+    // The two complete cohorts' numbers, as the engine picked them, and
+    // its tag; not the newest cohort's partial week.
+    assert!(
+        line.contains(&pct(t.oldest.1)) && line.contains(&pct(t.newest.1)),
+        "{line}"
+    );
+    let partial = cohorts().last().unwrap().weeks[0];
+    assert!(!line.contains(&pct(partial)), "{line}");
+    let tag = if t.newest.1 < t.oldest.1 {
+        "Falling"
+    } else {
+        "Rising"
+    };
+    assert!(line.contains(tag), "{line}");
+    assert!(line.contains("/p/p1/retention"), "{line}");
+    // The table is on the Retention tab, not here.
+    assert!(!html.contains("First seen (week of)"), "{html}");
+    // Too few complete cohorts: the line says why, without numbers.
+    let early = Board {
+        retention_trend: None,
+        ..full()
+    };
+    let html = page(&early);
+    let line = between(&html, r#"id="ret-h""#, "</section>");
+    assert!(
+        line.contains("Not enough complete cohorts") && !line.contains('%'),
+        "{line}"
+    );
 }

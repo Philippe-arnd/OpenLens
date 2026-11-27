@@ -220,3 +220,139 @@ pub(crate) async fn retention(
     }
     Ok(out)
 }
+
+/// The week whose return the board's retention line compares (#619): a
+/// month after the first visit. Fewer weeks when no two cohorts have
+/// lived that long yet.
+const TREND_WEEK: usize = 4;
+
+/// Which way week-N return went from the oldest cohort to the newest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum Trend {
+    /// The newest cohort comes back less.
+    Falling,
+    /// The newest cohort comes back more.
+    Rising,
+}
+
+/// The board's retention line (#619): week-N return of the oldest and the
+/// newest cohort for which week N is over, and which way it went.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct RetentionTrend {
+    /// N: the week after the first visit that is compared (1 = the week
+    /// after the cohort's own week).
+    pub week: usize,
+    /// The oldest complete cohort's week (YYYY-MM-DD) and its week-N share.
+    pub oldest: (String, f64),
+    /// The newest complete cohort's week and its week-N share.
+    pub newest: (String, f64),
+    /// None when both shares read the same at 0.1 %.
+    pub trend: Option<Trend>,
+}
+
+/// The retention line from the cohorts (#619). A cohort counts for week N
+/// only when week N is over: its `weeks` then holds week N + 1 too (the
+/// last entry is the week in progress, see [`RetentionRow::weeks`]), so a
+/// newest cohort still living its week N is skipped, not compared on a
+/// partial week. Week [`TREND_WEEK`] first, then earlier weeks; none when
+/// no week has two complete cohorts with users.
+#[must_use]
+pub fn retention_trend(rows: &[RetentionRow]) -> Option<RetentionTrend> {
+    (1..=TREND_WEEK).rev().find_map(|n| {
+        let done: Vec<(&str, f64)> = rows
+            .iter()
+            .filter(|r| r.users > 0 && r.weeks.len() > n)
+            .filter_map(|r| Some((r.week.as_str(), *r.weeks.get(n - 1)?)))
+            .collect();
+        if done.len() < 2 {
+            return None;
+        }
+        // Weeks are YYYY-MM-DD: their text order is their date order.
+        let oldest = done.iter().min_by(|a, b| a.0.cmp(b.0))?;
+        let newest = done.iter().max_by(|a, b| a.0.cmp(b.0))?;
+        // Compared as printed (0.1 %), so the tag never contradicts the
+        // two numbers beside it.
+        let shown = |s: f64| (s * 1000.0).round();
+        let trend = match shown(newest.1).total_cmp(&shown(oldest.1)) {
+            std::cmp::Ordering::Less => Some(Trend::Falling),
+            std::cmp::Ordering::Greater => Some(Trend::Rising),
+            std::cmp::Ordering::Equal => None,
+        };
+        Some(RetentionTrend {
+            week: n,
+            oldest: (oldest.0.to_owned(), oldest.1),
+            newest: (newest.0.to_owned(), newest.1),
+            trend,
+        })
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A cohort of `users` that has lived `weeks.len()` weeks since its own.
+    fn row(week: &str, users: i64, weeks: &[f64]) -> RetentionRow {
+        RetentionRow {
+            week: week.to_owned(),
+            users,
+            weeks: weeks.to_vec(),
+        }
+    }
+
+    #[test]
+    fn the_line_compares_complete_cohorts_only() {
+        let rows = [
+            row("2026-10-05", 40, &[0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2]),
+            row("2026-10-12", 30, &[0.8, 0.7, 0.6, 0.5, 0.4, 0.3]),
+            row("2026-10-19", 20, &[0.8, 0.7, 0.6, 0.45, 0.4]),
+            // Living its week 4 now: a partial week, not compared.
+            row("2026-10-26", 10, &[0.9, 0.9, 0.9, 0.01]),
+            row("2026-11-02", 0, &[0.0, 0.0, 0.0, 0.0, 0.0]),
+        ];
+        let t = retention_trend(&rows).unwrap();
+        let (complete, partial) = (&rows[2], &rows[3]);
+        assert!(t.week < complete.weeks.len());
+        assert!(t.week >= partial.weeks.len(), "{t:?}");
+        assert_eq!(t.newest.0, complete.week);
+        assert_eq!(t.oldest.0, rows[0].week);
+        assert_eq!(t.newest.1, complete.weeks[t.week - 1]);
+        // Removing the partial cohort changes nothing.
+        let without: Vec<_> = rows
+            .iter()
+            .filter(|r| r.week != partial.week)
+            .cloned()
+            .collect();
+        assert_eq!(retention_trend(&without), Some(t));
+    }
+
+    #[test]
+    fn the_tag_follows_the_comparison() {
+        let at = |old: f64, new: f64| {
+            let rows = [
+                row("2026-10-05", 10, &[old, old]),
+                row("2026-10-12", 10, &[new, new]),
+            ];
+            retention_trend(&rows).unwrap()
+        };
+        let down = at(0.6, 0.4);
+        assert!(down.newest.1 < down.oldest.1);
+        assert_eq!(down.trend, Some(Trend::Falling));
+        let up = at(0.4, 0.6);
+        assert!(up.newest.1 > up.oldest.1);
+        assert_eq!(up.trend, Some(Trend::Rising));
+        assert_eq!(at(0.5, 0.5).trend, None);
+    }
+
+    #[test]
+    fn one_complete_cohort_makes_no_line() {
+        // Week 1 is over for the first cohort only.
+        let rows = [
+            row("2026-11-09", 10, &[0.5, 0.2]),
+            row("2026-11-16", 10, &[0.5]),
+            row("2026-11-23", 10, &[]),
+        ];
+        assert_eq!(retention_trend(&rows), None);
+        assert_eq!(retention_trend(&[]), None);
+    }
+}

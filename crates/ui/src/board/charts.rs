@@ -1,5 +1,6 @@
 //! The board's charts and tables (#543): active users per day, the
-//! feature pulse, the cohorts, who uses what, and the release comparison.
+//! feature pulse, the retention line, who uses what, and the release
+//! comparison.
 //! Every length is an SVG attribute and every shade a class (the CSP
 //! forbids `style`).
 
@@ -212,53 +213,37 @@ fn on_entry_finding(pid: &str, key: &str) -> String {
 }
 
 /// A share's shade, in tenths (`p0`…`p10`): the cell's class.
-pub(super) fn tenth(share: f64) -> u8 {
+pub(crate) fn tenth(share: f64) -> u8 {
     (share.clamp(0.0, 1.0) * 10.0).round() as u8
 }
 
-/// Weekly retention cohorts: users first seen each week (rows) and the
-/// share of them active again N weeks later (columns). A disclosure, open
-/// by default; the share is always printed, the shade only repeats it.
-pub(super) fn cohorts(pid: &str, f: &Filters, b: &Board) -> Markup {
-    let rows: Vec<_> = b.retention.iter().filter(|r| r.users > 0).collect();
-    let cols = rows.iter().map(|r| r.weeks.len()).max().unwrap_or(0);
-    if rows.len() < 2 || cols == 0 {
-        return html! {};
-    }
+/// Do they come back (#619): one line, week-N return of the oldest and
+/// the newest complete cohorts and which way it went (the engine picks
+/// them), and the link to People › Retention, which holds the table.
+pub(super) fn retention_line(pid: &str, f: &Filters, b: &Board) -> Markup {
+    // "5 Oct": the week a cohort was first seen.
+    let cohort = |w: &str| {
+        chrono::NaiveDate::parse_from_str(w, "%Y-%m-%d")
+            .map_or_else(|_| w.to_owned(), |d| d.format("%-d %b").to_string())
+    };
     html! {
-        details.card.disclose open {
-            summary {
-                h2 { "Do they come back?" } // no_detail: a disclosure; its link is in the body
-                span.muted.small { "Weekly cohorts: the share of each week's new users active again N weeks later" }
-                (icon("chev"))
+        section.card.pad.stack aria-labelledby="ret-h" {
+            div.section-head {
+                h2 id="ret-h" { (to(&detail_url(pid, "/retention", f), "Do they come back?")) }
             }
-            div.body {
-                div.scroll {
-                    table.heat {
-                        thead { tr {
-                            th scope="col" { "First seen (week of)" }
-                            (th_num("Users"))
-                            @for k in 1..=cols { th.c scope="col" { "Week " (k) } }
-                        } }
-                        tbody { @for r in &rows {
-                            tr {
-                                th.mono scope="row" { (r.week) }
-                                td.num.muted { (compact(r.users)) }
-                                @for k in 0..cols {
-                                    @if let Some(share) = r.weeks.get(k) {
-                                        td.c { span class={ "hc p" (tenth(*share)) } { (pct(*share)) } }
-                                    } @else {
-                                        td {}
-                                    }
-                                }
-                            }
-                        } }
+            @match &b.retention_trend {
+                Some(t) => p {
+                    "Week " (t.week) ": " strong { (pct(t.oldest.1)) } " of the " (cohort(&t.oldest.0)) " cohort, "
+                    strong { (pct(t.newest.1)) } " of the " (cohort(&t.newest.0)) " cohort"
+                    @match t.trend {
+                        Some(openlens_engine::Trend::Falling) => { " " span.tag.tone-warn { (icon("down")) "Falling" } }
+                        Some(openlens_engine::Trend::Rising) => { " " span.tag.tone-good { (icon("up")) "Rising" } }
+                        None => { " " span.muted { "(no change)" } }
                     }
-                }
-                p.muted.small {
-                    "Weeks start on Monday (" (b.filters.as_ref().map_or("UTC", |f| f.tz.as_str())) ")."
-                    @if !shared() { " " a href=(detail_url(pid, "/churn", f)) { "Who leaves, and when →" } }
-                }
+                },
+                None => p.muted {
+                    "Not enough complete cohorts yet: the line compares two weekly cohorts once the same week after their first has fully passed for both."
+                },
             }
         }
     }

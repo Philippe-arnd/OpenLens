@@ -86,7 +86,7 @@ pub use reads::MapLive;
 pub use relations::Relation;
 pub use replay_rate::{ReplayRate, replay_rate};
 pub use revenue::{Money, Revenue, revenue};
-pub use tasks::{RetentionRow, TaskTime};
+pub use tasks::{RetentionRow, RetentionTrend, TaskTime, Trend, retention_trend};
 pub use variants::*;
 pub use vital_parts::{Culprit, DeviceVital};
 pub use vitals::{PageVital, VitalGuide, VitalReport, vitals, vitals_guide};
@@ -457,6 +457,9 @@ pub struct Board {
     pub roles: Vec<RoleUsers>,
     /// Weekly retention cohorts (first-seen week × weeks later).
     pub retention: Vec<RetentionRow>,
+    /// The retention line (#619): week-N return of the oldest and newest
+    /// complete cohorts of `retention`, and which way it went.
+    pub retention_trend: Option<RetentionTrend>,
     /// Task durations per declared feature with a success event.
     pub task_times: Vec<TaskTime>,
     /// Who uses what: distinct users per (role, feature), last 30 days,

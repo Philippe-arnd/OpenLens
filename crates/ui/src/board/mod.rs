@@ -2,7 +2,7 @@
 //!
 //! `focus`: what to focus on (the lead insight, the ranked list);
 //! `tiles`: the key numbers; `charts`: active users per day, the feature
-//! pulse, the cohorts, who uses what and the release comparison;
+//! pulse, the retention line, who uses what and the release comparison;
 //! `sections`: the other cards (Web Vitals, revenue, role gaps, funnels,
 //! flags, paths to value), closed disclosures after the release
 //! comparison (#588).
@@ -14,7 +14,7 @@ mod focus;
 mod sections;
 mod tiles;
 
-pub(crate) use charts::{bar_with, barcell};
+pub(crate) use charts::{bar_with, barcell, tenth};
 pub(crate) use focus::{Side, compare};
 // The board's deltas, also on the Releases page (#549).
 pub(crate) use tiles::{Kpi, delta, delta_mark, kpi_tile};
@@ -47,7 +47,7 @@ pub fn board_shell(p: &ProjectInfo<'_>, wait: Option<u64>) -> Markup {
 
 /// The Focus board (#543, #588): the signals, the page head, what to
 /// focus on, the key numbers, active users and the feature pulse side by
-/// side, the cohorts (open) and the release comparison (closed), then the
+/// side, the retention line (#619) and the release comparison (closed), then the
 /// other cards as closed disclosures. `plain`: optional plain-language `(title, next step)` per
 /// insight (same order), shown instead of the original, which stays as
 /// the tooltip.
@@ -98,7 +98,7 @@ pub fn board(
                     (charts::active_users(p.id, f, b, marks))
                     (charts::feature_pulse(p.id, f, b))
                 }
-                (charts::cohorts(p.id, f, b))
+                (charts::retention_line(p.id, f, b))
                 (charts::releases(p.id, f, b))
                 (sections::others(p.id, f, b, revenue))
                 (charts::role_matrix(p.id, f, b))
