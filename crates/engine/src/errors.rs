@@ -111,10 +111,10 @@ pub(crate) const SERVER_ERROR: &str =
 
 /// The W3C trace id an event carries (`trace_id`, #601), or NULL. Reads
 /// the column `properties`.
-const TRACE_ID: &str = "regexp_match(properties, '\"trace_id\":\"([0-9a-f]{32})\"')[1]";
+pub(crate) const TRACE_ID: &str = "regexp_match(properties, '\"trace_id\":\"([0-9a-f]{32})\"')[1]";
 
 /// The pseudo user of server events tied to no user (#593): never a user.
-const SERVER_ID: &str = openlens_event::names::SERVER_ID;
+pub(crate) const SERVER_ID: &str = openlens_event::names::SERVER_ID;
 
 /// An error's group (#522 shares it): its message with numbers, ids and
 /// quoted values masked, `@`, and its source file without query, line and
@@ -123,6 +123,25 @@ pub(crate) const FINGERPRINT: &str = "concat( \
      regexp_replace(regexp_replace(coalesce(msg, '(no message)'), '0x[0-9a-fA-F]+|[0-9a-fA-F-]{12,}|[0-9]+', 'N', 'g'), \
                     '''[^'']*''|\\\\\"[^\\\\]*\\\\\"', '…', 'g'), \
      ' @ ', coalesce(regexp_replace(regexp_replace(source, '[?#].*$', ''), ':[0-9]+:[0-9]+$', ''), '?'))";
+
+/// The browser sessions of server errors (#624), per group `fp`: the
+/// session each was sent with, else the session of the failed request
+/// (`$request_failed`, read from `src` where `w` holds) with its trace id.
+/// `base` defines `g` with the columns `fp`, `session_id`, `uid`,
+/// `timestamp`, `trace` and `srv`. Rows `fp`, `sid`, `uid` and `seen`,
+/// the latest 1000 pairs at most.
+pub(crate) fn linked_sql(base: &str, src: &str, w: &str) -> String {
+    format!(
+        "{base}, s AS (SELECT fp, session_id, uid, timestamp, trace FROM g WHERE srv = 1), \
+         b AS (SELECT session_id, nullif(distinct_id, '{SERVER_ID}') AS uid, timestamp, {TRACE_ID} AS trace \
+               FROM {src} WHERE {w} AND event = '$request_failed' AND session_id IS NOT NULL), \
+         l AS (SELECT fp, session_id, uid, timestamp FROM s WHERE session_id IS NOT NULL \
+               UNION ALL SELECT s.fp, b.session_id, b.uid, b.timestamp FROM s JOIN b ON s.trace = b.trace \
+               WHERE s.session_id IS NULL AND b.trace IS NOT NULL) \
+         SELECT fp, session_id AS sid, max(uid) AS uid, CAST(max(timestamp) AS VARCHAR) AS seen \
+         FROM l WHERE session_id <> '' GROUP BY fp, session_id ORDER BY seen DESC LIMIT 1000"
+    )
+}
 
 /// The top 20 error groups of the last 30 days, most users first.
 pub async fn error_groups(
@@ -174,16 +193,7 @@ pub async fn error_groups_of(
     // A server error's browser sessions: the one it was sent with, else
     // the session of the failed request with its trace id. Bounded: the
     // latest pairs only, then LINKED_MAX per group.
-    let linked_sql = format!(
-        "{base}, s AS (SELECT fp, session_id, uid, timestamp, trace FROM g WHERE srv = 1), \
-         b AS (SELECT session_id, nullif(distinct_id, '{SERVER_ID}') AS uid, timestamp, {TRACE_ID} AS trace \
-               FROM {src} WHERE {w} AND event = '$request_failed' AND session_id IS NOT NULL), \
-         l AS (SELECT fp, session_id, uid, timestamp FROM s WHERE session_id IS NOT NULL \
-               UNION ALL SELECT s.fp, b.session_id, b.uid, b.timestamp FROM s JOIN b ON s.trace = b.trace \
-               WHERE s.session_id IS NULL AND b.trace IS NOT NULL) \
-         SELECT fp, session_id AS sid, max(uid) AS uid, CAST(max(timestamp) AS VARCHAR) AS seen \
-         FROM l WHERE session_id <> '' GROUP BY fp, session_id ORDER BY seen DESC LIMIT 1000"
-    );
+    let linked_sql = linked_sql(&base, src, &w);
     let (groups, dims, linked) = futures::join!(
         q.sql(project, &groups_sql),
         q.sql(project, &dims_sql),

@@ -159,6 +159,9 @@ pub async fn board_reusing(
         }
         _ => None,
     };
+    // The server side (#623): the window and the one before, or the
+    // Quality tile's 7 days.
+    let server_spans = crate::board_backend::spans(win.as_ref().map(|w| (w.current, w.previous)));
     // A period block's span: its fixed days, or the release window.
     let span = |days: i64| win.as_ref().map_or(Span::days(days), |w| w.current);
     let clause = |days: i64| match &win {
@@ -556,6 +559,7 @@ pub async fn board_reusing(
         resurrected,
         retention,
         churn_line,
+        server,
     ) = futures::try_join!(
         insights::compute(q, project, &card_rows, f, ident, churn, &successes),
         insights::journeys(q, project, &success_reads, &journey_rows, f, &successes),
@@ -565,7 +569,9 @@ pub async fn board_reusing(
         tasks::resurrected(q, project, &p90, f, churn),
         tasks::retention(q, project, &p90, f, ident),
         crate::churn::line(q, project, map.map(|(m, _)| m), f, &src, ident),
+        crate::board_backend::read(q, project, f, server_spans, map.map(|(m, _)| m)),
     )?;
+    b.server = Some(server);
     b.churn = Some(churn_line);
     b.retention_trend = tasks::retention_trend(&retention);
     b.retention = retention;

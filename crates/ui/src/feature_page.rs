@@ -384,6 +384,7 @@ mod tests {
             requires: vec![],
             renamed_from: vec![],
             server: vec![],
+            paths: vec![],
         };
         let step = |event: &str, users, conversion| openlens_engine::FunnelStep {
             event: event.into(),

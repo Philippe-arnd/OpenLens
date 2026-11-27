@@ -5,18 +5,6 @@
 
 use crate::*;
 use openlens_engine::board_verdict::Lead;
-use openlens_engine::verdict::Outcome;
-
-/// A check's mark: its tone, glyph and the words a screen reader says.
-fn mark(o: Outcome) -> (&'static str, Markup, &'static str) {
-    match o {
-        Outcome::Worse => ("bad", html! { "!" }, "worse"),
-        Outcome::Better => ("good", icon("task"), "better"),
-        Outcome::Same => ("muted", html! { "=" }, "no change that counts"),
-        Outcome::TooFew => ("muted", html! { "?" }, "too few to say"),
-        Outcome::Info => ("muted", html! { "·" }, "shown, not judged"),
-    }
-}
 
 /// The card.
 pub(super) fn card(pid: &str, f: &Filters, l: &Lead) -> Markup {
@@ -45,27 +33,7 @@ pub(super) fn card(pid: &str, f: &Filters, l: &Lead) -> Markup {
                 h2 { span.sr-only { "Insight 1: " } (l.headline) } // no_detail: the actions below
                 p.evidence { (l.evidence) }
             }
-            @if !l.layers.is_empty() {
-                div.layers {
-                    @for g in &l.layers {
-                        div.layer {
-                            h3 { (icon(if g.name == "Features" { "layers" } else { "globe" })) (g.name) }
-                            @for r in &g.rows {
-                                @let (tone, glyph, says) = mark(r.outcome);
-                                div class={ "check tone-" (tone) } {
-                                    span.mark role="img" aria-label=(says) { (glyph) }
-                                    span { (r.label) }
-                                    span.fromto {
-                                        @if let Some(p) = &r.from { (p) " → " }
-                                        @if r.outcome == Outcome::Worse { b { (r.to) } } @else { (r.to) }
-                                    }
-                                }
-                            }
-                            @if g.more > 0 { p.muted.small { (g.more) " more in the full verdict" } }
-                        }
-                    }
-                }
-            }
+            (crate::release_verdict::layers(&l.layers))
             div.next {
                 (icon("idea"))
                 div {

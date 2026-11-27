@@ -40,8 +40,8 @@ impl LatestRelease {
     }
 }
 
-/// A layer of the lead's checks (#615): Browser, Features (Backend comes
-/// with #623).
+/// A layer of the lead's checks (#615): Browser, Backend (#623),
+/// Features.
 #[derive(Debug, Clone, Serialize)]
 pub struct Layer {
     /// As shown.
@@ -63,6 +63,9 @@ pub struct Row {
     pub to: String,
     /// How it moved.
     pub outcome: Outcome,
+    /// A key action's route (#623): tagged as such.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub key: bool,
 }
 
 /// The lead card of a regressed release (#615): the verdict in plain
@@ -120,7 +123,7 @@ fn sessions_share(r: f64) -> String {
 }
 
 /// A server error group (the backend layer, #623), not a browser one.
-fn server_error(r: &Report, c: &Check) -> bool {
+pub(crate) fn server_error(r: &Report, c: &Check) -> bool {
     c.kind == "errors"
         && r.current
             .new_errors
@@ -128,8 +131,9 @@ fn server_error(r: &Report, c: &Check) -> bool {
             .any(|e| e.fingerprint == c.key && e.server)
 }
 
-/// The layer a check shows in; none for the layers the lead leaves to
-/// the full verdict (backend, goals and guardrails).
+/// The layer a check shows in; none for the backend (its own group,
+/// [`crate::verdict_backend::backend_layer`]) and the layers the lead
+/// leaves to the full verdict (goals and guardrails).
 fn layer(r: &Report, c: &Check) -> Option<&'static str> {
     match c.kind {
         "kpi" if c.outcome != Outcome::Info => Some("Browser"),
@@ -140,17 +144,31 @@ fn layer(r: &Report, c: &Check) -> Option<&'static str> {
     }
 }
 
-/// How bad a worse check is, for the headline: errors first, then a
-/// feature that stopped finishing, the vitals, the other KPIs, the rest.
+/// Whether a route check is a key action's (#594 B).
+fn key_route(r: &Report, c: &Check) -> bool {
+    c.kind == "route"
+        && c.key.split_once(':').is_some_and(|(_, n)| {
+            r.current
+                .routes
+                .iter()
+                .any(|s| s.key_of.is_some() && s.name() == n)
+        })
+}
+
+/// How bad a worse check is, for the headline: a key action that fails
+/// more first, then errors, a feature that stopped finishing, the other
+/// routes, the vitals, the other KPIs, the rest.
 fn weight(r: &Report, c: &Check) -> (u8, f64) {
     let moved = c.previous.map_or(c.current, |p| (c.current - p).abs());
     let rank = match (c.kind, c.key.as_str()) {
-        ("kpi", "error_rate") => 0,
-        ("errors", _) if !server_error(r, c) => 1,
-        ("feature", _) => 2,
-        ("vital", _) => 3,
-        ("kpi", _) => 4,
-        _ => 5,
+        ("route", k) if k.starts_with("5xx:") && key_route(r, c) => 0,
+        ("kpi", "error_rate") => 1,
+        ("errors", _) if !server_error(r, c) => 2,
+        ("feature", _) => 3,
+        ("route", _) => 4,
+        ("vital", _) => 5,
+        ("kpi", _) => 6,
+        _ => 7,
     };
     (rank, moved)
 }
@@ -161,6 +179,7 @@ fn shown(c: &Check, v: f64) -> String {
         "vital" => crate::vitals::show(&c.key, v),
         "errors" => format!("{v:.0} users"),
         "kpi" | "feature" => pct(v),
+        "route" => crate::verdict_backend::shown(c.key.split_once(':').map_or("", |x| x.0), v),
         _ => format!("{v:.2}"),
     }
 }
@@ -222,6 +241,34 @@ fn wording(r: &Report, c: &Check) -> (String, String, Option<String>) {
                 None,
             )
         }
+        ("route", k) => {
+            let (kind, name) = k.split_once(':').unwrap_or(("", k));
+            if kind == "5xx" {
+                let key = r
+                    .current
+                    .routes
+                    .iter()
+                    .find(|s| s.name() == name)
+                    .and_then(|s| s.key_of.as_deref());
+                let what = key.map_or_else(
+                    || format!("{name} answers 5xx more often"),
+                    |f| format!("the key action {f} fails more: {name} answers 5xx"),
+                );
+                (
+                    format!("{since}, {what}: {}", from_to()),
+                    format!(
+                        "Open the server errors on {rel} for {name}, then a session that made the request."
+                    ),
+                    None,
+                )
+            } else {
+                (
+                    format!("{since}, {name} got slower: p95 {}", from_to()),
+                    format!("Open {name} on the Routes page and its slowest request on {rel}."),
+                    None,
+                )
+            }
+        }
         ("kpi", "bounce_rate") => (
             format!("{since}, more sessions end at once: {}", from_to()),
             format!("Look at the entry pages on {rel}: find what makes people leave at once."),
@@ -271,9 +318,28 @@ pub fn lead(r: &Report) -> Option<Lead> {
         1 => " One more check got worse.".to_owned(),
         n => format!(" {n} more checks got worse."),
     });
-    let layers = ["Browser", "Features"]
+    Some(Lead {
+        release: r.release.clone(),
+        previous: r.previous_release.clone(),
+        sessions,
+        headline,
+        evidence,
+        next_step,
+        layers: layers(r),
+        metric,
+    })
+}
+
+/// A verdict's checks by layer: Browser, Backend (#623) and Features, the
+/// layers with no check left out.
+#[must_use]
+pub fn layers(r: &Report) -> Vec<Layer> {
+    ["Browser", "Backend", "Features"]
         .into_iter()
         .filter_map(|name| {
+            if name == "Backend" {
+                return crate::verdict_backend::backend_layer(r);
+            }
             let mut checks: Vec<&Check> = r
                 .checks
                 .iter()
@@ -294,6 +360,7 @@ pub fn lead(r: &Report) -> Option<Lead> {
                     from: c.previous.map(|p| shown(c, p)),
                     to: shown(c, c.current),
                     outcome: c.outcome,
+                    key: false,
                 })
                 .collect();
             (!rows.is_empty()).then(|| Layer {
@@ -302,17 +369,7 @@ pub fn lead(r: &Report) -> Option<Lead> {
                 more: checks.len() - shown_n,
             })
         })
-        .collect();
-    Some(Lead {
-        release: r.release.clone(),
-        previous: r.previous_release.clone(),
-        sessions,
-        headline,
-        evidence,
-        next_step,
-        layers,
-        metric,
-    })
+        .collect()
 }
 
 impl Board {
