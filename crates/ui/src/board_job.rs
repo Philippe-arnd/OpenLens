@@ -65,12 +65,12 @@ pub fn board_job(p: &ProjectInfo<'_>, j: &JobView<'_>) -> Markup {
                     "cancelled" => {
                         h2 { "Cancelled" }
                         p { "This board was stopped before it finished; nothing was kept." }
-                        p { a.button href=(j.back) { "Back to this period" } }
+                        p { a.btn href=(j.back) { "Back to this period" } }
                     }
                     _ => {
                         h2 { "This board could not be computed" }
                         p.alert role="alert" { (j.error.unwrap_or("It stopped with an error.")) }
-                        p { a.button href=(j.back) { "Back to this period" } }
+                        p { a.btn href=(j.back) { "Back to this period" } }
                     }
                 }
             }

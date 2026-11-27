@@ -4,7 +4,8 @@ use super::*;
 
 #[derive(Deserialize)]
 pub(super) struct HeatmapQuery {
-    path: String,
+    /// The page; the page view opens the most viewed one without it (#592).
+    path: Option<String>,
     session: Option<String>,
     /// The heatmap page's tab (#548): `rage` or `scroll`; clicks otherwise.
     mode: Option<String>,
@@ -40,7 +41,47 @@ pub(super) async fn heatmap_page(
             openlens_ui::message("Not found", "No such project."),
         );
     };
-    let (map, src) = match click_map_for(&state, &p, &q.path).await {
+    let f = openlens_engine::Filters {
+        tz: auth::tz_for(&state, &headers, &p.timezone),
+        ..openlens_engine::Filters::default()
+    };
+    // The Heatmap tab (#592) names no page: open the most viewed one, or
+    // the empty state when there is none yet.
+    let (path, first_pages) = match q.path.filter(|s| !s.is_empty()) {
+        Some(path) => (path, None),
+        None => {
+            let map = crate::load_map(&state, &p.id).await;
+            let src = openlens_engine::source(map.as_ref().map(|(m, _)| m));
+            let pages = openlens_engine::pages(&state.query, &p.id, &src, &f)
+                .await
+                .unwrap_or_default();
+            let top = pages.first().map(|pg| pg.path.clone()).unwrap_or_default();
+            (top, Some(pages))
+        }
+    };
+    let info = openlens_ui::ProjectInfo {
+        id: &p.id,
+        name: &p.name,
+        key: &p.api_key,
+    };
+    if path.is_empty() {
+        // No page viewed yet: the page with its empty state, no query.
+        let none = openlens_engine::ClickMap {
+            path: String::new(),
+            cells: Vec::new(),
+            clicks: 0,
+            viewport: 0,
+        };
+        let view = openlens_ui::HeatmapView {
+            mode: "clicks",
+            pages: &[],
+        };
+        return html(
+            StatusCode::OK,
+            openlens_ui::heatmap(&info, &none, None, &view),
+        );
+    }
+    let (map, src) = match click_map_for(&state, &p, &path).await {
         Ok(m) => m,
         Err(e) => {
             return html(
@@ -49,16 +90,17 @@ pub(super) async fn heatmap_page(
             );
         }
     };
-    // A recorded visit of this page, to draw the heatmap over the real page.
-    let f = openlens_engine::Filters {
-        tz: auth::tz_for(&state, &headers, &p.timezone),
-        ..openlens_engine::Filters::default()
-    };
-    // The most viewed pages: the picker, and this page's labels and scroll
-    // depth (#548). Without them the map still shows.
+    // A recorded visit of this page, to draw the heatmap over the real page,
+    // and the most viewed pages: the picker, and this page's labels and
+    // scroll depth (#548). Without them the map still shows.
     let (sessions, pages) = tokio::join!(
-        openlens_engine::sessions_on_path(&state.query, &p.id, &src, &f, &q.path),
-        openlens_engine::pages(&state.query, &p.id, &src, &f)
+        openlens_engine::sessions_on_path(&state.query, &p.id, &src, &f, &path),
+        async {
+            match first_pages {
+                Some(pages) => Ok(pages),
+                None => openlens_engine::pages(&state.query, &p.id, &src, &f).await,
+            }
+        }
     );
     let (sessions, pages) = (sessions.unwrap_or_default(), pages.unwrap_or_default());
     let root = state.data_dir.clone();
@@ -75,14 +117,9 @@ pub(super) async fn heatmap_page(
             format!(
                 "/p/{}/heatmap/overlay?path={}&session={s}",
                 p.id,
-                openlens_ui::url_enc(&q.path)
+                openlens_ui::url_enc(&path)
             )
         });
-    let info = openlens_ui::ProjectInfo {
-        id: &p.id,
-        name: &p.name,
-        key: &p.api_key,
-    };
     html(
         StatusCode::OK,
         openlens_ui::heatmap(
@@ -106,7 +143,10 @@ pub(super) async fn heatmap_json(
     let Some(p) = project(&state, id).await else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    match click_map_for(&state, &p, &q.path).await {
+    let Some(path) = q.path else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    match click_map_for(&state, &p, &path).await {
         Ok((m, _)) => (
             [(header::CACHE_CONTROL, "no-store")],
             axum::Json(serde_json::json!({
@@ -132,7 +172,8 @@ pub(super) async fn heatmap_overlay(
             openlens_ui::message("Not found", "No such project."),
         );
     };
-    let Some(session) = q.session.filter(|s| openlens_replay::valid_id(s)) else {
+    let (Some(path), Some(session)) = (q.path, q.session.filter(|s| openlens_replay::valid_id(s)))
+    else {
         return html(
             StatusCode::NOT_FOUND,
             openlens_ui::message("No recording", "Pick a page with a recorded visit."),
@@ -145,6 +186,6 @@ pub(super) async fn heatmap_overlay(
     };
     player_csp(html(
         StatusCode::OK,
-        openlens_ui::heatmap_overlay(&info, &q.path, &session),
+        openlens_ui::heatmap_overlay(&info, &path, &session),
     ))
 }

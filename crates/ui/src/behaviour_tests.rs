@@ -174,6 +174,31 @@ fn a_heatmap_without_recording_ranks_the_labels_in_click_order() {
 }
 
 #[test]
+fn the_heatmap_is_a_behaviour_tab_current_on_its_page_and_has_an_empty_state() {
+    let empty = ClickMap {
+        path: String::new(),
+        cells: vec![],
+        clicks: 0,
+        viewport: 0,
+    };
+    let html = heatmap(
+        &demo(),
+        &empty,
+        None,
+        &HeatmapView {
+            mode: "clicks",
+            pages: &[],
+        },
+    )
+    .into_string();
+    clean(&html);
+    let tabs = part(&html, "aria-label=\"Behaviour\"", "</nav>");
+    assert!(tabs.contains("href=\"/p/d/heatmap\" aria-current=\"page\""));
+    assert!(tabs.contains("href=\"/p/d/pages\"") && !tabs.contains("/pages\" aria-current"));
+    assert!(html.contains("heat-empty") && !html.contains("Most clicked"));
+}
+
+#[test]
 fn forms_draw_a_longer_funnel_bar_for_a_field_more_sessions_reach() {
     use openlens_engine::forms::{FieldStats, FormStats};
     let field = |name: &str, sessions| FieldStats {

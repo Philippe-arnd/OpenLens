@@ -461,7 +461,7 @@ fn data(p: &ProjectInfo<'_>, v: &SettingsView<'_>, base: &str) -> Markup {
         @if v.admin {
             section.card.wide {
                 h2.violet { (icon("code")) "Explore the data" }
-                p { a.button href={ "/p/" (p.id) "/sql" } { "Read-only SQL" } " " a.button href={ "/p/" (p.id) "/breakdown?by=role" } { "Break down" } }
+                p { a.btn href={ "/p/" (p.id) "/sql" } { "Read-only SQL" } " " a.btn href={ "/p/" (p.id) "/breakdown?by=role" } { "Break down" } }
             }
         }
         form.card.wide.form-card method="get" action={ "/p/" (p.id) "/export" } aria-labelledby="export-h" {

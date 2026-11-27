@@ -37,10 +37,6 @@ pub fn events(
     eq: &openlens_engine::EventQuery,
     next: Option<&str>,
 ) -> Markup {
-    let mut envs = b.environments.clone();
-    if !envs.iter().any(|e| e == "production") {
-        envs.insert(0, "production".into());
-    }
     let sort = eq.sort.as_deref().unwrap_or("time");
     let days = eq.days.unwrap_or(30);
     let later_page = eq.before.is_some() || eq.skip > 0;
@@ -70,9 +66,28 @@ pub fn events(
         rows.len(),
         if rows.len() == 1 { "event" } else { "events" }
     );
-    layout(
+    // The page's own filters ride along in every chip's form (#589), and
+    // the context rides along in the refine form.
+    let days_s = eq.days.map(|d| d.to_string());
+    let own: Vec<(&str, &str)> = [
+        ("family", eq.family.as_deref()),
+        ("event", eq.event.as_deref()),
+        ("person", eq.person.as_deref()),
+        ("path", eq.path.as_deref()),
+        ("days", days_s.as_deref()),
+        ("sort", eq.sort.as_deref()),
+    ]
+    .into_iter()
+    .filter_map(|(k, v)| Some((k, v?)))
+    .collect();
+    let mut context = kept_filters(f, Ctx::Team, &[]);
+    if f.internal {
+        context.push(("internal".into(), "1".into()));
+    }
+    layout_in(
         "Events",
         Some(p),
+        context_bar_kept(p.id, b, f, "/events", &own, false),
         html! {
             div.heading {
                 div {
@@ -82,11 +97,11 @@ pub fn events(
                         ", last " (days) (if days == 1 { " day" } else { " days" }) ", 100 per page. Times in " (f.tz) "."
                     }
                 }
-                a.button href={ "/p/" (p.id) "/settings/data" } { (icon("down")) "Export" }
+                a.btn href={ "/p/" (p.id) "/settings/data" } { (icon("down")) "Export" }
             }
             form.card.refine method="get" action={ "/p/" (p.id) "/events" } aria-label="Refine the events" {
-                (filter_fields(&envs, b, f))
-                label { "Family "
+                @for (k, v) in &context { input type="hidden" name=(k) value=(v); }
+                label.sm { "Family "
                     select name="family" {
                         option value="" { "All families" }
                         @for (k, label, _) in openlens_engine::FAMILIES {
@@ -97,21 +112,21 @@ pub fn events(
                 label { "Event " input type="text" name="event" value=[eq.event.as_deref()] placeholder="any" maxlength="200"; }
                 label { "User " input type="text" name="person" value=[eq.person.as_deref()] placeholder="any" maxlength="200"; }
                 label { "Page " input type="text" name="path" value=[eq.path.as_deref()] placeholder="/settings" maxlength="200"; }
-                label { "Period "
+                label.sm { "Period "
                     select name="days" {
                         @for (d, l) in [(1, "24 hours"), (7, "7 days"), (30, "30 days"), (90, "90 days")] {
                             option value=(d) selected[days == d] { (l) }
                         }
                     }
                 }
-                label { "Sort "
+                label.sm { "Sort "
                     select name="sort" {
                         option value="time" selected[sort == "time"] { "Newest first" }
                         option value="event" selected[sort == "event"] { "Event name" }
                         option value="person" selected[sort == "person"] { "User" }
                     }
                 }
-                button type="submit" { "Apply" }
+                button.btn.primary type="submit" { "Apply" }
             }
             div.active-filters {
                 span { "Showing" }
@@ -131,7 +146,7 @@ pub fn events(
                     div {
                         h2 { "Nothing matches" }
                         p { "Widen the period or clear a filter." }
-                        @if !active.is_empty() || later_page { p { a.button href=(events_url(p.id, f, &openlens_engine::EventQuery::default(), "")) { "Clear the filters" } } }
+                        @if !active.is_empty() || later_page { p { a.btn href=(events_url(p.id, f, &openlens_engine::EventQuery::default(), "")) { "Clear the filters" } } }
                     }
                 }
             } @else {
@@ -226,5 +241,83 @@ mod tests {
             html.contains("class=\"card refine\"") && html.contains("class=\"card table-card\"")
         );
         assert!(!html.contains("style=") && !html.contains("<script"));
+    }
+
+    /// The `name=value` pairs of the hidden fields of the form whose
+    /// popover or form id/label is `marker`.
+    fn hidden_after(html: &str, marker: &str) -> Vec<(String, String)> {
+        let start = html.find(marker).unwrap();
+        let form = &html[start..start + html[start..].find("</form>").unwrap()];
+        form.split("<input type=\"hidden\" name=\"")
+            .skip(1)
+            .map(|t| {
+                let (k, rest) = t.split_once('"').unwrap();
+                let v = rest.split("value=\"").nth(1).unwrap();
+                (k.to_owned(), v[..v.find('"').unwrap()].to_owned())
+            })
+            .collect()
+    }
+
+    /// The context lives in the top bar's chips (#589): applying one keeps
+    /// the page's own filters, and applying the refine form keeps the
+    /// context.
+    #[test]
+    fn a_chip_keeps_the_page_filters_and_the_refine_form_keeps_the_chips() {
+        let p = ProjectInfo {
+            id: "d",
+            name: "D",
+            key: "k",
+        };
+        let f = Filters {
+            environment: "staging".into(),
+            role: Some("admin".into()),
+            internal: true,
+            tz: "UTC".into(),
+            ..Filters::default()
+        };
+        let eq = openlens_engine::EventQuery {
+            family: Some("error".into()),
+            event: Some("a&b c".into()),
+            person: Some("u 1".into()),
+            path: Some("/billing".into()),
+            days: Some(7),
+            sort: Some("person".into()),
+            limit: 100,
+            ..Default::default()
+        };
+        let html = render(events(&p, &Board::default(), &[], &f, &eq, None));
+        let own = [
+            ("family", "error"),
+            ("event", "a&amp;b c"),
+            ("person", "u 1"),
+            ("path", "/billing"),
+            ("days", "7"),
+            ("sort", "person"),
+        ];
+        for chip in ["id=\"ctx-env\"", "id=\"ctx-role\"", "id=\"ctx-release\""] {
+            let kept = hidden_after(&html, chip);
+            for (k, v) in own {
+                assert!(
+                    kept.iter().any(|(a, b)| a == k && b == v),
+                    "{chip} keeps {k}: {kept:?}"
+                );
+            }
+        }
+        // The team link keeps them too, encoded.
+        let ctx = &html[html.find("class=\"context\"").unwrap()..];
+        let team = ctx
+            .split("class=\"chip")
+            .find(|c| c.contains("Team"))
+            .unwrap();
+        assert!(team.contains("person=u%201") && team.contains("event=a%26b%20c"));
+        // The refine form holds only the page's own fields, plus the
+        // context as hidden fields.
+        let refine = hidden_after(&html, "aria-label=\"Refine the events\"");
+        for (k, v) in [("env", "staging"), ("role", "admin"), ("internal", "1")] {
+            assert!(refine.iter().any(|(a, b)| a == k && b == v), "{k}");
+        }
+        let start = html.find("aria-label=\"Refine the events\"").unwrap();
+        let form = &html[start..start + html[start..].find("</form>").unwrap()];
+        assert!(!form.contains("<select name=\"env\"") && !form.contains("<select name=\"role\""));
     }
 }

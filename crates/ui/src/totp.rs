@@ -108,7 +108,7 @@ pub fn totp_recovery_codes(codes: &[String]) -> Markup {
                 p { "The authenticator app is on. Keep these codes somewhere safe: each one signs you in once if you lose your phone. They are shown only now." }
                 pre.copy { @for c in codes { (c) "\n" } }
                 p.muted.small { "Your other sessions are signed out." }
-                p { a.button href="/me/sign-in" { "Done" } }
+                p { a.btn href="/me/sign-in" { "Done" } }
             }
         },
     )

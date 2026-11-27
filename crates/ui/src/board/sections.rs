@@ -1,27 +1,58 @@
 //! The board's other cards (#543), in the v2 parts: Web Vitals, revenue,
-//! role gaps, funnels, flags and paths to value. Each title opens its
-//! page (#409), plain text on a share link.
+//! role gaps, funnels, flags and paths to value. Since #588 they follow
+//! the release comparison as closed disclosures, so the board reads like
+//! the mockup down to it; each body ends with the link to its page
+//! (#409), left out on a share link.
 
 use crate::*;
 
-/// A card's head: its title, which opens `href`.
-fn head(id: &str, href: &str, title: &str) -> Markup {
+/// A secondary card (#588): a closed disclosure whose summary is the
+/// title and a short hint, and whose body ends with `more`, a link to
+/// the card's page (not on a share link).
+pub(super) fn disclose(
+    id: &str,
+    title: &str,
+    hint: Markup,
+    (href, more): (&str, &str),
+    body: Markup,
+) -> Markup {
     html! {
-        div.section-head { h2 id=(id) { (to(href, title)) } }
+        details.card.disclose.secondary {
+            summary {
+                h2 id=(id) { (title) } // no_detail: a disclosure; its link ends the body
+                (hint)
+                (icon("chev"))
+            }
+            div.body {
+                (body)
+                @if !shared() { p.small { a href=(href) { (more) " →" } } }
+            }
+        }
     }
 }
 
-/// Web Vitals, revenue and role gaps, side by side.
+/// A summary's hint, in muted small text.
+pub(super) fn hint(text: &str) -> Markup {
+    html! { span.muted.small { (text) } }
+}
+
+/// Web Vitals, revenue and role gaps, one disclosure each.
 pub(super) fn others(
     pid: &str,
     f: &Filters,
     b: &Board,
     revenue: Option<&openlens_engine::Revenue>,
 ) -> Markup {
+    let poor = b.vitals.iter().filter(|v| v.rating != "good").count();
+    let vitals_hint = if b.vitals.is_empty() {
+        hint("No measurements yet")
+    } else if poor == 0 {
+        html! { span.tag.tone-good { "All good" } }
+    } else {
+        html! { span.tag.tone-warn { (poor) " to improve" } }
+    };
     html! {
-        div.split {
-            section.card.pad.stack aria-labelledby="wv-h" {
-                (head("wv-h", &detail_url(pid, "/pages", f), "Web Vitals (p75)"))
+        (disclose("wv-h", "Web Vitals (p75)", vitals_hint, (&detail_url(pid, "/pages", f), "Pages"), html! {
                 @if b.vitals.is_empty() { p.muted { "No measurements yet. They arrive when visitors leave a page." } }
                 @else {
                     div.scroll {
@@ -40,24 +71,21 @@ pub(super) fn others(
                         }
                     }
                 }
-            }
-            @if let Some(r) = revenue {
-                section.card.pad.stack aria-labelledby="rev-h" {
-                    (head("rev-h", &detail_url(pid, "/revenue", f), "Revenue, last 30 days"))
-                    table.plain { tbody { @for m in &r.totals {
-                        tr { th scope="row" { (money(m.total, &m.currency)) } td.small.muted { (compact(m.payers)) " payers · " (money(m.per_active_user, &m.currency)) " per active user" } }
-                    } } }
-                    p.small { (row_link(&format!("/p/{pid}/revenue"), "By feature, role and release →")) }
-                }
-            }
-            @if !b.role_gaps.is_empty() {
-                section.card.pad.stack aria-labelledby="gaps-h" {
-                    (head("gaps-h", &detail_url(pid, "/breakdown?by=role", f), "Role gaps"))
-                    p.small { "These raw role values match no role in the feature map, so they are counted apart:" }
-                    p.tag-list { @for (raw, n) in &b.role_gaps { span.tag { code { (raw) } " · " (compact(*n)) " users" } } }
-                    p.muted.small { "Ask your agent to map them under " code { "roles:" } " in openlens.features.yaml." }
-                }
-            }
+        }))
+        @if let Some(r) = revenue {
+            @let total = r.totals.first().map(|m| money(m.total, &m.currency)).unwrap_or_default();
+            (disclose("rev-h", "Revenue, last 30 days", hint(&total), (&detail_url(pid, "/revenue", f), "By feature, role and release"), html! {
+                table.plain { tbody { @for m in &r.totals {
+                    tr { th scope="row" { (money(m.total, &m.currency)) } td.small.muted { (compact(m.payers)) " payers · " (money(m.per_active_user, &m.currency)) " per active user" } }
+                } } }
+            }))
+        }
+        @if !b.role_gaps.is_empty() {
+            (disclose("gaps-h", "Role gaps", html! { span.tag.tone-warn { (b.role_gaps.len()) " unmapped" } }, (&detail_url(pid, "/breakdown?by=role", f), "Break down by role"), html! {
+                p.small { "These raw role values match no role in the feature map, so they are counted apart:" }
+                p.tag-list { @for (raw, n) in &b.role_gaps { span.tag { code { (raw) } " · " (compact(*n)) " users" } } }
+                p.muted.small { "Ask your agent to map them under " code { "roles:" } " in openlens.features.yaml." }
+            }))
         }
     }
 }
@@ -67,9 +95,14 @@ pub(super) fn funnels(pid: &str, f: &Filters, b: &Board) -> Markup {
     if b.funnels.is_empty() {
         return html! {};
     }
-    html! {
-        section.card.pad.stack aria-labelledby="fun-h" {
-            (head("fun-h", &detail_url(pid, "/flows", f), "Funnels"))
+    let n = b.funnels.len();
+    let count = format!("{n} declared {}", if n == 1 { "funnel" } else { "funnels" });
+    disclose(
+        "fun-h",
+        "Funnels",
+        hint(&count),
+        (&detail_url(pid, "/flows", f), "Flows"),
+        html! {
             @for fun in &b.funnels {
                 h3.small { (fun.feature) }
                 div.scroll {
@@ -86,8 +119,8 @@ pub(super) fn funnels(pid: &str, f: &Filters, b: &Board) -> Markup {
                 }
             }
             p.muted.small { "From each feature's declared steps, in order, within a day, last 30 days. Time is the median from the previous step." }
-        }
-    }
+        },
+    )
 }
 
 /// Each recent flag's sessions against everyone else's.
@@ -95,9 +128,14 @@ pub(super) fn flags(pid: &str, f: &Filters, b: &Board) -> Markup {
     if b.flag_cohorts.is_empty() {
         return html! {};
     }
-    html! {
-        section.card.pad.stack aria-labelledby="flags-h" {
-            (head("flags-h", &detail_url(pid, "/flags", f), "Flags: with vs without"))
+    let n = b.flag_cohorts.len();
+    let count = format!("{n} recent {}", if n == 1 { "flag" } else { "flags" });
+    disclose(
+        "flags-h",
+        "Flags: with vs without",
+        hint(&count),
+        (&detail_url(pid, "/flags", f), "Flags"),
+        html! {
             div.scroll {
                 table.plain {
                     thead { tr { th scope="col" { "Flag" } (th_num("Users with / without")) (th_num("Avg session")) (th_num("Tasks / session")) (th_num("Sessions with errors")) (th_def("Confidence")) } }
@@ -114,8 +152,8 @@ pub(super) fn flags(pid: &str, f: &Filters, b: &Board) -> Markup {
                 }
             }
             p.muted.small { "Sessions where the flag was on, against all other sessions, last 30 days." }
-        }
-    }
+        },
+    )
 }
 
 /// Paths to value: what users did just before their first success.
@@ -123,9 +161,12 @@ pub(super) fn journeys(pid: &str, f: &Filters, b: &Board) -> Markup {
     if b.journeys.is_empty() {
         return html! {};
     }
-    html! {
-        section.card.pad.stack aria-labelledby="paths-h" {
-            (head("paths-h", &detail_url(pid, "/flows", f), "Paths to value"))
+    disclose(
+        "paths-h",
+        "Paths to value",
+        hint("What users did just before their first success"),
+        (&detail_url(pid, "/flows", f), "Flows"),
+        html! {
             p.muted.small { "What users did just before reaching each success for the first time (last 30 days)." }
             ul.journeys {
                 @for j in &b.journeys {
@@ -136,8 +177,8 @@ pub(super) fn journeys(pid: &str, f: &Filters, b: &Board) -> Markup {
                     }
                 }
             }
-        }
-    }
+        },
+    )
 }
 
 /// A p-value in words: whether the difference can be trusted yet.
