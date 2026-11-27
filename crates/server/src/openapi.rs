@@ -98,7 +98,7 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "GET",
         "/api/projects/{project}/errors",
         "read",
-        "Error groups.",
+        "Error groups, each with its origin (`server`: raised on a server) and, for a server group, the browser sessions linked to it (`linked`, with `replay` when a recording exists). `origin=browser` or `origin=server` keeps one origin.",
     ),
     (
         "GET",

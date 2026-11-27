@@ -20,6 +20,7 @@ mod maintenance;
 mod map_lookups;
 mod map_shape;
 mod releases;
+mod server_errors;
 mod slo;
 mod status_page;
 mod stored_totals;

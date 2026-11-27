@@ -381,6 +381,11 @@ pub fn prune(root: &Path, project: &str, now: DateTime<Utc>) -> Result<usize> {
     Ok(removed)
 }
 
+/// Whether a recording of `session` exists (an invalid id has none).
+pub fn exists(root: &Path, project: &str, session: &str) -> bool {
+    session_dir(root, project, session).is_ok_and(|d| d.join("info.json").is_file())
+}
+
 /// One recording's owner and all its events in chunk order, as one JSON
 /// array, or `None` if it does not exist.
 pub fn load(root: &Path, project: &str, session: &str) -> Result<Option<(Info, String)>> {
