@@ -46,7 +46,9 @@ pub(crate) const NAV: &[NavGroup] = &[
         icon: "events",
         tabs: &[
             ("/events", "Events", &["Events"]),
-            ("/pages", "Pages", &["Pages", "Heatmap"]),
+            ("/pages", "Pages", &["Pages"]),
+            // The most viewed page's heatmap; Pages links every other one (#592).
+            ("/heatmap", "Heatmap", &["Heatmap"]),
             ("/forms", "Forms", &["Forms"]),
             ("/flows", "Feature flow", &["Feature flow"]),
         ],
@@ -391,7 +393,7 @@ fn shared_layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -
                 (icons::sprite())
                 div.content {
                     header.shared-banner {
-                        span.brand-mark aria-hidden="true" {}
+                        span.blob aria-hidden="true" {}
                         strong { "OpenLens" }
                         @if let Some(p) = project { span.muted { (p.name) } }
                         span.pill { "Read-only view" }
@@ -538,7 +540,7 @@ mod tests {
         assert!(c.contains("href=\"/projects\""));
         assert!(c.contains("href=\"/p/d\""));
         assert!(c.contains("href=\"/p/d/events\">Behaviour"));
-        assert!(c.contains("aria-current=\"page\">Pages"));
+        assert!(c.contains("aria-current=\"page\">Heatmap"));
         let i = Crumbs::of("Storage and backups", None)
             .render()
             .into_string();
@@ -629,7 +631,7 @@ mod tests {
         };
         let html = section_tabs("Heatmap", &p).into_string();
         assert!(html.contains("aria-label=\"Behaviour\""));
-        assert!(html.contains("href=\"/p/default/pages\" aria-current=\"page\""));
+        assert!(html.contains("href=\"/p/default/heatmap\" aria-current=\"page\""));
         assert!(html.contains("href=\"/p/default/forms\""));
         assert!(
             section_tabs("Ask", &p).into_string().is_empty(),
