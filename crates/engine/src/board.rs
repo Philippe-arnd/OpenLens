@@ -545,16 +545,28 @@ pub async fn board_reusing(
                 .collect()
         })
         .unwrap_or_default();
-    let ((mut cards, readiness), journeys, cohorts, funnels, task_times, resurrected, retention) =
-        futures::try_join!(
-            insights::compute(q, project, &card_rows, f, ident, churn, &successes),
-            insights::journeys(q, project, &success_reads, &journey_rows, f, &successes),
-            insights::flag_cohorts(q, project, &src, f),
-            insights::funnels(q, project, &src, f, &funnel_defs),
-            tasks::task_times(q, project, map.map(|(m, _)| m), f, &successes),
-            tasks::resurrected(q, project, &p90, f, churn),
-            tasks::retention(q, project, &p90, f, ident),
-        )?;
+    // The Retention tile's churn rate and median lifetime (#616): the
+    // Churn page's users query, beside the other blocks.
+    let (
+        (mut cards, readiness),
+        journeys,
+        cohorts,
+        funnels,
+        task_times,
+        resurrected,
+        retention,
+        churn_line,
+    ) = futures::try_join!(
+        insights::compute(q, project, &card_rows, f, ident, churn, &successes),
+        insights::journeys(q, project, &success_reads, &journey_rows, f, &successes),
+        insights::flag_cohorts(q, project, &src, f),
+        insights::funnels(q, project, &src, f, &funnel_defs),
+        tasks::task_times(q, project, map.map(|(m, _)| m), f, &successes),
+        tasks::resurrected(q, project, &p90, f, churn),
+        tasks::retention(q, project, &p90, f, ident),
+        crate::churn::line(q, project, map.map(|(m, _)| m), f, &src, ident),
+    )?;
+    b.churn = Some(churn_line);
     b.retention_trend = tasks::retention_trend(&retention);
     b.retention = retention;
     b.task_times = task_times;
@@ -596,5 +608,6 @@ fn sessions_of(r: &Map<String, Value>) -> Sessions {
         bounce_rate: float(r, "bounce_rate"),
         error_rate: float(r, "error_rate"),
         tasks_per_user_day: int(r, "tasks") as f64 / user_days,
+        tasks_per_session: int(r, "tasks") as f64 / int(r, "sessions").max(1) as f64,
     }
 }

@@ -22,6 +22,7 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Map drift | Routes new in the latest release that no feature of the map claims |
 | Counted with | On a feature's releases: the map version in force when the release came out |
 | Production right now | The status strip at the top of the board: the app, the latest release's verdict, open incidents and the setup left, each in a word |
+| Outcomes | On the board: one tile per question (Reach, Value, Retention, Quality, Speed, and Income when there is revenue), each with what it compares with |
 | Period picker | On the board: the form that picks a past release or a date range for the period blocks |
 | Board job | A long period of the board computed in the background after *Run it*: its own page, progress and Cancel, kept an hour for whoever started it |
 | Feature pulse | Per feature: adoption, uses per user, active days, completion and task time |

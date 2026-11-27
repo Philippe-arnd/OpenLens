@@ -40,7 +40,7 @@ fn plain_tile(label: &str, value: Markup, sub: String) -> Markup {
         label,
         Kpi {
             value,
-            spark: html! {},
+            graded: None,
             sub,
             moved: None,
         },

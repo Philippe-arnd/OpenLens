@@ -142,7 +142,7 @@ fn the_board_reads_in_the_mockup_order() {
     let order = [
         r#"class="card lead""#,
         r#"class="card ranked""#,
-        r#"id="kpi-h""#,
+        r#"id="out-h""#,
         r#"id="au-h""#,
         r#"id="fp-h""#,
         "Do they come back?",
@@ -232,6 +232,7 @@ fn full() -> Board {
         bounce_rate: 0.1,
         error_rate: 0.33,
         tasks_per_user_day: 2.0,
+        tasks_per_session: 2.48,
     };
     Board {
         total_events: 100,
@@ -257,6 +258,7 @@ fn full() -> Board {
                     bounce_rate: 0.1,
                     error_rate: 0.03,
                     tasks_per_user_day: 2.0,
+                    tasks_per_session: 2.6,
                 },
             },
             ..BoardWindow::default()
@@ -367,13 +369,13 @@ fn the_first_insight_leads_and_the_others_are_ranked() {
 #[test]
 fn every_kpi_delta_has_a_sign_and_says_what_it_compares_with() {
     let html = page(&full());
-    let tiles = between(&html, r#"id="kpi-h""#, "</section>");
+    let tiles = between(&html, r#"id="out-h""#, "</section>");
     let deltas: Vec<&str> = tiles
         .split(r#"<span class="delta "#)
         .skip(1)
         .map(|s| s.split("</div>").next().unwrap())
         .collect();
-    assert_eq!(deltas.len(), 3, "avg session, tasks, errors: {tiles}");
+    assert_eq!(deltas.len(), 3, "reach, value, quality: {tiles}");
     for d in &deltas {
         assert!(
             d.contains("#i-up") || d.contains("#i-down") || d.contains("#i-right"),
@@ -381,7 +383,7 @@ fn every_kpi_delta_has_a_sign_and_says_what_it_compares_with() {
         );
         assert!(d.contains('+') || d.contains('−'), "a sign: {d}");
         assert!(
-            d.contains("vs the 10 days before") || d.contains("was "),
+            d.contains("vs the 10 days before") || d.contains("was ") || d.contains("v1: "),
             "what it is compared with: {d}"
         );
     }
@@ -397,14 +399,14 @@ fn every_kpi_delta_has_a_sign_and_says_what_it_compares_with() {
     let mut fixed = full();
     fixed.window = None;
     let html = page(&fixed);
-    let tiles = between(&html, r#"id="kpi-h""#, "</section>");
+    let tiles = between(&html, r#"id="out-h""#, "</section>");
     assert!(!tiles.contains(r#"class="delta "#) && !tiles.contains("is-alert"));
 }
 
 #[test]
 fn each_kpi_definition_opens_from_its_button() {
     let html = page(&full());
-    let tiles = between(&html, r#"id="kpi-h""#, "</section>");
+    let tiles = between(&html, r#"id="out-h""#, "</section>");
     let targets: Vec<&str> = tiles
         .split("popovertarget=\"")
         .skip(1)
@@ -474,7 +476,7 @@ fn the_shared_board_hides_what_needs_a_login() {
     let b = full();
     let own = page(&b);
     let shared = shared_page(&b);
-    assert!(shared.contains(&b.insights[0].title) && shared.contains("Key numbers"));
+    assert!(shared.contains(&b.insights[0].title) && shared.contains("Outcomes"));
     for needle in [
         "/tickets/new",
         "Create ticket",
@@ -809,4 +811,161 @@ fn the_ranked_list_shows_four_rows_and_the_rest_on_demand() {
         ..full()
     };
     assert!(!page(&few).contains("Show all"));
+}
+
+/// One tile of the outcomes (#616), found by its definition's label.
+fn outcome<'a>(html: &'a str, label: &str) -> &'a str {
+    between(html, r#"id="out-h""#, "</section>")
+        .split(r#"<div class="kpi-slot">"#)
+        .find(|t| t.contains(&format!("Definition: {label}\"")))
+        .unwrap_or_else(|| panic!("no {label} tile: {html}"))
+}
+
+/// #613: on a window, Reach's headline is the window's active users, not
+/// today's partial day, which comes second and says so.
+#[test]
+fn reach_counts_the_window_and_today_comes_second() {
+    let mut b = full();
+    b.users.dau = 3;
+    b.users.known = 300;
+    b.roles = vec![
+        openlens_engine::RoleUsers {
+            role: Some("member".into()),
+            users: 115,
+        },
+        openlens_engine::RoleUsers {
+            role: None,
+            users: 7,
+        },
+    ];
+    let window = b.window.as_ref().unwrap().current.users;
+    assert_ne!(
+        window, b.users.dau,
+        "the two must differ to tell them apart"
+    );
+    let html = page(&b);
+    let reach = outcome(&html, "Active users");
+    let headline = between(reach, r#"class="kpi-value""#, "</div>");
+    assert!(
+        headline.ends_with(&format!(">{}", compact(window))),
+        "{headline}"
+    );
+    assert!(
+        !headline.ends_with(&format!(">{}", compact(b.users.dau))),
+        "{headline}"
+    );
+    assert!(
+        reach.contains(&format!("{} today, so far", compact(b.users.dau))),
+        "{reach}"
+    );
+    assert!(
+        reach.contains(&format!("of {} known", compact(b.users.known))),
+        "{reach}"
+    );
+    // The role split names the roles, not the users without one.
+    assert!(
+        reach.contains("member: 115") && !reach.contains(": 7"),
+        "{reach}"
+    );
+    assert!(
+        reach.contains("Reach"),
+        "the question as its eyebrow: {reach}"
+    );
+}
+
+/// A tile that compares with nothing shows no arrow (#616): Retention
+/// says its numbers, Speed its grade against the public threshold.
+#[test]
+fn a_tile_without_a_comparison_shows_no_delta() {
+    let mut b = full();
+    let churn = openlens_engine::ChurnLine {
+        window: 14,
+        active_at_start: 185,
+        churned_recent: 41,
+        median_days: Some(19),
+    };
+    b.churn = Some(churn.clone());
+    b.vitals = vec![openlens_engine::Vital {
+        name: "LCP".into(),
+        p75: 4800.0,
+        rating: "poor".into(),
+        samples: 121,
+    }];
+    let html = page(&b);
+    let retention = outcome(&html, "Churn rate");
+    assert!(!retention.contains(r#"class="delta "#), "{retention}");
+    assert!(
+        retention.contains(&pct(churn.rate().unwrap())),
+        "{retention}"
+    );
+    assert!(
+        retention.contains(&format!(
+            "half are gone by day {}",
+            churn.median_days.unwrap()
+        )),
+        "{retention}"
+    );
+    let speed = outcome(&html, "Largest paint p75");
+    let good = openlens_engine::vitals_guide("LCP").unwrap().good;
+    assert!(!speed.contains(r#"class="delta "#), "{speed}");
+    assert!(
+        speed.contains(&format!("good ≤ {} s", good / 1000.0)),
+        "{speed}"
+    );
+    assert!(speed.contains(r#"class="status bad""#), "graded: {speed}");
+    // With nothing measured, a tile says so instead of a zero.
+    b.churn = None;
+    b.vitals.clear();
+    let html = page(&b);
+    for label in ["Churn rate", "Largest paint p75"] {
+        let tile = outcome(&html, label);
+        assert!(!tile.contains(r#"class="delta "#), "{tile}");
+        assert!(tile.contains("—") && !tile.contains("0.0%"), "{tile}");
+    }
+}
+
+/// Revenue is a sixth tile, and only when there is revenue (#616).
+#[test]
+fn revenue_gets_a_tile_only_when_there_is_revenue() {
+    let b = full();
+    let without = page(&b);
+    let r = openlens_engine::Revenue {
+        totals: vec![openlens_engine::Money {
+            currency: "EUR".into(),
+            total: 1200.0,
+            orders: 30,
+            payers: 12,
+            per_active_user: 8.3,
+        }],
+        ..openlens_engine::Revenue::default()
+    };
+    let with = board(&project(), &b, &Filters::default(), "h", &[], Some(&r), &[]).into_string();
+    let slots = |html: &str| {
+        between(html, r#"id="out-h""#, "</section>")
+            .matches(r#"class="kpi-slot""#)
+            .count()
+    };
+    assert_eq!(slots(&with), slots(&without) + 1);
+    assert!(!between(&without, r#"id="out-h""#, "</section>").contains("/revenue"));
+    let tile = outcome(&with, "Revenue");
+    assert!(tile.contains("/p/p1/revenue?"), "{tile}");
+    assert!(tile.contains(&money(1200.0, "EUR")), "{tile}");
+}
+
+/// Each outcome opens its page, the board's filters carried along.
+#[test]
+fn each_outcome_opens_its_page_with_the_board_filters() {
+    let f = Filters {
+        role: Some("admin".into()),
+        ..Filters::default()
+    };
+    let html = board(&project(), &full(), &f, "h", &[], None, &[]).into_string();
+    let tiles = between(&html, r#"id="out-h""#, "</section>");
+    for path in ["/audience", "/features", "/churn", "/errors", "/pages"] {
+        let href = detail_url("p1", path, &f).replace('&', "&amp;");
+        assert!(
+            tiles.contains(&format!(r#"href="{href}""#)),
+            "{path}: {tiles}"
+        );
+    }
 }

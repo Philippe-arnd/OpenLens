@@ -9,12 +9,13 @@
 //! by role), the top reasons ranked with their evidence, and what brought
 //! back the users who returned.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::{NaiveDate, Utc};
 use openlens_featuremap::FeatureMap;
 use openlens_query::QueryEngine;
 use serde::Serialize;
+use serde_json::{Map, Value};
 
 use crate::{Filters, INTERACTION, Result, any_person, identified, int, source, text};
 
@@ -295,6 +296,157 @@ pub fn survival(lives: &[(i64, bool)], at: &[i64]) -> Vec<(i64, f64)> {
         .collect()
 }
 
+/// The churn numbers of the board's Retention tile (#616): the churn
+/// rate and the median lifetime, read with the same users query and the
+/// same rules as [`churn`], so the board and the Churn page agree.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ChurnLine {
+    /// The churn window used (days).
+    pub window: i64,
+    /// Users active at the start of the last window.
+    pub active_at_start: i64,
+    /// Of them, churned since.
+    pub churned_recent: i64,
+    /// Median lifetime in days (Kaplan–Meier), when the curve crosses
+    /// one half.
+    pub median_days: Option<i64>,
+}
+
+impl ChurnLine {
+    /// The churn rate (docs/kpis.md): churned ÷ active at the start; none
+    /// when nobody was active at the start.
+    #[must_use]
+    pub fn rate(&self) -> Option<f64> {
+        (self.active_at_start > 0).then(|| self.churned_recent as f64 / self.active_at_start as f64)
+    }
+}
+
+/// One row per identified user over the window `w`: `distinct_id`,
+/// `role`, `first` and `last` (interactions only), and the active days in
+/// the last churn window `c` (`recent`) and in the one before (`before`).
+fn users_sql(src: &str, w: &str, ident: &str, c: i64) -> String {
+    format!(
+        "SELECT distinct_id, max(role) AS role, CAST(min(timestamp) AS VARCHAR) AS first, \
+         CAST(max(timestamp) AS VARCHAR) AS last, \
+         count(DISTINCT CASE WHEN timestamp >= now() - INTERVAL '{c} days' THEN date END) AS recent, \
+         count(DISTINCT CASE WHEN timestamp < now() - INTERVAL '{c} days' \
+               AND timestamp >= now() - INTERVAL '{c2} days' THEN date END) AS before \
+         FROM {src} WHERE {w} AND {ident} AND {INTERACTION} GROUP BY distinct_id",
+        c2 = 2 * c
+    )
+}
+
+/// The users who sent the map's `churn_event` over the window `w`.
+async fn cancelled(
+    q: &QueryEngine,
+    project: &str,
+    src: &str,
+    w: &str,
+    map: Option<&FeatureMap>,
+) -> Result<HashSet<String>> {
+    let Some(ev) = map.and_then(|m| m.churn_event.as_deref()) else {
+        return Ok(HashSet::new());
+    };
+    let sql = format!(
+        "SELECT DISTINCT distinct_id FROM {src} WHERE {w} AND event = {}",
+        crate::lit(ev)?
+    );
+    Ok(q.sql(project, &sql)
+        .await?
+        .rows
+        .iter()
+        .filter_map(|r| text(r, "distinct_id"))
+        .collect())
+}
+
+/// A user of [`users_sql`]: their first and last active days, the days
+/// since, whether they cancelled, and whether they churned.
+struct Life {
+    id: String,
+    first: NaiveDate,
+    last: NaiveDate,
+    idle: i64,
+    explicit: bool,
+    gone: bool,
+}
+
+/// The user of a [`users_sql`] row, `today`, with the churn window `c`.
+fn life(
+    r: &Map<String, Value>,
+    today: NaiveDate,
+    c: i64,
+    cancelled: &HashSet<String>,
+) -> Option<Life> {
+    let (id, first, last) = (
+        text(r, "distinct_id")?,
+        text(r, "first").as_deref().and_then(day)?,
+        text(r, "last").as_deref().and_then(day)?,
+    );
+    let idle = (today - last).num_days();
+    let explicit = cancelled.contains(&id);
+    Some(Life {
+        id,
+        first,
+        last,
+        idle,
+        explicit,
+        gone: idle > c || explicit,
+    })
+}
+
+/// Active in the window before the last one, which starts at `start`:
+/// counted at its start.
+fn at_start(first: NaiveDate, last: NaiveDate, start: NaiveDate, c: i64) -> bool {
+    first < start && last >= start - chrono::Duration::days(c)
+}
+
+/// The first day the Kaplan–Meier curve of `lives` falls under one half.
+fn median_days(lives: &[(i64, bool)]) -> Option<i64> {
+    let fine: Vec<i64> = (0..=90).collect();
+    survival(lives, &fine)
+        .into_iter()
+        .find(|(_, s)| *s < 0.5)
+        .map(|(d, _)| d)
+}
+
+/// The board's [`ChurnLine`] (#616): the users query of [`churn`] and the
+/// cancellations only, on the board's engine `q` (its parameters set),
+/// source `src` and identified-user condition `ident`.
+pub(crate) async fn line(
+    q: &QueryEngine,
+    project: &str,
+    map: Option<&FeatureMap>,
+    f: &Filters,
+    src: &str,
+    ident: &str,
+) -> Result<ChurnLine> {
+    let w = f.clause(90)?;
+    let c = map.map_or(14, |m| i64::from(m.churn_days()));
+    let users = users_sql(src, &w, ident, c);
+    let (u, cancelled) =
+        futures::join!(q.sql(project, &users), cancelled(q, project, src, &w, map));
+    let cancelled = cancelled?;
+    let today = Utc::now().date_naive();
+    let start = today - chrono::Duration::days(c);
+    let mut out = ChurnLine {
+        window: c,
+        ..ChurnLine::default()
+    };
+    let mut lives = Vec::new();
+    for r in &u?.rows {
+        let Some(l) = life(r, today, c, &cancelled) else {
+            continue;
+        };
+        if at_start(l.first, l.last, start, c) {
+            out.active_at_start += 1;
+            out.churned_recent += i64::from(l.gone);
+        }
+        lives.push(((l.last - l.first).num_days(), l.gone));
+    }
+    out.median_days = median_days(&lives);
+    Ok(out)
+}
+
 /// The churn report of a project.
 pub async fn churn(
     q: &QueryEngine,
@@ -307,15 +459,7 @@ pub async fn churn(
     let w = f.clause(90)?;
     let ident = identified(any_person(q, project).await?);
     let c = map.map_or(14, |m| i64::from(m.churn_days()));
-    let users_sql = format!(
-        "SELECT distinct_id, max(role) AS role, CAST(min(timestamp) AS VARCHAR) AS first, \
-         CAST(max(timestamp) AS VARCHAR) AS last, \
-         count(DISTINCT CASE WHEN timestamp >= now() - INTERVAL '{c} days' THEN date END) AS recent, \
-         count(DISTINCT CASE WHEN timestamp < now() - INTERVAL '{c} days' \
-               AND timestamp >= now() - INTERVAL '{c2} days' THEN date END) AS before \
-         FROM {src} WHERE {w} AND {ident} AND {INTERACTION} GROUP BY distinct_id",
-        c2 = 2 * c
-    );
+    let users_sql = users_sql(&src, &w, ident, c);
     let days_sql = format!(
         "SELECT distinct_id, date, max(release) AS rel, min(feature) AS feat FROM {src} WHERE {w} AND {ident} AND {INTERACTION} \
          GROUP BY distinct_id, date ORDER BY distinct_id, date LIMIT 500000"
@@ -337,13 +481,6 @@ pub async fn churn(
         "SELECT distinct_id, first_value(release ORDER BY timestamp) AS rel FROM {src} \
          WHERE {w} AND {ident} AND release IS NOT NULL GROUP BY distinct_id"
     );
-    let cancel_sql = match map.and_then(|m| m.churn_event.as_deref()) {
-        Some(ev) => Some(format!(
-            "SELECT DISTINCT distinct_id FROM {src} WHERE {w} AND event = {}",
-            crate::lit(ev)?
-        )),
-        None => None,
-    };
     let active_rows = crate::tasks::event_rows(&src, f)?;
     let last_sql = format!(
         "WITH l AS (SELECT distinct_id, max(timestamp) AS t FROM {src} WHERE {w} AND {ident} AND {INTERACTION} GROUP BY distinct_id) \
@@ -366,16 +503,7 @@ pub async fn churn(
         q.sql(project, &friction_sql),
         q.sql(project, &release_sql),
     );
-    let cancelled: std::collections::HashSet<String> = match &cancel_sql {
-        Some(sql) => q
-            .sql(project, sql)
-            .await?
-            .rows
-            .iter()
-            .filter_map(|r| text(r, "distinct_id"))
-            .collect(),
-        None => std::collections::HashSet::new(),
-    };
+    let cancelled = cancelled(q, project, &src, &w, map).await?;
     let today = Utc::now().date_naive();
     let mut out = ChurnReport {
         window: c,
@@ -390,17 +518,18 @@ pub async fn churn(
     let mut leave: HashMap<i64, i64> = HashMap::new();
     let start = today - chrono::Duration::days(c);
     for r in &u?.rows {
-        let (Some(id), Some(first), Some(last)) = (
-            text(r, "distinct_id"),
-            text(r, "first").as_deref().and_then(day),
-            text(r, "last").as_deref().and_then(day),
-        ) else {
+        let Some(Life {
+            id,
+            first,
+            last,
+            idle,
+            explicit,
+            gone,
+        }) = life(r, today, c, &cancelled)
+        else {
             continue;
         };
         out.users += 1;
-        let idle = (today - last).num_days();
-        let explicit = cancelled.contains(&id);
-        let gone = idle > c || explicit;
         out.cancelled += i64::from(explicit);
         churned.insert(id.clone(), gone);
         firsts.insert(id.clone(), first);
@@ -413,8 +542,7 @@ pub async fn churn(
         if first >= start {
             out.new_recent += 1;
         }
-        if first < start && last >= start - chrono::Duration::days(c) {
-            // Active in the window before the last one: counted at its start.
+        if at_start(first, last, start, c) {
             out.active_at_start += 1;
             if gone {
                 out.churned_recent += 1;
@@ -458,13 +586,7 @@ pub async fn churn(
     out.leave_week = lw;
     let points: Vec<i64> = [0, 1, 2, 3, 7, 14, 21, 30, 45, 60, 75, 90].to_vec();
     out.survival = survival(&lives, &points);
-    out.median_days = {
-        let fine: Vec<i64> = (0..=90).collect();
-        survival(&lives, &fine)
-            .into_iter()
-            .find(|(_, s)| *s < 0.5)
-            .map(|(d, _)| d)
-    };
+    out.median_days = median_days(&lives);
     // Gaps between active days → a suggested window; returns after a gap
     // longer than the window in the last 30 days → win-back.
     let mut gaps: Vec<i64> = Vec::new();

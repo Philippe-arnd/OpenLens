@@ -146,3 +146,21 @@ async fn old_files_without_fact_columns_and_new_ones_say_the_same() {
     let q = QueryEngine::new(d.path(), Limits::default());
     assert_eq!(told(&q).await, new, "the text alone");
 }
+
+/// The board's Retention tile (#616) reads the Churn page's numbers: the
+/// same users, the same churned, the same median lifetime.
+#[tokio::test]
+async fn the_board_churn_line_agrees_with_the_churn_page() {
+    let (_d, q) = seed();
+    let f = Filters::default();
+    let page = openlens_engine::churn(&q, "p", None, &f).await.unwrap();
+    let b = openlens_engine::board(&q, "p", &f, None).await.unwrap();
+    let line = b.churn.unwrap();
+    assert!(page.churned_recent > 0, "the seed has users who left");
+    assert_eq!(
+        (line.active_at_start, line.churned_recent, line.median_days),
+        (page.active_at_start, page.churned_recent, page.median_days)
+    );
+    let rate = line.rate().unwrap();
+    assert!(rate > 0.0 && rate <= 1.0, "{rate}");
+}
