@@ -4,6 +4,8 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-27
+
 ### Added
 
 - **Features touched by each release** (#576): each release read from GitHub has its changed files matched once, by the hourly pass, against the code paths of the feature map in force for it, and the result is kept (at most 100 features per release). The release verdict judges and lists the touched features first, with the same thresholds; the Releases page's notes, `releases.list`, `release_report` (MCP) and `releases.notes` show them with the files in no feature ("3 changed files match no feature"), or say that the map declares no code paths yet (`openlens-cli rules`). A feature's Releases tab and `feature_context` list the releases that changed it.
@@ -558,7 +560,8 @@ These changes concern instances that ran pre-release builds:
 - Every input is treated as hostile: bounded sizes, a rejection list per event, no `unwrap`/`panic` in production code, and read-only SQL scoped to one project with time, memory and row caps.
 - HMAC session cookies (`HttpOnly`, `SameSite=Lax`), and origin checks on dashboard forms.
 
-[Unreleased]: https://github.com/Philippe-arnd/OpenLens/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/Philippe-arnd/OpenLens/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/Philippe-arnd/OpenLens/compare/v0.6.1...v0.7.0
 [0.6.0]: https://github.com/Philippe-arnd/OpenLens/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Philippe-arnd/OpenLens/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Philippe-arnd/OpenLens/compare/v0.3.0...v0.4.0
