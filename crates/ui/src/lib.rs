@@ -13,6 +13,7 @@ mod announcements;
 mod audience;
 mod board;
 mod board_job;
+mod capacity;
 mod check_ins;
 mod components;
 mod cost;

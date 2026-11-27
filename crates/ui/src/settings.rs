@@ -86,6 +86,9 @@ pub struct StorageView {
     pub cold_blocked: Option<String>,
     /// Days whose only copy is on S3 now.
     pub cold_days: usize,
+    /// What the disk allows (#632): the engine's `capacity.get`, or why
+    /// it failed.
+    pub capacity: Result<openlens_engine::capacity::Capacity, String>,
     /// After an action.
     pub notice: Option<String>,
     /// After a failed action.
@@ -701,8 +704,8 @@ pub(crate) fn shown_path(path: &str, data_dir: &str) -> String {
     }
 }
 
-/// Settings → Storage and backups (#218, #551): the S3 copy as a form
-/// card, the cold tier in its own card, the backup plan as a form card
+/// Settings → Storage and backups (#218, #551): what the disk allows
+/// (#632), the S3 copy as a form card, the cold tier in its own card, the backup plan as a form card
 /// and its runs as a table, then how to restore. Local paths are printed
 /// from the data directory's name on, never in full.
 pub fn storage(v: &StorageView) -> Markup {
@@ -731,6 +734,7 @@ pub fn storage(v: &StorageView) -> Markup {
             }
             @if let Some(n) = &v.notice { p.notice role="status" { (n) } }
             @if let Some(e) = &v.error { p.alert role="alert" { (e) } }
+            (crate::capacity::card(&v.capacity))
             form.card.wide.form-card method="post" action="/settings/storage/s3" aria-labelledby="s3-h" {
                 div.section-head {
                     h2 #s3-h { (icon("layers")) "S3-compatible copy" }

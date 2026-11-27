@@ -220,6 +220,9 @@ fn storage_view(data_dir: &str) -> StorageView {
         cold_from_env: false,
         cold_blocked: None,
         cold_days: 0,
+        capacity: Ok(openlens_engine::capacity::derive(
+            &openlens_engine::capacity::Inputs::default(),
+        )),
         notice: None,
         error: None,
     }
@@ -241,6 +244,70 @@ fn the_storage_page_never_prints_the_full_data_path() {
         crate::settings::shown_path("/home/alice/backups", dir),
         "…/backups"
     );
+}
+
+#[test]
+fn the_capacity_card_prints_the_engines_reasons_or_why_the_floors_apply() {
+    use openlens_engine::capacity::{Inputs, ProjectUse, Usage, Volume, derive};
+    let esc = |t: &str| maud::html! { (t) }.into_string();
+    let page = |c: &openlens_engine::capacity::Capacity| {
+        let mut v = storage_view("/srv/openlens-data");
+        v.capacity = Ok(c.clone());
+        let html = storage(&v).into_string();
+        csp_clean(&html);
+        // Every value's reason, as the engine gives it.
+        for cap in [
+            &c.replays_per_day,
+            &c.replay_retention_days,
+            &c.event_retention_days,
+            &c.stats_window,
+        ] {
+            assert!(html.contains(&esc(&cap.reason)), "{}\n{html}", cap.reason);
+        }
+        assert!(html.contains(&esc(&c.budget_source)), "{html}");
+        html
+    };
+    // The volume cannot be read: one line says the floors apply and why,
+    // and the budget is not shown as zero.
+    let floors = derive(&Inputs::default());
+    assert!(!floors.derived);
+    let html = page(&floors);
+    assert!(html.contains("The floors apply"), "{html}");
+    assert!(html.contains(&esc(&floors.reason)), "{html}");
+    assert!(html.contains("not known yet") && !html.contains(">0 kB<"), "{html}");
+    // A measured disk: the values follow it, the floors line goes, and an
+    // override is named next to the budget.
+    let gb = 1_000_000_000u64;
+    let project = ProjectUse {
+        project: "p".into(),
+        event_bytes: 20 * gb,
+        replay_bytes: 9 * gb,
+        event_bytes_per_day: 50_000_000,
+        replay_bytes_per_day: 300_000_000,
+        replay_bytes_per_recording: 1_000_000,
+        stats: None,
+    };
+    let derived = derive(&Inputs {
+        volume: Some(Volume {
+            available: 1_500 * gb,
+            total: 2_000 * gb,
+        }),
+        usage: Some(Usage {
+            used: 29 * gb,
+            upgrade_copy: 0,
+            projects: vec![project],
+            measured_at: "2026-11-27T10:00:00+00:00".into(),
+        }),
+        budget_override: Some("40%".into()),
+    });
+    assert!(derived.derived, "{}", derived.reason);
+    let html = page(&derived);
+    assert!(!html.contains("The floors apply"), "{html}");
+    assert!(html.contains("set by environment"), "{html}");
+    // A failed command says so instead of an empty card.
+    let mut v = storage_view("/srv/openlens-data");
+    v.capacity = Err("no disk here".into());
+    assert!(storage(&v).into_string().contains("no disk here"));
 }
 
 #[test]
