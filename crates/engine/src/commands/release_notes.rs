@@ -1,4 +1,4 @@
-//! A release's notes from the git host (#574, D-092): the merged pull
+//! A release's notes from the git host (#574, D-093): the merged pull
 //! requests of its commit range grouped plainly, the range's counts and
 //! the matching tag, or why they are not there. The reads themselves are
 //! the hourly pass of [`crate::release_git`]; this command only reads

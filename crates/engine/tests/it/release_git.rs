@@ -1,4 +1,4 @@
-//! The git host link, read side (#574, D-092): a release recorded with
+//! The git host link, read side (#574, D-093): a release recorded with
 //! its range is read from GitHub once, by the hourly pass, and its notes
 //! are then served from the store; GitHub's answers are bounded; a
 //! failing GitHub is retried a few times, then given up.

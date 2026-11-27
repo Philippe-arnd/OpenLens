@@ -1,4 +1,4 @@
-//! The git host link, read side (#574, part of #237, D-092): for each
+//! The git host link, read side (#574, part of #237, D-093): for each
 //! release recorded with its commit range (`from..commit`, D-066), the
 //! commits of the range, the merged pull requests they belong to, the
 //! files they changed and the tag or GitHub release named like it, read

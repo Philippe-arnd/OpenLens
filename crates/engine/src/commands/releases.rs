@@ -7,7 +7,7 @@
 //! D-067): `releases.list` carries it with its reasons, `releases.report`
 //! the whole comparison of one release ([`crate::verdict`]).
 //!
-//! Both carry the release notes the git host gave (#574, D-092):
+//! Both carry the release notes the git host gave (#574, D-093):
 //! `releases.list` those of the newest releases recorded with a range,
 //! `releases.report` the release's own, or why they are not there.
 

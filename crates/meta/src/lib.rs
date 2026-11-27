@@ -80,7 +80,7 @@ pub mod maintenance;
 mod projects;
 /// The feature map version each release shipped with (#483).
 pub mod release_maps;
-/// What the git host said about each recorded release (#574, D-092).
+/// What the git host said about each recorded release (#574, D-093).
 pub mod release_reads;
 /// Automatic release names per build fingerprint (#495).
 pub mod releases;

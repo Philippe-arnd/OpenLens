@@ -1,4 +1,4 @@
-//! The release notes card of the Releases page (#574, D-092): for the
+//! The release notes card of the Releases page (#574, D-093): for the
 //! newest releases recorded with a commit range, the merged pull requests
 //! the git host gave, grouped Added, Fixed, Changed, with "and K more";
 //! or why there are none. From `releases.list`'s notes.

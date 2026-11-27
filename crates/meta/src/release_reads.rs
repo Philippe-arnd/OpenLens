@@ -1,4 +1,4 @@
-//! What the git host said about each recorded release (#574, D-092): the
+//! What the git host said about each recorded release (#574, D-093): the
 //! commits of its range, the merged pull requests they belong to, the
 //! files they changed and the matching tag, read once by a background
 //! pass and kept here, so the Releases page, `release_report` and the
@@ -7,7 +7,7 @@
 //! One row per (project, environment, release) in `release_reads`, with
 //! the range it was read for and how the reads went; its commits, pull
 //! requests and files in three child tables. The caller bounds what it
-//! stores (D-092). No author is kept: not their name, login or email.
+//! stores (D-093). No author is kept: not their name, login or email.
 //! A row goes when its release has no deploy left (deploys are cut at
 //! [`crate::deploys::MAX_DEPLOYS`] per project).
 
