@@ -15,6 +15,7 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Time in staging | On the Releases page: from a build's first event in staging to its first in production |
 | Release verdict | On the Releases page: healthy, regressed or inconclusive, a release against the one before it |
 | Server routes | On the Errors page and in `routes`: requests, 5xx share and response times per server route template, from the server SDK |
+| Runtime health | In `runtime` and `release_report`: process restarts per day, memory (RSS) and event-loop delay per release, from the Node SDK |
 | Key action | A server route a feature of the map declares under `server:`; its regression is named in the verdict and its alert is urgent |
 | Deploy hook | The project's secret URL that platforms post their deploy notifications to |
 | Delivery | On the Releases page: deploy frequency, lead time, change failure rate and time to restore per environment |
@@ -36,3 +37,4 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Availability target | One per environment over a rolling 30 days; with it, the error budget (downtime it allows), what is spent and left, and the burn rate |
 | Status page | The public, read-only page of a project at `/status/<slug>`: its state, components, 90 daily bars, announcements and planned maintenance |
 | Component | A line of the status page: production or a monitored environment, under a public name |
+| Job check-ins | On Uptime: cron and background jobs that report each run; OpenLens learns how often they run and alerts when one is missed, fails or gets slower |

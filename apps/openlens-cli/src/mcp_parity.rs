@@ -20,6 +20,7 @@ const TOOL_OF: &[(&str, &str)] = &[
     ("releases.report", "release_report"),
     ("releases.delivery", "delivery"),
     ("routes.list", "routes"),
+    ("runtime.list", "runtime"),
     ("tickets.list", "tickets"),
     ("tickets.draft", "create_ticket"),
     ("tickets.file", "create_ticket"),
@@ -76,6 +77,11 @@ const TOOL_OF: &[(&str, &str)] = &[
     ("status_page.get", "status_page"),
     ("status_page.set", "status_page_set"),
     ("status_page.public", "status_page"),
+    // Job check-ins (#609).
+    ("jobs.list", "jobs"),
+    ("jobs.check_in", "check_in"),
+    ("jobs.remove", "job_set"),
+    ("jobs.set_availability", "job_set"),
 ];
 
 /// Commands deliberately without an MCP tool, each with its reason.

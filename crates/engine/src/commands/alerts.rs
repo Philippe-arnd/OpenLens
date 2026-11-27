@@ -244,7 +244,8 @@ pub struct Uptime {
     /// The address the probe asks for, when the probe is on.
     pub url: Option<String>,
     /// Share of successful checks over the last day and week, the checks
-    /// during planned maintenance of production left out (#563, D-076).
+    /// during planned maintenance of production left out (#563, D-076);
+    /// with the project's switch on, job check-ins counted too (#609).
     pub avail: (Option<f64>, Option<f64>),
     /// Seconds of planned maintenance of production left out of the
     /// availability of the last day and week.
@@ -300,8 +301,16 @@ impl Command for GetUptime {
         let incident_windows = meta
             .maintenance_windows(&p.id, now - 30 * 86400, now)
             .unwrap_or_default();
-        let share = |v: &[&Check]| {
-            (!v.is_empty()).then(|| v.iter().filter(|c| c.1).count() as f64 / v.len() as f64)
+        // Job check-ins count only when the project says so (#609, D-086).
+        let jobs_on = super::jobs::in_availability(meta, &p.id);
+        let share = |v: &[&Check], since: i64| {
+            let (mut good, mut total) = (v.iter().filter(|c| c.1).count(), v.len());
+            if jobs_on {
+                let (g, t) = super::jobs::availability_counts(meta, &p.id, since);
+                good += g;
+                total += t;
+            }
+            (total > 0).then(|| good as f64 / total as f64)
         };
         let mut ms: Vec<i64> = day.iter().filter_map(|c| c.3).collect();
         ms.sort_unstable();
@@ -316,7 +325,7 @@ impl Command for GetUptime {
         Ok(Uptime {
             status: st,
             url,
-            avail: (share(&day), share(&week_refs)),
+            avail: (share(&day, now - 86400), share(&week_refs, now - 7 * 86400)),
             maintenance_left_out: (
                 overlap_seconds(&windows, PRODUCTION, now - 86400, now),
                 overlap_seconds(&windows, PRODUCTION, now - 7 * 86400, now),
@@ -445,6 +454,9 @@ fn label(rule: &str) -> &'static str {
         r if r.starts_with("route:") => "has a failing route",
         "budget_spent" => "has spent its error budget",
         "budget_burn" => "is burning its error budget fast",
+        r if r.starts_with("job:") && r.ends_with(":missed") => "has a job that did not run",
+        r if r.starts_with("job:") && r.ends_with(":failed") => "has a job that failed",
+        r if r.starts_with("job:") && r.ends_with(":slower") => "has a job running slower",
         _ => "has a problem",
     }
 }
@@ -617,6 +629,8 @@ pub async fn track_at<H: Host>(host: &H, project: &str, name: &str, seen: &Seen<
             } else if notified
                 && !rule.starts_with("insight:")
                 && !budget(rule)
+                // A job's incident is announced once (#609, D-086).
+                && !rule.starts_with("job:")
                 && m.incident_last_notified(id)
                     .ok()
                     .flatten()
@@ -880,7 +894,7 @@ pub async fn traffic_stopped(query: &QueryEngine, project: &str) -> Option<(bool
         "SELECT min(date) AS first, \
          count(CASE WHEN date < '{today}' AND date_part('hour', timestamp) = {h} AND date_part('dow', timestamp) = {dow} THEN 1 END) AS same, \
          CAST(max(timestamp) AS VARCHAR) AS last \
-         FROM raw_events WHERE date >= '{since}' AND environment <> 'bot' AND event <> '$request_stats'"
+         FROM raw_events WHERE date >= '{since}' AND environment <> 'bot' AND event NOT IN ('$request_stats', '$runtime_stats')"
     );
     let r = query.sql(project, &sql).await.ok()?;
     let row = r.rows.first()?;

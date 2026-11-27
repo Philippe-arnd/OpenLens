@@ -2,6 +2,8 @@
 //!
 //! Only dev-dependencies may use this crate (`cargo xtask layers`).
 
+pub mod otlp;
+
 /// Hostile JSON bodies for `/capture`. Every crash fix adds its input here.
 pub fn hostile_capture_bodies() -> Vec<Vec<u8>> {
     let deep = format!(
@@ -94,6 +96,57 @@ pub fn hostile_slugs() -> Vec<String> {
         "' OR 1=1 --".into(),
         "a".repeat(41),
         "b".repeat(10_000),
+    ]
+}
+
+/// Hostile job slugs for job check-ins (#609): what a broken script or a
+/// scan sends as `/check-in/<key>/<slug>`. Path tricks, encoded
+/// separators, a colon (which would split the incident rule), uppercase,
+/// Unicode look-alikes, control characters, markup, and lengths past the
+/// 64 allowed. None is a valid slug; none reaches the store.
+pub fn hostile_job_slugs() -> Vec<String> {
+    vec![
+        "../etc/passwd".into(),
+        "..".into(),
+        "a/b".into(),
+        "a%2Fb".into(),
+        "a%00b".into(),
+        "nul\u{0000}byte".into(),
+        "job:missed".into(),
+        "nightly.export".into(),
+        "Nightly-Export".into(),
+        "with space".into(),
+        "tab\there".into(),
+        "ſlug".into(),
+        "jоb".into(),
+        "é".into(),
+        "<script>".into(),
+        "' OR 1=1 --".into(),
+        "a".repeat(65),
+        "b".repeat(10_000),
+    ]
+}
+
+/// Hostile query strings for a job check-in (#609): a status that is
+/// neither `ok` nor `error`, a repeated field, negative, fractional, huge
+/// and non-numeric durations and gaps, and gaps out of bounds. Each one
+/// is refused and records nothing.
+pub fn hostile_check_in_queries() -> Vec<String> {
+    vec![
+        "status=maybe".into(),
+        "status=OK".into(),
+        "status=ok&status=error".into(),
+        "status=%00".into(),
+        "ms=-1".into(),
+        "ms=abc".into(),
+        "ms=1.5".into(),
+        "ms=99999999999999999999".into(),
+        "ms=604800001".into(),
+        "expectEvery=5".into(),
+        "expectEvery=-60".into(),
+        "expectEvery=1e9".into(),
+        "expectEvery=2678401".into(),
+        format!("status={}", "x".repeat(10_000)),
     ]
 }
 

@@ -72,6 +72,8 @@ pub use identity::{Identified, IdentityTables, PersonIdentity};
 pub use projects::Seen;
 /// Deploys reported by the deploy hook, and its secret (#504).
 pub mod deploys;
+/// Job check-ins: cron and background jobs and their last runs (#609).
+pub mod jobs;
 /// Planned maintenance windows (#563, D-076).
 pub mod maintenance;
 /// Read-only connections next to the writer (#344).
@@ -626,6 +628,7 @@ impl Meta {
         migrate(&conn)?;
         conn.execute_batch(announcements::SCHEMA)?;
         conn.execute_batch(status_page::SCHEMA)?;
+        conn.execute_batch(jobs::SCHEMA)?;
         let readers = (0..READERS)
             .map(|_| {
                 let r = Connection::open_with_flags(
@@ -665,6 +668,7 @@ impl Meta {
         migrate(&conn)?;
         conn.execute_batch(announcements::SCHEMA)?;
         conn.execute_batch(status_page::SCHEMA)?;
+        conn.execute_batch(jobs::SCHEMA)?;
         Ok(Self {
             conn: Mutex::new(conn),
             readers: Vec::new(),

@@ -49,14 +49,14 @@ $ol->capture((string) $user->id, 'invoice_sent'); // sent at the end of the requ
 
 PHP has no background thread: events are sent when 50 are queued and at the end of the request. Under PHP-FPM, that happens after the response if the app calls `fastcgi_finish_request()`.
 
-## Server errors and route stats (Node)
+## Server errors, route stats and runtime health (Node)
 
 ```js
 import express from "express";
 import { OpenLens } from "@openlens/node";
 const ol = new OpenLens({ host: process.env.OPENLENS_HOST, key: process.env.OPENLENS_KEY });
 const app = express();
-app.use(ol.express({ user: (req) => req.user?.id })); // first: route stats + trace context
+app.use(ol.express({ user: (req) => req.user?.id })); // first: route stats, runtime health, trace context
 // … routes …
 app.use(ol.expressErrors()); // last: reports the error, then next(err)
 ol.captureUncaught(); // optional: crashes and unhandled rejections
@@ -66,7 +66,81 @@ ol.captureUncaught(); // optional: crashes and unhandled rejections
 - **Errors:** `ol.captureException(err, { distinctId, route })` anywhere else. A server error is grouped with the other errors, alerted on, and judged per release.
 - **Session link:** the browser SDK adds one header, `x-openlens-session`, to requests to its own origin, so a server error carries the session and its replay. An API on another origin needs `traceOrigins: ["https://api.example.com"]` in the browser config, and its CORS must allow that header. No user id travels in a header: pass `user` to `express()`.
 - **OpenTelemetry:** OpenLens reads W3C trace context and never writes it. When the app's own OpenTelemetry sends `traceparent`, the trace id lands on server errors and failed requests as `trace_id`, so you can open the same request in your tracing tool. OpenLens adds no `traceparent` and no `baggage`: your server keeps its own sampling, and nothing of OpenLens is forwarded to other services.
+- **Runtime health:** `express()` also sends `$runtime_stats` (other frameworks call `ol.captureRuntime()` once at start-up). At start, one event with `process.start: true`, sent by the next flush; then, every 10-minute window, one event with OpenTelemetry's runtime names: `nodejs.eventloop.delay.p50` and `.p99` (seconds, from `perf_hooks.monitorEventLoopDelay`, reset each window), and the window's largest `process.memory.usage` (RSS) and `v8js.memory.heap.used` (bytes), sampled on each flush. No new timer, nothing keeps the process alive, `shutdown()` sends the open window. A release's verdict turns regressed only when its process restarts per day go up significantly (a crash loop); memory and loop delay are shown per release, never judged. There is no switch to turn it off: it costs one small event per process every 10 minutes (D-087).
 - **Release:** keep the same release name on both sides. Both SDKs read the host's commit (`SOURCE_COMMIT` on Coolify) when `release` is not set.
-- **Volume:** a server sends one batch every 5 s and one stats event per route and status code every 10 minutes, far below the capture limits, whatever the traffic.
+- **Volume:** a server sends one batch every 5 s and one stats event per route and status code every 10 minutes (and one runtime event per process), far below the capture limits, whatever the traffic.
 
 Use the same `distinct_id` as the browser SDK's `identify()`, so server and browser events belong to the same person. Success events sent from the server count for the feature map like any other event.
+
+## Job check-ins
+
+A cron job, a queue worker or a nightly export that stops running sends no request and raises no error. Make it check in at the end of each run, and OpenLens alerts on the project's channels when a run is **missed** (no check-in for 1.5 times its usual gap), **failed** (the check-in said `error`) or **slower** (twice its usual duration or more). Each alert is sent once and closes with the next check-in that clears it. The jobs are listed on the Uptime page.
+
+From a shell script or a crontab line:
+
+```sh
+0 3 * * * /opt/app/export.sh && curl -fsS -X POST "https://lens.example.com/check-in/$OPENLENS_KEY/nightly-export"
+# a failure, with the run's duration in milliseconds:
+curl -fsS -X POST "https://lens.example.com/check-in/$OPENLENS_KEY/nightly-export?status=error&ms=81234"
+```
+
+From a server SDK (the key travels in the `X-OpenLens-Key` header, `POST /check-in/<slug>`):
+
+```js
+await ol.checkIn("nightly-export", { status: "ok", ms: Date.now() - started });
+```
+
+```python
+ol.check_in("nightly-export", status="ok", ms=elapsed_ms)
+```
+
+```go
+ol.CheckIn(ctx, "nightly-export", openlens.CheckInOptions{Duration: time.Since(start)})
+```
+
+```ruby
+OL.check_in("nightly-export", status: "ok", ms: elapsed_ms)
+```
+
+```php
+$ol->checkIn('nightly-export', ['status' => 'ok', 'ms' => $elapsedMs]);
+```
+
+- **Schedule:** learned, no cron expression to type: the median gap between the last check-ins, once there are four. One long pause or a manual rerun does not move it. To give it instead, add `expectEvery` (seconds, 10 to 31 days) to a check-in (`expect_every` in Python and Ruby, `ExpectEvery` in Go); `expectEvery=0` goes back to learning.
+- **Slug:** 1 to 64 lowercase letters, digits, `_` or `-`. One check-in per job every 10 seconds (a 429 with `Retry-After` beyond); at most 200 jobs per project (remove one on the Uptime page).
+- **Never in the way:** the SDK call is sent at once, returns false on any error and never throws. The `curl` line's `-f` makes a refused check-in fail the cron line, so the cron's own mail shows it.
+- **Key in the path:** the `curl` form puts the project key in the URL. OpenLens never logs it, but a reverse proxy in front may: prefer the header form (`curl -H "X-OpenLens-Key: $OPENLENS_KEY" -X POST https://lens.example.com/check-in/nightly-export`) when your proxy logs paths.
+- **Availability:** jobs are not counted in the Uptime page's availability unless an admin ticks *Count jobs in availability* on the Jobs card. Then each check-in counts as a check and each missed run as a failed one, in the last 24 hours and 7 days.
+
+## Already on OpenTelemetry
+
+An app whose server already exports OpenTelemetry metrics needs no OpenLens SDK for its route stats: point an OTLP/HTTP exporter at OpenLens with one header, the project key. OpenLens reads the `http.server.request.duration` histogram (method, route template, status code) and stores each data point as the Node SDK's route stats, so the routes table, the verdict and the alerts work the same. Resource `service.version` is the release and `deployment.environment.name` the environment. Metrics only: no spans, no traces.
+
+With an OpenTelemetry Collector (protobuf and gzip, its defaults):
+
+```yaml
+exporters:
+  otlp_http/openlens:          # `otlphttp` in older Collectors
+    endpoint: https://lens.example.com   # /v1/metrics is appended
+    headers:
+      x-openlens-key: pk_your_project_key
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      exporters: [otlp_http/openlens]
+```
+
+With the Node SDK's `@opentelemetry/exporter-metrics-otlp-http` (JSON), through the standard variables:
+
+```sh
+OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=https://lens.example.com/v1/metrics
+OTEL_EXPORTER_OTLP_METRICS_HEADERS=x-openlens-key=pk_your_project_key
+OTEL_RESOURCE_ATTRIBUTES=service.version=$GIT_SHA,deployment.environment.name=production
+OTEL_SEMCONV_STABILITY_OPT_IN=http   # HTTP instrumentations that still emit the old http.server.duration
+```
+
+- **Both temporalities:** cumulative (every SDK's default) and delta. For cumulative points OpenLens stores the difference with the last point it saw; an app restart (a new start time) starts over, and a retried export adds nothing.
+- **Any bucket bounds:** OpenTelemetry's defaults are read as they are; other bounds are folded into them by upper bound, so p95 is never under-reported. Units `s` and `ms` both work.
+- **Everything else is dropped and counted:** other metrics (including `http.client.request.duration`, for now) come back in the response's `partialSuccess.rejectedDataPoints`. A data point needs `http.route`.
+- **Limits:** 4 MB per request and 10,000 data points; the capture rate limits apply (one data point counts as one event). OTLP over gRPC is not served: let the Collector convert.

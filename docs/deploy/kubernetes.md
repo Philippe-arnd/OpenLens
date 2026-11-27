@@ -171,4 +171,4 @@ The chart's defaults:
 - no Linux capabilities, seccomp `RuntimeDefault`, and no service-account token;
 - probes on `/healthz`.
 
-The capture endpoint must be public for browsers. Behind the Ingress it is rate-limited per client address and per project key (`429` with `Retry-After`, which the SDK honours); keep `X-Forwarded-For` set by the Ingress. The dashboard and the API are protected by the token, by sessions and by optional OIDC. If you put a WAF or an auth proxy in front, exempt `/capture`, `/flags`, `/r`, `/c.js`, `/r.js` and `/s.js`, or the SDK stops reporting.
+The capture endpoint must be public for browsers. Behind the Ingress it is rate-limited per client address and per project key (`429` with `Retry-After`, which the SDK honours); keep `X-Forwarded-For` set by the Ingress. The dashboard and the API are protected by the token, by sessions and by optional OIDC. If you put a WAF or an auth proxy in front, exempt `/capture`, `/flags`, `/r`, `/c.js`, `/r.js` and `/s.js` (and `/v1/metrics` if apps send OpenTelemetry metrics), or the SDK stops reporting.

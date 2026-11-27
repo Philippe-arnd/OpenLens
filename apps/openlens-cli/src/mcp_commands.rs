@@ -110,6 +110,11 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
             input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"days":{"type":"integer","minimum":1,"maximum":90}}))}),
         },
         ToolSpec {
+            name: "runtime",
+            description: "Runtime health of the app's server per release in one environment (production unless env), from the Node SDK (on with its Express middleware, or `captureRuntime()`), newest first: process starts and restarts (starts more than 30 minutes after the release's first runtime event), restarts per day, the largest RSS and heap used in bytes, the median of the 10-minute windows' event-loop delay p50 and p99 in ms, and next to the release before: RSS growth (0.25 = 25 % more) and its `restarts` check. Only restarts per day are judged: significantly up, at least twice and 5 more per day, makes a release's verdict regressed (a crash loop); memory and loop delay are shown, never judged. `release_report` carries the same as `runtime`. Empty, with a note, until the SDK sends runtime stats.",
+            input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"}}))}),
+        },
+        ToolSpec {
             name: "delete_goal",
             description: "Remove a goal (its id from `goals`). Objectives that used it as a key result keep the others.",
             input_schema: json!({"type":"object","properties":with(json!({"goal":{"type":"string"}})),"required":["goal"]}),
@@ -166,6 +171,29 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
             input_schema: json!({"type":"object","properties":with(json!({
                 "before":{"type":"integer"},
                 "limit":{"type":"integer","minimum":1,"maximum":100}
+            }))}),
+        },
+        ToolSpec {
+            name: "jobs",
+            description: "Cron and background jobs that check in (POST /check-in/<key>/<slug>, or checkIn in a server SDK): per job its state (learning, ok, missed: no check-in for 1.5 times its usual gap, failed: its last check-in said error, slower: its last run took twice its usual time or more), last check-in, status and duration, the gap expected (declared with expectEvery, or learned: the median gap once there are 3), when it counts as missed, and its usual duration; and whether jobs count in availability. Missed, failed and slower open incidents (job:<slug>:missed|failed|slower) announced once on the alert channels.",
+            input_schema: json!({"type":"object","properties":proj()}),
+        },
+        ToolSpec {
+            name: "check_in",
+            description: "Record a check-in of a job (slug: 1 to 64 of a-z, 0-9, _ and -) as its cron would: status ok (default) or error, ms (its duration), expect_every (seconds between runs, 10 to 31 days, instead of learning it; 0 learns again). One per job every 10 seconds; at most 200 jobs per project.",
+            input_schema: json!({"type":"object","properties":with(json!({
+                "slug":{"type":"string","maxLength":64},
+                "status":{"type":"string","enum":["ok","error"]},
+                "ms":{"type":"integer","minimum":0},
+                "expect_every":{"type":"integer","minimum":0}
+            })),"required":["slug"]}),
+        },
+        ToolSpec {
+            name: "job_set",
+            description: "Change the jobs of a project: in_availability (true or false: count check-ins and missed runs in the Uptime page's 24-hour and 7-day availability; off by default), and/or remove (a job's slug: forget it and its check-ins, its open incidents close without a message).",
+            input_schema: json!({"type":"object","properties":with(json!({
+                "in_availability":{"type":"boolean"},
+                "remove":{"type":"string"}
             }))}),
         },
         ToolSpec {
@@ -287,6 +315,44 @@ fn alert_set(c: &Client, args: &Value) -> Result<Value, String> {
     Ok(json!({ "changed": changed, "test": tested }))
 }
 
+fn check_in(c: &Client, args: &Value) -> Result<Value, String> {
+    let slug = required(args, "slug")?;
+    let body = json!({
+        "status": s(args, "status"),
+        "ms": args.get("ms").and_then(Value::as_i64),
+        "expect_every": args.get("expect_every").and_then(Value::as_i64),
+    });
+    let path = at(args, &format!("/jobs/{}/check-in", enc(&slug)));
+    send(c, "POST", &path, Some(body))
+}
+
+fn job_set(c: &Client, args: &Value) -> Result<Value, String> {
+    let on = args.get("in_availability").and_then(Value::as_bool);
+    let remove = s(args, "remove");
+    if on.is_none() && remove.is_none() {
+        return Err("give in_availability, remove or both".into());
+    }
+    let availability = match on {
+        Some(on) => send(
+            c,
+            "PUT",
+            &at(args, "/jobs/availability"),
+            Some(json!({ "on": on })),
+        )?,
+        None => Value::Null,
+    };
+    let removed = match remove {
+        Some(slug) => send(
+            c,
+            "DELETE",
+            &at(args, &format!("/jobs/{}", enc(&slug))),
+            None,
+        )?,
+        None => Value::Null,
+    };
+    Ok(json!({ "availability": availability, "removed": removed }))
+}
+
 fn flag_update(c: &Client, args: &Value) -> Result<Value, String> {
     let key = required(args, "key")?;
     let mut body = serde_json::Map::new();
@@ -320,6 +386,7 @@ pub(crate) fn call(c: &Client, name: &str, args: &Value) -> Option<Result<Value,
             }
             get(c, &path)
         }
+        "runtime" => get(c, &query(args, "/runtime", &["env"])),
         "delete_goal" => required(args, "goal").and_then(|g| {
             let path = at(args, &format!("/goals/{}", enc(&g)));
             send(c, "DELETE", &path, None)
@@ -352,6 +419,9 @@ pub(crate) fn call(c: &Client, name: &str, args: &Value) -> Option<Result<Value,
             }
             get(c, &at(args, &format!("/incidents?{}", q.join("&"))))
         }
+        "jobs" => get(c, &at(args, "/jobs")),
+        "check_in" => check_in(c, args),
+        "job_set" => job_set(c, args),
         "alert_set" => alert_set(c, args),
         "ticket_target" => required(args, "repo").and_then(|repo| {
             let body = json!({ "repo": repo });
@@ -392,7 +462,7 @@ mod tests {
         // Enough arguments for each tool to reach the server (which is not
         // there): a tool this module does not answer would return `None`.
         let args = json!({"goal": "g", "title": "t", "end": "2027-01-01", "objective": "o",
-            "repo": "a/b", "key": "k", "test": true});
+            "repo": "a/b", "key": "k", "test": true, "slug": "nightly", "remove": "nightly"});
         for t in specs() {
             assert!(
                 call(&client, t.name, &args).is_some(),

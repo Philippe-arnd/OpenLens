@@ -190,7 +190,8 @@ pub(crate) fn ip_limited(state: &AppState, peer: &Peer, headers: &HeaderMap) -> 
         .is_ok_and(|mut b| b.take(&ip, 1.0, IP_RATE, IP_BURST))
 }
 
-fn key_limited(state: &AppState, key: &str, events: usize) -> bool {
+/// Whether the project key spent its event budget (`events` more).
+pub(crate) fn key_limited(state: &AppState, key: &str, events: usize) -> bool {
     !state
         .caches
         .key_buckets
@@ -281,6 +282,20 @@ pub(crate) fn is_bot(ua: &str) -> bool {
         ]
         .iter()
         .any(|k| ua.contains(k))
+}
+
+/// Write `events` and wait until they are durable (blocking). Written
+/// under the lock, waited for outside it, so one fsync serves every
+/// request that arrives meanwhile (#333). `/v1/metrics` writes here too.
+pub(crate) fn store(state: &AppState, events: &[openlens_event::Event]) -> Result<(), String> {
+    let (ticket, durable) = {
+        let mut w = state
+            .writer
+            .lock()
+            .map_err(|_| "writer lock poisoned".to_owned())?;
+        (w.write(events).map_err(|e| e.to_string())?, w.durable())
+    };
+    durable.wait(ticket).map_err(|e| e.to_string())
 }
 
 pub(crate) async fn capture(
@@ -400,16 +415,7 @@ pub(crate) async fn capture(
         if ms >= 100 {
             tracing::warn!(project = %pid, ms, identifies = seen.len(), "capture: metadata write slow");
         }
-        // Write under the lock, wait for the disk outside it, so one fsync
-        // serves every request that arrives meanwhile (#333).
-        let (ticket, durable) = {
-            let mut w = st
-                .writer
-                .lock()
-                .map_err(|_| "writer lock poisoned".to_owned())?;
-            (w.write(&events).map_err(|e| e.to_string())?, w.durable())
-        };
-        durable.wait(ticket).map_err(|e| e.to_string())
+        store(&st, &events)
     })
     .await;
     match stored {

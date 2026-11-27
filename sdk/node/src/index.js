@@ -2,6 +2,8 @@
 // Events are queued and sent in batches (every `flushInterval` ms or
 // `flushAt` events). Errors never throw into the app: they go to `onError`.
 
+import { monitorEventLoopDelay } from "node:perf_hooks";
+
 /** @typedef {{ role?: string, account?: string, plan?: string }} Dimensions */
 
 /** Distinct id of server events tied to no user: left out of user counts (#593). */
@@ -19,6 +21,12 @@ export const SESSION_HEADER = "x-openlens-session";
 const MAX_STATS_KEYS = 500;
 /** Same error message sent at most this many times per minute. */
 const MAX_SAME_ERROR = 5;
+/** Sampling resolution of the event-loop delay histogram, ms (#610). */
+const LOOP_RESOLUTION_MS = 20;
+/** Largest event-loop delay sent, seconds: a bound, not a measure. */
+const MAX_LOOP_DELAY_S = 3600;
+/** Whether a client already sent this process's start (#610): once per process. */
+let processStartSent = false;
 
 /** Variables hosts set to the deployed commit, in order of preference (#495). */
 const COMMIT_VARS = [
@@ -210,6 +218,8 @@ export class OpenLens {
    * `expressErrors()` last.
    */
   express(opts = {}) {
+    // Runtime health comes with the middleware (#610).
+    this.captureRuntime();
     return (req, res, next) => {
       const t0 = process.hrtime.bigint();
       try {
@@ -237,6 +247,70 @@ export class OpenLens {
       this.captureException(err, { ...ctx, distinctId: user, route: routeOf(req), method: req.method });
       next(err);
     };
+  }
+
+  /**
+   * Runtime health (#610): event-loop delay, memory and process starts.
+   * At once, one `$runtime_stats` with `process.start: true` (sent by the
+   * next flush, so a process that crash-loops is still counted); then, for
+   * every stats window, one `$runtime_stats` with the event-loop delay p50
+   * and p99 (seconds) and the largest RSS and heap used (bytes) of the
+   * window, sampled on each flush. On with `express()`; call it for other
+   * frameworks. Calling it again does nothing.
+   */
+  captureRuntime() {
+    if (this.runtime) return;
+    try {
+      let loop;
+      try {
+        loop = monitorEventLoopDelay({ resolution: LOOP_RESOLUTION_MS });
+        loop.enable();
+      } catch {
+        loop = undefined;
+      }
+      this.runtime = { start: windowStart(Date.now()), loop, rss: 0, heap: 0 };
+      this.sampleRuntime();
+      if (!processStartSent) {
+        processStartSent = true;
+        this.push("$runtime_stats", SERVER_ID, { "process.start": true, ...memoryProps(this.runtime) });
+      }
+    } catch (e) {
+      this.onError(e);
+    }
+  }
+
+  /** @private Keep the window's largest RSS and heap used. */
+  sampleRuntime() {
+    const r = this.runtime;
+    if (!r) return;
+    try {
+      const m = process.memoryUsage();
+      if (m.rss > r.rss) r.rss = m.rss;
+      if (m.heapUsed > r.heap) r.heap = m.heapUsed;
+    } catch (e) {
+      this.onError(e);
+    }
+  }
+
+  /** @private Turn the runtime of a closed window (the open one too when `all`) into an event. */
+  drainRuntime(all) {
+    const r = this.runtime;
+    if (!r) return;
+    const open = windowStart(Date.now());
+    if (!all && r.start >= open) return;
+    // OpenTelemetry runtime metric names (#610): `nodejs.eventloop.delay.*`
+    // in seconds, `process.memory.usage` (RSS) and `v8js.memory.heap.used`
+    // in bytes, here the largest sample of the window.
+    const props = { ...memoryProps(r), $window_s: STATS_WINDOW_MS / 1000 };
+    if (r.loop && r.loop.count > 0) {
+      props["nodejs.eventloop.delay.p50"] = delaySeconds(r.loop.percentile(50));
+      props["nodejs.eventloop.delay.p99"] = delaySeconds(r.loop.percentile(99));
+    }
+    r.loop?.reset();
+    this.push("$runtime_stats", SERVER_ID, props, undefined, new Date(r.start));
+    r.start = open;
+    r.rss = 0;
+    r.heap = 0;
   }
 
   /** @private Queue one event. */
@@ -298,8 +372,38 @@ export class OpenLens {
     }
   }
 
+  /**
+   * Job check-in (#609): call it at the end of a cron or background job, so
+   * OpenLens alerts when the job does not run, fails or gets slower. Sent at
+   * once (not queued); resolves to false on any error, never throws.
+   * @param {string} slug 1 to 64 of a-z, 0-9, `_` and `-`
+   * @param {{ status?: "ok" | "error", ms?: number, expectEvery?: number }} [opts]
+   *   `ms`: the run's duration; `expectEvery`: seconds between runs, instead
+   *   of the schedule OpenLens learns.
+   */
+  async checkIn(slug, opts = {}) {
+    try {
+      const q = new URLSearchParams();
+      if (opts.status) q.set("status", opts.status);
+      if (opts.ms !== undefined) q.set("ms", String(Math.max(0, Math.round(opts.ms))));
+      if (opts.expectEvery !== undefined) q.set("expectEvery", String(Math.round(opts.expectEvery)));
+      const qs = q.toString();
+      const r = await this.fetch(
+        `${this.host}/check-in/${encodeURIComponent(String(slug))}${qs ? `?${qs}` : ""}`,
+        { method: "POST", headers: { "x-openlens-key": this.key } },
+      );
+      if (!r.ok) this.onError(new Error(`OpenLens check-in failed: HTTP ${r.status}`));
+      return r.ok;
+    } catch (e) {
+      this.onError(e);
+      return false;
+    }
+  }
+
   /** Send queued events now. */
   async flush(all = false) {
+    this.sampleRuntime();
+    this.drainRuntime(all);
     this.drainStats(all);
     if (this.queue.length === 0) return;
     const batch = this.queue.splice(0, this.queue.length);
@@ -319,6 +423,8 @@ export class OpenLens {
   async shutdown() {
     clearInterval(this.timer);
     await this.flush(true);
+    this.runtime?.loop?.disable();
+    this.runtime = undefined;
   }
 }
 
@@ -340,6 +446,25 @@ export function requestContext(headers) {
   const sid = String(headers[SESSION_HEADER] || "").trim();
   if (/^[A-Za-z0-9_-]{1,100}$/.test(sid)) ctx.sessionId = sid;
   return ctx;
+}
+
+/** Start of the stats window that holds `ms`. */
+function windowStart(ms) {
+  return ms - (ms % STATS_WINDOW_MS);
+}
+
+/** The window's largest RSS and heap used, when sampled. */
+function memoryProps(r) {
+  const p = {};
+  if (r.rss > 0) p["process.memory.usage"] = r.rss;
+  if (r.heap > 0) p["v8js.memory.heap.used"] = r.heap;
+  return p;
+}
+
+/** A histogram value (nanoseconds) in seconds, bounded. */
+function delaySeconds(ns) {
+  const s = Math.max(0, Number(ns) || 0) / 1e9;
+  return round6(Math.min(s, MAX_LOOP_DELAY_S));
 }
 
 function round6(v) {

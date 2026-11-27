@@ -62,3 +62,37 @@ class ClientTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+CHECK_INS = []
+
+
+class CheckInHandler(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def do_POST(self):
+        CHECK_INS.append((self.path, self.headers["x-openlens-key"]))
+        self.send_response(200 if len(CHECK_INS) == 1 else 429)
+        self.end_headers()
+        self.wfile.write(b"{}")
+
+
+class CheckInTest(unittest.TestCase):
+    def test_check_in_posts_the_slug_and_never_raises(self):
+        srv = HTTPServer(("127.0.0.1", 0), CheckInHandler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        errors = []
+        ol = OpenLens(host=f"http://127.0.0.1:{srv.server_port}", key="pk_t", flush_interval=60, on_error=errors.append)
+        self.assertTrue(ol.check_in("nightly-export", status="error", ms=1234.4, expect_every=86400))
+        path, key = CHECK_INS[0]
+        u = urlparse(path)
+        self.assertEqual(u.path, "/check-in/nightly-export")
+        self.assertEqual(key, "pk_t")
+        self.assertNotIn("pk_t", path)
+        q = parse_qs(u.query)
+        self.assertEqual((q["status"], q["ms"], q["expectEvery"]), (["error"], ["1234"], ["86400"]))
+        self.assertFalse(ol.check_in("nightly-export"), "a refusal is False")
+        self.assertGreaterEqual(len(errors), 1)
+        ol.shutdown()
+        srv.shutdown()

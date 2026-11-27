@@ -170,3 +170,30 @@ test("hostile trace and session headers are ignored", () => {
   assert.deepEqual(requestContext({ traceparent: "garbage", "x-openlens-session": "a b;c" }), {});
   assert.deepEqual(requestContext({ "x-openlens-session": "x".repeat(5000) }), {});
 });
+
+test("checkIn posts the slug with the key in a header, and never throws", async () => {
+  const got = [];
+  const s = await server((req, res) => {
+    got.push({ method: req.method, url: req.url, key: req.headers["x-openlens-key"] });
+    res.statusCode = got.length === 1 ? 200 : 429;
+    res.end("{}");
+  });
+  const errors = [];
+  const ol = new OpenLens({ host: `http://localhost:${s.address().port}`, key: "pk_t", flushInterval: 60000, onError: (e) => errors.push(e) });
+  assert.equal(await ol.checkIn("nightly-export", { status: "error", ms: 1234.4, expectEvery: 86400 }), true);
+  assert.equal(got[0].method, "POST");
+  assert.equal(got[0].key, "pk_t");
+  assert.ok(!got[0].url.includes("pk_t"), "the key is not in the URL");
+  const u = new URL(got[0].url, "http://x");
+  assert.equal(u.pathname, "/check-in/nightly-export");
+  assert.equal(u.searchParams.get("status"), "error");
+  assert.equal(u.searchParams.get("ms"), "1234");
+  assert.equal(u.searchParams.get("expectEvery"), "86400");
+  assert.equal(await ol.checkIn("nightly-export"), false, "a refusal resolves to false");
+  await ol.shutdown();
+  s.close();
+  const down = new OpenLens({ host: "http://127.0.0.1:9", key: "pk_t", flushInterval: 60000, onError: (e) => errors.push(e) });
+  assert.equal(await down.checkIn("backup"), false);
+  await down.shutdown();
+  assert.ok(errors.length >= 2);
+});

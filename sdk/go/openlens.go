@@ -206,6 +206,58 @@ func (c *Client) IsEnabled(ctx context.Context, flag, distinctID string, t Trait
 	return false
 }
 
+// CheckInOptions describe one run of a job; every field is optional.
+type CheckInOptions struct {
+	// Status is "ok" (default) or "error".
+	Status string
+	// Duration is how long the run took (0: not given).
+	Duration time.Duration
+	// ExpectEvery is the time between runs, instead of the schedule
+	// OpenLens learns (0: not given; 10 s to 31 days).
+	ExpectEvery time.Duration
+}
+
+// CheckIn reports a run of a cron or background job (#609), so OpenLens
+// alerts when the job does not run, fails or gets slower. Call it at the
+// end of the job. It is sent at once (not queued) and returns false on any
+// error; it never panics.
+//
+//	ol.CheckIn(ctx, "nightly-export", openlens.CheckInOptions{Duration: time.Since(start)})
+func (c *Client) CheckIn(ctx context.Context, slug string, o CheckInOptions) bool {
+	q := url.Values{}
+	if o.Status != "" {
+		q.Set("status", o.Status)
+	}
+	if o.Duration > 0 {
+		q.Set("ms", fmt.Sprint(o.Duration.Milliseconds()))
+	}
+	if o.ExpectEvery > 0 {
+		q.Set("expectEvery", fmt.Sprint(int64(o.ExpectEvery.Seconds())))
+	}
+	u := c.host + "/check-in/" + url.PathEscape(slug)
+	if len(q) > 0 {
+		u += "?" + q.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, nil)
+	if err != nil {
+		c.cfg.OnError(err)
+		return false
+	}
+	req.Header.Set("x-openlens-key", c.cfg.Key)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		c.cfg.OnError(err)
+		return false
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		c.cfg.OnError(fmt.Errorf("openlens: check-in returned %d", resp.StatusCode))
+		return false
+	}
+	return true
+}
+
 // Flush sends queued events now.
 func (c *Client) Flush() {
 	c.mu.Lock()

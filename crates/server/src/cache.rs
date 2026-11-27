@@ -139,6 +139,8 @@ pub struct Caches {
     /// apart from capture's so a flood of page views never slows
     /// ingestion.
     pub(crate) status_buckets: Mutex<crate::capture::Buckets>,
+    /// Job check-ins (#609): one token every 10 seconds per job.
+    pub(crate) check_in_buckets: Mutex<crate::capture::Buckets>,
     /// Public status pages as computed, per slug (30 seconds; cleared when
     /// a page's settings change).
     pub(crate) status_pages:
@@ -180,6 +182,13 @@ pub struct Caches {
     /// Long boards computed in the background (#515), each private to
     /// whoever started it; finished ones kept an hour.
     pub(crate) board_jobs: crate::board_jobs::BoardJobs,
+    /// OTLP cumulative histograms (#605, D-085): the last point of each
+    /// series, keyed by a hash of project, resource, attributes and start
+    /// time; the least recently updated go first.
+    pub(crate) otlp_series: Bounded<String, crate::otlp::Last>,
+    /// When the server started or last forgot an OTLP series (Unix ns): a
+    /// series first seen that started before may have been counted.
+    pub(crate) otlp_forgot: std::sync::atomic::AtomicU64,
 }
 
 impl Default for Caches {
@@ -194,6 +203,7 @@ impl Default for Caches {
             key_buckets: Mutex::default(),
             hook_buckets: Mutex::default(),
             status_buckets: Mutex::default(),
+            check_in_buckets: Mutex::default(),
             status_pages: Bounded::new(crate::status_page::CACHED, crate::status_page::TTL),
             disk_logged: Mutex::default(),
             cookieless: Bounded::new(100_000, 30 * MIN),
@@ -211,6 +221,8 @@ impl Default for Caches {
             release_builds: Bounded::new(10_000, 60 * MIN),
             release_days_full: Bounded::new(10_000, 10 * MIN),
             board_jobs: crate::board_jobs::BoardJobs::default(),
+            otlp_series: Bounded::new(crate::otlp::SERIES_CAP, crate::otlp::SERIES_TTL),
+            otlp_forgot: std::sync::atomic::AtomicU64::new(crate::otlp::now_ns()),
         }
     }
 }
@@ -229,6 +241,7 @@ impl Caches {
             ("key_buckets", n(buckets(&self.key_buckets))),
             ("hook_buckets", n(buckets(&self.hook_buckets))),
             ("status_buckets", n(buckets(&self.status_buckets))),
+            ("check_in_buckets", n(buckets(&self.check_in_buckets))),
             ("status_pages", n(self.status_pages.len())),
             ("cookieless", n(self.cookieless.len())),
             ("icons_in_flight", n(self.icons_in_flight.len())),
@@ -242,6 +255,7 @@ impl Caches {
             ("replay_rates", n(self.replay_rates.len())),
             ("release_builds", n(self.release_builds.len())),
             ("board_jobs", n(self.board_jobs.len())),
+            ("otlp_series", n(self.otlp_series.len())),
         ]
     }
 }
