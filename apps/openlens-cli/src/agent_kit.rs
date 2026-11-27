@@ -114,7 +114,7 @@ pub(crate) fn release_layers<A: Api + ?Sized>(c: &A, project: &str) -> Result<Va
             "layer": "build fingerprint seen",
             "active": builds > 0,
             "detail": builds,
-            "fix": "use the browser SDK at its current version (script tag or @openlens/web): it sends a fingerprint of the page's own scripts with each event",
+            "fix": "use the browser SDK at its current version (script tag or @openlens-obs/web): it sends a fingerprint of the page's own scripts with each event",
         },
         {
             "layer": "deploy hook configured",

@@ -26,7 +26,7 @@ Errors are JSON: `{"code": "...", "message": "..."}`. Act on `code`, which is on
 1. **Project.** `openlens-cli init --name <app> --timezone <IANA zone>` (or `POST /api/projects`) creates the project and returns its capture key and snippet. `openlens-cli init` also makes the project's deploy hook URL and lists, under `keep_it_running`, the steps of [Keep it running](#keep-it-running) below: the hook URL is shown only there, so store it as a secret at once. Days and weeks of every KPI start in that zone: use the team's, from the app's config (a `TZ` or locale setting) or the commit history, `UTC` if unknown. `openlens-cli timezone <project> <zone>` changes it later. Put the key and the server URL in the app's existing config mechanism (env file, settings module). Never hard-code the key anywhere else.
 2. **SDK.** Pick one:
    - Server-rendered app: add `<script src="<url>/c.js" data-key="<key>" defer></script>` to the main layout.
-   - SPA: `npm install @openlens/web`, then call `openlens.init({ host, key })` at startup.
+   - SPA: `npm install @openlens-obs/web`, then call `openlens.init({ host, key })` at startup.
 
    The environment is detected automatically from the host. A staging or preview host whose name does not say so is stored as `unknown`: declare it with `openlens-cli env rule <host> staging` (MCP `environments` with `host` and `env`), and `ignore` the developers' own hosts. Events stored before the rule keep their old environment: count what would move with `env relabel <host> --dry-run` (MCP `environments` with `relabel`, a dry run by default), then run it without `--dry-run` (MCP `dry_run: false`). If the app sends its own environment names, map them with `env alias <name> <environment>` (MCP `alias` and `to`). Only if the operator asks to refuse events from other sites, preview an allow-list with `env allow <host…>` (MCP `environments` with `allow`), show them the hosts it would drop, and save it with `--confirm` (MCP `confirm: true`). If staging has its own address, check it with `env monitor staging <url>` (MCP `monitor` and `url`; `level: notify` only if the operator wants its alerts sent). Pass `release` from the build (git SHA or version). For a framework, follow its recipe in [Framework recipes](#framework-recipes) below: init runs **in the browser only**, once.
 3. **Identify.** Where the logged-in user becomes known, call `openlens.identify(user.id, { role, account, plan })`. Find the real role field (for example `user.role`, `membership.kind`). If none exists, ask the operator; do not invent one. Mark the team's own accounts (staff, testers, the founders) with `internal: true`, for example from the email domain or an `is_staff` flag: the board leaves them out by default, so their clicks don't weigh on a small app.
@@ -123,7 +123,7 @@ Older servers refuse maps with these fields (the format is strict): upgrade the 
 ## Framework recipes
 
 Three rules hold in every framework:
-- **Init in the browser, once.** Importing `@openlens/web` on the server is harmless (`init` does nothing without `window`), but call `init` from client-only code.
+- **Init in the browser, once.** Importing `@openlens-obs/web` on the server is harmless (`init` does nothing without `window`), but call `init` from client-only code.
 - **Release at build time.** Inject the commit or version into a public build variable: for example `GITHUB_SHA`, `VERCEL_GIT_COMMIT_SHA`, `CF_PAGES_COMMIT_SHA`, Coolify's `SOURCE_COMMIT`, or `git rev-parse --short HEAD`. Use the same value for `openlens-cli sourcemaps --release`. Without one, the server still tells builds apart by their script and stylesheet names and calls each new one `YYYY-MM-DD.N`; the Node SDK reads the host's commit variable by itself.
 - **Identify on every load where the user is known, and reset on logout.** `reset()` while nobody is identified does nothing, so it is safe to call whenever there is no session.
 
@@ -133,7 +133,7 @@ Route changes are picked up on their own (History API and `#/` routes), so no ro
 
 ```ts
 // src/main.ts, before mounting the app
-import openlens from "@openlens/web";
+import openlens from "@openlens-obs/web";
 openlens.init({
   host: import.meta.env.VITE_OPENLENS_HOST,
   key: import.meta.env.VITE_OPENLENS_KEY,
@@ -149,7 +149,7 @@ Angular: do the same in `main.ts`, before `bootstrapApplication`, with the value
 // app/openlens.tsx
 "use client";
 import { useEffect } from "react";
-import openlens from "@openlens/web";
+import openlens from "@openlens-obs/web";
 
 export function OpenLens({ user }: { user?: { id: string; role: string } }) {
   useEffect(() => {
@@ -186,7 +186,7 @@ Pages Router: do the same in `pages/_app.tsx`. With the script tag, use `<Script
 
 ```ts
 // plugins/openlens.client.ts (the .client suffix keeps it out of the server)
-import openlens from "@openlens/web";
+import openlens from "@openlens-obs/web";
 export default defineNuxtPlugin(() => {
   const c = useRuntimeConfig().public;
   openlens.init({ host: c.openlensHost, key: c.openlensKey, release: c.release });
@@ -205,7 +205,7 @@ Identify where the session is known, for example in a `watch` on the user in `ap
 
 ```ts
 // src/hooks.client.ts: runs once, in the browser
-import openlens from "@openlens/web";
+import openlens from "@openlens-obs/web";
 import { PUBLIC_OPENLENS_HOST, PUBLIC_OPENLENS_KEY } from "$env/static/public";
 import { version } from "$app/environment"; // kit.version.name, e.g. the git SHA
 openlens.init({ host: PUBLIC_OPENLENS_HOST, key: PUBLIC_OPENLENS_KEY, release: version });
@@ -215,7 +215,7 @@ Set `kit.version.name` to the commit in `svelte.config.js` (`process.env.GITHUB_
 
 ```svelte
 <script>
-  import openlens from "@openlens/web";
+  import openlens from "@openlens-obs/web";
   export let data;
   $: if (data.user) openlens.identify(data.user.id, { role: data.user.role }); else openlens.reset();
 </script>
@@ -241,7 +241,7 @@ View transitions (`<ClientRouter />`) navigate with the History API, so page vie
 
 ```tsx
 // app/entry.client.tsx, before hydrateRoot
-import openlens from "@openlens/web";
+import openlens from "@openlens-obs/web";
 openlens.init({
   host: import.meta.env.VITE_OPENLENS_HOST,
   key: import.meta.env.VITE_OPENLENS_KEY,

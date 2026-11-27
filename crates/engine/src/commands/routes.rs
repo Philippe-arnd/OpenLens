@@ -132,7 +132,7 @@ impl Command for List {
         let trend = trend.map_err(failed)?;
         let pair = pair.map_err(failed)?;
         let note = list.is_empty().then(|| {
-            "No server route stats yet: add the Node SDK's middleware (`@openlens/node`, see sdk/SERVER.md)."
+            "No server route stats yet: add the Node SDK's middleware (`@openlens-obs/node`, see sdk/SERVER.md)."
                 .to_owned()
         });
         // Declared key actions without a request still show, as zeros.

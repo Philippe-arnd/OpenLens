@@ -1,4 +1,4 @@
-# @openlens/web
+# @openlens-obs/web
 
 The browser SDK of [OpenLens](https://github.com/Philippe-arnd/OpenLens): self-hosted product analytics by role, feature and release. **About 5.5 kB gzipped**, no runtime dependencies, no cookies.
 
@@ -15,11 +15,11 @@ It is the one non-Rust part of OpenLens (`docs/decisions.md`, D-003). It has to 
 **npm** (SPAs and frameworks):
 
 ```sh
-npm install @openlens/web
+npm install @openlens-obs/web
 ```
 
 ```js
-import openlens from "@openlens/web";
+import openlens from "@openlens-obs/web";
 openlens.init({ host: "https://lens.example.com", key: "pk_...", release: import.meta.env.VITE_RELEASE });
 ```
 

@@ -97,7 +97,7 @@ From then on, agents keep the map current. Over **MCP** (`openlens-cli mcp`) the
 
 ```js
 // SPAs and frameworks
-import openlens from "@openlens/web";
+import openlens from "@openlens-obs/web";
 openlens.init({ host: "https://lens.example.com", key: "pk_…", release: BUILD_SHA });
 openlens.identify(user.id, { role: user.role, account: user.orgId, plan: user.plan });
 ```
@@ -177,7 +177,7 @@ Measured on 2026-11-22, on one core of a 4-vCPU VPS ([docs/benchmarks.md](docs/b
 - **Web first.** There is no native mobile SDK yet.
 - **Sessions are cut at UTC midnight** by the SDK; KPI days follow the project's time zone.
 - **Small samples:** insight cards wait for at least 8 users per compared group.
-- **npm:** `@openlens/web` is not on the npm registry yet (publishing is ready). Use the script tag meanwhile.
+- **npm:** `@openlens-obs/web` and `@openlens-obs/node` are published from v0.8.0 on. Use the script tag before that.
 
 The full list, with what is planned, is in [docs/gaps.md](docs/gaps.md) and the [backlog](https://github.com/Philippe-arnd/OpenLens/milestones).
 

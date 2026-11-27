@@ -4,6 +4,10 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Changed
+
+- **The npm packages are `@openlens-obs/web` and `@openlens-obs/node`** (the `@openlens` scope was taken on npm). Both are published on release tags from v0.8.0 on, with the release's version; `npm.yml` failed before on every tag, since the package versions stayed at 0.1.0.
+
 ## [0.7.0] - 2026-11-27
 
 ### Added

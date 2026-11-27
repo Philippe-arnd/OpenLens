@@ -1,12 +1,29 @@
 {
-  "name": "@openlens/node",
-  "version": "0.1.0",
+  "name": "@openlens-obs/node",
+  "version": "0.8.0",
   "description": "OpenLens server SDK for Node: capture server-side events, identify users, check flags. No dependencies.",
   "license": "AGPL-3.0-only",
   "type": "module",
   "main": "src/index.js",
   "types": "src/index.d.ts",
-  "files": ["src"],
-  "engines": { "node": ">=18" },
-  "scripts": { "test": "node --test test/*.test.js" }
+  "files": [
+    "src"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "prepack": "cp ../../LICENSE LICENSE",
+    "postpack": "rm -f LICENSE"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Philippe-arnd/OpenLens.git",
+    "directory": "sdk/node"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
 }

@@ -29,7 +29,7 @@ async fn route_stats_are_summed_per_route_shown_and_kept_out_of_user_activity() 
     let cookie = login_cookie(&h).await;
     // Without route stats, the page explains how to send them (rule 11).
     let empty = body_text(get(&h, "/p/default/routes", Some(&cookie), false).await).await;
-    assert!(empty.contains("@openlens/node") && !empty.contains("/api/auth/sign-in"));
+    assert!(empty.contains("@openlens-obs/node") && !empty.contains("/api/auth/sign-in"));
 
     let mut ok = [0; 15];
     ok[3] = 90;
@@ -79,7 +79,7 @@ async fn route_stats_are_summed_per_route_shown_and_kept_out_of_user_activity() 
     assert!(n("SELECT count(*) AS n FROM raw_events WHERE event = '$request_stats'").await > 0);
 
     let routes = body_text(get(&h, "/p/default/routes", Some(&cookie), false).await).await;
-    assert!(routes.contains("/api/auth/sign-in") && !routes.contains("@openlens/node"));
+    assert!(routes.contains("/api/auth/sign-in") && !routes.contains("@openlens-obs/node"));
     let page = body_text(get(&h, "/p/default/errors", Some(&cookie), false).await).await;
     assert!(
         page.contains("requests answered 5xx"),

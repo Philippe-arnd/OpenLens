@@ -107,7 +107,7 @@ Run it by hand from the Actions tab: `dry_run` (on by default) only reports what
    - `release.yml`: the image `ghcr.io/philippe-arnd/openlens:vX.Y.Z` (also `X.Y.Z` and `X.Y`), built and smoke-tested;
    - `k8s.yml`: the chart, installed on kind, then pushed to `oci://ghcr.io/philippe-arnd/charts/openlens`;
    - `publish.yml`: the GitHub release, with the notes (`docs/releases/vX.Y.Z.md`, or the CHANGELOG section, plus a *Full changelog* link), the Linux binaries, the SDK bundles, the chart and `SHA256SUMS`;
-   - `npm.yml`: `@openlens/web` (public repository only).
+   - `npm.yml`: `@openlens-obs/web` and `@openlens-obs/node` (public repository only). A tag is published only when both `package.json` versions match it; the release train moves them with `Cargo.toml`.
 
 **Upgrades are checked** before any image is published: `scripts/upgrade-check.sh <last release image> <new image>` (run by `release.yml`) writes data with the last release, reads it back with the new image, then goes back to the last release (a rollback) and reads it again. A change that has to rewrite stored data needs its own migration and a CHANGELOG *Changed* entry.
 
@@ -122,7 +122,7 @@ Run it by hand from the Actions tab: `dry_run` (on by default) only reports what
 
 **Re-attach assets** to an existing tag: run *Release* by hand with `tag` set.
 
-**npm, once.** On npmjs.com, add a *trusted publisher* for `@openlens/web`: repository `Philippe-arnd/OpenLens`, workflow `npm.yml`. No token is needed; `NPM_TOKEN` as a repository secret also works.
+**npm, once.** The packages live in the npm organisation `openlens-obs` (`openlens` was taken). The first publish needs a granular access token (read and write, scope `@openlens-obs`) as the `NPM_TOKEN` repository secret. Then, on npmjs.com, add a *trusted publisher* to each package (repository `Philippe-arnd/OpenLens`, workflow `npm.yml`) and delete the token.
 
 
 ## Maintenance on autopilot (M9)

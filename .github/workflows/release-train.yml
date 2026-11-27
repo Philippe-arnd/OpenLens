@@ -105,6 +105,10 @@ jobs:
           sed -i "0,/^version = \"$V\"/s//version = \"$next\"/" Cargo.toml
           # Only the workspace's own versions move (no dependency update).
           cargo update -w -q
+          # The npm SDKs follow it too: npm.yml publishes a tag only when
+          # the package version matches it.
+          sed -i "/\"name\": \"@openlens-obs\/\(web\|node\)\"/{n;s/\"version\": \"$V\"/\"version\": \"$next\"/}" \
+            sdk/js/package.json sdk/js/package-lock.json sdk/node/package.json examples/tasks-spa/package-lock.json
           # Plain-manifest and chart defaults name the release just cut.
           sed -i "s/^appVersion: .*/appVersion: \"$TAG\"/; s/^version: .*/version: $V/" deploy/helm/openlens/Chart.yaml
           sed -i -E "s/^(\s*newTag:) .*/\\1 $TAG/" deploy/k8s/example/kustomization.yaml
