@@ -145,6 +145,13 @@ pub(crate) fn parse_local(s: &str, tz: &str) -> Option<DateTime<Utc>> {
         .map(|t| t.with_timezone(&Utc))
 }
 
+/// `d` in whole seconds, rounded up: a span of that many seconds before
+/// `now` starts at or before the instant `d` before it (#568).
+pub(crate) fn whole_seconds_up(d: Duration) -> i64 {
+    let whole = d.num_seconds();
+    whole + i64::from(d > Duration::seconds(whole))
+}
+
 /// The window at `now` from the current release `(name, first event)`, or
 /// the last 14 days without one.
 pub(crate) fn window(current: Option<(String, DateTime<Utc>)>, now: DateTime<Utc>) -> Resolved {
@@ -152,8 +159,10 @@ pub(crate) fn window(current: Option<(String, DateTime<Utc>)>, now: DateTime<Utc
         None => (None, FALLBACK_DAYS * DAY, false),
         Some((name, start)) => {
             // At least a minute, so a release first seen "now" (or a clock
-            // ahead of ours) still gives a span.
-            let age = (now - start).num_seconds().max(60);
+            // ahead of ours) still gives a span. Rounded up to the second,
+            // so the window starts at or before the release's first event
+            // and holds it (#568).
+            let age = whole_seconds_up(now - start).max(60);
             let capped = age >= MAX_DAYS * DAY;
             (Some(name), age.min(MAX_DAYS * DAY), capped)
         }
@@ -242,6 +251,17 @@ pub(crate) mod tests {
                     .unwrap_or_default()
                     .1
         );
+    }
+
+    #[test]
+    fn the_window_holds_the_release_s_first_event_to_the_microsecond() {
+        // The release's first event is on a whole second, `now` is not.
+        let start = Utc::now() - Duration::hours(70);
+        let start = start - Duration::nanoseconds(i64::from(start.timestamp_subsec_nanos()));
+        let now = start + Duration::hours(70) + Duration::milliseconds(400);
+        let w = window(Some(("v2".into(), start)), now);
+        assert!(now - Duration::seconds(w.current.start) <= start);
+        assert!(now - Duration::seconds(w.previous.end) <= start);
     }
 
     #[test]

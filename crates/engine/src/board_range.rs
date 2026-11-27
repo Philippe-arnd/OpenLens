@@ -124,8 +124,10 @@ fn start_of(zone: chrono_tz::Tz, d: NaiveDate) -> DateTime<Utc> {
 /// A window and its comparison from the instant `start` to `end` (now at
 /// the latest) at `now`.
 fn spans(start: DateTime<Utc>, end: DateTime<Utc>, now: DateTime<Utc>) -> (Span, Span) {
-    let back = (now - start).num_seconds().max(1);
-    let len = (end.min(now) - start).num_seconds().clamp(1, back);
+    // Rounded up, so the window starts at or before `start` (#568).
+    let up = crate::board_window::whole_seconds_up;
+    let back = up(now - start).max(1);
+    let len = up(end.min(now) - start).clamp(1, back);
     (
         Span {
             start: back,
