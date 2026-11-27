@@ -822,6 +822,15 @@ pub async fn alert_tick(state: &AppState, minute: u64) {
     alerts::tick(state, minute).await;
 }
 
+/// Stop the per-client rate-limit buckets from refilling, so a test sees
+/// the burst run out whatever the machine's speed (#595).
+#[doc(hidden)]
+pub fn freeze_client_rate_limits(state: &AppState) {
+    if let Ok(mut b) = state.caches.ip_buckets.lock() {
+        b.freeze();
+    }
+}
+
 /// A project's flags (tests and tools).
 #[doc(hidden)]
 pub async fn flags_for_tests(state: &AppState, project: &str) -> Vec<openlens_flags::Flag> {
