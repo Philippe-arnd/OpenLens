@@ -22,9 +22,9 @@ const PHONE = devices["iPhone 13"];
 // name, path ("/p/default" prefix for project views), theme, ready marker,
 // device. The marker is the content the picture is about, not the frame.
 const VIEWS = [
-  ["board-light", "/p/default", "light", "main .key-numbers", DESK],
-  ["board-dark", "/p/default", "dark", "main .key-numbers", DESK],
-  ["board-phone", "/p/default", "light", "main .key-numbers", PHONE],
+  ["board-light", "/p/default", "light", "main section.outcomes", DESK],
+  ["board-dark", "/p/default", "dark", "main section.outcomes", DESK],
+  ["board-phone", "/p/default", "light", "main section.outcomes", PHONE],
   ["errors-light", "/p/default/errors", "light", "main table", DESK],
   ["pages-light", "/p/default/pages", "light", "main table", DESK],
   ["events-light", "/p/default/events", "light", "main table", DESK],
