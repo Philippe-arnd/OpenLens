@@ -101,6 +101,61 @@ class ClientTest < Minitest::Test
     srv&.stop
   end
 
+  def test_detects_the_host_commit
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    assert_equal sha[0, 12], OpenLens.detect_release("RENDER_GIT_COMMIT" => "abc", "GITHUB_SHA" => sha)
+    assert_equal "v12", OpenLens.detect_release("SOURCE_COMMIT" => " ", "HEROKU_SLUG_COMMIT" => "v12")
+    assert_nil OpenLens.detect_release({})
+    ENV["SOURCE_COMMIT"] = "deadbeef"
+    assert_equal "deadbeef", OpenLens::Client.new(host: "http://x", key: "k", flush_interval: 60).instance_variable_get(:@release)
+    assert_equal "v2", OpenLens::Client.new(host: "http://x", key: "k", release: "v2", flush_interval: 60).instance_variable_get(:@release)
+  ensure
+    ENV.delete("SOURCE_COMMIT")
+  end
+
+  def test_server_error_with_request_context
+    srv = FakeServer.new
+    ol = OpenLens::Client.new(host: "http://127.0.0.1:#{srv.port}", key: "pk_t", flush_interval: 60)
+    ctx = OpenLens.request_context("HTTP_TRACEPARENT" => "00-#{"a" * 32}-#{"b" * 16}-01", "HTTP_X_OPENLENS_SESSION" => "s1")
+    err = begin
+      raise KeyError, "entry 42"
+    rescue KeyError => e
+      e
+    end
+    ol.capture_exception(err, route: "/entries/:id", method: "get", **ctx)
+    ol.capture_exception(err) # the same object is reported once
+    10.times { ol.capture_exception(ArgumentError.new("same")) }
+    ol.shutdown
+    errs = srv.posts.flat_map { |_, b| b["batch"] }.select { |e| e["event"] == "$error" }
+    first = errs[0]
+    p = first["properties"]
+    assert_equal ["$server", "s1"], [first["distinct_id"], first["session_id"]]
+    assert_equal ["server", "KeyError", "/entries/:id", "GET", "a" * 32],
+                 [p["$kind"], p["exception.type"], p["http.route"], p["http.request.method"], p["trace_id"]]
+    assert_includes p["$source"], "test_client.rb:"
+    assert_operator errs.count { |e| e["properties"]["$message"] == "ArgumentError: same" }, :<, 10
+    assert_equal 1, errs.count { |e| e["properties"]["exception.type"] == "KeyError" }
+  ensure
+    srv&.stop
+  end
+
+  def test_crash_is_reported_and_still_fails
+    srv = FakeServer.new
+    code = "require 'openlens'; ol = OpenLens::Client.new(host: 'http://127.0.0.1:#{srv.port}', key: 'pk_t', " \
+           "flush_interval: 60); ol.capture_uncaught; raise IndexError, 'crash'"
+    ok = system(RbConfig.ruby, "-I", File.expand_path("../lib", __dir__), "-e", code, err: File::NULL)
+    refute ok, "the process still fails"
+    errs = srv.posts.flat_map { |_, b| b["batch"] }.select { |e| e["event"] == "$error" }
+    assert_equal ["IndexError: crash"], errs.map { |e| e["properties"]["$message"] }
+  ensure
+    srv&.stop
+  end
+
+  def test_rejects_hostile_context
+    assert_empty OpenLens.request_context("traceparent" => "00-#{"0" * 32}-#{"b" * 16}-01", "x-openlens-session" => "a b")
+    assert_empty OpenLens.request_context("traceparent" => "ff-#{"a" * 32}-#{"b" * 16}-01")
+  end
+
   def test_requires_host_and_key
     assert_raises(ArgumentError) { OpenLens::Client.new(host: "http://x", key: "") }
   end

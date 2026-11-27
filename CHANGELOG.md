@@ -4,6 +4,16 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **Server errors from Python, Go, Ruby and PHP**: `capture_exception` (`CaptureException`, `captureException`) sends the same `$error` of kind *server* as Node, with the type, message, stack, the first frame of the app's own code as `$source`, the route template, method, `trace_id` and session; `request_context` (`RequestContext`, `requestContext`) reads `traceparent` and `x-openlens-session` from headers, a Rack env or `$_SERVER`. `capture_uncaught` (Python: main and other threads; Ruby: the exception that ends the process; PHP: an uncaught exception or fatal error at shutdown) and Go's `defer ol.CapturePanic()` report a crash, send it at once and let the process fail as before. Never raises; one object reported once, one message at most 5 times a minute.
+- **Every server SDK reads the release from the host** (#495): Python, Go, Ruby and PHP now default `release` to the commit the host exposes (`SOURCE_COMMIT`, `GITHUB_SHA`, `VERCEL_GIT_COMMIT_SHA`, `CF_PAGES_COMMIT_SHA`, `RENDER_GIT_COMMIT`, `HEROKU_SLUG_COMMIT`, shortened to 12 characters), as Node does; Go falls back to the binary's `vcs.revision`. An explicit `release` still wins.
+- **sdk/SERVER.md says what each SDK covers**: route stats and outgoing calls come over OTLP for the languages other than Node, runtime health is Node only.
+
+### Fixed
+
+- **PHP SDK:** an event with invalid UTF-8 (an exception message, a property) no longer makes the whole batch fail to encode; the bad bytes are replaced.
+
 ## [0.7.0] - 2026-11-27
 
 ### Added

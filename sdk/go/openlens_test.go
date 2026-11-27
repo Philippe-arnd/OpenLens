@@ -3,8 +3,11 @@ package openlens
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -129,5 +132,88 @@ func TestCheckIn(t *testing.T) {
 	defer mu.Unlock()
 	if errs < 1 {
 		t.Fatal("the refusal goes to OnError")
+	}
+}
+
+func TestDetectRelease(t *testing.T) {
+	sha := "0123456789abcdef0123456789abcdef01234567"
+	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+	if got := DetectRelease(env(map[string]string{"RENDER_GIT_COMMIT": "abc", "GITHUB_SHA": sha})); got != sha[:12] {
+		t.Fatalf("earlier variable first, shortened: %q", got)
+	}
+	if got := DetectRelease(env(map[string]string{"SOURCE_COMMIT": " ", "HEROKU_SLUG_COMMIT": "v12"})); got != "v12" {
+		t.Fatalf("blank skipped: %q", got)
+	}
+	t.Setenv("SOURCE_COMMIT", "deadbeef")
+	ol, _ := New(Config{Host: "http://x", Key: "k", FlushInterval: time.Minute})
+	ol2, _ := New(Config{Host: "http://x", Key: "k", Release: "v2", FlushInterval: time.Minute})
+	defer ol.Shutdown()
+	defer ol2.Shutdown()
+	if ol.cfg.Release != "deadbeef" || ol2.cfg.Release != "v2" {
+		t.Fatalf("host commit by default, explicit wins: %q %q", ol.cfg.Release, ol2.cfg.Release)
+	}
+}
+
+func failingHandler() error { return &os.PathError{Op: "open", Path: "/data/42", Err: os.ErrNotExist} }
+
+func TestCaptureException(t *testing.T) {
+	var mu sync.Mutex
+	var errs []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b struct{ Batch []map[string]any }
+		_ = json.NewDecoder(r.Body).Decode(&b)
+		mu.Lock()
+		for _, e := range b.Batch {
+			if e["event"] == "$error" {
+				errs = append(errs, e)
+			}
+		}
+		mu.Unlock()
+	}))
+	defer srv.Close()
+	ol, _ := New(Config{Host: srv.URL, Key: "pk_t", FlushInterval: time.Minute})
+	h := http.Header{}
+	h.Set("traceparent", "00-"+strings.Repeat("a", 32)+"-"+strings.Repeat("b", 16)+"-01")
+	h.Set("X-OpenLens-Session", "s1")
+	ctx := RequestContext(h)
+	ctx.Route, ctx.Method = "/api/entries/{id}", "get"
+	ol.CaptureException(failingHandler(), ctx)
+	for i := 0; i < 10; i++ {
+		ol.CaptureException(errors.New("same"), ErrorContext{})
+	}
+	func() {
+		defer func() { _ = recover() }()
+		defer ol.CapturePanic()
+		panic("boom")
+	}()
+	ol.Shutdown()
+	mu.Lock()
+	defer mu.Unlock()
+	first := errs[0]
+	p := first["properties"].(map[string]any)
+	if first["distinct_id"] != ServerID || first["session_id"] != "s1" || p["trace_id"] != strings.Repeat("a", 32) {
+		t.Fatalf("context %v", first)
+	}
+	if p["$kind"] != "server" || p["exception.type"] != "*fs.PathError" || p["http.route"] != "/api/entries/{id}" || p["http.request.method"] != "GET" {
+		t.Fatalf("properties %v", p)
+	}
+	if src, _ := p["$source"].(string); !strings.Contains(src, "openlens_test.go:") {
+		t.Fatalf("source should be the caller's frame: %q", src)
+	}
+	same, panics := 0, 0
+	for _, e := range errs {
+		props := e["properties"].(map[string]any)
+		if props["$message"] == "*errors.errorString: same" {
+			same++
+		}
+		if props["$message"] == "panic: boom" {
+			panics++
+			if src, _ := props["$source"].(string); !strings.Contains(src, "openlens_test.go:") {
+				t.Fatalf("a panic's source is where it panicked: %q", src)
+			}
+		}
+	}
+	if same >= 10 || panics != 1 {
+		t.Fatalf("repeats rate-limited (%d), panic reported once (%d)", same, panics)
 	}
 }
