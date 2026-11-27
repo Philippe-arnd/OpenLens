@@ -98,7 +98,7 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "GET",
         "/api/projects/{project}/errors",
         "read",
-        "Error groups.",
+        "Error groups, each with its origin (`server`: raised on a server) and, for a server group, the browser sessions linked to it (`linked`, with `replay` when a recording exists). `origin=browser` or `origin=server` keeps one origin.",
     ),
     (
         "GET",
@@ -236,7 +236,7 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "GET",
         "/api/projects/{project}/routes",
         "read",
-        "Server routes of one environment (`env`, production by default) over `days` (1 to 90, default 7), from the server SDKs' route stats: per method and route template, requests, 5xx count and share, p50 and p95 in ms (upper bounds of the duration histogram), the largest duration, and the feature whose key action the route is (`server:` in the feature map).",
+        "Server routes of one environment (`env`, production by default) over `days` (1 to 90, default 7), from the server SDKs' route stats: per method and route template, requests, 5xx count and share, p50 and p95 in ms (upper bounds of the duration histogram), the largest duration, the feature whose key action the route is (`server:` in the feature map), the p95 of each of the last ten days (from that day's merged histograms), and how the route moved from the release before to the latest one. Key actions come first, then the routes that got worse, then the largest change; the totals and the counts of worse routes and key actions come with the list.",
     ),
     (
         "GET",

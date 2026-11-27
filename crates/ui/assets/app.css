@@ -390,6 +390,13 @@
   pre.diff ins { text-decoration: none; color: var(--good); background: color-mix(in oklab, var(--mint) var(--tint), transparent); }
   pre.diff del { text-decoration: none; color: var(--bad); background: color-mix(in oklab, var(--bad) var(--tint), transparent); }
 
+  /* Retention (#619): the survival curve, a step line. */
+  svg.survival { width: 100%; height: auto; display: block; }
+  svg.survival .grid { stroke: var(--line); }
+  svg.survival text { fill: var(--muted); font-size: 11px; }
+  svg.survival .km { fill: none; stroke: var(--accent); stroke-width: 2; }
+  svg.survival circle { fill: var(--accent); }
+
   /* Audience map (#225): one hue, five steps; no data stays neutral. */
   svg.world { width: 100%; height: auto; display: block; }
   svg.world path { stroke: var(--surface); stroke-width: .5; }

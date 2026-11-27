@@ -262,3 +262,87 @@ fn revenue_without_payments_shows_the_snippet() {
     assert!(block.starts_with("<pre") && block.contains("<code>openlens.track("));
     assert!(!html.contains("style=") && !html.contains("<script"));
 }
+
+/// A board with two cohorts, and a churn report with a falling curve.
+fn retention_page() -> (Board, String) {
+    let b = Board {
+        retention: vec![
+            openlens_engine::RetentionRow {
+                week: "2026-10-05".into(),
+                users: 41,
+                weeks: vec![0.61, 0.5, 0.375],
+            },
+            openlens_engine::RetentionRow {
+                week: "2026-10-12".into(),
+                users: 29,
+                weeks: vec![0.24, 0.2],
+            },
+        ],
+        ..Board::default()
+    };
+    let c = ChurnReport {
+        window: 14,
+        users: 40,
+        survival: vec![(0, 1.0), (7, 0.8), (30, 0.45), (60, 0.45), (90, 0.2)],
+        median_days: Some(21),
+        ..ChurnReport::default()
+    };
+    let html = render(retention(&project(), &b, &Filters::default(), &c));
+    (b, html)
+}
+
+#[test]
+fn the_retention_tab_shows_the_cohort_numbers_the_board_had() {
+    let (b, html) = retention_page();
+    // The same table, from the same rows, as the board drew it. The body
+    // is compared: the column tooltip's id is numbered per render.
+    let alone = cohort_table(&b).into_string();
+    let body = &alone[alone.find("<tbody>").unwrap()..alone.find("</tbody>").unwrap()];
+    assert!(html.contains(body));
+    let table = &html[html.find("<table class=\"heat\"").unwrap()..];
+    let table = &table[..table.find("</table>").unwrap()];
+    for r in &b.retention {
+        let row = &table[table.find(&r.week).unwrap()..];
+        let row = &row[..row.find("</tr>").unwrap()];
+        for share in &r.weeks {
+            assert!(row.contains(&pct(*share)), "{row}");
+        }
+    }
+    assert!(!html.contains(" style="));
+}
+
+#[test]
+fn the_survival_curve_steps_down_as_users_leave_and_says_its_points() {
+    let (_, html) = retention_page();
+    let svg = &html[html.find("<svg class=\"survival\"").unwrap()..];
+    let svg = &svg[..svg.find("</svg>").unwrap()];
+    // A step line: horizontal then vertical moves only.
+    let path = svg.split("class=\"km\" d=\"").nth(1).unwrap();
+    let path = &path[..path.find('"').unwrap()];
+    assert!(path.starts_with('M') && path.contains(" H") && path.contains(" V"));
+    assert!(!path.contains('L') && !path.contains('C'), "{path}");
+    // Lower share, lower on the chart (larger y); equal shares, same y.
+    let ys: Vec<f64> = svg
+        .split(" cy=\"")
+        .skip(1)
+        .map(|s| s[..s.find('"').unwrap()].parse().unwrap())
+        .collect();
+    assert_eq!(ys.len(), 5);
+    assert!(ys.windows(2).all(|w| w[0] <= w[1]), "{ys:?}");
+    assert_eq!(ys[2], ys[3]);
+    assert!(ys[0] < ys[4]);
+    // The text alternative lists every point.
+    let desc = &svg[svg.find("<desc").unwrap()..svg.find("</desc>").unwrap()];
+    for (d, s) in [(0, 1.0), (7, 0.8), (30, 0.45), (60, 0.45), (90, 0.2)] {
+        assert!(desc.contains(&format!("day {d}: {}", pct(s))), "{desc}");
+    }
+    assert!(svg.contains("role=\"img\"") && svg.contains("aria-labelledby="));
+}
+
+#[test]
+fn churn_no_longer_lists_how_long_they_stay() {
+    // The curve is on Retention: Churn links there instead of repeating it.
+    let html = churn_page(Vec::new());
+    assert!(!html.contains("How long they stay"));
+    assert!(html.contains("/p/d/retention"));
+}

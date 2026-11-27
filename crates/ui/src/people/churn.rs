@@ -3,7 +3,7 @@
 //! table cards and the secondary ones as disclosures.
 
 use super::{card, head, key_numbers, plain_tile, share_rows};
-use crate::board::{Kpi, Side, barcell, compare, kpi_tile};
+use crate::board::{Kpi, Side, compare, kpi_tile};
 use crate::tables::{Col, TableCard, user_cell};
 use crate::*;
 
@@ -134,8 +134,10 @@ pub fn churn(
             (l, *n)
         })
         .collect();
+    let pid = p.id;
     // The churn page is the detail (#409): only "At risk now" opens its
-    // list below; the others stay plain on purpose.
+    // list below, and the median lifetime the curve on Retention (#619);
+    // the others stay plain on purpose.
     let tiles = html! {
         (plain_tile("Churn rate", html! { (pct(rate)) }, format!("{} of {} users active {} days ago left", compact(c.churned_recent), compact(c.active_at_start), c.window)))
         (plain_tile("Net change", html! { (if net >= 0 { "+" } else { "" }) (compact(net)) }, format!("{} new + {} back − {} gone", compact(c.new_recent), compact(c.resurrected), compact(c.churned_recent))))
@@ -145,9 +147,13 @@ pub fn churn(
             sub: "quiet for over half the window, less active than before".to_owned(),
             moved: None,
         }, false))
-        (plain_tile("Median lifetime", html! { (c.median_days.map_or_else(|| "over 90 days".into(), |d| format!("{d} days"))) }, "half the users are gone by then".to_owned()))
+        (kpi_tile(Some(&detail_url(pid, "/retention", f)), "Median lifetime", Kpi {
+            value: html! { (c.median_days.map_or_else(|| "over 90 days".into(), |d| format!("{d} days"))) },
+            spark: html! {},
+            sub: "half the users are gone by then; the curve is on Retention".to_owned(),
+            moved: None,
+        }, false))
     };
-    let pid = p.id;
     layout_in(
         "Churn",
         Some(p),
@@ -164,12 +170,6 @@ pub fn churn(
                     (card("ch-week", "Churned per week", html! {}, html! {
                         @if c.by_week.is_empty() { p.muted.small { "Nobody has churned in the window." } }
                         @else { (sparkline(&c.by_week)) p.muted.small { "Users whose last active day fell that week." } }
-                    }))
-                    (card("ch-stay", "How long they stay", html! {}, html! {
-                        div.scroll { table.share-bars { tbody { @for (d, s) in &c.survival {
-                            tr { th scope="row" { "day " (d) } td.bar { (barcell(*s)) } }
-                        } } } }
-                        p.muted.small { "Share still active N days after their first visit (Kaplan–Meier: users who joined recently count only for the days they could have stayed)." }
                     }))
                     (card("ch-leave", "When they leave", html! {}, html! {
                         @if leave.is_empty() { p.muted.small { "Nobody has churned yet." } }

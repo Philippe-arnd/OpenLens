@@ -50,6 +50,8 @@ pub const P95_MIN_MS: f64 = 200.0;
 pub const MAX_ROUTES: usize = 500;
 /// Days `routes.list` reads at most.
 pub const MAX_DAYS: i64 = 90;
+/// Days of each route's p95 trend (#622).
+pub const TREND_DAYS: i64 = 10;
 
 /// One route's numbers.
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
@@ -119,6 +121,20 @@ impl RouteStat {
     pub fn p95(&self) -> f64 {
         self.quantile(0.95)
     }
+    /// Add `other`'s requests and histogram to this one: the quantiles of
+    /// the result are those of both together, never an average of theirs.
+    pub fn merge(&mut self, other: &RouteStat) {
+        self.requests = self.requests.saturating_add(other.requests);
+        self.errors = self.errors.saturating_add(other.errors);
+        self.sum_ms = self.sum_ms.saturating_add(other.sum_ms);
+        self.max_ms = self.max_ms.max(other.max_ms);
+        if self.buckets.len() < other.buckets.len() {
+            self.buckets.resize(other.buckets.len(), 0);
+        }
+        for (a, b) in self.buckets.iter_mut().zip(&other.buckets) {
+            *a = a.saturating_add(*b);
+        }
+    }
 }
 
 /// `GET /api/login` → the features whose key action it is, from the map's
@@ -145,9 +161,9 @@ fn normalize(r: &str) -> String {
 }
 
 /// The SQL summing the stats per route (and per the `extra` expression,
-/// selected as `part`) where `w` holds; each histogram bucket is its own
-/// column.
-fn stats_sql(w: &str, extra: Option<&str>) -> String {
+/// selected as `part`) where `w` holds, `limit` rows at most; each
+/// histogram bucket is its own column.
+fn stats_sql(w: &str, extra: Option<&str>, limit: usize) -> String {
     // One data point of `http.server.request.duration` (#601): OpenTelemetry
     // semantic-convention attributes, durations in seconds.
     let attr = |k: &str, pat: &str| format!("regexp_match(properties, '\"{k}\":{pat}')[1]");
@@ -178,7 +194,7 @@ fn stats_sql(w: &str, extra: Option<&str>) -> String {
          sum(CASE WHEN {status} >= 500 THEN {count} ELSE 0 END) AS errors, \
          CAST(sum({sum}) * 1000 AS BIGINT) AS sum_ms, CAST(max({max}) * 1000 AS BIGINT) AS max_ms, {buckets} \
          FROM raw_events WHERE event = '{event}' AND {w} \
-         GROUP BY {group}{method}, {route} ORDER BY requests DESC LIMIT {MAX_ROUTES}",
+         GROUP BY {group}{method}, {route} ORDER BY requests DESC LIMIT {limit}",
         sum = secs_of("sum"),
         max = secs_of("max"),
         buckets = buckets.join(", "),
@@ -227,7 +243,7 @@ pub async fn list(
     let keys = key_actions(map);
     let r = q
         .with_params(&params)
-        .sql(project, &stats_sql(&w, None))
+        .sql(project, &stats_sql(&w, None, MAX_ROUTES))
         .await?;
     Ok(r.rows.iter().filter_map(|x| row_stat(x, &keys)).collect())
 }
@@ -254,7 +270,7 @@ pub(crate) async fn by_release(
     let keys = key_actions(map);
     let r = q
         .with_params(&params)
-        .sql(project, &stats_sql(&w, Some("release")))
+        .sql(project, &stats_sql(&w, Some("release"), MAX_ROUTES))
         .await?;
     let mut out: HashMap<String, Vec<RouteStat>> = HashMap::new();
     for x in &r.rows {
@@ -263,6 +279,231 @@ pub(crate) async fn by_release(
         }
     }
     Ok(out)
+}
+
+/// The days of the p95 trend (#622): the last [`TREND_DAYS`] UTC days,
+/// oldest first, today last.
+#[must_use]
+pub fn trend_days(now: chrono::DateTime<chrono::Utc>) -> Vec<String> {
+    let today = now.date_naive();
+    (0..TREND_DAYS)
+        .rev()
+        .map(|i| {
+            (today - chrono::Duration::days(i))
+                .format("%Y-%m-%d")
+                .to_string()
+        })
+        .collect()
+}
+
+/// Each route's p95 on each of `days` (`None` without requests that day),
+/// by route name. A day's p95 comes from the merge of that day's
+/// histograms, never from an average of p95s.
+#[must_use]
+pub fn daily_p95(
+    rows: &[(String, RouteStat)],
+    days: &[String],
+) -> HashMap<String, Vec<Option<f64>>> {
+    let mut merged: HashMap<(String, usize), RouteStat> = HashMap::new();
+    for (day, s) in rows {
+        let Some(i) = days.iter().position(|d| d == day) else {
+            continue;
+        };
+        merged
+            .entry((s.name(), i))
+            .and_modify(|m| m.merge(s))
+            .or_insert_with(|| s.clone());
+    }
+    let mut out: HashMap<String, Vec<Option<f64>>> = HashMap::new();
+    for ((name, i), s) in merged {
+        let series = out.entry(name).or_insert_with(|| vec![None; days.len()]);
+        if let Some(slot) = series.get_mut(i) {
+            *slot = (s.buckets.iter().sum::<i64>() > 0).then(|| s.p95());
+        }
+    }
+    out
+}
+
+/// The p95 trend of each route of `environment` over [`trend_days`]: one
+/// grouped query per day and route, bounded like the list.
+///
+/// # Errors
+/// A bad environment or a failed query.
+pub async fn trend(
+    q: &QueryEngine,
+    project: &str,
+    environment: &str,
+    days: &[String],
+) -> Result<HashMap<String, Vec<Option<f64>>>> {
+    let Some(first) = days.first() else {
+        return Ok(HashMap::new());
+    };
+    let mut params = openlens_sqlgen::Params::new();
+    let env = params
+        .set("env", environment)
+        .map_err(|_| EngineError::InvalidFilter("environment"))?;
+    let first = chrono::NaiveDate::parse_from_str(first, "%Y-%m-%d")
+        .map_err(|_| EngineError::InvalidFilter("date"))?
+        .format("%Y-%m-%d");
+    let w = format!("date >= '{first}' AND environment = {env}");
+    let r = q
+        .with_params(&params)
+        .sql(
+            project,
+            &stats_sql(&w, Some("date"), MAX_ROUTES * days.len()),
+        )
+        .await?;
+    let none = HashMap::new();
+    let rows: Vec<(String, RouteStat)> = r
+        .rows
+        .iter()
+        .filter_map(|x| Some((text(x, "part")?, row_stat(x, &none)?)))
+        .collect();
+    Ok(daily_p95(&rows, days))
+}
+
+/// The latest release of an environment with route stats and the one
+/// before it, each with its routes.
+#[derive(Debug, Clone, Default)]
+pub struct ReleasePair {
+    /// The latest release's name.
+    pub current: String,
+    /// Its routes.
+    pub current_routes: Vec<RouteStat>,
+    /// The release before it, with its routes, when there is one.
+    pub previous: Option<(String, Vec<RouteStat>)>,
+}
+
+/// The two latest releases of `environment` by their first route stats
+/// over the releases' window ([`crate::releases::WINDOW_DAYS`]), with
+/// their routes; `None` without a release in the stats.
+///
+/// # Errors
+/// A bad environment or a failed query.
+pub async fn latest_releases(
+    q: &QueryEngine,
+    project: &str,
+    environment: &str,
+    map: Option<&FeatureMap>,
+) -> Result<Option<ReleasePair>> {
+    let since = (chrono::Utc::now() - chrono::Duration::days(crate::releases::WINDOW_DAYS))
+        .format("%Y-%m-%d")
+        .to_string();
+    let mut params = openlens_sqlgen::Params::new();
+    let env = params
+        .set("env", environment)
+        .map_err(|_| EngineError::InvalidFilter("environment"))?;
+    let w = format!(
+        "event = '{event}' AND date >= '{since}' AND environment = {env} \
+         AND release IS NOT NULL AND release <> ''",
+        event = openlens_event::names::REQUEST_STATS,
+    );
+    let r = q
+        .with_params(&params)
+        .sql(
+            project,
+            &format!(
+                "SELECT release AS part, min(timestamp) AS first_ts FROM raw_events WHERE {w} \
+                 GROUP BY release ORDER BY first_ts DESC LIMIT 2"
+            ),
+        )
+        .await?;
+    let names: Vec<String> = r.rows.iter().filter_map(|x| text(x, "part")).collect();
+    let Some(current) = names.first().cloned() else {
+        return Ok(None);
+    };
+    let previous = names.get(1).cloned();
+    let mut list = vec![params.set("cur", &current)];
+    if let Some(p) = &previous {
+        list.push(params.set("prev", p));
+    }
+    // A release name the query cannot hold: no comparison.
+    let Ok(list) = list.into_iter().collect::<std::result::Result<Vec<_>, _>>() else {
+        return Ok(None);
+    };
+    let w = format!(
+        "date >= '{since}' AND environment = {env} AND ({})",
+        list.iter()
+            .map(|r| format!("release = {r}"))
+            .collect::<Vec<_>>()
+            .join(" OR ")
+    );
+    let keys = key_actions(map);
+    let r = q
+        .with_params(&params)
+        .sql(project, &stats_sql(&w, Some("release"), MAX_ROUTES * 2))
+        .await?;
+    let mut out = ReleasePair {
+        current: current.clone(),
+        ..ReleasePair::default()
+    };
+    let mut before = Vec::new();
+    for x in &r.rows {
+        let (Some(release), Some(s)) = (text(x, "part"), row_stat(x, &keys)) else {
+            continue;
+        };
+        if release == current {
+            out.current_routes.push(s);
+        } else {
+            before.push(s);
+        }
+    }
+    out.previous = previous.map(|p| (p, before));
+    Ok(Some(out))
+}
+
+/// How one route moved from the previous release to the latest one, by
+/// the verdict's rules ([`checks`]).
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct Change {
+    /// 5xx share in the latest release.
+    pub error_rate: f64,
+    /// 5xx share in the release before.
+    pub previous_error_rate: f64,
+    /// p95 in the latest release, ms.
+    pub p95_ms: f64,
+    /// p95 in the release before, ms.
+    pub previous_p95_ms: f64,
+    /// The 5xx share moved enough to count (worse or better).
+    pub errors_moved: bool,
+    /// The p95 moved enough to count.
+    pub p95_moved: bool,
+    /// Worse on either.
+    pub worse: bool,
+    /// Size of the larger move, in units of its threshold: 1 is a move
+    /// just large enough to count.
+    pub size: f64,
+}
+
+/// Each judged route's [`Change`] between `previous` and `current`, by
+/// route name. Routes with too few requests on either side are left out.
+#[must_use]
+pub fn changes(current: &[RouteStat], previous: &[RouteStat]) -> HashMap<String, Change> {
+    let mut out: HashMap<String, Change> = HashMap::new();
+    for c in checks(current, previous) {
+        let Some((kind, name)) = c.key.split_once(':') else {
+            continue;
+        };
+        let moved = matches!(c.outcome, Outcome::Worse | Outcome::Better);
+        let e = out.entry(name.to_owned()).or_default();
+        e.worse |= c.outcome == Outcome::Worse;
+        let before = c.previous.unwrap_or(0.0);
+        if kind == "5xx" {
+            e.error_rate = c.current;
+            e.previous_error_rate = before;
+            e.errors_moved = moved;
+        } else {
+            e.p95_ms = c.current;
+            e.previous_p95_ms = before;
+            e.p95_moved = moved;
+        }
+    }
+    for e in out.values_mut() {
+        let errors = (e.error_rate - e.previous_error_rate).abs() / MIN_5XX_MOVE;
+        let p95 = (e.p95_ms.max(1.0) / e.previous_p95_ms.max(1.0)).ln().abs() / P95_RATIO.ln();
+        e.size = errors.max(p95);
+    }
+    out
 }
 
 fn label(s: &RouteStat) -> String {
@@ -390,7 +631,7 @@ pub async fn failing_routes(
     // The last hour of closed windows (a window is stamped with its start
     // and sent when it ends, so 70 minutes back), and the week before.
     let part = "CASE WHEN timestamp >= now() - INTERVAL '70 minutes' THEN 'hour' ELSE 'week' END";
-    let sql = stats_sql(&w, Some(part));
+    let sql = stats_sql(&w, Some(part), MAX_ROUTES);
     let keys = key_actions(map);
     let r = q.sql(project, &sql).await?;
     let mut hour = Vec::new();
@@ -478,6 +719,42 @@ mod tests {
         assert!(failing(&stat(100, 80, 90, 4), Some(&week)).is_some());
         assert!(failing(&stat(100, 2, 90, 4), Some(&week)).is_none());
         assert!(failing(&stat(5, 5, 0, 4), Some(&week)).is_none());
+    }
+
+    #[test]
+    fn a_days_p95_comes_from_its_merged_histograms_never_an_average_of_p95s() {
+        let days = trend_days(chrono::Utc::now());
+        assert_eq!(days.len() as i64, TREND_DAYS);
+        let fast = stat(100, 0, 100, 2);
+        let slow = stat(10, 0, 0, 10);
+        let today = days.last().cloned().unwrap_or_default();
+        let rows = vec![(today.clone(), fast.clone()), (today, slow.clone())];
+        let series = daily_p95(&rows, &days);
+        let series = series.get(&fast.name()).cloned().unwrap_or_default();
+        let mut both = fast.clone();
+        both.merge(&slow);
+        let average = (fast.p95() + slow.p95()) / 2.0;
+        assert_eq!(series.last().copied().flatten(), Some(both.p95()));
+        assert!((both.p95() - average).abs() > 1.0);
+        assert!(
+            series.first().copied().flatten().is_none(),
+            "a day without requests has no p95"
+        );
+    }
+
+    #[test]
+    fn a_route_that_breaks_moves_more_than_one_that_holds() {
+        let before = [stat(400, 0, 390, 4)];
+        let broken = [stat(400, 120, 390, 4)];
+        let name = before[0].name();
+        let moved = changes(&broken, &before);
+        let held = changes(&before, &before);
+        let (Some(m), Some(h)) = (moved.get(&name), held.get(&name)) else {
+            panic!("both are judged");
+        };
+        assert!(m.worse && m.errors_moved && !h.worse && !h.errors_moved);
+        assert!(m.size > h.size && m.size >= 1.0);
+        assert!(m.previous_error_rate < m.error_rate);
     }
 
     #[test]

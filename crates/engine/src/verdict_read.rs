@@ -27,7 +27,7 @@ use openlens_query::QueryEngine;
 
 use crate::board_people;
 use crate::board_sessions::SessionRows;
-use crate::errors::FINGERPRINT;
+use crate::errors::{FINGERPRINT, SERVER_ERROR};
 use crate::goals::Goal;
 use crate::releases::Release;
 use crate::verdict::{self, FeatureUse, NewError, Report, Side, VitalP75};
@@ -102,7 +102,7 @@ async fn sides(
     let w = f.clause_at(DAYS, now)?;
     let errors_sql = format!(
         "WITH e AS (SELECT distinct_id, release, timestamp, error_message AS msg, error_source AS source, \
-           CASE WHEN strpos(properties, '\"$kind\":\"server\"') > 0 THEN 1 ELSE 0 END AS srv \
+           {SERVER_ERROR} AS srv \
            FROM {src} WHERE {w} AND event = '$error'), \
          g AS (SELECT distinct_id, release, timestamp, msg, srv, {FINGERPRINT} AS fp FROM e), \
          fr AS (SELECT fp, first_value(release ORDER BY timestamp) AS rel FROM g GROUP BY fp) \

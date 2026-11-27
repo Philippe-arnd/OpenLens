@@ -20,8 +20,8 @@ pub(crate) struct NavGroup {
 
 /// The project sidebar (#402, v2.1 #621): nine entries in the method's
 /// order, Releases first among the data sections (the "compare" step).
-/// Every page keeps its URL; a section opens its first tab. Pages that do
-/// not exist yet get no tab (Routes in Quality, Retention in People), and
+/// Every page keeps its URL; a section opens its first tab. A page
+/// that does not exist gets no tab:
 /// Delivery stays a card on the Releases page until it has its own page.
 pub(crate) const NAV: &[NavGroup] = &[
     NavGroup {
@@ -55,6 +55,7 @@ pub(crate) const NAV: &[NavGroup] = &[
         icon: "alert",
         tabs: &[
             ("/errors", "Errors", &["Errors"]),
+            ("/routes", "Routes", &["Routes"]),
             ("/replays", "Replays", &["Replays", "Replay"]),
         ],
     },
@@ -75,6 +76,7 @@ pub(crate) const NAV: &[NavGroup] = &[
         icon: "globe",
         tabs: &[
             ("/audience", "Audience", &["Audience", "Person"]),
+            ("/retention", "Retention", &["Retention"]),
             ("/churn", "Churn", &["Churn"]),
             ("/acquisition", "Acquisition", &["Acquisition"]),
             ("/revenue", "Revenue", &["Revenue"]),

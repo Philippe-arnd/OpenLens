@@ -182,6 +182,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/p/{project}/audience", get(crate::explore::audience))
         .route("/p/{project}/forms", get(crate::explore::forms))
         .route("/p/{project}/acquisition", get(crate::explore::acquisition))
+        .route("/p/{project}/retention", get(crate::explore::retention))
         .route("/p/{project}/churn", get(crate::explore::churn))
         .route(
             "/p/{project}/churn/audience",
@@ -638,7 +639,7 @@ async fn errors_page(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
-    Query(q): Query<FilterQuery>,
+    Query(q): Query<crate::api::ErrorsQuery>,
 ) -> Response {
     let Some(p) = project(&state, id).await else {
         return html(
@@ -646,7 +647,10 @@ async fn errors_page(
             openlens_ui::message("Not found", "No such project."),
         );
     };
-    let f = q.filters(&auth::tz_for(&state, &headers, &p.timezone));
+    let f = q
+        .filters
+        .filters(&auth::tz_for(&state, &headers, &p.timezone));
+    let origin = q.origin();
     let map = crate::load_map(&state, &p.id).await;
     let src = openlens_engine::source(map.as_ref().map(|(m, _)| m));
     let info = openlens_ui::ProjectInfo {
@@ -662,7 +666,7 @@ async fn errors_page(
     let caller = openlens_engine::commands::Caller::default();
     let (b, groups, routes) = tokio::join!(
         openlens_engine::filter_options(&state.query, &p.id, &f, map.as_ref().map(|(m, _)| m)),
-        openlens_engine::error_groups(&state.query, &p.id, &src, &f),
+        openlens_engine::error_groups_of(&state.query, &p.id, &src, &f, origin),
         <openlens_engine::commands::routes::List as openlens_engine::commands::Command>::run(
             &state, &caller, routes_in
         )
@@ -675,10 +679,11 @@ async fn errors_page(
                 std::mem::take(&mut b.environments),
                 &f.environment,
             );
+            let g = with_replays(&state, &p.id, g).await;
             let original = crate::resolve_frames(&state, &p.id, &g).await;
             html(
                 StatusCode::OK,
-                openlens_ui::errors(&info, &b, &g, &original, &f, routes.ok().as_ref()),
+                openlens_ui::errors(&info, &b, &g, &original, &f, origin, routes.ok().as_ref()),
             )
         }
         (Err(e), _) | (_, Err(e)) => html(
@@ -829,6 +834,28 @@ pub(crate) async fn access_layer(
         // changes a project takes `access::ProjectWrite` (#339).
     }
     next.run(req).await
+}
+
+/// `groups` with their linked browser sessions marked when a recording of
+/// them exists (#624), checked off the async threads.
+pub(crate) async fn with_replays(
+    state: &AppState,
+    project: &str,
+    groups: Vec<openlens_engine::ErrorGroup>,
+) -> Vec<openlens_engine::ErrorGroup> {
+    if groups.iter().all(|g| g.linked.is_empty()) {
+        return groups;
+    }
+    let root = state.data_dir.clone();
+    let project = project.to_owned();
+    let kept = groups.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut groups = groups;
+        openlens_engine::mark_replays(&root, &project, &mut groups);
+        groups
+    })
+    .await
+    .unwrap_or(kept)
 }
 
 #[cfg(test)]

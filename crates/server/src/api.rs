@@ -787,11 +787,26 @@ async fn validate_map(State(state): State<AppState>, headers: HeaderMap, body: S
     Json(json!({ "valid": parsed.map.is_some(), "issues": parsed.issues })).into_response()
 }
 
+/// The filters of the error groups: the usual ones, and their origin
+/// (#624): `browser`, `server`, or every group.
+#[derive(Deserialize, Default)]
+pub(crate) struct ErrorsQuery {
+    #[serde(flatten)]
+    pub(crate) filters: FilterQuery,
+    pub(crate) origin: Option<String>,
+}
+
+impl ErrorsQuery {
+    pub(crate) fn origin(&self) -> openlens_engine::Origin {
+        openlens_engine::Origin::parse(self.origin.as_deref())
+    }
+}
+
 async fn errors(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(project): Path<String>,
-    axum::extract::Query(q): axum::extract::Query<FilterQuery>,
+    axum::extract::Query(q): axum::extract::Query<ErrorsQuery>,
 ) -> Response {
     if let Some(r) = guard(&state, &headers) {
         return r;
@@ -802,8 +817,10 @@ async fn errors(
     };
     let map = crate::load_map(&state, &p.id).await;
     let src = openlens_engine::source(map.as_ref().map(|(m, _)| m));
-    match openlens_engine::error_groups(&state.query, &p.id, &src, &q.filters(&p.timezone)).await {
+    let f = q.filters.filters(&p.timezone);
+    match openlens_engine::error_groups_of(&state.query, &p.id, &src, &f, q.origin()).await {
         Ok(g) => {
+            let g = crate::web::with_replays(&state, &p.id, g).await;
             let original = crate::resolve_frames(&state, &p.id, &g).await;
             let groups: Vec<Value> = g
                 .iter()

@@ -340,31 +340,86 @@ pub fn pages(
     )
 }
 
-/// Error groups, most users first.
+/// Where an error group was raised (#624): a tag.
+fn origin_tag(server: bool) -> Markup {
+    html! {
+        @if server {
+            span.tag.tone-accent title="Raised on a server, sent by a server SDK" { (icon("code")) "Server" }
+        } @else {
+            span.tag.tone-info title="Raised in the browser" { (icon("globe")) "Browser" }
+        }
+    }
+}
+
+/// The browser sessions of a server error group (#624): a replay link
+/// when the session was recorded, else its user; or why there are none.
+fn linked_sessions(pid: &str, g: &openlens_engine::ErrorGroup) -> Markup {
+    html! {
+        @if g.linked.is_empty() {
+            span.muted.small { "No browser session linked: the requests carried no OpenLens session and no trace id the browser also sent." }
+        } @else {
+            span.small { "Browser sessions: " }
+            @for (i, s) in g.linked.iter().enumerate() {
+                @if i > 0 { ", " }
+                @if s.replay {
+                    a.small href={ "/p/" (pid) "/replays/" (url_enc(&s.session)) "?at=" (url_enc(&s.last_seen)) } title="Replay this session" {
+                        (icon("play")) " " (s.user.as_deref().unwrap_or("Replay"))
+                    }
+                } @else {
+                    span.small.mono title="Not recorded" { (s.user.as_deref().unwrap_or(s.session.get(..8).unwrap_or(&s.session))) }
+                }
+            }
+        }
+    }
+}
+
+/// Error groups, most users first, of one origin or all (#624).
 pub fn errors(
     p: &ProjectInfo<'_>,
     b: &Board,
     groups: &[openlens_engine::ErrorGroup],
     original: &[Option<openlens_errors::Original>],
     f: &Filters,
+    origin: openlens_engine::Origin,
     routes: Option<&openlens_engine::commands::routes::Routes>,
 ) -> Markup {
+    use openlens_engine::Origin;
     let list = |v: &[(String, i64)]| {
         v.iter()
             .map(|(k, n)| format!("{k} ({n})"))
             .collect::<Vec<_>>()
             .join(", ")
     };
+    let action = match origin {
+        Origin::All => "/errors".to_owned(),
+        o => format!("/errors?origin={}", o.as_str()),
+    };
+    let origin_href = |o: Origin| match o {
+        Origin::All => crate::explore::filtered_href(p.id, "/errors", f, &[]),
+        o => crate::explore::filtered_href(p.id, "/errors", f, &[("origin", o.as_str())]),
+    };
+    let none = match origin {
+        Origin::All => "No errors in the last 30 days. Nice.",
+        Origin::Browser => "No browser errors in the last 30 days.",
+        Origin::Server => {
+            "No server errors in the last 30 days. A server SDK sends them (see sdk/SERVER.md)."
+        }
+    };
     layout_in(
         "Errors",
         Some(p),
-        context_bar(p.id, b, f, "/errors", false),
+        context_bar(p.id, b, f, &action, false),
         html! {
             div.heading {
-                div { h1 { "Errors" } p.muted { "Uncaught errors grouped by cause, most users first, last 30 days." } }
+                div { h1 { "Errors" } p.muted { "Uncaught errors grouped by cause, most users first, last 30 days. A server error links to the browser sessions that made the request." } }
+            }
+            nav.tabs aria-label="Origin" {
+                @for (o, label) in [(Origin::All, "All"), (Origin::Browser, "Browser"), (Origin::Server, "Server")] {
+                    a href=(origin_href(o)) aria-current=[(o == origin).then_some("page")] { (label) }
+                }
             }
             @if groups.is_empty() {
-                section.card { p { (icon("task")) " No errors in the last 30 days. Nice." } }
+                section.card { p { (icon("task")) " " (none) } }
             } @else {
                 (crate::tables::TableCard {
                     label: "Error groups",
@@ -378,7 +433,9 @@ pub fn errors(
                         tr {
                             th scope="row" {
                                 span.ev.ev-error title="Error" { (icon("alert")) span.sr-only { "Error: " } (g.sample.get(..160).unwrap_or(&g.sample)) }
+                                " " (origin_tag(g.server))
                                 br;
+                                @if g.server { (linked_sessions(p.id, g)) br; }
                                 a.small href={ "/p/" (p.id) "/tickets/new?kind=error&subject=" (url_enc(&g.fingerprint)) } { "Create ticket →" } br;
                                 @if let Some(Some(o)) = original.get(i) {
                                     span.small.mono title="Resolved with the release's source map" {
@@ -407,45 +464,24 @@ pub fn errors(
                 .render())
             }
             @if let Some(r) = routes.filter(|r| !r.routes.is_empty()) {
-                (server_routes(r))
+                (server_routes(p.id, r))
             }
         },
     )
 }
 
-/// The server routes of the Errors page (#594): `routes.list`, worst 5xx
-/// share first among the routes with traffic.
-fn server_routes(r: &openlens_engine::commands::routes::Routes) -> Markup {
-    let mut rows: Vec<&openlens_engine::commands::routes::Route> = r.routes.iter().collect();
-    rows.sort_by(|a, b| {
-        b.error_rate
-            .total_cmp(&a.error_rate)
-            .then(b.stat.requests.cmp(&a.stat.requests))
-    });
+/// The server routes on the Errors page (#594): one line and a link, the
+/// table lives on Quality › Routes (#622).
+fn server_routes(pid: &str, r: &openlens_engine::commands::routes::Routes) -> Markup {
     html! {
-        (crate::tables::TableCard {
-            label: "Server routes",
-            head: html! {},
-            cols: &[
-                Col::Shown("Route"), Col::Num("Requests"), Col::Num("5xx"), Col::Num("p50"),
-                Col::Num("p95"), Col::Num("Slowest"),
-            ],
-            body: html! { @for x in rows.iter().take(50) {
-                tr {
-                    th scope="row" {
-                        span.mono { (x.stat.method) " " (x.stat.route) }
-                        @if let Some(k) = &x.stat.key_of { br; span.small.muted { "Key action of " (k) } }
-                    }
-                    td.num { (compact(x.stat.requests)) }
-                    td.num { @if x.stat.errors > 0 { strong { (format!("{:.1} %", x.error_rate * 100.0)) } } @else { span.muted { "0 %" } } }
-                    td.num { (format!("{:.0} ms", x.p50_ms)) }
-                    td.num { (format!("{:.0} ms", x.p95_ms)) }
-                    td.num.muted { (format!("{} ms", x.stat.max_ms)) }
-                }
-            } },
-            foot: html! { div.pager { span { (r.routes.len()) " routes · " (r.environment) " · last " (r.days) " days · worst 5xx first" } } },
-        }
-        .render())
+        section.card { p {
+            (icon("route")) " Server: " strong { (pct(r.errors as f64 / r.requests.max(1) as f64)) }
+            " of " (compact(r.requests)) " requests answered 5xx over the last " (r.days) " days"
+            @if r.worse > 0 {
+                ", " strong { (r.worse) } " " (if r.worse == 1 { "route" } else { "routes" }) " worse than the release before"
+            }
+            ". " a href={ "/p/" (pid) "/routes" } { "Routes →" }
+        } }
     }
 }
 

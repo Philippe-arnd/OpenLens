@@ -14,7 +14,7 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Automatic release | A release named `YYYY-MM-DD.N` by the server when a new build fingerprint arrives with no release |
 | Time in staging | On the Releases page: from a build's first event in staging to its first in production |
 | Release verdict | On the Releases page: healthy, regressed or inconclusive, a release against the one before it |
-| Server routes | On the Errors page and in `routes`: requests, 5xx share and response times per server route template, from the server SDK |
+| Server routes | Quality › Routes (#622) and `routes`: requests, 5xx share and response times per server route template, from the server SDK, with a ten-day p95 line and the move since the release before; the Errors page keeps one line and a link |
 | Runtime health | In `runtime` and `release_report`: process restarts per day, memory (RSS) and event-loop delay per release, from the Node SDK |
 | Key action | A server route a feature of the map declares under `server:`; its regression is named in the verdict and its alert is urgent |
 | Deploy hook | The project's secret URL that platforms post their deploy notifications to |
