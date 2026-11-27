@@ -232,6 +232,24 @@ impl Command for ReleaseReport {
     }
 }
 
+/// The verdicts of the releases of `environment` with traffic, oldest
+/// first: what the write-back pass (#575) sends to the git host.
+///
+/// # Errors
+/// The project is unknown, or the releases could not be read or judged.
+pub(crate) async fn judged<H: Host>(
+    host: &H,
+    project: &str,
+    environment: &str,
+) -> Result<Vec<Report>, Error> {
+    let input = ListInput {
+        project: project.to_owned(),
+        environment: Some(environment.to_owned()),
+    };
+    let (r, p) = list(host, &Caller::default(), &input).await?;
+    judge(host, &p.id, environment, &r).await
+}
+
 /// The verdict of the newest release of `environment` with traffic
 /// (#614): what the board's status strip and lead read. The server judges
 /// it next to the board and caches it with it; a failure is said, not

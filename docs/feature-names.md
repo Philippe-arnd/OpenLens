@@ -20,6 +20,7 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Deploy hook | The project's secret URL that platforms post their deploy notifications to |
 | Release notes | On the Releases page and in `release_report`: a release's merged pull requests, read from GitHub and grouped Added, Fixed, Changed |
 | Features touched | In a release's notes and `release_report`: the features whose code paths the release's changed files are in; a feature page lists the releases that changed it |
+| Verdict write-back | A production release's healthy or regressed verdict written to GitHub: a commit status, a note in the GitHub release, a comment on each pull request and an issue when regressed |
 | Delivery | On the Releases page: deploy frequency, lead time, change failure rate and time to restore per environment |
 | Map drift | Routes new in the latest release that no feature of the map claims |
 | Counted with | On a feature's releases: the map version in force when the release came out |

@@ -59,6 +59,14 @@ fn one(n: &ReleaseNotes) -> Markup {
             } @else if n.groups.is_empty() {
                 p.muted.small { "No merged pull request in this range: its commits were pushed directly." }
             }
+            @if let Some(w) = &n.write_back {
+                p.small.muted {
+                    "Verdict on GitHub: " (w.reason)
+                    @if let Some(u) = &w.issue_url {
+                        " " a href=(u) rel="noopener noreferrer" { "Open the issue" }
+                    }
+                }
+            }
             @for g in &n.groups {
                 h3 { (g.title) }
                 ul {
@@ -92,7 +100,7 @@ pub(crate) fn notes_card(n: &ListedNotes) -> Markup {
     html! {
         section.card.wide aria-labelledby="rel-notes-h" {
             h2 #rel-notes-h { "Release notes" }
-            p.muted.small { "Written from the merged pull requests of each release's commit range, read from GitHub once an hour. No author is kept." }
+            p.muted.small { "Written from the merged pull requests of each release's commit range, read from GitHub once an hour. No author is kept. A production release's healthy or regressed verdict is written back to GitHub: a commit status, a note in its GitHub release, a comment on each pull request, and an issue when regressed." }
             @if let Some(why) = &n.unavailable {
                 p.small { "Not available: " (why) }
             }
@@ -125,6 +133,7 @@ mod tests {
             first_commit_at: None,
             fetched_at: None,
             touched: None,
+            write_back: None,
         }
     }
 
