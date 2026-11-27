@@ -1420,3 +1420,18 @@
   /* Events: the page's own filters on one row, the short ones narrower. */
   .refine label.sm { flex-basis: 110px; max-width: 150px; }
 }
+
+/* Board fidelity (#588) */
+@layer components {
+  /* The mockup's rhythm: 32px between parts, 28px above the first, and
+     the signals and the page head as one group (16px). */
+  .board { gap: 32px; padding-top: 12px; }
+  .board > .signals + .page-head { margin-top: -16px; }
+  /* The lead and the ranked list, the chart and the pulse: equal heights. */
+  .board .focus-grid, .board > .split { align-items: stretch; }
+  /* The pulse's adoption bar takes the room of the columns it lost. */
+  table.pulse td.adopt { width: 40%; }
+  /* The secondary cards after the release comparison: quieter summaries. */
+  .disclose.secondary summary { padding-block: 14px; }
+  .disclose.secondary summary h2 { font-size: var(--step-1); }
+}
