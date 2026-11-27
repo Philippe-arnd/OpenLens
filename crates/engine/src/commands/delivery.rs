@@ -90,11 +90,17 @@ pub async fn with_releases<H: Host>(
         .meta()
         .deploys(&p.id, since)
         .map_err(|e| Error::Unavailable(e.to_string()))?;
-    // The first commit of each release (#237 part 4) is not read yet: lead
-    // time is reported unknown, with why.
+    // When each release's first commit was made, as its deploy step
+    // recorded it (#633): the start of its lead time.
+    let first_commit = host
+        .meta()
+        .first_commits(&p.id, since)
+        .map_err(|e| Error::Unavailable(e.to_string()))?
+        .into_iter()
+        .collect();
     let known = Known {
+        first_commit,
         regressed: delivery::regressed(&listed.releases),
-        ..Known::default()
     };
     delivery::delivery(host.query(), &p.id, &tz, env, days, &deploys, &known)
         .await

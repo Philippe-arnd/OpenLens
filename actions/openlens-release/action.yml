@@ -12,7 +12,9 @@
 # It downloads `openlens-cli` from the OpenLens release named by the ref the
 # action is used at (the latest release when that ref is not a version
 # tag), checks it against the release's SHA256SUMS, and runs
-# `openlens-cli release`. Linux runners only.
+# `openlens-cli release`. Linux runners only. Check out with `fetch-depth: 0`:
+# the CLI reads when the release's first commit was made from the git
+# history, for its lead time (#633).
 name: OpenLens release
 description: Record an app release in OpenLens with its commit range, upload its source maps, and optionally wait for its verdict.
 branding:

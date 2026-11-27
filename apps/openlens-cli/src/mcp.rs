@@ -221,8 +221,8 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "record_release",
-                description: "Record a release from the deploy step, after the deploy: its name (the one the SDK sends), the commit deployed and the commit its range starts after (default: the environment's previous deployed commit). It shows in `releases` as a succeeded deploy. In CI prefer `openlens-cli release` or the openlens-release GitHub Action, which also upload the source maps.",
-                input_schema: json!({"type":"object","properties":with(json!({"release":{"type":"string"},"commit":{"type":"string","description":"7 to 64 hex digits"},"from":{"type":"string","description":"7 to 64 hex digits"},"environment":{"type":"string","default":"production"}})),"required":["release"]}),
+                description: "Record a release from the deploy step, after the deploy: its name (the one the SDK sends), the commit deployed and the commit its range starts after (default: the environment's previous deployed commit), and optionally when the range's first commit was made (first_commit_at, from `git log`), which gives the release's lead time in `delivery`. It shows in `releases` as a succeeded deploy. In CI prefer `openlens-cli release` or the openlens-release GitHub Action, which also upload the source maps.",
+                input_schema: json!({"type":"object","properties":with(json!({"release":{"type":"string"},"commit":{"type":"string","description":"7 to 64 hex digits"},"from":{"type":"string","description":"7 to 64 hex digits"},"first_commit_at":{"type":"integer","description":"Author time (Unix seconds) of the oldest commit of the range, for the lead time"},"environment":{"type":"string","default":"production"}})),"required":["release"]}),
             },
             ToolSpec {
                 name: "create_ticket",

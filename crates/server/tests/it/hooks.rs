@@ -446,3 +446,78 @@ async fn deploys_feed_the_delivery_metrics() {
     let page = body_text(get(&h, "/p/default/releases", Some(&cookie), false).await).await;
     assert!(page.contains("Deploy frequency") && page.contains("Time to restore"));
 }
+
+/// #633: a release recorded with when its first commit was made has a
+/// lead time; one recorded without it leaves lead time unknown, with why.
+/// A dry run resolves the range and records nothing.
+#[tokio::test]
+async fn a_recorded_first_commit_gives_the_release_a_lead_time() {
+    let h = harness();
+    let now = chrono::Utc::now().timestamp();
+    let (s, _) = record(
+        &h,
+        "default",
+        serde_json::json!({"release": "v1", "commit": "aaaaaaa1"}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let before = production_delivery(&h).await;
+    assert!(
+        before["lead_time_secs"].is_null() && before["lead_time_note"].is_string(),
+        "{before}"
+    );
+
+    let (s, dry) = record(
+        &h,
+        "default",
+        serde_json::json!({"release": "v2", "commit": "bbbbbbb2", "dry_run": true}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(dry["from"], "aaaaaaa1", "{dry}");
+    let r = get(&h, "/api/projects/default/releases", None, true).await;
+    let listed: serde_json::Value = serde_json::from_str(&body_text(r).await).unwrap();
+    assert_eq!(
+        listed["deploys"].as_array().unwrap().len(),
+        1,
+        "a dry run records nothing"
+    );
+
+    let first = now - 3 * 3_600;
+    let (s, rec) = record(
+        &h,
+        "default",
+        serde_json::json!({"release": "v2", "commit": "bbbbbbb2", "first_commit_at": first}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{rec}");
+    let after = production_delivery(&h).await;
+    let secs = after["lead_time_secs"].as_f64().unwrap_or_default();
+    assert!(secs >= 3.0 * 3_600.0 - 60.0, "{after}");
+    assert!(secs < 4.0 * 3_600.0, "{after}");
+
+    for bad in [
+        serde_json::json!({"release": "v3", "first_commit_at": first}),
+        serde_json::json!({"release": "v3", "commit": "ccccccc3", "first_commit_at": now + 86_400}),
+        serde_json::json!({"release": "v3", "commit": "ccccccc3", "first_commit_at": -1}),
+    ] {
+        assert_eq!(
+            record(&h, "default", bad.clone()).await.0,
+            StatusCode::BAD_REQUEST,
+            "{bad}"
+        );
+    }
+}
+
+/// The production metrics of `GET /api/projects/default/delivery?days=7`.
+async fn production_delivery(h: &Harness) -> serde_json::Value {
+    let r = get(h, "/api/projects/default/delivery?days=7", None, true).await;
+    let v: serde_json::Value = serde_json::from_str(&body_text(r).await).unwrap();
+    v["environments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["environment"] == "production")
+        .unwrap()
+        .clone()
+}

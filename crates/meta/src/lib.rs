@@ -294,7 +294,8 @@ CREATE TABLE IF NOT EXISTS deploys (
   at INTEGER NOT NULL,
   source TEXT NOT NULL,
   received_at INTEGER NOT NULL,
-  from_sha TEXT
+  from_sha TEXT,
+  first_commit_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS deploys_project ON deploys (project, at);
 CREATE TABLE IF NOT EXISTS users (
@@ -348,6 +349,14 @@ fn migrate(c: &Connection) -> rusqlite::Result<()> {
         .exists([])?;
     if !has_from {
         c.execute_batch("ALTER TABLE deploys ADD COLUMN from_sha TEXT")?;
+    }
+    // Deploys: when the first commit of a recorded release's range was
+    // made, for its lead time (#633).
+    let has_first: bool = c
+        .prepare("SELECT 1 FROM pragma_table_info('deploys') WHERE name = 'first_commit_at'")?
+        .exists([])?;
+    if !has_first {
+        c.execute_batch("ALTER TABLE deploys ADD COLUMN first_commit_at INTEGER")?;
     }
     // Users: name, time zone, disabled, last sign-in (#215, #216).
     for (col, ddl) in [
