@@ -116,7 +116,10 @@ async fn feature_map_put_refuses_errors_and_stores_valid_maps() {
     )
     .to_string();
     assert!(html.contains("Feature map v1"));
-    assert!(html.contains("Never used"), "search is declared but unused");
+    assert!(
+        html.contains("Not used in"),
+        "search is declared but unused"
+    );
     assert!(html.contains(">admin<"), "owner resolves to admin");
 }
 

@@ -369,6 +369,7 @@ mod tests {
             next_step: String::new(),
             score: 1.0,
             subject: subject.into(),
+            figure: None,
         }
     }
 

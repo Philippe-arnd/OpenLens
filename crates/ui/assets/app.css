@@ -1039,10 +1039,10 @@
   .barcell svg { flex: 1; display: block; min-width: 60px; height: 6px; }
   .barcell .bg { fill: var(--line-2); } .barcell .fg { fill: var(--accent); }
   .barcell .num { min-width: 3.5em; }
-  tr.dim th, tr.dim td { color: var(--muted); }
+  .rolebar { display: block; } .rolebar rect { fill: var(--accent); } .rolebar .z { fill: var(--bad); }
   .journeys .arrow { color: var(--muted); }
 
-  /* Cohorts and who uses what: the share printed, the shade by tenths. */
+  /* Cohorts: the share printed, the shade by tenths. */
   .heat th.c { text-align: center; }
   .heat td.c { padding: 2px; text-align: center; border-bottom: 0; }
   .heat .hc { display: block; padding: 8px 4px; border-radius: 6px; font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--ink); }
@@ -1444,9 +1444,9 @@
      the signals and the page head as one group (16px). */
   .board { gap: 32px; padding-top: 12px; }
   .board > .signals + .page-head { margin-top: -16px; }
-  /* The lead and the ranked list, the chart and the pulse: equal heights. */
+  /* The lead and the ranked list, the chart and in flight: equal heights. */
   .board .focus-grid, .board > .split { align-items: stretch; }
-  /* The pulse's adoption bar takes the room of the columns it lost. */
+  /* Features and funnels: the adoption bar takes the room. */
   table.pulse td.adopt { width: 40%; }
   /* The secondary cards after the release comparison: quieter summaries. */
   .disclose.secondary summary { padding-block: 14px; }

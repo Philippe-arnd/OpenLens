@@ -37,6 +37,7 @@ pub mod environments;
 mod errors;
 mod events;
 mod explore;
+mod feature_signals;
 pub mod flows;
 pub mod forms;
 pub mod goals;
@@ -80,6 +81,7 @@ pub use errors::{
 };
 pub use events::*;
 pub use explore::*;
+pub use feature_signals::{FeatureRow, Signal};
 pub use flows::{Flow, FlowLink, FlowQuery, flows};
 pub use inforce::{History, MapAt};
 pub use insights::{CohortStats, FlagCohort, Funnel, FunnelStep, Insight, Journey, Readiness};
@@ -470,8 +472,8 @@ pub struct Board {
     pub retention_trend: Option<RetentionTrend>,
     /// Task durations per declared feature with a success event.
     pub task_times: Vec<TaskTime>,
-    /// Who uses what: distinct users per (role, feature), last 30 days,
-    /// ignoring the role filter (the roles × features grid).
+    /// Distinct users per (role, feature), last 30 days, ignoring the
+    /// role filter (the role bars of the board's Features table, #618).
     pub role_features: Vec<(String, String, i64)>,
     /// Latest releases, newest first.
     pub releases: Vec<ReleaseRow>,

@@ -1,6 +1,5 @@
 //! The board's charts and tables (#543): active users per day, the
-//! feature pulse, the retention line, who uses what, and the release
-//! comparison.
+//! retention line and the release comparison.
 //! Every length is an SVG attribute and every shade a class (the CSP
 //! forbids `style`).
 
@@ -123,95 +122,6 @@ pub(crate) fn bar_with(frac: f64, text: &str) -> Markup {
     }
 }
 
-/// Feature pulse: for each used feature, how many of the active users
-/// adopt it, how often they use it, and how many reach its success event;
-/// then the declared features nobody used. The mockup's four columns
-/// (#588): the users, days per user and task time are the cells' titles.
-pub(super) fn feature_pulse(pid: &str, f: &Filters, b: &Board) -> Markup {
-    // Adoption is over the active users of the same period: the last 30
-    // days (MAU), or the release window (D-055).
-    let active = b
-        .window
-        .as_ref()
-        .map_or(b.users.mau, |w| w.current.users)
-        .max(1);
-    let mau = active as f64;
-    let ratio = |a: i64, n: i64| a as f64 / n.max(1) as f64;
-    let used: Vec<_> = b.features.iter().filter(|x| x.users > 0).collect();
-    let unused: Vec<_> = b
-        .features
-        .iter()
-        .filter(|x| x.declared && x.users == 0)
-        .collect();
-    html! {
-        section.card.pad.stack aria-labelledby="fp-h" {
-            div.section-head {
-                h2 id="fp-h" { (to(&detail_url(pid, "/features", f), "Feature pulse")) }
-                @if !shared() { a.small href=(detail_url(pid, "/features", f)) { "Feature map" } }
-            }
-            @if used.is_empty() {
-                p.muted { "No feature has been used yet. Features come from " code { "data-feature" } " attributes and the feature map." }
-            }
-            @if !used.is_empty() || !unused.is_empty() {
-                div.scroll {
-                    table.pulse {
-                        thead { tr {
-                            th scope="col" { "Feature" }
-                            (th_def("Adoption"))
-                            (th_num("Uses / user"))
-                            (th_num("Completion"))
-                        } }
-                        tbody {
-                            @for x in &used {
-                                tr {
-                                    th scope="row" { (feature_link(pid, &x.key, x.name.as_deref().unwrap_or(&x.key), x.declared, f)) }
-                                    td.adopt title={ (compact(x.users)) (if x.users == 1 { " user" } else { " users" }) } { (barcell((x.users as f64 / mau).min(1.0))) }
-                                    td.num title=(format!("On {:.1} days per user", ratio(x.user_days, x.users))) { (format!("{:.1}", ratio(x.uses, x.users))) }
-                                    @if x.success_on_entry() {
-                                        // Its success fires on entry: every user "completes"
-                                        // at once, so neither a completion nor a task time
-                                        // means anything (#612). The finding says what to fix.
-                                        td.num {
-                                            @if shared() { span.muted title=(ON_ENTRY) { "—" } }
-                                            @else { a.muted href=(on_entry_finding(pid, &x.key)) title=(ON_ENTRY) { "—" } }
-                                        }
-                                    } @else {
-                                        td.num title=[b.task_time(&x.key).map(|t| format!("Task time: median {}, p90 {}", duration(t.median_secs), duration(t.p90_secs)))] {
-                                            @if x.declared && x.completed_users > 0 { (pct(ratio(x.completed_users, x.users).min(1.0))) }
-                                            @else { span.muted title="No success event declared or reached yet" { "—" } }
-                                        }
-                                    }
-                                }
-                            }
-                            @for x in &unused {
-                                tr.dim {
-                                    th scope="row" { (feature_link(pid, &x.key, x.name.as_deref().unwrap_or(&x.key), true, f)) }
-                                    td colspan="3" { span.tag.tone-warn { (icon("ban")) "Never used " (super::period(b, "in the last 30 days")) } }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            @if !used.is_empty() {
-                p.muted.small { "Adoption: share of the " (compact(active)) " active users who used the feature. Completion: share of them who reached its success event." }
-            }
-        }
-    }
-}
-
-/// Why a feature shows no completion or task time: its success event fires
-/// on entry (#612).
-const ON_ENTRY: &str = "Every user reaches the success event: it probably fires on entry, so there is no task to time. See Map health.";
-
-/// The map health finding for a success event that fires on entry.
-fn on_entry_finding(pid: &str, key: &str) -> String {
-    format!(
-        "/p/{pid}/features#{}",
-        crate::features::finding_anchor("success_always", Some(key))
-    )
-}
-
 /// A share's shade, in tenths (`p0`…`p10`): the cell's class.
 pub(crate) fn tenth(share: f64) -> u8 {
     (share.clamp(0.0, 1.0) * 10.0).round() as u8
@@ -247,57 +157,6 @@ pub(super) fn retention_line(pid: &str, f: &Filters, b: &Board) -> Markup {
             }
         }
     }
-}
-
-/// Roles × features: the share of each role's users who used each
-/// feature in the last 30 days, a closed disclosure (#588). One hue, darker = more adoption; the number
-/// is always printed, so colour is never the only cue.
-pub(super) fn role_matrix(pid: &str, f: &Filters, b: &Board) -> Markup {
-    let roles: Vec<(&str, i64)> = b
-        .roles
-        .iter()
-        .filter_map(|r| Some((r.role.as_deref()?, r.users)))
-        .filter(|(_, n)| *n > 0)
-        .take(6)
-        .collect();
-    let feats: Vec<&openlens_engine::FeatureUse> =
-        b.features.iter().filter(|f| f.users > 0).take(10).collect();
-    if roles.len() < 2 || feats.is_empty() {
-        return html! {};
-    }
-    let cell = |role: &str, feat: &str| {
-        b.role_features
-            .iter()
-            .find(|(r, f, _)| r == role && f == feat)
-            .map_or(0, |x| x.2)
-    };
-    let flt = f;
-    let hint = format!("{} roles × {} features", roles.len(), feats.len());
-    super::sections::disclose(
-        "who-h",
-        "Who uses what",
-        super::sections::hint(&hint),
-        (&detail_url(pid, "/features", f), "Feature map"),
-        html! {
-            div.scroll {
-                table.heat {
-                    thead { tr { th scope="col" { "Feature" } @for (r, n) in &roles { th.c scope="col" { (r) br; span.muted.small { (compact(*n)) " users" } } } } }
-                    tbody { @for f in &feats {
-                        tr {
-                            th scope="row" { (feature_link(pid, &f.key, f.name.as_deref().unwrap_or(&f.key), f.declared, flt)) }
-                            @for (r, n) in &roles {
-                                @let share = cell(r, &f.key) as f64 / (*n).max(1) as f64;
-                                td.c title={ (pct(share)) " of " (r) " users used " (f.name.as_deref().unwrap_or(&f.key)) } {
-                                    span class={ "hc p" (tenth(share)) } { @if share > 0.0 { (pct(share)) } @else { "—" } }
-                                }
-                            }
-                        }
-                    } }
-                }
-            }
-            p.muted.small { "Share of each role's users who used the feature, " (super::period(b, "last 30 days")) ". Empty cells are features a role never touches." }
-        },
-    )
 }
 
 /// One compared metric: label, new value, old value, whether higher is
