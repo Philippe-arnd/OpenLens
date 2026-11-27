@@ -12,8 +12,14 @@ services:
     image: ghcr.io/philippe-arnd/openlens:0.6
     environment:
       OPENLENS_PUBLIC_URL: https://analytics.example.com
+    # Published on the node that runs the task, not through the routing
+    # mesh: the one replica is pinned to one node, and OpenLens sees the
+    # client's address instead of the mesh's.
     ports:
-      - "8686:8686"
+      - target: 8686
+        published: 8686
+        protocol: tcp
+        mode: host
     volumes:
       - openlens-data:/data
     healthcheck:
