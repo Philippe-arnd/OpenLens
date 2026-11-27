@@ -4,6 +4,20 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-27
+
+### Added
+
+- **Heatmap tab** (#592): *Behaviour → Heatmap* opens the click heatmap of the most viewed page; `/p/{id}/heatmap` works without `path`, and with no page yet shows an empty state.
+
+### Fixed
+
+- **The dashboard now looks like the UI v2 design** (#586): buttons, type sizes, corners, headings, tags, tables and inputs follow the v2 tokens instead of the older styles left underneath (#587); the Focus board has one subtitle line, lighter ranked insights, a four-column Feature pulse and its secondary blocks folded after the cohorts and the release comparison (#588); Events puts environment, role, release and the team in the top-bar chips and keeps its own filters on one row (#589); the Person page lists the latest 30 events so the Privacy card shows (#590); the sign-in page says *Sign in* with the agent hint, and the colour-blob logo is back everywhere and changes shape again, unless the system asks for less motion (#591).
+- **Status pills were 130 px tall on some pages** (#587): the status page's container rule applied to every status pill.
+- **The release screenshots and the browser checks follow the UI v2 markup** (#584), so the site and the README images update after a release.
+
+## [0.6.0] - 2026-11-26
+
 ### Changed
 - **The filter bar is a row of chips** (#542): the board's two filter forms and its help paragraph are replaced by the context chips in the top bar; the query parameters are unchanged (the team toggle is still `internal=1`). The page's date fields show the expected format, `YYYY-MM-DD` (#557).
 - **Breakdown tabs keep every filter** (#548): they kept only the environment before. The Heatmap page offers a page picker and Clicks / Rage clicks / Scroll depth tabs when the data has them, and without a recording ranks the most clicked labels.
@@ -507,7 +521,9 @@ These changes concern instances that ran pre-release builds:
 - Every input is treated as hostile: bounded sizes, a rejection list per event, no `unwrap`/`panic` in production code, and read-only SQL scoped to one project with time, memory and row caps.
 - HMAC session cookies (`HttpOnly`, `SameSite=Lax`), and origin checks on dashboard forms.
 
-[Unreleased]: https://github.com/Philippe-arnd/OpenLens/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/Philippe-arnd/OpenLens/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/Philippe-arnd/OpenLens/compare/v0.6.0...v0.6.1
+[0.6.0]: https://github.com/Philippe-arnd/OpenLens/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Philippe-arnd/OpenLens/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Philippe-arnd/OpenLens/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Philippe-arnd/OpenLens/compare/v0.2.0...v0.3.0

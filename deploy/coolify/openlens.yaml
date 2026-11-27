@@ -14,7 +14,7 @@ services:
     # never brings a surprise. The release train moves it to each new minor
     # for new installs; moving an existing one is a choice (read the
     # CHANGELOG's Changed section). `:latest` follows every release.
-    image: ghcr.io/philippe-arnd/openlens:0.5
+    image: ghcr.io/philippe-arnd/openlens:0.6
     environment:
       - SERVICE_FQDN_OPENLENS_8686
       - OPENLENS_ADMIN_TOKEN=${SERVICE_PASSWORD_64_OPENLENSADMIN}
