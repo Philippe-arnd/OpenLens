@@ -9,9 +9,14 @@ import diagnostics from "node:diagnostics_channel";
 
 /** Distinct id of server events tied to no user: left out of user counts (#593). */
 export const SERVER_ID = "$server";
-/** Length of one request-stats window (#593, decision 1): one event per
- * (method, route, status code) per window, never one per request. */
+/** Default length of one stats window (#593, decision 1): one event per
+ * (method, route, status code) per window, never one per request. The
+ * server may advertise a finer one (#628, D-091). */
 export const STATS_WINDOW_MS = 10 * 60 * 1000;
+/** The response header in which the server advertises the stats window, seconds (#628). */
+export const STATS_WINDOW_HEADER = "x-openlens-stats-window";
+/** Stats windows the server may advertise and `statsWindowSeconds` may set, seconds. */
+const STATS_WINDOWS_S = [60, 300, 600];
 /** Explicit bounds (seconds) of the `http.server.request.duration` histogram:
  * OpenTelemetry's defaults for it (#601). One more bucket holds the rest. */
 export const BOUNDS_S = [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10];
@@ -74,7 +79,7 @@ export class OpenLens {
   /**
    * @param {{ host: string, key: string, release?: string, environment?: string,
    *   flushAt?: number, flushInterval?: number, onError?: (e: unknown) => void,
-   *   fetch?: typeof fetch }} opts
+   *   fetch?: typeof fetch, statsWindowSeconds?: number }} opts
    */
   constructor(opts) {
     if (!opts || !opts.host || !opts.key) throw new Error("OpenLens: host and key are required");
@@ -86,6 +91,10 @@ export class OpenLens {
     this.flushAt = opts.flushAt ?? 50;
     this.onError = opts.onError ?? (() => {});
     this.fetch = opts.fetch ?? globalThis.fetch;
+    // The stats window (#628, D-091): an explicit `statsWindowSeconds`
+    // (60, 300 or 600) wins; else the one the server advertises; else 10 minutes.
+    this.statsWindowOverride = windowMs(opts.statsWindowSeconds);
+    this.statsWindowMs = this.statsWindowOverride ?? STATS_WINDOW_MS;
     this.queue = [];
     /** @type {Map<string, any>} */
     this.stats = new Map();
@@ -207,17 +216,18 @@ export class OpenLens {
     try {
       if (!r || !r.route) return;
       const now = Date.now();
-      const start = now - (now % STATS_WINDOW_MS);
+      const len = this.statsWindowMs;
+      const start = windowStart(now, len);
       const method = String(r.method || "GET").toUpperCase().slice(0, 10);
       const route = String(r.route).slice(0, 300);
       const raw = Math.trunc(Number(r.status) || 0);
       const status = raw >= 100 && raw < 600 ? raw : 0;
-      const key = `${start} ${method} ${route} ${status}`;
+      const key = `${start} ${len} ${method} ${route} ${status}`;
       let s = this.stats.get(key);
       const secs = Math.max(0, Number(r.ms) || 0) / 1000;
       if (!s) {
         if (this.stats.size >= MAX_STATS_KEYS) return;
-        s = { start, method, route, status, count: 0, sum: 0, min: secs, max: 0, buckets: new Array(BOUNDS_S.length + 1).fill(0) };
+        s = { start, len, method, route, status, count: 0, sum: 0, min: secs, max: 0, buckets: new Array(BOUNDS_S.length + 1).fill(0) };
         this.stats.set(key, s);
       }
       s.count += 1;
@@ -379,25 +389,28 @@ export class OpenLens {
   /** @private Count one outgoing call in its host's stats. */
   recordCall(c) {
     try {
-      const start = windowStart(Date.now());
+      const len = this.statsWindowMs;
+      const start = windowStart(Date.now(), len);
       const method = clientMethod(c.method);
       const raw = Math.trunc(Number(c.status) || 0);
       const status = raw >= 100 && raw < 600 ? raw : 0;
       const error = status === 0 ? c.error || "_OTHER" : "";
       // A bound on hosts per window: the rest count together.
-      if (!this.clientHosts || this.clientHosts.start !== start) this.clientHosts = { start, hosts: new Set() };
+      if (!this.clientHosts || this.clientHosts.start !== start || this.clientHosts.len !== len) {
+        this.clientHosts = { start, len, hosts: new Set() };
+      }
       const seen = this.clientHosts.hosts;
       let host = c.host;
       if (!seen.has(host)) {
         if (seen.size >= MAX_CLIENT_HOSTS) host = "_OTHER";
         else seen.add(host);
       }
-      const key = `${start} ${method} ${host} ${status} ${error}`;
+      const key = `${start} ${len} ${method} ${host} ${status} ${error}`;
       let s = this.clientStats.get(key);
       const secs = Math.max(0, Number(c.ms) || 0) / 1000;
       if (!s) {
         if (this.clientStats.size >= MAX_CLIENT_KEYS) return;
-        s = { start, method, host, status, error, count: 0, sum: 0, min: secs, max: 0, buckets: new Array(BOUNDS_S.length + 1).fill(0) };
+        s = { start, len, method, host, status, error, count: 0, sum: 0, min: secs, max: 0, buckets: new Array(BOUNDS_S.length + 1).fill(0) };
         this.clientStats.set(key, s);
       }
       addSample(s, secs);
@@ -408,9 +421,9 @@ export class OpenLens {
 
   /** @private Turn the outgoing calls of closed windows (all of them when `all`) into events. */
   drainClientStats(all) {
-    const open = windowStart(Date.now());
+    const now = Date.now();
     for (const [key, s] of this.clientStats) {
-      if (!all && s.start >= open) continue;
+      if (!all && !this.closed(s, now)) continue;
       this.clientStats.delete(key);
       // One data point of OpenTelemetry's `http.client.request.duration`.
       const props = {
@@ -424,7 +437,7 @@ export class OpenLens {
         min: round6(s.min),
         max: round6(s.max),
         bucket_counts: s.buckets,
-        $window_s: STATS_WINDOW_MS / 1000,
+        $window_s: s.len / 1000,
       };
       if (s.error) props["error.type"] = s.error;
       this.push("$client_stats", SERVER_ID, props, undefined, new Date(s.start));
@@ -450,7 +463,8 @@ export class OpenLens {
       } catch {
         loop = undefined;
       }
-      this.runtime = { start: windowStart(Date.now()), loop, rss: 0, heap: 0 };
+      const len = this.statsWindowMs;
+      this.runtime = { start: windowStart(Date.now(), len), len, loop, rss: 0, heap: 0 };
       this.sampleRuntime();
       if (!processStartSent) {
         processStartSent = true;
@@ -478,19 +492,21 @@ export class OpenLens {
   drainRuntime(all) {
     const r = this.runtime;
     if (!r) return;
-    const open = windowStart(Date.now());
-    if (!all && r.start >= open) return;
+    const now = Date.now();
+    if (!all && !this.closed(r, now)) return;
     // OpenTelemetry runtime metric names (#610): `nodejs.eventloop.delay.*`
     // in seconds, `process.memory.usage` (RSS) and `v8js.memory.heap.used`
     // in bytes, here the largest sample of the window.
-    const props = { ...memoryProps(r), $window_s: STATS_WINDOW_MS / 1000 };
+    const props = { ...memoryProps(r), $window_s: r.len / 1000 };
     if (r.loop && r.loop.count > 0) {
       props["nodejs.eventloop.delay.p50"] = delaySeconds(r.loop.percentile(50));
       props["nodejs.eventloop.delay.p99"] = delaySeconds(r.loop.percentile(99));
     }
     r.loop?.reset();
     this.push("$runtime_stats", SERVER_ID, props, undefined, new Date(r.start));
-    r.start = open;
+    // The next window, at the length in force now, aligned on it.
+    r.len = this.statsWindowMs;
+    r.start = windowStart(now, r.len);
     r.rss = 0;
     r.heap = 0;
   }
@@ -524,11 +540,31 @@ export class OpenLens {
     return n <= MAX_SAME_ERROR;
   }
 
+  /** @private Is this window closed: it ended, or the window length changed
+   * since it opened (#628)? Either way it is sent with its own length. */
+  closed(w, now) {
+    return w.start + w.len <= now || w.len !== this.statsWindowMs;
+  }
+
+  /** @private Follow the window the server advertises in a capture
+   * response (#628, D-091), unless `statsWindowSeconds` is set. The windows
+   * being filled close on the next flush; new ones use the new length. */
+  followWindow(r) {
+    if (this.statsWindowOverride !== undefined) return;
+    try {
+      const h = r && r.headers && typeof r.headers.get === "function" ? r.headers.get(STATS_WINDOW_HEADER) : null;
+      const ms = h === null || h === undefined ? undefined : windowMs(Number(h));
+      if (ms !== undefined) this.statsWindowMs = ms;
+    } catch (e) {
+      this.onError(e);
+    }
+  }
+
   /** @private Turn the stats of closed windows (all of them when `all`) into events. */
   drainStats(all) {
-    const open = Date.now() - (Date.now() % STATS_WINDOW_MS);
+    const now = Date.now();
     for (const [key, s] of this.stats) {
-      if (!all && s.start >= open) continue;
+      if (!all && !this.closed(s, now)) continue;
       this.stats.delete(key);
       // One data point of OpenTelemetry's `http.server.request.duration`
       // histogram, with its semantic-convention attributes (#601).
@@ -546,7 +582,7 @@ export class OpenLens {
           min: round6(s.min),
           max: round6(s.max),
           bucket_counts: s.buckets,
-          $window_s: STATS_WINDOW_MS / 1000,
+          $window_s: s.len / 1000,
           ...exemplarsProp(s),
         },
         undefined,
@@ -598,6 +634,7 @@ export class OpenLens {
         body: JSON.stringify({ sent_at: new Date().toISOString(), batch }),
       });
       if (!r.ok) this.onError(new Error(`OpenLens capture failed: HTTP ${r.status}`));
+      else this.followWindow(r);
     } catch (e) {
       this.onError(e);
     }
@@ -701,9 +738,15 @@ function errorType(err) {
   return pick(err.code) || pick(err.cause && err.cause.code) || pick(err.name) || "_OTHER";
 }
 
-/** Start of the stats window that holds `ms`. */
-function windowStart(ms) {
-  return ms - (ms % STATS_WINDOW_MS);
+/** Start of the stats window of length `len` (ms) that holds `ms`:
+ * windows are aligned on multiples of their length. */
+function windowStart(ms, len) {
+  return ms - (ms % len);
+}
+
+/** A stats window in seconds (60, 300 or 600) as ms; `undefined` for anything else. */
+function windowMs(seconds) {
+  return typeof seconds === "number" && STATS_WINDOWS_S.includes(seconds) ? seconds * 1000 : undefined;
 }
 
 /** The window's largest RSS and heap used, when sampled. */

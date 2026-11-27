@@ -192,6 +192,9 @@ pub struct Caches {
     /// What the disk holds per project (#606, D-088), and when it was
     /// measured: measured again at most hourly, by the maintenance pass.
     pub(crate) capacity: Mutex<Option<(Instant, openlens_engine::capacity::Usage)>>,
+    /// The route-stats window in force, seconds (#628, D-091): derived
+    /// after each measurement, read by every capture response.
+    pub(crate) stats_window: std::sync::atomic::AtomicU64,
 }
 
 impl Default for Caches {
@@ -227,6 +230,9 @@ impl Default for Caches {
             otlp_series: Bounded::new(crate::otlp::SERIES_CAP, crate::otlp::SERIES_TTL),
             otlp_forgot: std::sync::atomic::AtomicU64::new(crate::otlp::now_ns()),
             capacity: Mutex::default(),
+            stats_window: std::sync::atomic::AtomicU64::new(
+                openlens_engine::capacity::window::DEFAULT_WINDOW_S.unsigned_abs(),
+            ),
         }
     }
 }

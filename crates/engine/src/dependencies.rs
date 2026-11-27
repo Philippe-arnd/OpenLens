@@ -1,8 +1,8 @@
 //! Outgoing dependencies (#608, D-090): the `$client_stats` the Node SDK
 //! (`captureOutgoing()`) and OTLP (`http.client.request.duration`) send,
 //! one data point of OpenTelemetry's `http.client.request.duration`
-//! histogram per (method, `server.address`, status code) per 10-minute
-//! window, summed per external host. Not an APM: no spans, no paths.
+//! histogram per (method, `server.address`, status code) per stats window
+//! (1, 5 or 10 minutes, #628), summed per external host. Not an APM: no spans, no paths.
 //!
 //! - **Calls, failures and duration** per host, the duration as a merged
 //!   histogram with the routes' bounds ([`crate::routes::BOUNDS_MS`]): p95
@@ -16,7 +16,8 @@
 //!   `dependencies`, never in its checks: a dependency's trouble is
 //!   usually not the release's fault, so it never changes the outcome.
 //! - **Alert** ([`failing_hosts`]): a host whose share of failed calls in
-//!   the latest closed window is at least [`FAILING_SHARE`] and well above
+//!   the latest closed windows (those that started in the last
+//!   [`LATEST_MINUTES`]) is at least [`FAILING_SHARE`] and well above
 //!   its previous seven days, on [`MIN_WINDOW_CALLS`] calls; announced
 //!   once it has lasted [`FAILING_WAIT_SECS`].
 //!
@@ -43,6 +44,11 @@ pub const MIN_WINDOW_CALLS: i64 = 10;
 pub const FAILING_SHARE: f64 = 0.25;
 /// Seconds a host must keep failing before its incident is announced.
 pub const FAILING_WAIT_SECS: i64 = 15 * 60;
+/// The alert reads the windows that started in the last this many
+/// minutes: a window is stamped with its start and sent when it ends, so
+/// that is the latest closed 10-minute window, or the closed 5-minute or
+/// 1-minute ones of the same span (#628).
+pub const LATEST_MINUTES: i64 = 20;
 
 /// One external host's numbers.
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
@@ -382,7 +388,7 @@ pub fn failing(window: &DependencyStat, week: Option<&DependencyStat>) -> Option
     (now >= FAILING_SHARE && now >= 3.0 * before + 0.05).then(|| Failing {
         host: window.host.clone(),
         cause: format!(
-            "{} failed {:.0}% of {} calls in the last 10 minutes ({} without a response; usually {:.1}%)",
+            "{} failed {:.0}% of {} calls in the last {LATEST_MINUTES} minutes ({} without a response; usually {:.1}%)",
             window.host,
             now * 100.0,
             window.calls,
@@ -398,7 +404,8 @@ pub fn rule(host: &str) -> String {
     format!("dep:{host}")
 }
 
-/// The hosts of production failing in the latest closed 10-minute window,
+/// The hosts of production failing in the latest closed windows (those
+/// that started in the last [`LATEST_MINUTES`], whatever their length),
 /// against the seven days before.
 ///
 /// # Errors
@@ -409,10 +416,12 @@ pub async fn failing_hosts(q: &QueryEngine, project: &str) -> Result<Vec<Failing
     let w = format!("date >= '{since}' AND environment = 'production'");
     // A window is stamped with its start and sent when it ends: the
     // windows that started in the last 20 minutes are the latest closed
-    // one (the open one is not sent yet).
-    let part = "CASE WHEN timestamp >= now() - INTERVAL '20 minutes' THEN 'window' ELSE 'week' END";
+    // ones (the open one is not sent yet).
+    let part = format!(
+        "CASE WHEN timestamp >= now() - INTERVAL '{LATEST_MINUTES} minutes' THEN 'window' ELSE 'week' END"
+    );
     let r = q
-        .sql(project, &stats_sql(&w, Some(part), MAX_HOSTS * 2))
+        .sql(project, &stats_sql(&w, Some(part.as_str()), MAX_HOSTS * 2))
         .await?;
     let mut window = Vec::new();
     let mut week = Vec::new();

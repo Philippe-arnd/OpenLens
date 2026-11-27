@@ -377,6 +377,8 @@ async fn run_jobs(state: AppState, digest: Job, digest_first: Duration) {
                 Ok(Err(err)) => tracing::error!(%err, "compaction failed"),
                 Err(err) => tracing::error!(%err, "compaction crashed"),
             }
+            // The route-stats window, after a disk measurement (#628).
+            capacity::refresh_window(&st).await;
             roll_up(&st, chrono::Utc::now()).await;
             started.send_replace(true);
         }

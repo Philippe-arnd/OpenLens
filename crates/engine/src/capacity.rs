@@ -18,9 +18,15 @@
 //! Every project keeps the same number a day, and gets a share of the
 //! budget in proportion to its cost at the floor.
 //!
+//! The route-stats window (#628, D-091) is chosen with the same budget,
+//! before the extra recordings: see [`window`].
+//!
 //! The functions here are pure: the host measures, the engine derives.
 
 use serde::{Deserialize, Serialize};
+
+pub mod window;
+pub use window::{StatsLoad, stats_load};
 
 /// Recordings a project keeps a day, at least (D-035).
 pub const REPLAYS_PER_DAY_FLOOR: i64 = crate::replay_rate::DAILY_BUDGET;
@@ -69,6 +75,9 @@ pub struct ProjectUse {
     pub replay_bytes_per_day: u64,
     /// Bytes of one recording, on average (the last days' recordings).
     pub replay_bytes_per_recording: u64,
+    /// Its route stats over the last 24 hours (#628), once counted.
+    #[serde(default)]
+    pub stats: Option<StatsLoad>,
 }
 
 /// What the host measured on the disk (cached: at most hourly).
@@ -175,6 +184,9 @@ pub struct Capacity {
     pub replay_retention_days: Cap,
     /// Days events are kept: fixed (D-015), listed for the record.
     pub event_retention_days: Cap,
+    /// Length of one route-stats window, seconds (60, 300 or 600; #628,
+    /// D-091): advertised to the server SDKs in `x-openlens-stats-window`.
+    pub stats_window: Cap,
     /// Each project's cost and share.
     pub projects: Vec<ProjectShare>,
     /// When the disk was last measured.
@@ -199,6 +211,7 @@ impl Capacity {
             replays_per_day: floor_cap(reason, false),
             replay_retention_days: Cap::fixed(REPLAY_RETENTION_DAYS, "recordings"),
             event_retention_days: Cap::fixed(EVENT_RETENTION_DAYS, "events"),
+            stats_window: window::default_cap(reason),
             projects: Vec::new(),
             measured_at: None,
         }
@@ -352,8 +365,10 @@ pub fn derive(inputs: &Inputs) -> Capacity {
     // One more recording a day, kept the fixed 30 days.
     let slot_of =
         |p: &ProjectUse| p.replay_bytes_per_recording as f64 * REPLAY_RETENTION_DAYS as f64;
+    // Events as they would be with 10-minute route stats (#628): a finer
+    // window is paid for below, from the room left.
     let floor_of = |p: &ProjectUse| {
-        p.event_bytes_per_day as f64 * EVENT_RETENTION_DAYS as f64
+        window::event_bytes_at_default(p) * EVENT_RETENTION_DAYS as f64
             + slot_of(p) * REPLAYS_PER_DAY_FLOOR as f64
     };
     let need: f64 = usage.projects.iter().map(floor_of).sum();
@@ -378,6 +393,9 @@ pub fn derive(inputs: &Inputs) -> Capacity {
             }
         })
         .collect();
+    // The route-stats window first: its bytes must fit in the room left
+    // after the floor, as extra recordings do, and come out of that room.
+    let (stats_window, window_cost) = window::choose(&usage.projects, data_budget - need);
     let base = Capacity {
         derived: true,
         reason: String::new(),
@@ -391,6 +409,7 @@ pub fn derive(inputs: &Inputs) -> Capacity {
         floor_bytes: Some(need as u64),
         projects,
         measured_at: Some(usage.measured_at.clone()),
+        stats_window,
         ..Capacity::floors("")
     };
     let budget_text = format!(
@@ -407,7 +426,7 @@ pub fn derive(inputs: &Inputs) -> Capacity {
             ..base
         };
     }
-    let extra = data_budget - need;
+    let extra = data_budget - need - window_cost;
     if extra <= 0.0 {
         let reason = format!(
             "{budget_text}: 400 days of events and {REPLAYS_PER_DAY_FLOOR} recordings a day for 30 days need {} (a fuller disk is stopped by the low-space guard, not by fewer recordings)",
@@ -427,8 +446,17 @@ pub fn derive(inputs: &Inputs) -> Capacity {
     } else {
         REPLAYS_PER_DAY_CEILING
     };
+    let stats_text = if window_cost > 0.0 {
+        format!(
+            " and {} route stats ({})",
+            window::text(base.stats_window.value),
+            bytes_text(window_cost as u64)
+        )
+    } else {
+        String::new()
+    };
     let reason = format!(
-        "{budget_text}: after 400 days of events and {REPLAYS_PER_DAY_FLOOR} recordings a day for 30 days ({}), each more recording a day takes {}",
+        "{budget_text}: after 400 days of events and {REPLAYS_PER_DAY_FLOOR} recordings a day for 30 days ({}){stats_text}, each more recording a day takes {}",
         bytes_text(need as u64),
         bytes_text(slot as u64)
     );
@@ -480,6 +508,7 @@ mod tests {
                     event_bytes_per_day: events,
                     replay_bytes_per_day: replays_day,
                     replay_bytes_per_recording: recording,
+                    stats: None,
                 }],
                 measured_at: "2026-11-27T00:00:00Z".into(),
             }),
