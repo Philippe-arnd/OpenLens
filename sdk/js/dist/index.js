@@ -325,7 +325,7 @@ var UnloadBudget = class {
 };
 
 // src/index.ts
-var VERSION = "0.1.0";
+var VERSION = "0.8.0";
 var SESSION_GAP = 30 * 60 * 1e3;
 var MAX_QUEUE = 500;
 var cfg;

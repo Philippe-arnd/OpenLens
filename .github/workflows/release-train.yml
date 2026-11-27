@@ -42,6 +42,9 @@ jobs:
         with:
           toolchain: stable
       - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
       - name: decide
         id: d
         env:
@@ -109,6 +112,10 @@ jobs:
           # the package version matches it.
           sed -i "/\"name\": \"@openlens-obs\/\(web\|node\)\"/{n;s/\"version\": \"$V\"/\"version\": \"$next\"/}" \
             sdk/js/package.json sdk/js/package-lock.json sdk/node/package.json examples/tasks-spa/package-lock.json
+          # The browser SDK reports it as $lib_version, from its committed
+          # bundle (served at /c.js): rebuild it.
+          sed -i "s/^const VERSION = \"$V\";$/const VERSION = \"$next\";/" sdk/js/src/index.ts
+          (cd sdk/js && npm ci --no-audit --no-fund && npm run build && node scripts/version.mjs)
           # Plain-manifest and chart defaults name the release just cut.
           sed -i "s/^appVersion: .*/appVersion: \"$TAG\"/; s/^version: .*/version: $V/" deploy/helm/openlens/Chart.yaml
           sed -i -E "s/^(\s*newTag:) .*/\\1 $TAG/" deploy/k8s/example/kustomization.yaml
