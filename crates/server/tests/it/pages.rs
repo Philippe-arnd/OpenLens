@@ -120,7 +120,10 @@ async fn feature_map_put_refuses_errors_and_stores_valid_maps() {
         html.contains("Not used in"),
         "search is declared but unused"
     );
-    assert!(html.contains(">admin<"), "owner resolves to admin");
+    // The Reach tile splits the active users by role (#616): the raw
+    // `owner` is counted as the map's `admin`.
+    assert!(html.contains("admin: "), "owner resolves to admin");
+    assert!(!html.contains("owner: "), "no raw role left");
 }
 
 #[tokio::test]
