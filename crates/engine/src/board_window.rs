@@ -204,6 +204,7 @@ pub(crate) mod tests {
             deploy: None,
             verdict: None,
             reasons: Vec::new(),
+            runtime: None,
         }
     }
 

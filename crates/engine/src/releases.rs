@@ -117,6 +117,10 @@ pub struct Release {
     pub verdict: Option<crate::verdict::Verdict>,
     /// Why, in plain words (also why there is no verdict yet).
     pub reasons: Vec<String>,
+    /// Runtime health next to the release before (#610, #631), from its
+    /// verdict: none when it sent no runtime stats or is not judged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<crate::runtime::RuntimeShown>,
 }
 
 /// The releases of a project.
@@ -404,6 +408,7 @@ pub async fn releases(
                 deploy: None,
                 verdict: None,
                 reasons: Vec::new(),
+                runtime: None,
             }
         })
         .collect();
@@ -530,6 +535,7 @@ fn with_deploys(
             deploy: Some(st),
             verdict: None,
             reasons: Vec::new(),
+            runtime: None,
         });
     }
     rows.reverse();
@@ -650,6 +656,7 @@ mod tests {
             deploy: None,
             verdict: None,
             reasons: Vec::new(),
+            runtime: None,
         };
         let dep = |release: Option<&str>, status: Status, at: i64| Deploy {
             environment: PRODUCTION.into(),

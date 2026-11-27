@@ -592,6 +592,7 @@ mod tests {
             deploy: None,
             verdict,
             reasons: Vec::new(),
+            runtime: None,
         }
     }
 

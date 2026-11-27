@@ -17,7 +17,7 @@ use openlens_query::QueryEngine;
 use serde::Serialize;
 
 use crate::board_verdict::{Layer, Row};
-use crate::routes::RouteStat;
+use crate::routes::{Exemplar, RouteStat};
 use crate::verdict::{Check, Outcome, Report, Verdict};
 use crate::{EngineError, Result, int, text};
 
@@ -78,7 +78,9 @@ fn worse_names(r: &Report) -> Vec<String> {
 }
 
 /// The Backend group of a verdict; none when the release sent no server
-/// stats and has no new server error.
+/// stats, no runtime stats, has no new server error and no dependency
+/// that got worse. A crash loop (restarts per day up significantly, #610)
+/// leads it (#631).
 #[must_use]
 pub fn backend_layer(r: &Report) -> Option<Layer> {
     let worse = worse_names(r);
@@ -169,8 +171,27 @@ pub fn backend_layer(r: &Report) -> Option<Layer> {
             key: false,
         });
     }
-    let more =
-        worse.len().saturating_sub(MAX_WORSE) + new_errors.len().saturating_sub(MAX_NEW_ERRORS);
+    // Restarts per day (#610, #631): the runtime's only judged number.
+    if let Some(c) = r.checks.iter().find(|c| c.kind == "runtime") {
+        let row = Row {
+            label: c.label.clone(),
+            from: c.previous.map(|p| format!("{p:.1}")),
+            to: format!("{:.1}", c.current),
+            outcome: c.outcome,
+            key: false,
+        };
+        if c.outcome == Outcome::Worse {
+            rows.insert(0, row);
+        } else {
+            rows.push(row);
+        }
+    }
+    // Outgoing dependencies (#630): shown, never judged.
+    let (deps, deps_more) = outgoing::rows(r);
+    rows.extend(deps);
+    let more = worse.len().saturating_sub(MAX_WORSE)
+        + new_errors.len().saturating_sub(MAX_NEW_ERRORS)
+        + deps_more;
     (!rows.is_empty()).then_some(Layer {
         name: "Backend",
         rows,
@@ -233,6 +254,11 @@ pub struct WorseRoute {
     /// Browser sessions that made the request, latest first, at most
     /// [`MAX_SESSIONS`].
     pub sessions: Vec<RouteSession>,
+    /// Its slowest request on the release when its p95 got worse: the
+    /// p95 check's exemplar (#607), its replay marked (#629). Never the
+    /// user.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slowest: Option<Exemplar>,
 }
 
 /// The routes worse than the release before, at most [`MAX_WORSE`],
@@ -276,6 +302,13 @@ pub fn worse_routes(r: &Report) -> Vec<WorseRoute> {
                 p95_worse: worse("p95"),
                 top_error: None,
                 sessions,
+                slowest: r
+                    .checks
+                    .iter()
+                    .find(|c| {
+                        route_of(c) == Some(("p95", name.as_str())) && c.outcome == Outcome::Worse
+                    })
+                    .and_then(|c| c.exemplar.clone()),
             })
         })
         .collect()
@@ -299,6 +332,10 @@ pub struct LatestVerdict {
     pub backend: bool,
     /// Routes worse than the release before.
     pub routes: Vec<WorseRoute>,
+    /// Runtime health next to the release before (#610, #631): none when
+    /// the release sent no runtime stats.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<crate::runtime::RuntimeShown>,
     /// Why the routes' errors and sessions are missing, when they could
     /// not be read.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -414,6 +451,9 @@ pub async fn latest(
             for s in &mut w.sessions {
                 s.replay = openlens_replay::exists(data_dir, project, &s.session);
             }
+            if let Some(e) = &mut w.slowest {
+                e.mark_replay(data_dir, project);
+            }
         }
     }
     LatestVerdict {
@@ -424,9 +464,11 @@ pub async fn latest(
         layers: crate::board_verdict::layers(r),
         backend: !r.current.routes.is_empty(),
         routes,
+        runtime: r.runtime.clone(),
         note,
     }
 }
 
+mod outgoing;
 #[cfg(test)]
 mod tests;

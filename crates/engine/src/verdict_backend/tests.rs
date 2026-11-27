@@ -50,6 +50,7 @@ fn broken() -> Report {
         status: 503,
         trace_id: None,
         session_id: Some("browser-1".into()),
+        replay: false,
     });
     new.routes = vec![
         sign_in,
@@ -121,4 +122,81 @@ fn a_release_without_server_stats_has_no_backend_group_and_keeps_its_verdict() {
     );
     // The browser-only verdict is the same with or without the module.
     assert_eq!(r.verdict, Some(Verdict::Healthy), "{:?}", r.reasons);
+}
+
+/// #629: the table names a slower route's slowest request (the p95
+/// check's exemplar); a route that only fails more names none, even when
+/// it carries one.
+#[test]
+fn a_slower_route_names_its_slowest_request_and_one_only_failing_more_none() {
+    let mut prev = side("v1");
+    prev.routes = vec![route("/api/export", 0, false), route("/api/a", 0, false)];
+    let slowest = Exemplar {
+        ms: 2400.0,
+        time: "2026-11-20T10:00:00.000Z".into(),
+        session_id: Some("browser-2".into()),
+        ..Exemplar::default()
+    };
+    let mut slow = route("/api/export", 0, false);
+    slow.buckets = vec![0; BUCKETS];
+    if let Some(b) = slow.buckets.get_mut(10) {
+        *b = 300;
+    }
+    slow.max_ms = 2400;
+    slow.slowest = Some(slowest.clone());
+    let mut failing = route("/api/a", 300, false);
+    failing.slowest = Some(slowest.clone());
+    let mut new = side("v2");
+    new.routes = vec![slow, failing];
+    let rows = worse_routes(&compare("production", &new, Some(&prev), 30, &[]));
+    let of = |p: &str| rows.iter().find(|w| w.route == p);
+    let (Some(s), Some(f)) = (of("/api/export"), of("/api/a")) else {
+        panic!("both got worse: {rows:?}");
+    };
+    assert!(s.p95_worse && s.slowest.as_ref() == Some(&slowest), "{s:?}");
+    assert!(
+        f.errors_worse && !f.p95_worse && f.slowest.is_none(),
+        "{f:?}"
+    );
+}
+
+/// #610's crash loop: 1 restart in 48 h on v1, 150 on v2.
+fn looping(mut prev: Side, mut new: Side) -> Report {
+    let runtime = |restarts: i64| crate::runtime::RuntimeStat {
+        starts: restarts + 2,
+        restarts,
+        hours: 48.0,
+        rss_max_bytes: Some(200 << 20),
+        ..crate::runtime::RuntimeStat::default()
+    };
+    prev.runtime = Some(runtime(1));
+    new.runtime = Some(runtime(150));
+    compare("production", &new, Some(&prev), 30, &[])
+}
+
+#[test]
+fn a_crash_loop_leads_the_verdict_before_a_broken_key_route() {
+    // Alone, without route stats: regressed, a Backend group, the restarts
+    // named in the lead.
+    let r = looping(side("v1"), side("v2"));
+    assert_eq!(r.verdict, Some(Verdict::Regressed), "{:?}", r.reasons);
+    let g = backend_layer(&r).unwrap();
+    assert_eq!(g.rows[0].outcome, Outcome::Worse, "{g:?}");
+    assert!(g.rows[0].label.contains("restarts"), "{g:?}");
+    let lead = crate::board_verdict::lead(&r).unwrap();
+    assert!(lead.headline.contains("restart"), "{}", lead.headline);
+    // With the sign-in route broken too, the crash loop still leads: it
+    // explains the rest.
+    let b = broken();
+    let (prev, new) = (b.previous.clone().unwrap(), b.current.clone());
+    let r = looping(prev, new);
+    let g = backend_layer(&r).unwrap();
+    assert!(g.rows[0].label.contains("restarts"), "{g:?}");
+    assert!(g.rows.iter().any(|x| x.label.contains("/api/auth/sign-in")));
+    let lead = crate::board_verdict::lead(&r).unwrap();
+    assert!(
+        lead.headline.contains("restart") && !lead.headline.contains("sign-in"),
+        "{}",
+        lead.headline
+    );
 }

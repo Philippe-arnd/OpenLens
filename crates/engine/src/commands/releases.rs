@@ -165,6 +165,7 @@ impl Command for List {
             if let Some(rep) = reports.iter().find(|y| y.release == x.release) {
                 x.verdict = rep.verdict;
                 x.reasons = rep.reasons.clone();
+                x.runtime = rep.runtime.clone();
             }
         }
         Ok(r)

@@ -383,7 +383,7 @@ pub fn errors(
     original: &[Option<openlens_errors::Original>],
     f: &Filters,
     origin: openlens_engine::Origin,
-    routes: Option<&openlens_engine::commands::routes::Routes>,
+    backend: ErrorsBackend<'_>,
 ) -> Markup {
     use openlens_engine::Origin;
     let list = |v: &[(String, i64)]| {
@@ -465,8 +465,11 @@ pub fn errors(
                 }
                 .render())
             }
-            @if let Some(r) = routes.filter(|r| !r.routes.is_empty()) {
+            @if let Some(r) = backend.routes.filter(|r| !r.routes.is_empty()) {
                 (server_routes(p.id, r))
+            }
+            @if let Some(d) = backend.dependencies {
+                (crate::dependencies_table::dependencies(d))
             }
         },
     )

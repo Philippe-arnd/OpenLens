@@ -663,12 +663,20 @@ async fn errors_page(
         environment: Some(f.environment.clone()),
         days: None,
     };
+    let deps_in = openlens_engine::commands::dependencies::ListInput {
+        project: p.id.clone(),
+        environment: Some(f.environment.clone()),
+        days: None,
+    };
     let caller = openlens_engine::commands::Caller::default();
-    let (b, groups, routes) = tokio::join!(
+    let (b, groups, routes, deps) = tokio::join!(
         openlens_engine::filter_options(&state.query, &p.id, &f, map.as_ref().map(|(m, _)| m)),
         openlens_engine::error_groups_of(&state.query, &p.id, &src, &f, origin),
         <openlens_engine::commands::routes::List as openlens_engine::commands::Command>::run(
             &state, &caller, routes_in
+        ),
+        <openlens_engine::commands::dependencies::List as openlens_engine::commands::Command>::run(
+            &state, &caller, deps_in
         )
     );
     match (b, groups) {
@@ -683,7 +691,18 @@ async fn errors_page(
             let original = crate::resolve_frames(&state, &p.id, &g).await;
             html(
                 StatusCode::OK,
-                openlens_ui::errors(&info, &b, &g, &original, &f, origin, routes.ok().as_ref()),
+                openlens_ui::errors(
+                    &info,
+                    &b,
+                    &g,
+                    &original,
+                    &f,
+                    origin,
+                    openlens_ui::ErrorsBackend {
+                        routes: routes.ok().as_ref(),
+                        dependencies: deps.ok().as_ref(),
+                    },
+                ),
             )
         }
         (Err(e), _) | (_, Err(e)) => html(

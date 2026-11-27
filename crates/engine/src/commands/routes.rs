@@ -185,6 +185,15 @@ impl Command for List {
             })
             .collect();
         sort(&mut out);
+        // Which exemplars' sessions were recorded (#629): their replay opens.
+        for r in &mut out {
+            for e in [&mut r.stat.slowest, &mut r.stat.first_5xx]
+                .into_iter()
+                .flatten()
+            {
+                e.mark_replay(host.data_dir(), &p.id);
+            }
+        }
         let worse = |r: &&Route| r.change.as_ref().is_some_and(|c| c.worse);
         Ok(Routes {
             environment,

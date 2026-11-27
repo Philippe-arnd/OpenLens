@@ -44,7 +44,8 @@ pub struct Dependencies {
     pub environment: String,
     /// Days read.
     pub days: i64,
-    /// The hosts that fail more or got slower first, then most calls.
+    /// The hosts that fail more first, then those that got slower, each
+    /// by the largest change, then the most called.
     pub hosts: Vec<Dependency>,
     /// Calls over the period, every host.
     pub calls: i64,
@@ -58,6 +59,27 @@ pub struct Dependencies {
     pub worse: usize,
     /// Why the list is empty, when it is.
     pub note: Option<String>,
+}
+
+/// How a host sorts: those that fail more than on the release before
+/// first (by points of failed calls gained), then those that got slower
+/// (by how many times their p95 grew), then the others.
+fn rank(d: &Dependency) -> (u8, f64) {
+    match &d.change {
+        Some(c) if c.fails_more => (0, c.error_rate - c.previous_error_rate),
+        Some(c) if c.slower => (1, c.p95_ms / c.previous_p95_ms.max(1.0)),
+        _ => (2, 0.0),
+    }
+}
+
+/// Failing first, then the largest change, then the most called.
+fn sort(hosts: &mut [Dependency]) {
+    hosts.sort_by(|a, b| {
+        let (ra, rb) = (rank(a), rank(b));
+        ra.0.cmp(&rb.0)
+            .then(rb.1.total_cmp(&ra.1))
+            .then(b.stat.calls.cmp(&a.stat.calls))
+    });
 }
 
 /// `dependencies.list`: the project's outgoing dependencies.
@@ -121,11 +143,7 @@ impl Command for List {
             })
             .collect();
         let worse = |d: &Dependency| d.change.as_ref().is_some_and(DependencyChange::worse);
-        hosts.sort_by(|a, b| {
-            worse(b)
-                .cmp(&worse(a))
-                .then(b.stat.calls.cmp(&a.stat.calls))
-        });
+        sort(&mut hosts);
         Ok(Dependencies {
             environment,
             days,
@@ -137,5 +155,59 @@ impl Command for List {
             hosts,
             note,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn host(name: &str, calls: i64, errors: (f64, f64), p95: (f64, f64)) -> Dependency {
+        let change = DependencyChange {
+            host: name.into(),
+            calls,
+            previous_calls: calls,
+            error_rate: errors.0,
+            previous_error_rate: errors.1,
+            p95_ms: p95.0,
+            previous_p95_ms: p95.1,
+            fails_more: errors.0 > errors.1,
+            slower: p95.0 > p95.1,
+        };
+        Dependency {
+            stat: DependencyStat {
+                host: name.into(),
+                calls,
+                ..DependencyStat::default()
+            },
+            error_rate: errors.0,
+            p95_ms: p95.0,
+            change: Some(change),
+        }
+    }
+
+    #[test]
+    fn failing_hosts_come_first_then_the_largest_change_then_the_most_called() {
+        let mut hosts = vec![
+            host("busy.example", 9_000, (0.01, 0.01), (100.0, 100.0)),
+            host("a-bit-slower.example", 500, (0.0, 0.0), (300.0, 200.0)),
+            host("much-slower.example", 400, (0.0, 0.0), (900.0, 100.0)),
+            host("fails-a-bit.example", 600, (0.08, 0.01), (100.0, 100.0)),
+            host("fails-a-lot.example", 300, (0.6, 0.01), (100.0, 100.0)),
+            host("quiet.example", 50, (0.0, 0.0), (100.0, 100.0)),
+        ];
+        sort(&mut hosts);
+        let order: Vec<&str> = hosts.iter().map(|d| d.stat.host.as_str()).collect();
+        assert_eq!(
+            order,
+            [
+                "fails-a-lot.example",
+                "fails-a-bit.example",
+                "much-slower.example",
+                "a-bit-slower.example",
+                "busy.example",
+                "quiet.example",
+            ]
+        );
     }
 }
