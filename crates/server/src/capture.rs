@@ -420,11 +420,19 @@ pub(crate) async fn capture(
     })
     .await;
     match stored {
-        Ok(Ok(())) => (
-            StatusCode::OK,
-            Json(json!({ "accepted": accepted, "rejected": rejected })),
-        )
-            .into_response(),
+        Ok(Ok(())) => {
+            let mut resp = (
+                StatusCode::OK,
+                Json(json!({ "accepted": accepted, "rejected": rejected })),
+            )
+                .into_response();
+            // The route-stats window (#628, D-091), for the server SDKs:
+            // they send the key in the header, browsers in the query.
+            if headers.contains_key("x-openlens-key") {
+                crate::capacity::advertise_window(&state, resp.headers_mut());
+            }
+            resp
+        }
         Ok(Err(err)) => {
             tracing::error!(%err, "cannot store events");
             error(

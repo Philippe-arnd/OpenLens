@@ -10,7 +10,7 @@ use crate::maintenance::TestHost;
 fn stripe() -> Vec<Failing> {
     vec![Failing {
         host: "api.stripe.com".into(),
-        cause: "api.stripe.com failed 80% of 40 calls in the last 10 minutes".into(),
+        cause: "api.stripe.com failed 80% of 40 calls in the last 20 minutes".into(),
     }]
 }
 

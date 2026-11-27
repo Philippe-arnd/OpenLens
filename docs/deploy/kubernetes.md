@@ -166,15 +166,16 @@ Keep the same admin token Secret.
 
 ### What grows with the disk
 
-OpenLens sizes what it keeps from its data volume, with no setting (D-088). Its budget is 80 % of the volume minus what other files on it use; after its own other files (rollups, `meta.db`, backups), half of the rest is for events and recordings and the other half for the copy made before each upgrade. Every hour it measures what each project's events take a day and what one of its recordings takes. Only one thing grows with the room: **the number of recordings kept per project a day**.
+OpenLens sizes what it keeps from its data volume, with no setting (D-088). Its budget is 80 % of the volume minus what other files on it use; after its own other files (rollups, `meta.db`, backups), half of the rest is for events and recordings and the other half for the copy made before each upgrade. Every hour it measures what each project's events take a day and what one of its recordings takes. Two things follow the room: **the number of recordings kept per project a day**, and **the length of the route-stats window** (D-091).
 
 | What | On a small disk | On a larger disk |
 | --- | --- | --- |
 | Recordings kept per project a day | 300 (the floor) | more, the same number in every project, as many as fit for 30 days once events and the floor's recordings are paid for, up to 30 000 |
 | Event retention | 400 days | 400 days: fixed ([privacy](../privacy.md), D-015) |
 | Replay retention | 30 days | 30 days: fixed ([privacy](../privacy.md), D-015) |
+| Route-stats window (server SDKs) | 10 minutes | 5 or 1 minute when their extra points fit for 400 days, paid before extra recordings; never finer than 10-minute windows of 500 keys would store a day, so a busy project with many routes keeps a coarser window |
 
-Retention never follows the disk: personal data is not kept longer because there is room, and you can state a fixed duration. The number of recordings never goes below 300. When the volume fills (other files, larger backups), the next measurement lowers it back toward 300; below that, writes stop at 5 % free, as before. `GET /api/capacity` (admin), the MCP `capacity` tool and the startup log (`capacity from the disk`) show the value in force and why. If the volume's size cannot be read, 300 applies and the answer says so.
+Retention never follows the disk: personal data is not kept longer because there is room, and you can state a fixed duration. The number of recordings never goes below 300. When the volume fills (other files, larger backups), the next measurement lowers it back toward 300; below that, writes stop at 5 % free, as before. `GET /api/capacity` (admin), the MCP `capacity` tool and the startup log (`capacity from the disk`) show the value in force and why. If the volume's size cannot be read, 300 applies and the answer says so. The window is advertised to the server SDKs in each capture response (`x-openlens-stats-window`); 10 minutes applies until the route stats are counted, and an app can pin its own with `statsWindowSeconds`.
 
 To give OpenLens less (a volume shared with other services) or more of the volume, set `OPENLENS_DISK_BUDGET` to a share (`40%`, 1 to 95 %) or a number of bytes (`500GB`, `2TiB`); it never goes past what leaves 5 % free.
 

@@ -24,6 +24,7 @@ mod map_shape;
 mod releases;
 mod server_errors;
 mod slo;
+mod stats_windows;
 mod status_page;
 mod stored_totals;
 mod typed_facts;

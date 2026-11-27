@@ -1,7 +1,8 @@
 //! Runtime health per release (#610, D-087): the `$runtime_stats` the
 //! Node SDK sends, one per process start (`process.start`) and one per
-//! 10-minute window per process (event-loop delay p50 and p99, the
-//! largest RSS and heap used), read per release.
+//! stats window per process (event-loop delay p50 and p99, the largest
+//! RSS and heap used), read per release. A window is 1, 5 or 10 minutes
+//! (#628, D-091): each point says its own in `$window_s`.
 //!
 //! - **Restarts per day:** the process starts of a release after its
 //!   rollout ([`ROLLOUT_MINUTES`] after its first runtime event: the
@@ -41,8 +42,6 @@ pub const RESTARTS_RATIO: f64 = 2.0;
 pub const RESTARTS_MIN_MOVE: f64 = 5.0;
 /// Releases read at most.
 pub const MAX_RELEASES: usize = 500;
-/// Length of one stats window, seconds (the SDK's `STATS_WINDOW_MS`).
-const WINDOW_SECS: f64 = 600.0;
 
 /// The runtime numbers of one release.
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
@@ -216,7 +215,7 @@ fn runtime_sql(w: &str) -> String {
            WHERE event = '{event}' AND {w}), \
          f AS (SELECT release, min(timestamp) AS t0 FROM r GROUP BY release) \
          SELECT r.release AS release, CAST(min(f.t0) AS VARCHAR) AS first_seen, \
-         date_part('epoch', max(r.timestamp)) - date_part('epoch', min(f.t0)) AS span_s, \
+         max(date_part('epoch', r.timestamp) + {win}) - date_part('epoch', min(f.t0)) AS span_s, \
          sum(CASE WHEN strpos(r.properties, '\"process.start\":true') > 0 THEN 1 ELSE 0 END) AS starts, \
          sum(CASE WHEN strpos(r.properties, '\"process.start\":true') > 0 \
              AND r.timestamp >= f.t0 + INTERVAL '{ROLLOUT_MINUTES} minutes' THEN 1 ELSE 0 END) AS restarts, \
@@ -229,6 +228,9 @@ fn runtime_sql(w: &str) -> String {
         heap = bytes("v8js\\.memory\\.heap\\.used"),
         p50 = secs("nodejs\\.eventloop\\.delay\\.p50"),
         p99 = secs("nodejs\\.eventloop\\.delay\\.p99"),
+        // A window is stamped with its start: it ends `$window_s` later
+        // (0 for a process start), whatever the window's length (#628).
+        win = crate::capacity::window::window_s_sql("r.properties"),
     )
 }
 
@@ -250,7 +252,7 @@ fn row_runtime(r: &Map<String, Value>) -> Option<ReleaseRuntime> {
         stat: RuntimeStat {
             starts: int(r, "starts"),
             restarts: int(r, "restarts"),
-            hours: (float(r, "span_s").max(0.0) + WINDOW_SECS) / 3600.0,
+            hours: float(r, "span_s").max(0.0) / 3600.0,
             rss_max_bytes: opt_int(r, "rss"),
             heap_used_max_bytes: opt_int(r, "heap"),
             loop_delay_p50_ms: opt_ms(r, "p50_s"),

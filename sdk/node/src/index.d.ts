@@ -9,6 +9,9 @@ export interface Options {
   flushInterval?: number;
   onError?: (e: unknown) => void;
   fetch?: typeof fetch;
+  /** Stats window in seconds: 60, 300 or 600 (anything else is ignored). Default: the window the
+   * server advertises in `x-openlens-stats-window`, else 600. Set it only to pin one (D-091). */
+  statsWindowSeconds?: number;
 }
 /** Request context the middleware puts on `req.openlens`. */
 export interface RequestContext { traceId?: string; sessionId?: string }
@@ -21,7 +24,10 @@ export interface ExceptionContext extends RequestContext {
 /** One request; `traceId` and `sessionId` are kept if it becomes an exemplar (never a user id). */
 export interface RequestRecord { method: string; route: string; status: number; ms: number; traceId?: string; sessionId?: string }
 export declare const SERVER_ID: "$server";
+/** The default stats window (10 minutes), used until the server advertises another. */
 export declare const STATS_WINDOW_MS: number;
+/** The capture response header that carries the server's stats window, seconds. */
+export declare const STATS_WINDOW_HEADER: "x-openlens-stats-window";
 export declare const BOUNDS_S: number[];
 export declare const SESSION_HEADER: "x-openlens-session";
 /** Distinct external hosts kept per stats window by `captureOutgoing()`; the rest count as `_OTHER`. */
@@ -36,13 +42,13 @@ export declare class OpenLens {
   captureException(err: unknown, ctx?: ExceptionContext): void;
   /** Report uncaught exceptions and unhandled rejections (opt-in). */
   captureUncaught(): void;
-  /** Count one request in its route's 10-minute stats (any framework); `ms` in milliseconds. */
+  /** Count one request in its route's stats window (any framework); `ms` in milliseconds. */
   recordRequest(r: RequestRecord): void;
-  /** Runtime health: one `$runtime_stats` at the process start, then one per 10-minute window
+  /** Runtime health: one `$runtime_stats` at the process start, then one per stats window
    * (event-loop delay p50/p99, largest RSS and heap used). On with `express()`. */
   captureRuntime(): void;
   /** Outgoing calls (global `fetch`, `http`/`https`) per external host: one `$client_stats` per
-   * method, host and status per 10-minute window. The host only, never the path or query; calls to
+   * method, host and status per stats window. The host only, never the path or query; calls to
    * the OpenLens host are not counted. Opt-in; `shutdown()` stops it. */
   captureOutgoing(): void;
   /** Express middleware: route stats, runtime health and `req.openlens`. `user` reads the signed-in user's id for server errors, never for exemplars. */

@@ -1,7 +1,9 @@
 //! Server routes (#594, D-083): the `$request_stats` the server SDKs send
 //! (#593, D-082), one data point of OpenTelemetry's
 //! `http.server.request.duration` histogram per (method, route, status
-//! code) per 10-minute window (#601, D-084), summed per route.
+//! code) per stats window (#601, D-084), summed per route. The window is
+//! 1, 5 or 10 minutes (#628, D-091), mixed within a day after a change:
+//! every read sums histograms, so none depends on its length.
 //!
 //! - **Requests, 5xx and duration** per route, the duration as a merged
 //!   histogram: p50 and p95 are the upper bound of the bucket that holds
@@ -832,8 +834,9 @@ pub fn failing(hour: &RouteStat, week: Option<&RouteStat>) -> Option<Failing> {
     })
 }
 
-/// The routes of production failing in the last hour (closed 10-minute
-/// windows), against the seven days before.
+/// The routes of production failing in the last hour (the closed windows
+/// that started in the last 70 minutes, whatever their length), against
+/// the seven days before.
 ///
 /// # Errors
 /// A failed query.
@@ -846,7 +849,9 @@ pub async fn failing_routes(
     let since = (now - chrono::Duration::days(8)).format("%Y-%m-%d");
     let w = format!("date >= '{since}' AND environment = 'production'");
     // The last hour of closed windows (a window is stamped with its start
-    // and sent when it ends, so 70 minutes back), and the week before.
+    // and sent when it ends, so 70 minutes back for 10-minute windows; with
+    // finer ones a few more minutes, a share is a share), and the week
+    // before.
     let part = "CASE WHEN timestamp >= now() - INTERVAL '70 minutes' THEN 'hour' ELSE 'week' END";
     let sql = stats_sql(&w, Some(part), MAX_ROUTES);
     let keys = key_actions(map);

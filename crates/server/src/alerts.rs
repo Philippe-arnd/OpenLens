@@ -196,7 +196,8 @@ pub(crate) async fn tick(state: &AppState, minute: u64) {
             ))
             .await;
         }
-        // Failing server routes (#594): the stats come in 10-minute windows.
+        // Failing server routes (#594): every 10 minutes, the longest stats
+        // window (#628).
         if s.failing && minute % 10 == 6 {
             Box::pin(cmd::failing_routes(state, &p)).await;
         }

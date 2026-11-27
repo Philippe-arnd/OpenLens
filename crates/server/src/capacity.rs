@@ -3,11 +3,17 @@
 //! the maintenance pass), and the engine derives from it and the data
 //! volume the recordings each project keeps a day. Retention stays fixed
 //! (D-015). `GET /api/capacity` is the engine's `capacity.get`.
+//!
+//! The route-stats window (#628, D-091) is chosen with it: after each
+//! measurement the maintenance pass counts each project's route stats of
+//! the last 24 hours, derives the window, and keeps it for the capture
+//! response's `x-openlens-stats-window` (never computed per request).
 
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -68,6 +74,8 @@ fn measure(state: &AppState) -> Usage {
                 event_bytes_per_day: e.per_day(),
                 replay_bytes_per_day: r.per_day(),
                 replay_bytes_per_recording: r.per_recording(),
+                // Counted next, by `refresh_window` (a query, async).
+                stats: None,
             }
         })
         .collect();
@@ -106,6 +114,66 @@ pub(crate) fn refresh(state: &AppState) {
         replays_per_day = cap.replays_per_day.value,
         reason = %cap.reason,
         "capacity from the disk"
+    );
+}
+
+/// The route-stats window, on every maintenance pass: after a
+/// measurement, count each project's route stats of the last 24 hours
+/// (once per measurement; a failed count is tried again on the next pass,
+/// and meanwhile that project counts as unknown, so 10 minutes apply),
+/// then derive the window and keep it for the capture response.
+pub(crate) async fn refresh_window(state: &AppState) {
+    let pending: Vec<String> = state
+        .caches
+        .capacity
+        .lock()
+        .ok()
+        .and_then(|c| {
+            c.as_ref().map(|(_, u)| {
+                u.projects
+                    .iter()
+                    .filter(|p| p.stats.is_none())
+                    .map(|p| p.project.clone())
+                    .collect()
+            })
+        })
+        .unwrap_or_default();
+    let mut counted = Vec::with_capacity(pending.len());
+    for id in pending {
+        match capacity::stats_load(&state.query, &id).await {
+            Ok(load) => counted.push((id, load)),
+            Err(err) => tracing::warn!(project = %id, %err, "cannot count the route stats"),
+        }
+    }
+    if !counted.is_empty() {
+        let mut cached = state.caches.capacity.lock().ok();
+        if let Some((_, u)) = cached.as_mut().and_then(|c| c.as_mut()) {
+            for p in &mut u.projects {
+                if let Some((_, load)) = counted.iter().find(|(id, _)| *id == p.project) {
+                    p.stats = Some(*load);
+                }
+            }
+        }
+    }
+    let cap = current(state);
+    let w = cap.stats_window.value.unsigned_abs();
+    let before = state.caches.stats_window.swap(w, Ordering::Relaxed);
+    if before != w || !counted.is_empty() {
+        tracing::info!(
+            stats_window_s = w,
+            reason = %cap.stats_window.reason,
+            "route-stats window from the disk"
+        );
+    }
+}
+
+/// Add `x-openlens-stats-window` (the window in force, seconds) to a
+/// capture response for a server SDK.
+pub(crate) fn advertise_window(state: &AppState, headers: &mut HeaderMap) {
+    let w = state.caches.stats_window.load(Ordering::Relaxed);
+    headers.insert(
+        HeaderName::from_static(capacity::window::HEADER),
+        HeaderValue::from(w),
     );
 }
 
