@@ -334,6 +334,8 @@ mod tests {
         let body = [
             &src[src.find("pub fn board(").unwrap()..],
             include_str!("board/focus.rs"),
+            include_str!("board/lead.rs"),
+            include_str!("board/now.rs"),
             include_str!("board/tiles.rs"),
             include_str!("board/charts.rs"),
             include_str!("board/sections.rs"),

@@ -12,6 +12,7 @@ use crate::*;
 
 mod charts;
 mod focus;
+mod lead;
 mod now;
 mod sections;
 mod tiles;

@@ -714,3 +714,99 @@ fn the_status_strip_says_each_state_in_a_word_and_stays_when_all_is_fine() {
             .contains("grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr))")
     );
 }
+
+#[test]
+fn a_regressed_release_leads_as_its_verdict_and_its_card_is_not_repeated() {
+    let b = Board {
+        latest_release: Some(judged(80)),
+        ..full()
+    };
+    let html = page(&b);
+    assert_eq!(html.matches(r#"class="card lead""#).count(), 1);
+    let lead = between(&html, r#"class="card lead""#, r#"class="card ranked""#);
+    // A headline in plain words, from the worst check.
+    assert!(lead.contains("Release regressed"), "{lead}");
+    assert!(
+        lead.contains("Since v2, one session in five hits an error"),
+        "{lead}"
+    );
+    // The checks by layer, the worse one said in words.
+    assert!(
+        lead.contains(r#"<div class="layers">"#) && lead.contains("Browser"),
+        "{lead}"
+    );
+    assert!(lead.contains(r#"aria-label="worse""#), "{lead}");
+    for action in ["Next step", "Create ticket", "Errors on v2", "Full verdict"] {
+        assert!(lead.contains(action), "{action}: {lead}");
+    }
+    assert!(
+        lead.contains("/tickets/new?kind=release&amp;subject=production%3Av2"),
+        "{lead}"
+    );
+    // The release regression card is the lead now: not in the list.
+    assert!(!html.contains(&b.insights[0].title), "no duplicate: {html}");
+    let ranked = between(&html, r#"class="card ranked""#, "</ol>");
+    assert_eq!(
+        ranked.matches(r#"<li class="row">"#).count(),
+        b.insights.len() - 1
+    );
+    assert!(ranked.contains(&b.insights[1].title), "{ranked}");
+    assert!(html.contains(&format!(
+        r#"<span class="count">{}</span>"#,
+        b.insights.len()
+    )));
+    // A healthy release: the top insight leads, as before.
+    let healthy = Board {
+        latest_release: Some(judged(8)),
+        ..full()
+    };
+    let html = page(&healthy);
+    let lead = between(&html, r#"class="card lead""#, r#"class="card ranked""#);
+    assert!(
+        lead.contains(&healthy.insights[0].title) && !lead.contains("Full verdict"),
+        "{lead}"
+    );
+    // On a share link, the verdict stays and its actions go.
+    let shared = shared_page(&b);
+    let lead = between(&shared, r#"class="card lead""#, r#"class="card ranked""#);
+    assert!(
+        lead.contains("Since v2") && !lead.contains("Create ticket"),
+        "{lead}"
+    );
+}
+
+#[test]
+fn the_ranked_list_shows_four_rows_and_the_rest_on_demand() {
+    let kinds = [
+        "churn_point",
+        "friction",
+        "funnel_drop",
+        "stick_driver",
+        "value_moment",
+        "slow_pages",
+        "flag_win",
+    ];
+    let b = Board {
+        insights: kinds.iter().map(|&k| insight(k, "x")).collect(),
+        ..full()
+    };
+    let html = page(&b);
+    let card = between(&html, r#"class="card ranked""#, "</details>");
+    let (ranked, more) = card.split_once("<details").unwrap();
+    assert_eq!(ranked.matches(r#"<li class="row">"#).count(), 4, "{ranked}");
+    assert!(
+        more.contains(&format!("Show all {}", kinds.len())),
+        "{more}"
+    );
+    assert_eq!(
+        more.matches(r#"<li class="row">"#).count(),
+        kinds.len() - 5,
+        "{more}"
+    );
+    // Four or fewer: no disclosure.
+    let few = Board {
+        insights: kinds.iter().take(5).map(|&k| insight(k, "x")).collect(),
+        ..full()
+    };
+    assert!(!page(&few).contains("Show all"));
+}

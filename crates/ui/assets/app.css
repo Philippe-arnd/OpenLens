@@ -960,6 +960,17 @@
   .row .step .label { color: var(--muted); }
   .row .links { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 13px; font-weight: 500; }
   .row .links a { display: inline-flex; align-items: center; min-height: 24px; }
+  .ranked summary { padding: 10px 14px; font-size: 13px; font-weight: 500; cursor: pointer; }
+  /* A regressed release's lead (#615): its checks by layer, each a mark, a label, from → to. */
+  .layers { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 10px; }
+  .layer { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--line-2); border-radius: var(--r); background: var(--raised); }
+  .layer h3 { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .02em; }
+  .layer .check { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; font-size: 13px; }
+  .layer .mark { display: grid; place-items: center; align-self: center; width: 16px; height: 16px; border-radius: 50%; font-size: 10px; font-weight: 700;
+    line-height: 1; color: var(--surface); background: var(--tone, var(--muted)); }
+  .layer .mark .icon { width: 11px; height: 11px; }
+  .layer .fromto { white-space: nowrap; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .layer .fromto b { color: var(--tone); font-weight: 600; }
 
   /* Key numbers: the tile is the link; its definition sits beside it. */
   .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 12px; }
