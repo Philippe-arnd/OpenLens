@@ -62,10 +62,11 @@ app.use(ol.expressErrors()); // last: reports the error, then next(err)
 ol.captureUncaught(); // optional: crashes and unhandled rejections
 ```
 
-- **Route stats:** each request counts in its route template (`/api/entries/:id`, never the raw URL) and status class, in 10-minute windows: count, 5xx, duration histogram. Other frameworks call `ol.recordRequest({ method, route, status, ms })`.
+- **Route stats:** each request counts in its route template (`/api/entries/:id`, never the raw URL) and status code, in 10-minute windows, as one data point of OpenTelemetry's `http.server.request.duration` histogram: the semantic-convention attributes `http.request.method`, `http.route`, `http.response.status_code`, seconds, and the default explicit bounds (5 ms to 10 s). Every request counts: nothing is sampled. Other frameworks call `ol.recordRequest({ method, route, status, ms })`.
 - **Errors:** `ol.captureException(err, { distinctId, route })` anywhere else. A server error is grouped with the other errors, alerted on, and judged per release.
-- **Session link:** the browser SDK adds `traceparent` and `baggage` to requests to its own origin, so a server error carries the session (and its replay) and the user. An API on another origin needs `traceOrigins: ["https://api.example.com"]` in the browser config, and its CORS must allow the `traceparent` and `baggage` headers.
+- **Session link:** the browser SDK adds one header, `x-openlens-session`, to requests to its own origin, so a server error carries the session and its replay. An API on another origin needs `traceOrigins: ["https://api.example.com"]` in the browser config, and its CORS must allow that header. No user id travels in a header: pass `user` to `express()`.
+- **OpenTelemetry:** OpenLens reads W3C trace context and never writes it. When the app's own OpenTelemetry sends `traceparent`, the trace id lands on server errors and failed requests as `trace_id`, so you can open the same request in your tracing tool. OpenLens adds no `traceparent` and no `baggage`: your server keeps its own sampling, and nothing of OpenLens is forwarded to other services.
 - **Release:** keep the same release name on both sides. Both SDKs read the host's commit (`SOURCE_COMMIT` on Coolify) when `release` is not set.
-- **Volume:** a server sends one batch every 5 s and one stats event per route and status class every 10 minutes, far below the capture limits, whatever the traffic.
+- **Volume:** a server sends one batch every 5 s and one stats event per route and status code every 10 minutes, far below the capture limits, whatever the traffic.
 
 Use the same `distinct_id` as the browser SDK's `identify()`, so server and browser events belong to the same person. Success events sent from the server count for the feature map like any other event.

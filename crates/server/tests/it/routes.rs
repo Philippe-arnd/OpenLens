@@ -4,22 +4,19 @@
 
 use super::*;
 
-fn stats(
-    uuid: u32,
-    status_class: &str,
-    count: i64,
-    errors: i64,
-    buckets: [i64; 12],
-) -> serde_json::Value {
+fn stats(uuid: u32, status: i64, count: i64, buckets: [i64; 15]) -> serde_json::Value {
+    // One `http.server.request.duration` data point, as the Node SDK sends it.
     serde_json::json!({
         "event": "$request_stats",
         "distinct_id": "$server",
         "uuid": format!("0191f0c0-0000-7000-8000-{uuid:012}"),
         "properties": {
             "$lib": "node", "$environment": "production", "$release": "v2",
-            "$method": "POST", "$route": "/api/auth/sign-in", "$status_class": status_class,
-            "$count": count, "$errors": errors, "$sum_ms": count * 30, "$max_ms": 900,
-            "$buckets": buckets, "$window_s": 600,
+            "$metric": "http.server.request.duration", "$unit": "s",
+            "http.request.method": "POST", "http.route": "/api/auth/sign-in",
+            "http.response.status_code": status,
+            "count": count, "sum": count as f64 * 0.03, "min": 0.001, "max": 0.9,
+            "bucket_counts": buckets, "$window_s": 600,
         },
     })
 }
@@ -27,13 +24,13 @@ fn stats(
 #[tokio::test]
 async fn route_stats_are_summed_per_route_shown_and_kept_out_of_user_activity() {
     let h = harness();
-    let mut ok = [0; 12];
+    let mut ok = [0; 15];
     ok[3] = 90;
-    let mut bad = [0; 12];
-    bad[7] = 10;
+    let mut bad = [0; 15];
+    bad[8] = 10;
     let events = vec![
-        stats(1, "2xx", 90, 0, ok),
-        stats(2, "5xx", 10, 10, bad),
+        stats(1, 200, 90, ok),
+        stats(2, 503, 10, bad),
         serde_json::json!({
             "event": "$error", "distinct_id": "$server",
             "uuid": "0191f0c0-0000-7000-8000-000000000003",
@@ -54,6 +51,7 @@ async fn route_stats_are_summed_per_route_shown_and_kept_out_of_user_activity() 
     assert_eq!(route["requests"], 100);
     assert_eq!(route["errors"], 10);
     assert!(route["p95_ms"].as_f64().unwrap() > route["p50_ms"].as_f64().unwrap());
+    assert!(route["max_ms"].as_i64().unwrap() >= 900, "seconds read as ms");
 
     // Stats are not user activity: the events view never has them.
     let n = |sql: &'static str| {

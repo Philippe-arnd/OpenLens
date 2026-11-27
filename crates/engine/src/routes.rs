@@ -1,6 +1,7 @@
 //! Server routes (#594, D-083): the `$request_stats` the server SDKs send
-//! (#593, D-082), one event per (method, route, status class) per
-//! 10-minute window, summed per route.
+//! (#593, D-082), one data point of OpenTelemetry's
+//! `http.server.request.duration` histogram per (method, route, status
+//! code) per 10-minute window (#601, D-084), summed per route.
 //!
 //! - **Requests, 5xx and duration** per route, the duration as a merged
 //!   histogram: p50 and p95 are the upper bound of the bucket that holds
@@ -27,10 +28,13 @@ use serde::Serialize;
 use crate::verdict::{Check, Outcome};
 use crate::{EngineError, Result, int, stats, text};
 
-/// Upper bounds (ms) of the histogram buckets, as the SDKs send them; one
-/// more bucket holds the rest.
-pub const BOUNDS_MS: [f64; 11] = [
-    5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0, 10000.0,
+/// Upper bounds of the histogram buckets as the SDKs send them: one more
+/// bucket holds the rest.
+/// OpenTelemetry's default explicit bounds of `http.server.request.duration`
+/// (0.005 s to 10 s, #601), in ms.
+pub const BOUNDS_MS: [f64; 14] = [
+    5.0, 10.0, 25.0, 50.0, 75.0, 100.0, 250.0, 500.0, 750.0, 1000.0, 2500.0, 5000.0, 7500.0,
+    10000.0,
 ];
 /// Buckets per histogram.
 pub const BUCKETS: usize = BOUNDS_MS.len() + 1;
@@ -144,30 +148,44 @@ fn normalize(r: &str) -> String {
 /// selected as `part`) where `w` holds; each histogram bucket is its own
 /// column.
 fn stats_sql(w: &str, extra: Option<&str>) -> String {
-    let num = |k: &str| {
-        format!("COALESCE(CAST(regexp_match(properties, '\"\\${k}\":([0-9]+)')[1] AS BIGINT), 0)")
+    // One data point of `http.server.request.duration` (#601): OpenTelemetry
+    // semantic-convention attributes, durations in seconds.
+    let attr = |k: &str, pat: &str| format!("regexp_match(properties, '\"{k}\":{pat}')[1]");
+    let int_of = |k: &str| {
+        format!(
+            "COALESCE(CAST({} AS BIGINT), 0)",
+            attr(k, "([0-9]{1,18})")
+        )
+    };
+    let secs_of = |k: &str| {
+        format!(
+            "COALESCE(CAST({} AS DOUBLE), 0)",
+            attr(k, "([0-9]{1,12}(?:\\.[0-9]{1,9})?(?:[eE][-+]?[0-9]{1,3})?)")
+        )
     };
     let buckets: Vec<String> = (1..=BUCKETS)
         .map(|i| {
             format!(
-                "sum(COALESCE(CAST(NULLIF(split_part(regexp_match(properties, '\"\\$buckets\":\\[([0-9,]*)\\]')[1], ',', {i}), '') AS BIGINT), 0)) AS b{i}"
+                "sum(COALESCE(CAST(NULLIF(split_part({}, ',', {i}), '') AS BIGINT), 0)) AS b{i}",
+                attr("bucket_counts", "\\[([0-9,]{0,400})\\]")
             )
         })
         .collect();
-    let route = "regexp_match(properties, '\"\\$route\":\"((?:[^\"\\\\]|\\\\.){1,300})\"')[1]";
-    let method = "regexp_match(properties, '\"\\$method\":\"([A-Z]{1,10})\"')[1]";
+    let route = attr("http\\.route", "\"((?:[^\"\\\\]|\\\\.){1,300})\"");
+    let method = attr("http\\.request\\.method", "\"([A-Z]{1,10})\"");
+    let status = int_of("http\\.response\\.status_code");
+    let count = int_of("count");
     let (sel, group) = extra.map_or((String::new(), String::new()), |e| {
         (format!("{e} AS part, "), format!("{e}, "))
     });
     format!(
         "SELECT {sel}{method} AS method, {route} AS route, sum({count}) AS requests, \
-         sum({errors}) AS errors, sum({sum}) AS sum_ms, max({max}) AS max_ms, {buckets} \
+         sum(CASE WHEN {status} >= 500 THEN {count} ELSE 0 END) AS errors, \
+         CAST(sum({sum}) * 1000 AS BIGINT) AS sum_ms, CAST(max({max}) * 1000 AS BIGINT) AS max_ms, {buckets} \
          FROM raw_events WHERE event = '{event}' AND {w} \
          GROUP BY {group}{method}, {route} ORDER BY requests DESC LIMIT {MAX_ROUTES}",
-        count = num("count"),
-        errors = num("errors"),
-        sum = num("sum_ms"),
-        max = num("max_ms"),
+        sum = secs_of("sum"),
+        max = secs_of("max"),
         buckets = buckets.join(", "),
         event = openlens_event::names::REQUEST_STATS,
     )
