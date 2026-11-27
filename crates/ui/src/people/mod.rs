@@ -320,7 +320,7 @@ pub fn revenue(
                             p { "Revenue comes from a feature's success event that carries an amount in " code { "revenue" } " (or " code { "value" } "), with an optional " code { "currency" } ". Send it from the app when the payment succeeds:" }
                             pre.copy { code { "openlens.track(\"order_paid\", { revenue: 49, currency: \"EUR\" });" } }
                             p { "Then declare " code { "order_paid" } " as that feature's success event in the feature map." }
-                            div.actions { a.button href={ "/p/" (p.id) "/features" } { "Open the feature map" } }
+                            div.actions { a.btn.primary href={ "/p/" (p.id) "/features" } { "Open the feature map" } }
                         }
                     },
                     Some(r) => {

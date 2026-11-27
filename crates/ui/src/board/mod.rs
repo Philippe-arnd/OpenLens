@@ -4,7 +4,8 @@
 //! `tiles`: the key numbers; `charts`: active users per day, the feature
 //! pulse, the cohorts, who uses what and the release comparison;
 //! `sections`: the other cards (Web Vitals, revenue, role gaps, funnels,
-//! flags, paths to value).
+//! flags, paths to value), closed disclosures after the release
+//! comparison (#588).
 
 use crate::*;
 
@@ -44,10 +45,10 @@ pub fn board_shell(p: &ProjectInfo<'_>, wait: Option<u64>) -> Markup {
     )
 }
 
-/// The Focus board (#543): the signals, the page head, what to focus on,
-/// the key numbers, active users and the feature pulse side by side, the
-/// other cards, then the cohorts and the release comparison as
-/// disclosures. `plain`: optional plain-language `(title, next step)` per
+/// The Focus board (#543, #588): the signals, the page head, what to
+/// focus on, the key numbers, active users and the feature pulse side by
+/// side, the cohorts (open) and the release comparison (closed), then the
+/// other cards as closed disclosures. `plain`: optional plain-language `(title, next step)` per
 /// insight (same order), shown instead of the original, which stays as
 /// the tooltip.
 pub fn board(
@@ -78,10 +79,9 @@ pub fn board(
                 div.page-head {
                     div {
                         h1 { "Focus board" }
-                        p { "What " (scope) " did " (period(b, "lately")) " in " strong { (f.environment) } "." }
-                        @if let Some(w) = &b.window {
-                            (window_line(w))
-                            @if let Some(e) = &w.estimate { (crate::cost::cost_line(e)) }
+                        (subtitle(b, f, &scope))
+                        @if let Some(e) = b.window.as_ref().and_then(|w| w.estimate.as_ref()) {
+                            (crate::cost::cost_line(e))
                         }
                         (crate::cost::unavailable_note(&b.unavailable_days))
                     }
@@ -98,13 +98,13 @@ pub fn board(
                     (charts::active_users(p.id, f, b, marks))
                     (charts::feature_pulse(p.id, f, b))
                 }
+                (charts::cohorts(p.id, f, b))
+                (charts::releases(p.id, f, b))
                 (sections::others(p.id, f, b, revenue))
                 (charts::role_matrix(p.id, f, b))
                 (sections::funnels(p.id, f, b))
                 (sections::flags(p.id, f, b))
                 (sections::journeys(p.id, f, b))
-                (charts::cohorts(p.id, f, b))
-                (charts::releases(p.id, f, b))
                 p.muted.small.center {
                     @match b.map_version {
                         Some(v) => { "Feature map v" (v) " in use. Cards compare users who stayed with users who churned; each shows the cohort sizes behind it." }
@@ -170,25 +170,38 @@ pub(crate) fn days_before(w: &openlens_engine::BoardWindow) -> String {
     }
 }
 
-/// The release window against the same length before it (D-055): users,
-/// sessions and sessions with errors.
-pub(crate) fn window_line(w: &openlens_engine::BoardWindow) -> Markup {
-    let change = |now: i64, before: i64| {
-        if before == 0 {
-            return if now == 0 { "no change" } else { "new" }.to_owned();
-        }
+/// The page head's one line (#588): the window and what it is compared
+/// with (D-055), or what the board reads without one. The numbers are in
+/// the key numbers and the active users card, not repeated here.
+fn subtitle(b: &Board, f: &Filters, scope: &str) -> Markup {
+    match &b.window {
+        Some(w) => html! {
+            p {
+                (w.label) " in " strong { (f.environment) } ", compared with the " (days_before(w)) " before."
+                @if scope != "everyone" { " Only " strong { (scope) } "." }
+            }
+        },
+        None => html! {
+            p { "What " (scope) " did " (period(b, "lately")) " in " strong { (f.environment) } "." }
+        },
+    }
+}
+
+/// The window's users against the same length before it (D-055), for
+/// the active users card: "144 users, -8% against the 10 days before".
+pub(crate) fn window_users(w: &openlens_engine::BoardWindow) -> String {
+    let (now, before) = (w.current.users, w.previous.users);
+    let change = if before == 0 {
+        if now == 0 { "no change" } else { "new" }.to_owned()
+    } else {
         let d = (now - before) as f64 / before as f64 * 100.0;
         format!("{}{d:.0}%", if d >= 0.0 { "+" } else { "" })
     };
-    let (now, before) = (&w.current, &w.previous);
-    html! {
-        p.muted.small.window-line {
-            strong { (w.label) } ", against the " (days_before(w)) " before: "
-            (compact(now.users)) " users (" (change(now.users, before.users)) "), "
-            (compact(now.sessions.count)) " sessions (" (change(now.sessions.count, before.sessions.count)) "), "
-            (pct(now.sessions.error_rate)) " of sessions with errors (was " (pct(before.sessions.error_rate)) ")."
-        }
-    }
+    format!(
+        "{} users, {change} against the {} before",
+        compact(now),
+        days_before(w)
+    )
 }
 
 #[cfg(test)]

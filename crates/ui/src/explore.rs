@@ -4,6 +4,10 @@
 
 use super::*;
 
+/// How many of a person's latest events their page lists (#590): the
+/// rest are one link away, on the Events page filtered on them.
+pub(crate) const LATEST: usize = 30;
+
 /// A person's profile (#222): who they are, their role over time, their
 /// recordings, their latest events and errors. Admins get the privacy
 /// danger zone; `confirm` opens the dialog that forgets them (#545).
@@ -40,9 +44,16 @@ pub fn person(
             }
         } @else { p.muted { "Anonymous visitor, never logged in." } }
     };
-    layout(
+    // The trail ends on the person (#590): `… › Audience › u276`.
+    let mut crumbs = Crumbs::of("Person", Some(p));
+    if let Some(last) = crumbs.0.last_mut() {
+        last.1 = Some(format!("/p/{}/audience", p.id));
+    }
+    crumbs.0.push((who.to_owned(), None));
+    layout_with(
         "Person",
         Some(p),
+        &crumbs,
         html! {
             (entity(who, html! { span.mono { (who) } }, facts, html! { a.btn href=(all_events) { "All their events" } }))
             div.kpis {
@@ -78,7 +89,7 @@ pub fn person(
                         h2 { (icon("events")) "Latest events" }
                         a href=(all_events) { "All their events" }
                     },
-                    events,
+                    &events[..events.len().min(LATEST)],
                     tz,
                     crate::tables::EventCols { user: false, role: false, groups: true },
                     html! {},
