@@ -820,7 +820,7 @@ async fn errors(
     let f = q.filters.filters(&p.timezone);
     match openlens_engine::error_groups_of(&state.query, &p.id, &src, &f, q.origin()).await {
         Ok(g) => {
-            let g = crate::with_replays(&state, &p.id, g).await;
+            let g = crate::web::with_replays(&state, &p.id, g).await;
             let original = crate::resolve_frames(&state, &p.id, &g).await;
             let groups: Vec<Value> = g
                 .iter()

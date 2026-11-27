@@ -679,7 +679,7 @@ async fn errors_page(
                 std::mem::take(&mut b.environments),
                 &f.environment,
             );
-            let g = crate::with_replays(&state, &p.id, g).await;
+            let g = with_replays(&state, &p.id, g).await;
             let original = crate::resolve_frames(&state, &p.id, &g).await;
             html(
                 StatusCode::OK,
@@ -834,6 +834,28 @@ pub(crate) async fn access_layer(
         // changes a project takes `access::ProjectWrite` (#339).
     }
     next.run(req).await
+}
+
+/// `groups` with their linked browser sessions marked when a recording of
+/// them exists (#624), checked off the async threads.
+pub(crate) async fn with_replays(
+    state: &AppState,
+    project: &str,
+    groups: Vec<openlens_engine::ErrorGroup>,
+) -> Vec<openlens_engine::ErrorGroup> {
+    if groups.iter().all(|g| g.linked.is_empty()) {
+        return groups;
+    }
+    let root = state.data_dir.clone();
+    let project = project.to_owned();
+    let kept = groups.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut groups = groups;
+        openlens_engine::mark_replays(&root, &project, &mut groups);
+        groups
+    })
+    .await
+    .unwrap_or(kept)
 }
 
 #[cfg(test)]

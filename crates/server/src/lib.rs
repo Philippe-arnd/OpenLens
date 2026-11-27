@@ -771,28 +771,6 @@ pub(crate) async fn resolve_frames(
     .unwrap_or_else(|_| vec![None; groups.len()])
 }
 
-/// `groups` with their linked browser sessions marked when a recording of
-/// them exists (#624), checked off the async threads.
-pub(crate) async fn with_replays(
-    state: &AppState,
-    project: &str,
-    groups: Vec<openlens_engine::ErrorGroup>,
-) -> Vec<openlens_engine::ErrorGroup> {
-    if groups.iter().all(|g| g.linked.is_empty()) {
-        return groups;
-    }
-    let root = state.data_dir.clone();
-    let project = project.to_owned();
-    let kept = groups.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut groups = groups;
-        openlens_engine::mark_replays(&root, &project, &mut groups);
-        groups
-    })
-    .await
-    .unwrap_or(kept)
-}
-
 /// The project's latest valid feature map, if it has one.
 pub(crate) async fn load_map(
     state: &AppState,
