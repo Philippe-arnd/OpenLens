@@ -9,7 +9,7 @@
 services:
   openlens:
     # A channel: :latest, or a minor such as :0.6 (never :edge).
-    image: ghcr.io/philippe-arnd/openlens:0.6
+    image: ghcr.io/philippe-arnd/openlens:0.7
     environment:
       OPENLENS_PUBLIC_URL: https://analytics.example.com
     # Published on the node that runs the task, not through the routing
