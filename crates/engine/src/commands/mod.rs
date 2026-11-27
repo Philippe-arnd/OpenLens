@@ -29,6 +29,7 @@ pub mod goals;
 pub mod goto;
 pub mod maintenance;
 pub mod releases;
+pub mod routes;
 pub mod status_page;
 pub mod tickets;
 pub mod uptime;
@@ -135,6 +136,8 @@ pub const REGISTRY: &[Spec] = &[
     spec::<board::GetEstimate>(),
     // Delivery metrics (#523).
     spec::<delivery::GetDelivery>(),
+    // Server routes (#594).
+    spec::<routes::List>(),
     // Uptime history (#559).
     spec::<uptime::GetDays>(),
     spec::<uptime::GetIncidents>(),

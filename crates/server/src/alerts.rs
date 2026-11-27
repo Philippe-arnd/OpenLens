@@ -194,6 +194,10 @@ pub(crate) async fn tick(state: &AppState, minute: u64) {
             ))
             .await;
         }
+        // Failing server routes (#594): the stats come in 10-minute windows.
+        if s.failing && minute % 10 == 6 {
+            Box::pin(cmd::failing_routes(state, &p)).await;
+        }
         // Error budgets of the environments with a target (#560).
         if minute % 5 == 2 {
             Box::pin(openlens_engine::slo::alert_pass(

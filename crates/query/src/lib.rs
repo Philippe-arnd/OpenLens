@@ -45,6 +45,9 @@ use serde::Serialize;
 /// read again. Events are flushed every ~10 s, so this stays fresh enough.
 const ALIAS_TTL: Duration = Duration::from_secs(30);
 
+/// `openlens_event::names::REQUEST_STATS` (#593), not user activity.
+const REQUEST_STATS: &str = "$request_stats";
+
 /// The `events` table as callers see it: `raw_events` with every
 /// anonymous id found in `person_aliases` replaced by its user, through
 /// the scalar function `person_of` (a lookup in the cached alias map, not
@@ -70,7 +73,7 @@ fn events_view_sql(merge: bool) -> String {
     format!(
         "SELECT {}, r.date FROM raw_events r WHERE r.event <> '{}'",
         cols.join(", "),
-        openlens_event::names::REQUEST_STATS
+        REQUEST_STATS
     )
 }
 
