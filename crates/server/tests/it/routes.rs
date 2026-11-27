@@ -1,6 +1,7 @@
 //! Server route stats (#593, #594): what the Node SDK sends is read back
-//! per route by `GET /api/projects/{id}/routes`, shown on the Errors page,
-//! and never counted as user activity.
+//! per route by `GET /api/projects/{id}/routes`, shown on Quality › Routes
+//! (#622) and summed up on the Errors page, and never counted as user
+//! activity.
 
 use super::*;
 
@@ -24,6 +25,11 @@ fn stats(uuid: u32, status: i64, count: i64, buckets: [i64; 15]) -> serde_json::
 #[tokio::test]
 async fn route_stats_are_summed_per_route_shown_and_kept_out_of_user_activity() {
     let h = harness();
+    let cookie = login_cookie(&h).await;
+    // Without route stats, the page explains how to send them (rule 11).
+    let empty = body_text(get(&h, "/p/default/routes", Some(&cookie), false).await).await;
+    assert!(empty.contains("@openlens/node") && !empty.contains("/api/auth/sign-in"));
+
     let mut ok = [0; 15];
     ok[3] = 90;
     let mut bad = [0; 15];
@@ -71,9 +77,13 @@ async fn route_stats_are_summed_per_route_shown_and_kept_out_of_user_activity() 
     );
     assert!(n("SELECT count(*) AS n FROM raw_events WHERE event = '$request_stats'").await > 0);
 
-    let cookie = login_cookie(&h).await;
+    let routes = body_text(get(&h, "/p/default/routes", Some(&cookie), false).await).await;
+    assert!(routes.contains("/api/auth/sign-in") && !routes.contains("@openlens/node"));
     let page = body_text(get(&h, "/p/default/errors", Some(&cookie), false).await).await;
-    assert!(page.contains("Server routes") && page.contains("/api/auth/sign-in"));
+    assert!(
+        page.contains("requests answered 5xx"),
+        "the Errors page sums the routes up"
+    );
     assert!(
         page.contains("db down"),
         "the server error is an error group"

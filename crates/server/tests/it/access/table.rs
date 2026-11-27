@@ -199,6 +199,7 @@ pub(super) const ROUTES: &[(&str, &str, Access)] = &[
     ("POST", "/p/{project}/board/jobs/{job}/cancel", Shared),
     ("GET", "/p/{project}/events", Read),
     ("GET", "/p/{project}/errors", Read),
+    ("GET", "/p/{project}/routes", Read),
     ("GET", "/p/{project}/pages", Read),
     ("GET", "/p/{project}/replays", Read),
     ("GET", "/p/{project}/replays/{session}", Read),
