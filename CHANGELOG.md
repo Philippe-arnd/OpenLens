@@ -12,6 +12,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- **Ruby SDK on Ruby 3.0 and 3.1:** events are sent every 5 s again. `Queue#pop(timeout:)` raised `ThreadError` there and killed the background thread, so events left only at `shutdown` or once 50 were queued.
 - **PHP SDK:** an event with invalid UTF-8 (an exception message, a property) no longer makes the whole batch fail to encode; the bad bytes are replaced.
 
 ## [0.7.0] - 2026-11-27

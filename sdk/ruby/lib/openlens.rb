@@ -96,10 +96,12 @@ module OpenLens
       @seen_minute = -1
       @seen_errors = {}
       @lock = Mutex.new
-      @stop = Queue.new
+      @stopped = false
+      @stop_lock = Mutex.new
+      @stop_cv = ConditionVariable.new
       @thread = Thread.new do
         loop do
-          break if timed_pop(flush_interval)
+          break if wait_for_stop(flush_interval)
 
           flush
         end
@@ -243,7 +245,10 @@ module OpenLens
 
     # Flush and stop the background thread (call on exit).
     def shutdown
-      @stop << true
+      @stop_lock.synchronize do
+        @stopped = true
+        @stop_cv.signal
+      end
       @thread.join(@timeout)
       flush
     end
@@ -279,11 +284,14 @@ module OpenLens
       Time.now.utc.iso8601(3)
     end
 
-    def timed_pop(seconds)
-      @stop.pop(timeout: seconds)
-    rescue ArgumentError # Ruby < 3.2: no timeout on Queue#pop
-      sleep(seconds)
-      !@stop.empty?
+    # Waits up to `seconds` for shutdown; true once it was asked. A condition
+    # variable, not Queue#pop(timeout:): before Ruby 3.2 that call raises
+    # ThreadError on an empty queue, which killed the flush thread.
+    def wait_for_stop(seconds)
+      @stop_lock.synchronize do
+        @stop_cv.wait(@stop_lock, seconds) unless @stopped
+        @stopped
+      end
     end
 
     def http(uri, &block)

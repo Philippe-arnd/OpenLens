@@ -72,6 +72,18 @@ class ClientTest < Minitest::Test
     srv&.stop
   end
 
+  def test_flushes_on_its_own_every_interval
+    srv = FakeServer.new
+    ol = OpenLens::Client.new(host: "http://127.0.0.1:#{srv.port}", key: "pk_t", flush_interval: 0.1)
+    ol.capture("u1", "x")
+    deadline = Time.now + 5
+    sleep 0.05 while srv.posts.empty? && Time.now < deadline
+    refute_empty srv.posts, "sent by the background thread, before shutdown"
+    ol.shutdown
+  ensure
+    srv&.stop
+  end
+
   def test_never_raises_when_down
     errors = []
     ol = OpenLens::Client.new(host: "http://127.0.0.1:9", key: "pk_t", on_error: ->(e) { errors << e },
