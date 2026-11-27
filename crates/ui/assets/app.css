@@ -31,6 +31,9 @@
               0 6px 20px -12px light-dark(oklch(20% 0.02 285 / .12), transparent);
     /* Earlier names, kept as aliases until the components move to v2. */
     --violet: var(--accent); --mint: var(--good); --sky: var(--info); --sun: var(--warn); --coral: var(--bad);
+    /* The logo keeps the v1 colours exactly (the aliases above follow the v2 status tones). */
+    --logo-violet: light-dark(#5b4ef0, #8f84ff); --logo-sky: light-dark(#2f8cf0, #58a8ff); --logo-mint: light-dark(#0e9f6e, #34c38f);
+    --logo-sun: light-dark(#d99400, #f2b544); --logo-coral: light-dark(#e5486a, #ff6f8b);
   }
   :root[data-theme="light"] { color-scheme: light; }
   :root[data-theme="dark"] { color-scheme: dark; }
@@ -120,7 +123,7 @@
   .brand:hover { text-decoration: none; }
   /* The OpenLens logo: a colour blob that slowly changes shape (also docs/img/logo.svg). */
   .blob { display: inline-block; flex: none;
-    background: conic-gradient(from 200deg, var(--violet), var(--sky), var(--mint), var(--sun), var(--coral), var(--violet));
+    background: conic-gradient(from 200deg, var(--logo-violet), var(--logo-sky), var(--logo-mint), var(--logo-sun), var(--logo-coral), var(--logo-violet));
     border-radius: 42% 58% 61% 39% / 45% 39% 61% 55%; }
   .brand .blob { width: 22px; height: 22px; }
   .theme { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); }
