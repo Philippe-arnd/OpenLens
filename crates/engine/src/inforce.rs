@@ -64,6 +64,9 @@ pub struct History {
     pub recorded: Vec<ReleaseMap>,
     /// Recorded versions that are not among the newest 50.
     pub older: Vec<(i64, FeatureMap)>,
+    /// The features each release of the environment touched (#576),
+    /// newest first, keyed as in the map version matched with.
+    pub touched: Vec<(String, Vec<crate::release_features::TouchedFeature>)>,
 }
 
 impl From<Vec<MapAt>> for History {
@@ -76,8 +79,9 @@ impl From<Vec<MapAt>> for History {
 }
 
 impl History {
-    /// The stored versions of `project`'s map and the releases of
-    /// `environment` recorded with one. Unreadable rows are left out.
+    /// The stored versions of `project`'s map, the releases of
+    /// `environment` recorded with one and the features each touched.
+    /// Unreadable rows are left out.
     #[must_use]
     pub fn load(meta: &openlens_meta::Meta, project: &str, environment: &str) -> Self {
         let versions = history(meta, project);
@@ -101,6 +105,7 @@ impl History {
             versions,
             recorded,
             older,
+            touched: crate::release_features::by_release(meta, project, environment),
         }
     }
 

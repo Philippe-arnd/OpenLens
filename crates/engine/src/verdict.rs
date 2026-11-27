@@ -18,9 +18,12 @@
 //!   [`NEW_ERROR_USERS`] users (as the hourly alert counts a new error).
 //! - **Web Vitals**: LCP, INP and CLS at p75, worse when the rating drops
 //!   (good, needs improvement, poor).
-//! - **Features touched**: the success rate of each feature with a success
+//! - **Features**: the success rate of each feature with a success
 //!   event, worse when it drops by [`MIN_FEATURE_DROP`] or more,
-//!   significantly.
+//!   significantly. The features the release's code change touched
+//!   ([`Side::touched`], #576, D-095) are judged and listed first, before
+//!   every other check, with the same thresholds; one that cannot be
+//!   compared says so.
 //! - **Goals and guardrails** (production): a guardrail breached by the
 //!   release and not by the one before is a regression; a goal's KPI moving
 //!   toward or away from its target is shown, not judged.
@@ -153,6 +156,10 @@ pub struct Side {
     /// external host; empty when the release sent no client stats.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dependencies: Vec<crate::dependencies::DependencyStat>,
+    /// The features its code change touched (#576, D-095), in map order:
+    /// judged and listed first. Empty when not known.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub touched: Vec<String>,
 }
 
 fn share(n: i64, of: i64) -> f64 {
@@ -451,25 +458,12 @@ pub fn compare(
                 ),
             });
         }
-        for f in &c.features {
-            let Some(pf) = p.feature(&f.feature) else {
-                continue;
-            };
-            let (rc, rp) = (
-                share(f.succeeded, f.sessions),
-                share(pf.succeeded, pf.sessions),
-            );
-            let mut ch = share_check(
-                &f.feature,
-                &format!("Success rate of {}", f.feature),
-                (rc, f.sessions),
-                (rp, pf.sessions),
-                true,
-                MIN_FEATURE_DROP,
-            );
-            ch.kind = "feature";
-            checks.push(ch);
-        }
+        // The features the release touched lead the comparison (#576).
+        let (touched, rest) = feature_checks(c, p);
+        checks.extend(rest);
+        let mut first = touched;
+        first.append(&mut checks);
+        checks = first;
         for g in goals {
             goal_checks(g, c, p, &mut checks);
         }
@@ -522,6 +516,64 @@ pub fn compare(
             .unwrap_or_default(),
         notes: None,
     }
+}
+
+/// The features compared on two releases: the success rate of each one
+/// with a success event used on both, as `(touched, the rest)`. The
+/// features the release touched (#576) are in their order, and one that
+/// cannot be compared says so, shown and not judged. The thresholds are
+/// the same for every feature.
+fn feature_checks(c: &Side, p: &Side) -> (Vec<Check>, Vec<Check>) {
+    let one = |f: &FeatureUse, touched: bool| {
+        let pf = p.feature(&f.feature)?;
+        let (rc, rp) = (
+            share(f.succeeded, f.sessions),
+            share(pf.succeeded, pf.sessions),
+        );
+        let label = if touched {
+            format!("Success rate of {} (changed in this release)", f.feature)
+        } else {
+            format!("Success rate of {}", f.feature)
+        };
+        let mut ch = share_check(
+            &f.feature,
+            &label,
+            (rc, f.sessions),
+            (rp, pf.sessions),
+            true,
+            MIN_FEATURE_DROP,
+        );
+        ch.kind = "feature";
+        Some(ch)
+    };
+    let mut out = Vec::new();
+    for key in &c.touched {
+        match c.feature(key).and_then(|f| one(f, true)) {
+            Some(ch) => out.push(ch),
+            None => out.push(Check {
+                exemplar: None,
+                kind: "feature",
+                key: key.clone(),
+                label: format!("{key} (changed in this release)"),
+                previous: None,
+                current: 0.0,
+                outcome: Outcome::Info,
+                judged: false,
+                note: format!(
+                    "{key} was changed in this release but cannot be compared: it has no success \
+                     event, or no sessions on {} and {}.",
+                    p.release, c.release
+                ),
+            }),
+        }
+    }
+    let rest = c
+        .features
+        .iter()
+        .filter(|f| !c.touched.contains(&f.feature))
+        .filter_map(|f| one(f, false))
+        .collect();
+    (out, rest)
 }
 
 /// A goal's guardrails (judged) and its KPI (shown) on two releases.

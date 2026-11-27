@@ -649,6 +649,10 @@ pub struct FeatureContext {
     /// Use per release, newest first (#411), last 90 days, each counted
     /// with the map version in force (#283).
     pub releases: Vec<FeatureRelease>,
+    /// The releases whose code change touched it (#576), newest first:
+    /// `(release, changed files matching its code paths)`. Empty when no
+    /// release was matched (no git host link, or no `paths` declared).
+    pub touched_by: Vec<(String, i64)>,
     /// Inferred relations it is part of (#283).
     pub relations: Vec<crate::relations::Relation>,
     /// Errors in the sessions that used it (#411), most users first, last 30 days.
@@ -804,6 +808,7 @@ pub async fn feature_context(
             .map(|x| x.key.clone())
             .collect(),
         releases: rel?,
+        touched_by: crate::release_features::touched_by(history, &key, def.as_ref()),
         relations: health
             .relations
             .iter()

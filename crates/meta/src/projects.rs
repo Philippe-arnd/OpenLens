@@ -166,6 +166,8 @@ impl Meta {
                 "notes",
                 "release_builds",
                 "release_maps",
+                "release_attribution",
+                "release_attribution_features",
                 "deploy_hooks",
                 "deploys",
                 "maintenance_windows",

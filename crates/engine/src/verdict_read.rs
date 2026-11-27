@@ -258,6 +258,9 @@ pub struct Scope<'a> {
     pub map: Option<(&'a FeatureMap, i64)>,
     /// The project's goals (they count in production only).
     pub goals: &'a [Goal],
+    /// The features each release touched, by release (#576): compared
+    /// first.
+    pub touched: &'a HashMap<String, Vec<String>>,
 }
 
 /// Judge every release of the scope's environment with traffic in
@@ -278,6 +281,7 @@ pub async fn judge(
         tz,
         map,
         goals,
+        touched,
     } = scope;
     let mut ours: Vec<(DateTime<Utc>, &Release)> = releases
         .iter()
@@ -300,10 +304,11 @@ pub async fn judge(
     };
     let mut out = Vec::with_capacity(ours.len());
     for (i, (first, r)) in ours.iter().enumerate() {
-        let current = sides
+        let mut current = sides
             .get(&r.release)
             .cloned()
             .unwrap_or_else(|| empty(&r.release));
+        current.touched = touched.get(&r.release).cloned().unwrap_or_default();
         let previous = i.checked_sub(1).and_then(|j| ours.get(j)).map(|(_, p)| {
             sides
                 .get(&p.release)

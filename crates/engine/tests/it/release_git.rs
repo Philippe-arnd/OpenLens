@@ -1,7 +1,8 @@
 //! The git host link, read side (#574, D-093): a release recorded with
 //! its range is read from GitHub once, by the hourly pass, and its notes
 //! are then served from the store; GitHub's answers are bounded; a
-//! failing GitHub is retried a few times, then given up.
+//! failing GitHub is retried a few times, then given up. Its changed files
+//! are matched once to the features whose code paths they are in (#576).
 
 use std::collections::HashSet;
 use std::sync::Mutex;
@@ -10,9 +11,11 @@ use openlens_engine::commands::alerts;
 use openlens_engine::commands::deploys::{RecordRelease, RecordReleaseInput};
 use openlens_engine::commands::release_notes::{Notes, NotesInput};
 use openlens_engine::commands::{Caller, Change, Command, Host, tickets};
+use openlens_engine::release_features::{self, TouchedState};
 use openlens_engine::release_git::{
     self, MAX_ATTEMPTS, MAX_COMMITS, MAX_FILES, NotesState, ReleaseNotes,
 };
+use openlens_engine::verdict::{FeatureUse, Side, Verdict, compare};
 use openlens_engine::{Board, EngineError, Filters};
 use openlens_featuremap::FeatureMap;
 use openlens_meta::{Meta, Project};
@@ -69,7 +72,8 @@ fn answer(url: &str) -> Result<Value, String> {
                     "author": { "name": "Bob Example", "email": "bob@example.com", "date": "2026-11-21T09:00:00Z" },
                     "committer": { "date": "2026-11-21T09:00:00Z" } } }
             ],
-            "files": [ { "filename": "src/export.rs" }, { "filename": "src/filters.rs" } ]
+            "files": [ { "filename": "src/export.rs" }, { "filename": "src/filters.rs" },
+                       { "filename": "src/export/csv.rs" }, { "filename": "README.md" } ]
         }));
     }
     if url.contains("/pulls?") {
@@ -323,4 +327,126 @@ fn hostile_github_answers_are_bounded() {
             .0
             .is_empty()
     );
+}
+
+/// A map whose `export` feature owns `src/export/**` and `filters` one
+/// file; `src/export.rs` and `README.md` are in no feature.
+const MAP_WITH_PATHS: &str = "features:\n  - key: checkout\n    name: Checkout\n    success: paid\n    entry: { routes: ['/checkout'] }\n    paths: ['src/checkout/**']\n  - key: export\n    name: Export\n    success: exported\n    entry: { routes: ['/export'] }\n    paths: ['src/export/**']\n  - key: filters\n    name: Filters\n    success: filtered\n    entry: { routes: ['/filters'] }\n    paths: ['src/filters.rs']\n";
+
+fn feature_use(key: &str, sessions: i64, succeeded: i64) -> FeatureUse {
+    FeatureUse {
+        feature: key.into(),
+        sessions,
+        succeeded,
+    }
+}
+
+fn release_side(release: &str, touched: Vec<String>) -> Side {
+    Side {
+        release: release.into(),
+        users: 150,
+        sessions: 500,
+        bounced: 100,
+        error_sessions: 10,
+        task_sessions: 250,
+        tasks: 500,
+        avg_secs: 60.0,
+        features: vec![
+            feature_use("checkout", 200, 150),
+            feature_use("export", 200, 150),
+            feature_use("filters", 200, 150),
+        ],
+        touched,
+        ..Side::default()
+    }
+}
+
+#[tokio::test]
+async fn a_release_that_changes_export_lists_it_as_touched_and_its_verdict_compares_it_first() {
+    let (h, p) = GitHost::new(true, false);
+    h.meta.save_feature_map(&p.id, MAP_WITH_PATHS).unwrap();
+    record(&h, &p, Some(FROM)).await;
+    assert!(release_git::pass(&h, &p.id).await.is_empty());
+
+    let n = notes(&h, &p).await;
+    let t = n.touched.expect("ready notes carry the features touched");
+    assert_eq!(t.state, TouchedState::Ready);
+    let keys: Vec<&str> = t.features.iter().map(|f| f.key.as_str()).collect();
+    assert!(keys.contains(&"export"), "{keys:?}");
+    assert!(keys.contains(&"filters"));
+    assert!(!keys.contains(&"checkout"), "no file of checkout changed");
+    assert!(t.unmatched > 0 && t.unmatched < t.files);
+    assert!(
+        t.note
+            .clone()
+            .unwrap_or_default()
+            .contains("match no feature")
+    );
+
+    // Matched once and kept: what the verdict and the feature page read.
+    let by = release_features::by_release(&h.meta, &p.id, "production");
+    let (_, fs) = by.iter().find(|(r, _)| r == "v1.4").unwrap();
+    let touched: Vec<String> = fs.iter().map(|f| f.key.clone()).collect();
+    assert!(touched.contains(&"export".to_owned()));
+    let history = openlens_engine::History::load(&h.meta, &p.id, "production");
+    assert!(
+        history
+            .touched
+            .iter()
+            .any(|(r, fs)| r == "v1.4" && fs.iter().any(|f| f.key == "export")),
+        "the feature page's Releases tab reads it"
+    );
+
+    // Export's and checkout's success drop: export, touched, is judged
+    // first, before every other check, and gives the first reason.
+    let mut current = release_side("v1.4", touched);
+    current.features[0] = feature_use("checkout", 200, 60);
+    current.features[1] = feature_use("export", 200, 60);
+    let previous = release_side("v1.3", Vec::new());
+    let r = compare("production", &current, Some(&previous), 30, &[]);
+    let first = r.checks.first().unwrap();
+    assert_eq!((first.kind, first.key.as_str()), ("feature", "export"));
+    let at = |key: &str| r.checks.iter().position(|c| c.key == key).unwrap();
+    assert!(at("export") < at("error_rate"));
+    assert!(at("export") < at("checkout"));
+    assert_eq!(r.verdict, Some(Verdict::Regressed));
+    assert!(r.reasons[0].contains("export"), "{:?}", r.reasons);
+
+    // A later pass matches and calls nothing again.
+    let calls = h.calls();
+    assert!(release_git::pass(&h, &p.id).await.is_empty());
+    assert_eq!(h.calls(), calls);
+}
+
+#[tokio::test]
+async fn files_in_no_feature_and_a_map_without_paths_say_so() {
+    // Paths declared, none matching: no feature, and the gap is counted.
+    let (h, p) = GitHost::new(true, false);
+    h.meta
+        .save_feature_map(&p.id, &MAP_WITH_PATHS.replace("src/", "lib/"))
+        .unwrap();
+    record(&h, &p, Some(FROM)).await;
+    let _ = release_git::pass(&h, &p.id).await;
+    let t = notes(&h, &p).await.touched.unwrap();
+    assert_eq!(t.state, TouchedState::Ready);
+    assert!(t.features.is_empty());
+    assert!(t.files > 0);
+    assert_eq!(t.unmatched, t.files);
+    let gap = format!("{} changed files match no feature", t.files);
+    assert!(t.note.unwrap_or_default().contains(&gap));
+
+    // No paths at all: not "N files match no feature", but how to add them.
+    let (h, p) = GitHost::new(true, false);
+    let bare: String = MAP_WITH_PATHS
+        .lines()
+        .filter(|l| !l.contains("paths:"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    h.meta.save_feature_map(&p.id, &bare).unwrap();
+    record(&h, &p, Some(FROM)).await;
+    let _ = release_git::pass(&h, &p.id).await;
+    let t = notes(&h, &p).await.touched.unwrap();
+    assert_eq!(t.state, TouchedState::NoPaths);
+    assert!(t.features.is_empty() && t.note.is_none());
+    assert!(t.reason.unwrap_or_default().contains("openlens-cli rules"));
 }
