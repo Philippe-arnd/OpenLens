@@ -8,7 +8,7 @@ use super::*;
 use crate::tables::Col;
 
 /// Milliseconds as shown.
-fn ms(v: f64) -> String {
+pub(crate) fn ms(v: f64) -> String {
     format!("{v:.0} ms")
 }
 
@@ -51,7 +51,12 @@ fn trend(series: &[Option<f64>], days: &[String]) -> Markup {
 
 /// A rate or a duration, marked when it got worse since the release
 /// before, with the earlier value when it moved enough to count.
-fn moved(now: String, worse: bool, was: Option<String>, previous: Option<&str>) -> Markup {
+pub(crate) fn moved(
+    now: String,
+    worse: bool,
+    was: Option<String>,
+    previous: Option<&str>,
+) -> Markup {
     html! {
         @if worse { span.status.bad { (icon("alert")) (now) } } @else { (now) }
         @if let Some(w) = was {

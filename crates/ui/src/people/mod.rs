@@ -41,6 +41,7 @@ fn plain_tile(label: &str, value: Markup, sub: String) -> Markup {
         Kpi {
             value,
             graded: None,
+            more: None,
             sub,
             moved: None,
         },

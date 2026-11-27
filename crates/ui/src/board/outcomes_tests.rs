@@ -160,3 +160,32 @@ fn each_outcome_opens_its_page_with_the_board_filters() {
         );
     }
 }
+
+/// #623: the Quality tile's second line is the server side of the same
+/// window, and says when there is none rather than a zero.
+#[test]
+fn quality_adds_the_share_of_server_requests_answered_5xx() {
+    let mut b = full();
+    b.server = Some(openlens_engine::board_backend::ServerLine {
+        requests: 2_000,
+        errors: 14,
+        ..Default::default()
+    });
+    let html = page(&b);
+    let quality = outcome(&html, "Sessions with errors");
+    assert!(
+        quality.contains(&format!(
+            "{} of server requests answered 5xx",
+            pct(14.0 / 2_000.0)
+        )),
+        "{quality}"
+    );
+    // No server stats in the window: one line says so, no number.
+    b.server = Some(Default::default());
+    let html = page(&b);
+    let quality = outcome(&html, "Sessions with errors");
+    assert!(
+        quality.contains("No server request stats") && !quality.contains("answered 5xx"),
+        "{quality}"
+    );
+}

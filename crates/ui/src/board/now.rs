@@ -1,11 +1,13 @@
 //! "Production right now" (#614): the status strip at the top of the
 //! board, one cell per question (is the app up, how is the latest release
-//! judged, what incident is open, what setup is left). Each cell has a
+//! judged, how are the key actions doing (#623), what incident is open,
+//! what setup is left). Each cell has a
 //! dot, a word (the colour is never the only cue), one line of detail and
 //! a link; it shows all green when everything is fine. On a share link
 //! the cells are not links and Setup is left out.
 
 use crate::*;
+use openlens_engine::board_backend::ServerLine;
 use openlens_engine::board_verdict::LatestRelease;
 use openlens_engine::verdict::Verdict;
 
@@ -107,6 +109,64 @@ fn release(pid: &str, env: &str, l: &LatestRelease) -> Cell {
         tone,
         key,
         word: word.into(),
+        detail,
+        href,
+    }
+}
+
+/// The key actions (#594 B, #623): the worst one and its success rate
+/// against the length before, all fine, or none declared (a link to the
+/// feature map where they are declared).
+fn key_actions(pid: &str, s: &ServerLine) -> Cell {
+    let routes = format!("/p/{pid}/routes");
+    let seen = s.key_actions.iter().filter(|k| k.requests > 0).count();
+    let (tone, word, detail, href) = match s.worst() {
+        _ if s.declared == 0 => (
+            "muted",
+            "None declared".to_owned(),
+            "Mark the routes that must never fail in the feature map".to_owned(),
+            format!("/p/{pid}/features"),
+        ),
+        None => (
+            "muted",
+            "No requests".to_owned(),
+            "No server request to a key action in this window".to_owned(),
+            routes,
+        ),
+        Some(k) => {
+            let now = pct(k.success_rate().unwrap_or(1.0));
+            let was = k
+                .previous_success_rate()
+                .map(|p| format!(", was {}", pct(p)))
+                .unwrap_or_default();
+            if k.degraded {
+                (
+                    "warn",
+                    format!("{} degraded", k.name),
+                    format!("{now} succeed{was}"),
+                    routes,
+                )
+            } else if seen == 1 {
+                (
+                    "good",
+                    "All fine".to_owned(),
+                    format!("{}: {now} succeed{was}", k.name),
+                    routes,
+                )
+            } else {
+                (
+                    "good",
+                    "All fine".to_owned(),
+                    format!("{seen} key actions; the lowest, {}, {now} succeed", k.name),
+                    routes,
+                )
+            }
+        }
+    };
+    Cell {
+        tone,
+        key: "Key actions".into(),
+        word,
         detail,
         href,
     }
@@ -218,6 +278,13 @@ pub(super) fn strip(pid: &str, f: &Filters, b: &Board) -> Markup {
     if let Some(l) = &b.latest_release {
         cells.push(release(pid, &f.environment, l));
     }
+    if let Some(s) = b
+        .server
+        .as_ref()
+        .filter(|_| b.alerts.is_some() || b.latest_release.is_some())
+    {
+        cells.push(key_actions(pid, s));
+    }
     if let Some(s) = &b.alerts {
         cells.push(incidents(pid, s));
     }
@@ -242,5 +309,86 @@ pub(super) fn strip(pid: &str, f: &Filters, b: &Board) -> Markup {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::tests::{between, full, judged, page};
+    use super::*;
+    use openlens_engine::board_backend::KeyAction;
+
+    fn sign_in(errors: i64, before: i64, degraded: bool) -> KeyAction {
+        KeyAction {
+            feature: "sign-in".into(),
+            name: "Sign-in".into(),
+            requests: 1_000,
+            errors,
+            previous_requests: 1_000,
+            previous_errors: before,
+            degraded,
+        }
+    }
+
+    /// The Key actions cell of a board with this server side.
+    fn cell(s: ServerLine) -> String {
+        let b = Board {
+            latest_release: Some(judged(8)),
+            server: Some(s),
+            ..full()
+        };
+        let html = page(&b);
+        let strip = between(&html, r#"aria-label="Production right now""#, "</section>");
+        strip
+            .split(r#"class="tone-"#)
+            .find(|c| c.contains("Key actions"))
+            .unwrap_or_default()
+            .to_owned()
+    }
+
+    #[test]
+    fn the_key_actions_cell_names_the_degraded_one_says_all_fine_or_links_to_the_map() {
+        // Degraded: its name, its success rate now and before, in words.
+        let c = cell(ServerLine {
+            declared: 1,
+            key_actions: vec![sign_in(84, 1, true)],
+            ..ServerLine::default()
+        });
+        assert!(!c.starts_with("good"), "{c}");
+        assert!(c.contains("Sign-in degraded"), "{c}");
+        let (now, was) = (pct(1.0 - 84.0 / 1_000.0), pct(1.0 - 1.0 / 1_000.0));
+        assert!(c.contains(&format!("{now} succeed, was {was}")), "{c}");
+        assert!(c.contains("/p/p1/routes"), "{c}");
+        // Fine: green, and the key action still named.
+        let c = cell(ServerLine {
+            declared: 1,
+            key_actions: vec![sign_in(1, 1, false)],
+            ..ServerLine::default()
+        });
+        assert!(c.starts_with("good") && c.contains("All fine"), "{c}");
+        // None declared: says so and leads to the feature map.
+        let c = cell(ServerLine::default());
+        assert!(
+            c.contains("None declared") && c.contains("/p/p1/features"),
+            "{c}"
+        );
+        assert!(!c.contains('%'), "no empty number: {c}");
+        // Declared, but no request in the window: no number either.
+        let c = cell(ServerLine {
+            declared: 1,
+            ..ServerLine::default()
+        });
+        assert!(c.contains("No requests") && !c.contains('%'), "{c}");
+    }
+
+    #[test]
+    fn a_board_that_did_not_read_the_server_side_has_no_key_actions_cell() {
+        let b = Board {
+            latest_release: Some(judged(8)),
+            ..full()
+        };
+        let html = page(&b);
+        let strip = between(&html, r#"aria-label="Production right now""#, "</section>");
+        assert!(!strip.contains("Key actions"), "{strip}");
     }
 }

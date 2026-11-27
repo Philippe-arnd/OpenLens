@@ -144,12 +144,14 @@ pub fn churn(
         (kpi_tile(Some("#at-risk"), "At risk now", Kpi {
             value: html! { (compact(c.at_risk.len() as i64)) },
             graded: None,
+            more: None,
             sub: "quiet for over half the window, less active than before".to_owned(),
             moved: None,
         }, false))
         (kpi_tile(Some(&detail_url(pid, "/retention", f)), "Median lifetime", Kpi {
             value: html! { (c.median_days.map_or_else(|| "over 90 days".into(), |d| format!("{d} days"))) },
             graded: None,
+            more: None,
             sub: "half the users are gone by then; the curve is on Retention".to_owned(),
             moved: None,
         }, false))

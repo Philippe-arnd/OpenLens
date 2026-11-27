@@ -203,6 +203,9 @@ pub fn releases(
                 }
                 .render())
             }
+            @if let Some(l) = &r.latest {
+                (crate::release_verdict::latest(p.id, l))
+            }
             details.card.disclose {
                 summary { h2 { "How releases are judged" } (icon("chev")) }
                 div.body {
@@ -213,7 +216,7 @@ pub fn releases(
                         strong { "Rolled back" } ": it had the majority, then an older release took it back. "
                         strong { "Failed" } " and " strong { "deploying" } ": a deploy the hook reported, with no traffic. "
                         "Time in staging runs from the build's first event in staging to its first in production. " }
-                    p.muted.small { strong { "Verdict" } ": once a release has 30 sessions and 8 users, or is a day old, it is compared with the release before it in the environment (errors, new error groups, bounce, tasks, Web Vitals, features with a success event, guardrails): "
+                    p.muted.small { strong { "Verdict" } ": once a release has 30 sessions and 8 users, or is a day old, it is compared with the release before it in the environment (errors, new error groups, bounce, tasks, Web Vitals, features with a success event, guardrails, and the 5xx share and p95 of each server route with enough requests on both): "
                         strong { "healthy" } " when nothing got worse, " strong { "regressed" } " when something did, " strong { "inconclusive" } " with too little traffic or nothing to compare with. Production is judged unless one environment is picked. Users are compared with the release before it in the same environment." }
                 }
             }
@@ -268,6 +271,7 @@ mod tests {
             releases: vec![row, failed],
             deploys: Vec::new(),
             deploy_hook: None,
+            latest: None,
         };
         let hook = HookView {
             admin: true,
@@ -330,6 +334,7 @@ mod tests {
             releases: vec![new, old],
             deploys: Vec::new(),
             deploy_hook: None,
+            latest: None,
         };
         let hook = HookView {
             admin: false,
