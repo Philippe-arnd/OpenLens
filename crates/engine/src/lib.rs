@@ -67,7 +67,9 @@ pub use board_kept::PeriodBlocks;
 pub use board_window::{BoardWindow, Period};
 pub use churn::{AtRisk, ChurnReport, churn};
 pub use digest::{Delta, Digest, digest, digest_markdown, release_lines};
-pub use errors::{ErrorGroup, error_groups};
+pub use errors::{
+    ErrorGroup, LINKED_MAX, LinkedSession, Origin, error_groups, error_groups_of, mark_replays,
+};
 pub use events::*;
 pub use explore::*;
 pub use flows::{Flow, FlowLink, FlowQuery, flows};
@@ -617,7 +619,9 @@ pub(crate) fn lookups(m: &FeatureMap) -> (String, String) {
 /// Only identified users (`persons`), unless the project never identified
 /// anyone, in which case every visitor counts. User KPIs (DAU/WAU/MAU,
 /// retention, cohorts) use it, so a visitor who never logged in is not a
-/// user (docs/kpis.md); anonymous visitors are counted on their own.
+/// user (docs/kpis.md); anonymous visitors are counted on their own. The
+/// `$server` pseudo user of server events (#593 D) is never a user: it is
+/// not in `persons`, and the other case leaves it out by name.
 ///
 /// Decided here, from the `persons` count, rather than in SQL: DataFusion
 /// cannot plan `IN (…) OR NOT EXISTS (…)` as a semi-join (20× slower), and
@@ -626,9 +630,13 @@ pub(crate) fn identified(any_person: bool) -> &'static str {
     if any_person {
         "distinct_id IN (SELECT person FROM persons)"
     } else {
-        "TRUE"
+        NOT_SERVER
     }
 }
+
+/// Not the `$server` pseudo user (`openlens_event::names::SERVER_ID`,
+/// #593 D): server events tied to no user are no visitor either.
+pub(crate) const NOT_SERVER: &str = "distinct_id <> '$server'";
 
 /// Whether the project identified anyone (the `persons` table is cached).
 pub(crate) async fn any_person(q: &QueryEngine, project: &str) -> Result<bool> {

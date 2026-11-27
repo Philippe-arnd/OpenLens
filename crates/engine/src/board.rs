@@ -233,8 +233,11 @@ pub async fn board_reusing(
          count(DISTINCT distinct_id) AS mau FROM {p30} WHERE {ident}"
     );
     let known_sql = format!("SELECT count(DISTINCT distinct_id) AS n FROM {p90} WHERE {ident}");
-    let anonymous_sql =
-        format!("SELECT count(DISTINCT distinct_id) AS n FROM {p30} WHERE NOT {ident}");
+    // Visitors who never logged in; the `$server` pseudo user is none
+    // (#593 D).
+    let anonymous_sql = format!(
+        "SELECT count(DISTINCT distinct_id) AS n FROM {p30} WHERE NOT ({ident}) AND {NOT_SERVER}"
+    );
     let sessions = board_sessions::SessionRows {
         src: &src,
         role,

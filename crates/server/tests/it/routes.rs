@@ -82,3 +82,87 @@ async fn route_stats_are_summed_per_route_shown_and_kept_out_of_user_activity() 
     let bad_days = get(&h, "/api/projects/default/routes?days=0", None, true).await;
     assert_eq!(bad_days.status(), StatusCode::BAD_REQUEST);
 }
+
+/// #624: the Errors page tags each group Browser or Server, filters on
+/// it, and a server error sent with a recorded browser session links to
+/// that replay. A value it does not know shows every group.
+#[tokio::test]
+async fn the_errors_page_tells_the_origin_and_links_a_server_error_to_its_replay() {
+    let h = harness();
+    let uuid = |n: u32| format!("0191f0c0-0000-7000-8000-{n:012}");
+    let events = vec![
+        serde_json::json!({
+            "event": "$pageview", "distinct_id": "u1", "session_id": "rec-1", "uuid": uuid(11),
+            "properties": { "$environment": "production", "$pathname": "/" },
+        }),
+        serde_json::json!({
+            "event": "$error", "distinct_id": "$server", "session_id": "rec-1", "uuid": uuid(12),
+            "properties": { "$lib": "node", "$environment": "production", "$kind": "server",
+                "$message": "Error: db down", "$source": "/app/dist/auth.js:3:4" },
+        }),
+        serde_json::json!({
+            "event": "$error", "distinct_id": "u2", "session_id": "s-2", "uuid": uuid(13),
+            "properties": { "$environment": "production",
+                "$message": "TypeError: x is undefined", "$source": "https://app.test/a.js:1:2" },
+        }),
+    ];
+    let body = serde_json::json!({ "key": h.key, "batch": events }).to_string();
+    let (status, v) = post(&h, "/capture", body.into_bytes(), false).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    openlens_server::flush_now(&h.state).unwrap();
+    let chunk = serde_json::value::RawValue::from_string("[{\"type\":2}]".into()).unwrap();
+    openlens_replay::append(
+        &h.state.data_dir,
+        "default",
+        "rec-1",
+        "u1",
+        0,
+        &chunk,
+        chrono::Utc::now(),
+    )
+    .unwrap();
+
+    let cookie = login_cookie(&h).await;
+    let page = |q: &'static str| {
+        let (h, cookie) = (&h, cookie.clone());
+        async move {
+            body_text(get(h, &format!("/p/default/errors{q}"), Some(&cookie), false).await).await
+        }
+    };
+    let (server_tag, browser_tag, replay) = (
+        "tag tone-accent",
+        "tag tone-info",
+        "title=\"Replay this session\"",
+    );
+    let all = page("").await;
+    assert!(all.contains("db down") && all.contains("x is undefined"));
+    assert!(all.contains(server_tag) && all.contains(browser_tag));
+    assert!(
+        all.contains(replay),
+        "the recorded session links to its replay"
+    );
+
+    let server = page("?origin=server").await;
+    assert!(server.contains("db down") && !server.contains("x is undefined"));
+    assert!(server.contains(replay) && !server.contains(browser_tag));
+
+    let browser = page("?origin=browser").await;
+    assert!(browser.contains("x is undefined") && !browser.contains("db down"));
+    assert!(!browser.contains(server_tag) && !browser.contains(replay));
+
+    let hostile = page("?origin=%27%3Cscript%3E").await;
+    assert!(hostile.contains("db down") && hostile.contains("x is undefined"));
+
+    let api = get(&h, "/api/projects/default/errors?origin=server", None, true).await;
+    assert_eq!(api.status(), StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_str(&body_text(api).await).unwrap();
+    let groups = v["groups"].as_array().unwrap();
+    assert!(!groups.is_empty() && groups.iter().all(|g| g["server"] == true));
+    assert!(
+        groups[0]["linked"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["session"] == "rec-1" && s["replay"] == true)
+    );
+}
