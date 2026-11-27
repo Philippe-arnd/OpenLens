@@ -488,6 +488,10 @@ pub struct Board {
     /// for (the engine's own [`board`] does not judge releases).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latest_release: Option<board_verdict::LatestRelease>,
+    /// Set by the server (#617): goals, tickets and flags in flight, for
+    /// the card next to the usage chart.
+    #[serde(skip)]
+    pub in_flight: commands::in_flight::InFlight,
     /// Environments seen.
     pub environments: Vec<String>,
     /// Raw role values no rule of the feature map matches, with user counts.

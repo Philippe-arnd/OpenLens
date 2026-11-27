@@ -158,6 +158,8 @@ pub(crate) fn render_board(
     // The status strip (#614): the app's state and open incidents, and
     // for admins the setup steps; read from the metadata, no query.
     if let Ok(b) = board.as_mut() {
+        // Stored rows only (goals, tickets, flags), no query (#617).
+        b.in_flight = openlens_engine::commands::in_flight::in_flight(&state.meta, &p.id, b);
         if admin {
             b.setup = Some(crate::settings::setup_count(state, &p.id));
         }

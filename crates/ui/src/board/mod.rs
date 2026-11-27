@@ -12,6 +12,7 @@ use crate::*;
 
 mod charts;
 mod focus;
+mod in_flight;
 mod lead;
 mod now;
 mod sections;
@@ -99,6 +100,7 @@ pub fn board(
                 (tiles::key_numbers(p.id, f, b))
                 div.split {
                     (charts::active_users(p.id, f, b, marks))
+                    (in_flight::in_flight(p.id, b))
                     (charts::feature_pulse(p.id, f, b))
                 }
                 (charts::retention_line(p.id, f, b))

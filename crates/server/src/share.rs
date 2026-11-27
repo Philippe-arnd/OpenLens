@@ -199,6 +199,8 @@ pub(crate) async fn view(
                     &state.meta,
                     &p.id,
                 ));
+                b.in_flight =
+                    openlens_engine::commands::in_flight::in_flight(&state.meta, &p.id, &b);
                 openlens_ui::render_shared(|| openlens_ui::board(&info, &b, &f, "", &[], None, &[]))
             };
             let h = markup.into_string();

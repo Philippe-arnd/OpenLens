@@ -32,7 +32,7 @@ fn tag(kind: &str) -> Markup {
 }
 
 /// Where an insight's ticket is drafted.
-fn ticket(pid: &str, c: &Insight) -> String {
+pub(super) fn ticket(pid: &str, c: &Insight) -> String {
     format!(
         "/p/{pid}/tickets/new?kind=insight&subject={}",
         url_enc(&format!("{}:{}", c.kind, c.subject))
