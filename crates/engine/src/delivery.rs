@@ -622,7 +622,11 @@ mod tests {
         assert!(a.failures > b.failures, "regressed releases fail");
         assert_eq!(a.failures, a.changes, "every change here was regressed");
         assert!(a.change_failure_rate > b.change_failure_rate);
-        assert!(!known.regressed.contains(&(PRODUCTION.to_owned(), "v3".to_owned())));
+        assert!(
+            !known
+                .regressed
+                .contains(&(PRODUCTION.to_owned(), "v3".to_owned()))
+        );
     }
 
     #[test]
