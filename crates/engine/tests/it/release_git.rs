@@ -173,6 +173,7 @@ async fn record(h: &GitHost, p: &Project, from: Option<&str>) {
         environment: None,
         commit: Some(C2.into()),
         from: from.map(str::to_owned),
+        ..RecordReleaseInput::default()
     };
     RecordRelease::run(h, &Caller::default(), input)
         .await
