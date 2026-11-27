@@ -37,7 +37,9 @@ for (const theme of ["light", "dark"]) {
     // Matrix cells must carry their heat class, bucketed by tenths (UI v2,
     // #543: no inline style under the CSP, so the shade is a class).
     const heat = await tab.evaluate(() => [...document.querySelectorAll("table.heat .hc")].filter((c) => /\bp(10|\d)\b/.test(c.className)).length);
-    if (p === "" && heat === 0) problems.push(`${url}: roles × features cells have no heat class`);
+    // The roles × features matrix is on the feature map page since UI v2.1
+    // moved it off the board (#618, #620).
+    if (p === "/features" && heat === 0) problems.push(`${url}: roles × features cells have no heat class`);
     const spriteHeight = await tab.evaluate(() => document.querySelector("svg.sprite")?.getBoundingClientRect().height ?? 0);
     if (spriteHeight > 0) problems.push(`${url}: icon sprite is visible`);
     const name = (p || "/board").slice(1).replace(/[\/?=]/g, "-");
