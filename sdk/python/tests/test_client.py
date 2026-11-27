@@ -96,3 +96,85 @@ class CheckInTest(unittest.TestCase):
         self.assertGreaterEqual(len(errors), 1)
         ol.shutdown()
         srv.shutdown()
+
+
+class ReleaseTest(unittest.TestCase):
+    def test_detects_the_host_commit(self):
+        from openlens import detect_release
+
+        sha = "0123456789abcdef0123456789abcdef01234567"
+        self.assertEqual(detect_release({"GITHUB_SHA": sha}), sha[:12])
+        self.assertEqual(detect_release({"RENDER_GIT_COMMIT": "abc", "GITHUB_SHA": sha}), sha[:12], "earlier variable first")
+        self.assertEqual(detect_release({"SOURCE_COMMIT": "  ", "HEROKU_SLUG_COMMIT": "v12"}), "v12")
+        self.assertIsNone(detect_release({}))
+
+    def test_explicit_release_wins(self):
+        import os
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, {"SOURCE_COMMIT": "deadbeef"}):
+            self.assertEqual(OpenLens(host="http://x", key="k", flush_interval=60).release, "deadbeef")
+            self.assertEqual(OpenLens(host="http://x", key="k", release="v2", flush_interval=60).release, "v2")
+
+
+class ExceptionTest(unittest.TestCase):
+    def test_server_error_with_request_context(self):
+        from openlens import request_context
+
+        GOT.clear()
+        srv = HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        ol = OpenLens(host=f"http://127.0.0.1:{srv.server_port}", key="pk_t", flush_interval=60)
+        ctx = request_context({"TraceParent": f"00-{'a' * 32}-{'b' * 16}-01", "X-OpenLens-Session": "s1"})
+        try:
+            raise KeyError("entry 42")
+        except KeyError as e:
+            err = e
+            ol.capture_exception(e, route="/api/entries/<id>", method="get", **ctx)
+        ol.capture_exception(err)  # the same object is reported once
+        for _ in range(10):
+            ol.capture_exception(ValueError("same"))
+        ol.shutdown()
+        srv.shutdown()
+        errs = [e for _, b in GOT for e in b["batch"] if e["event"] == "$error"]
+        first = errs[0]
+        p = first["properties"]
+        self.assertEqual((first["distinct_id"], first["session_id"]), ("$server", "s1"))
+        self.assertEqual((p["$kind"], p["exception.type"], p["http.route"], p["http.request.method"]), ("server", "KeyError", "/api/entries/<id>", "GET"))
+        self.assertEqual(p["trace_id"], "a" * 32)
+        self.assertIn("KeyError", p["$message"])
+        self.assertIn("test_client.py:", p["$source"], "the app's own frame, not the SDK's")
+        self.assertIn("raise KeyError", p["$stack"])
+        same = [e for e in errs if e["properties"]["$message"] == "ValueError: same"]
+        self.assertLess(len(same), 10, "a repeated message is rate-limited")
+        self.assertEqual(sum(1 for e in errs if e["properties"]["exception.type"] == "KeyError"), 1)
+
+    def test_rejects_hostile_context(self):
+        from openlens import request_context
+
+        self.assertEqual(request_context({"traceparent": f"00-{'0' * 32}-{'b' * 16}-01", "x-openlens-session": "a b"}), {})
+        self.assertEqual(request_context({"traceparent": f"ff-{'a' * 32}-{'b' * 16}-01"}), {})
+
+
+class UncaughtTest(unittest.TestCase):
+    def test_crash_is_reported_and_still_fails(self):
+        import os
+        import subprocess
+        import sys
+
+        GOT.clear()
+        srv = HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        code = (
+            "from openlens import OpenLens\n"
+            f"ol = OpenLens(host='http://127.0.0.1:{srv.server_port}', key='pk_t', flush_interval=60)\n"
+            "ol.capture_uncaught()\n"
+            "raise LookupError('crash')\n"
+        )
+        src = os.path.join(os.path.dirname(__file__), "..")
+        r = subprocess.run([sys.executable, "-c", code], cwd=src, capture_output=True, timeout=30)
+        srv.shutdown()
+        self.assertNotEqual(r.returncode, 0, "the process still fails")
+        self.assertIn(b"LookupError: crash", r.stderr, "Python's own report is kept")
+        errs = [e for _, b in GOT for e in b["batch"] if e["event"] == "$error"]
+        self.assertEqual([e["properties"]["$message"] for e in errs], ["LookupError: crash"])

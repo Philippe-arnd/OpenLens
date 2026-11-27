@@ -12,6 +12,19 @@ Thin clients for events that happen on the server: a payment confirmed, an expor
 
 Until they are published, copy the single source file: `sdk/node/src/index.js`, `sdk/python/openlens/__init__.py`, `sdk/go/openlens.go`, `sdk/ruby/lib/openlens.rb` or `sdk/php/src/OpenLens.php`. The Go module can already be fetched from the repository.
 
+What each SDK covers:
+
+| | Node | Python | Go | Ruby | PHP |
+| --- | --- | --- | --- | --- | --- |
+| Events, identify, flags, job check-ins | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Release read from the host's commit | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Server errors, with the session and trace | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Route stats and their exemplars | ✅ | over OTLP | over OTLP | over OTLP | over OTLP |
+| Outgoing calls per host | opt-in | over OTLP | over OTLP | over OTLP | over OTLP |
+| Runtime health (restarts, memory, loop delay) | ✅ | — | — | — | — |
+
+*Over OTLP* means the SDK does not count it itself: an app whose OpenTelemetry exports `http.server.request.duration` (and `http.client.request.duration`) sends them to OpenLens as described in [Already on OpenTelemetry](#already-on-opentelemetry), and gets the same routes, verdicts and alerts. Route stats need one process that lives across requests to fill a stats window, which PHP under PHP-FPM does not have; for the other languages each web framework would need its own middleware, which OpenTelemetry's instrumentation already provides.
+
 ```js
 import { OpenLens } from "@openlens/node";
 const ol = new OpenLens({ host: process.env.OPENLENS_HOST, key: process.env.OPENLENS_KEY, release: process.env.GIT_SHA });
@@ -69,11 +82,67 @@ ol.captureUncaught(); // optional: crashes and unhandled rejections
 - **OpenTelemetry:** OpenLens reads W3C trace context and never writes it. When the app's own OpenTelemetry sends `traceparent`, the trace id lands on server errors and failed requests as `trace_id`, so you can open the same request in your tracing tool. OpenLens adds no `traceparent` and no `baggage`: your server keeps its own sampling, and nothing of OpenLens is forwarded to other services.
 - **Runtime health:** `express()` also sends `$runtime_stats` (other frameworks call `ol.captureRuntime()` once at start-up). At start, one event with `process.start: true`, sent by the next flush; then, every stats window, one event with OpenTelemetry's runtime names: `nodejs.eventloop.delay.p50` and `.p99` (seconds, from `perf_hooks.monitorEventLoopDelay`, reset each window), and the window's largest `process.memory.usage` (RSS) and `v8js.memory.heap.used` (bytes), sampled on each flush. No new timer, nothing keeps the process alive, `shutdown()` sends the open window. A release's verdict turns regressed only when its process restarts per day go up significantly (a crash loop); memory and loop delay are shown per release, never judged. There is no switch to turn it off: it costs one small event per process per window, every 10 minutes by default (D-087).
 - **Outgoing calls (opt-in):** `ol.captureOutgoing()` once at start-up counts the app's own HTTP calls to other services (the global `fetch` and `http`/`https`, through Node's diagnostics channels) per external host: one `$client_stats` per method, host and status code every stats window, as OpenTelemetry's `http.client.request.duration` histogram (`server.address`, `http.request.method`, `http.response.status_code`, and `error.type`, the error's code such as `ECONNREFUSED`, when a call got no response). **Recorded:** the host name, the method, the status code or error code, the duration to the response headers. **Never recorded:** the path, the query, the port, headers, bodies, credentials or error messages; calls to the OpenLens host itself; more than 50 hosts per window (the rest count as `_OTHER`). A call fails on a 5xx or no response. The verdict shows a dependency that fails more or got slower than on the release before, but never judges it; a host failing for 15 minutes raises a `dep:<host>` alert (under *failing requests*). Calls made outside `fetch` and `http`/`https` (raw sockets, native gRPC clients) are not seen. Apps on OpenTelemetry send `http.client.request.duration` over OTLP instead (D-090).
-- **Release:** keep the same release name on both sides. Both SDKs read the host's commit (`SOURCE_COMMIT` on Coolify) when `release` is not set.
+- **Release:** keep the same release name on both sides. The browser SDK and every server SDK read the host's commit when `release` is not set: `SOURCE_COMMIT` (Coolify), `GITHUB_SHA`, `VERCEL_GIT_COMMIT_SHA`, `CF_PAGES_COMMIT_SHA`, `RENDER_GIT_COMMIT` or `HEROKU_SLUG_COMMIT`, the first one set, shortened to 12 characters. When none is set, Node falls back to `npm_package_version` and Go to the commit it stamped into the binary (`vcs.revision`); Python, Ruby and PHP send no release.
 - **Stats window:** route stats, runtime health and outgoing calls are counted in windows of 10 minutes by default. The OpenLens server picks the window from its disk budget, hourly: 1 or 5 minutes when the room left after the floor (D-088) holds the extra stats points for 400 days and the busiest project has few active routes, else 10 minutes. It says so in every capture response, `x-openlens-stats-window: 60` (seconds), and the SDK follows it: on the next flush the windows being filled are sent with their own length, and new ones use the new length, aligned on it. Each stats event says its window in `$window_s`, and OpenLens reads any mix of windows, so totals, alerts and verdicts do not change with it. To pin one window, pass `statsWindowSeconds: 60`, `300` or `600` to `new OpenLens(...)` (anything else is ignored); it wins over the header (D-091). `GET /api/capacity` (admin) and the MCP `capacity` tool show the window in force and why (`stats_window`).
 - **Volume:** a server sends one batch every 5 s and one stats event per route and status code per window, every 10 minutes by default (and one runtime event per process, and with `captureOutgoing()` one per host, method and status code), far below the capture limits, whatever the traffic.
 
 Use the same `distinct_id` as the browser SDK's `identify()`, so server and browser events belong to the same person. Success events sent from the server count for the feature map like any other event.
+
+## Server errors in Python, Go, Ruby and PHP
+
+The same `$error` of kind *server* as Node: grouped with the browser's errors, alerted on and judged per release, and linked to the session and its replay when the browser SDK sent `x-openlens-session`. Report an error where your app or framework handles it, and turn on the crash report once at start-up.
+
+```python
+from openlens import request_context
+ol.capture_uncaught()  # once: uncaught exceptions, main thread and other threads
+
+try:
+    export(entry_id)
+except Exception as e:
+    ol.capture_exception(e, distinct_id=user_id, route="/entries/<id>", method="POST",
+                         **request_context(request.headers))
+    raise
+```
+
+```go
+defer ol.CapturePanic() // in main and in each goroutine: reports the panic, then panics again
+
+if err := export(ctx); err != nil {
+    ec := openlens.RequestContext(r.Header)
+    ec.Route, ec.Method, ec.DistinctID = "/entries/{id}", r.Method, userID
+    ol.CaptureException(err, ec)
+}
+```
+
+```ruby
+OL.capture_uncaught # once: the exception that ends the process
+
+begin
+  export(entry_id)
+rescue StandardError => e
+  OL.capture_exception(e, distinct_id: user_id, route: "/entries/:id", method: "POST",
+                          **OpenLens.request_context(request.env)) # a Rack env or plain headers
+  raise
+end
+```
+
+```php
+$ol->captureUncaught(); // once: an uncaught exception or fatal error, sent at the end of the request
+
+try {
+    export($entryId);
+} catch (\Throwable $e) {
+    $ol->captureException($e, OpenLens::requestContext($_SERVER) + ['distinctId' => $userId, 'route' => '/entries/{id}', 'method' => 'POST']);
+    throw $e;
+}
+```
+
+In a web framework, call it from the framework's own error-reporting hook (one place for every request) rather than around each call. `request_context` reads `traceparent` and `x-openlens-session` from plain headers, a Rack env or `$_SERVER`.
+
+- **What is sent:** the type and message (`exception.type`, `$message`, 500 characters), the stack trace (4000 characters), the first frame of your own code as `$source` (outside installed packages, the standard library and `vendor/`; the error's group is its message @ this file), the route template and method when given, `trace_id` when the app's OpenTelemetry sent `traceparent`, and the session. The user only when you pass `distinct_id`, otherwise `$server`.
+- **Never in the way:** the call never raises or panics. The same exception object is reported once (Go errors are values: each call counts), and one message at most 5 times a minute.
+- **Crashes:** Python's own report, Ruby's exit status and PHP's fatal error are kept: OpenLens reports, sends at once, then lets the process fail as it would have. `CapturePanic` panics again with the same value, so `net/http`'s own recovery still answers 500.
+- **Route:** pass the template (`/entries/{id}`, `/entries/:id`), never the raw URL: a URL can carry ids and tokens.
 
 ## Job check-ins
 

@@ -10,14 +10,74 @@
 #   ol.capture("42", "invoice_sent")
 #   ol.enabled?("new-billing", "42", role: "owner")
 #   ol.shutdown
+#
+# Server errors: ol.capture_exception(e) in a rescue, or ol.capture_uncaught
+# once at start-up for crashes.
 require "json"
 require "net/http"
+require "rbconfig"
 require "securerandom"
 require "time"
 require "uri"
 
 module OpenLens
   VERSION = "0.1.0"
+  # The distinct id of events that belong to no user (server errors).
+  SERVER_ID = "$server"
+  # The header the browser SDK adds to its own requests: the session id.
+  SESSION_HEADER = "x-openlens-session"
+  # Variables hosts set to the deployed commit, in order of preference (#495).
+  COMMIT_VARS = %w[SOURCE_COMMIT GITHUB_SHA VERCEL_GIT_COMMIT_SHA CF_PAGES_COMMIT_SHA
+                   RENDER_GIT_COMMIT HEROKU_SLUG_COMMIT].freeze
+  # At most this many errors with one message per minute.
+  MAX_SAME_ERROR = 5
+  TRACEPARENT = /\A([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}\z/.freeze
+  TRACE_ID = /\A[0-9a-f]{32}\z/.freeze
+  SESSION_ID = /\A[A-Za-z0-9_-]{1,100}\z/.freeze
+  LIB_DIRS = [RbConfig::CONFIG["rubylibdir"], RbConfig::CONFIG["rubyarchdir"]].compact.freeze
+
+  # The release the host exposes: the deployed commit (shortened to 12
+  # characters when it is a full hash), else nil.
+  def self.detect_release(env)
+    COMMIT_VARS.each do |name|
+      v = env[name].to_s.strip
+      next if v.empty?
+
+      return v.match?(/\A\h{13,64}\z/) ? v[0, 12].downcase : v[0, 200]
+    end
+    nil
+  end
+
+  # trace_id of the incoming W3C traceparent (read, never written) and
+  # session_id from the browser SDK's x-openlens-session header, for
+  # capture_exception. Takes plain headers or a Rack env (HTTP_TRACEPARENT).
+  def self.request_context(headers)
+    h = {}
+    headers.each { |k, v| h[k.to_s.downcase.sub(/\Ahttp_/, "").tr("_", "-")] = v.to_s.strip }
+    ctx = {}
+    m = TRACEPARENT.match(h["traceparent"].to_s)
+    if m && m[1] != "ff" && m[2] =~ /[^0]/ && m[3] =~ /[^0]/
+      ctx[:trace_id] = m[2]
+    end
+    sid = h[SESSION_HEADER].to_s
+    ctx[:session_id] = sid if sid.match?(SESSION_ID)
+    ctx
+  end
+
+  # The first backtrace line outside gems and Ruby's own library, as
+  # "file:line:0": the error's group is its message @ this file.
+  def self.app_frame(backtrace)
+    Array(backtrace).first(50).each do |line|
+      m = /\A(.+?):(\d+)(?::in |\z)/.match(line.to_s)
+      next unless m
+
+      file = m[1]
+      next if file.start_with?("<") || file.include?("/gems/") || LIB_DIRS.any? { |d| file.start_with?(d) }
+
+      return "#{file}:#{m[2]}:0"
+    end
+    nil
+  end
 
   class Client
     def initialize(host:, key:, release: nil, environment: nil, flush_at: 50,
@@ -26,17 +86,22 @@ module OpenLens
 
       @host = host.to_s.chomp("/")
       @key = key
-      @release = release
+      # An explicit release wins; else what the host exposes (#495).
+      @release = release || OpenLens.detect_release(ENV)
       @environment = environment || ENV.fetch("OPENLENS_ENVIRONMENT", "production")
       @flush_at = flush_at
       @timeout = timeout
       @on_error = on_error || ->(_e) {}
       @queue = []
+      @seen_minute = -1
+      @seen_errors = {}
       @lock = Mutex.new
-      @stop = Queue.new
+      @stopped = false
+      @stop_lock = Mutex.new
+      @stop_cv = ConditionVariable.new
       @thread = Thread.new do
         loop do
-          break if timed_pop(flush_interval)
+          break if wait_for_stop(flush_interval)
 
           flush
         end
@@ -45,6 +110,53 @@ module OpenLens
 
     # Record an event for a user.
     def capture(distinct_id, event, properties = {})
+      push(distinct_id, event, properties, nil)
+    end
+
+    # Report a server exception. It is sent as $error with $kind "server", so
+    # it is grouped, alerted on and judged per release like a browser error.
+    # session_id: and trace_id: come from OpenLens.request_context(headers);
+    # route: is the route template ("/entries/:id"), never the raw URL.
+    # Never raises.
+    def capture_exception(err, distinct_id: nil, session_id: nil, trace_id: nil, route: nil, method: nil,
+                          properties: {})
+      return if err.nil? || reported?(err)
+
+      name = err.is_a?(Exception) ? err.class.name.to_s : "Error"
+      message = "#{name}: #{err.is_a?(Exception) ? err.message : err}"[0, 500]
+      return unless allow_error?(message)
+
+      props = (properties || {}).transform_keys(&:to_s).merge("$kind" => "server", "$message" => message)
+      trace = err.is_a?(Exception) ? err.backtrace : nil
+      if trace
+        props["$stack"] = ([message] + trace.first(50)).join("\n")[0, 4000]
+        source = OpenLens.app_frame(trace)
+        props["$source"] = source if source
+      end
+      # OpenTelemetry semantic-convention names next to OpenLens's own.
+      props["exception.type"] = name[0, 200]
+      props["http.route"] = route.to_s[0, 300] if route
+      props["http.request.method"] = method.to_s.upcase[0, 10] if method
+      props["trace_id"] = trace_id if trace_id.is_a?(String) && trace_id.match?(TRACE_ID) && trace_id =~ /[^0]/
+      sid = session_id if session_id.is_a?(String) && session_id.match?(SESSION_ID)
+      push(distinct_id || SERVER_ID, "$error", props, sid)
+    rescue StandardError => e
+      @on_error.call(e)
+    end
+
+    # Report the exception that ends the process (not exit or Ctrl-C), send
+    # it at once, then let Ruby fail as it would have. Opt-in.
+    def capture_uncaught
+      at_exit do
+        e = $!
+        unless e.nil? || e.is_a?(SystemExit) || e.is_a?(Interrupt)
+          capture_exception(e)
+          flush
+        end
+      end
+    end
+
+    private def push(distinct_id, event, properties, session_id)
       return if distinct_id.to_s.empty? || event.to_s.empty?
 
       props = { "$lib" => "ruby", "$environment" => @environment }
@@ -57,6 +169,7 @@ module OpenLens
         "timestamp" => now,
         "properties" => props
       }
+      item["session_id"] = session_id if session_id
       full = @lock.synchronize do
         @queue << item
         @queue.size >= @flush_at
@@ -132,22 +245,53 @@ module OpenLens
 
     # Flush and stop the background thread (call on exit).
     def shutdown
-      @stop << true
+      @stop_lock.synchronize do
+        @stopped = true
+        @stop_cv.signal
+      end
       @thread.join(@timeout)
       flush
     end
 
     private
 
+    # The same exception object is reported once.
+    def reported?(err)
+      return true if err.instance_variable_defined?(:@__openlens_reported)
+
+      err.instance_variable_set(:@__openlens_reported, true)
+      false
+    rescue StandardError # a frozen exception
+      false
+    end
+
+    # At most MAX_SAME_ERROR of one message per minute.
+    def allow_error?(message)
+      minute = Time.now.to_i / 60
+      n = @lock.synchronize do
+        if minute != @seen_minute
+          @seen_minute = minute
+          @seen_errors.clear
+        end
+        c = @seen_errors.fetch(message, 0) + 1
+        @seen_errors[message] = c if @seen_errors.size < 1000 || @seen_errors.key?(message)
+        c
+      end
+      n <= MAX_SAME_ERROR
+    end
+
     def now
       Time.now.utc.iso8601(3)
     end
 
-    def timed_pop(seconds)
-      @stop.pop(timeout: seconds)
-    rescue ArgumentError # Ruby < 3.2: no timeout on Queue#pop
-      sleep(seconds)
-      !@stop.empty?
+    # Waits up to `seconds` for shutdown; true once it was asked. A condition
+    # variable, not Queue#pop(timeout:): before Ruby 3.2 that call raises
+    # ThreadError on an empty queue, which killed the flush thread.
+    def wait_for_stop(seconds)
+      @stop_lock.synchronize do
+        @stop_cv.wait(@stop_lock, seconds) unless @stopped
+        @stopped
+      end
     end
 
     def http(uri, &block)
