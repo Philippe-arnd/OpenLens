@@ -647,17 +647,20 @@
   .subnav .section-tabs a { margin-bottom: 0; }
   .subnav + main { padding-top: 14px; }
 
-  /* Signals: the page's alerts and pending setup, one line of pills. */
-  .signals { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 18px; }
+  /* A pill in the top bar (Live's refresh). */
   .signal { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 32px; padding: 4px 12px; border: 1px solid var(--line);
     border-radius: var(--r-pill); background: var(--surface); color: var(--ink-2); font-size: 13px; }
-  .signal.bad { border-color: color-mix(in oklab, var(--bad) 35%, var(--line)); }
-  .signal .dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: currentColor; color: var(--warn); }
-  .signal.bad .dot { color: var(--bad); box-shadow: 0 0 0 3px color-mix(in oklab, var(--bad) 18%, transparent); }
-  .signal a { display: inline-flex; align-items: center; min-height: 24px; font-weight: 500; }
-  .signal .meter { flex: none; width: 44px; height: 4px; }
-  .signal .meter .track { fill: var(--line); }
-  .signal .meter .done { fill: var(--warn); }
+  /* Production right now (#614): a dot, a word, a line, per cell; they stack on a phone. */
+  .now { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); }
+  .now > * { display: flex; flex-direction: column; gap: 4px; padding: 14px 18px; color: inherit; min-width: 0; }
+  .now > * + * { border-left: 1px solid var(--line-2); }
+  .now a:hover { background: var(--raised); text-decoration: none; }
+  .now .k { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+  .now .v { font-size: var(--step-1); font-weight: 600; }
+  .now .tone-bad .v { color: var(--bad); }
+  .now .s { font-size: 12.5px; color: var(--muted); }
+  .now .state-dot { width: 9px; height: 9px; flex: none; border-radius: 50%; background: var(--tone, var(--muted)); }
+  @media (max-width: 760px) { .now > * + * { border-left: 0; border-top: 1px solid var(--line-2); } }
 
   @media (max-width: 640px) {
     .side { width: 56px; padding: 10px 6px; }
@@ -957,6 +960,17 @@
   .row .step .label { color: var(--muted); }
   .row .links { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 13px; font-weight: 500; }
   .row .links a { display: inline-flex; align-items: center; min-height: 24px; }
+  .ranked summary { padding: 10px 14px; font-size: 13px; font-weight: 500; cursor: pointer; }
+  /* A regressed release's lead (#615): its checks by layer, each a mark, a label, from → to. */
+  .layers { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 10px; }
+  .layer { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--line-2); border-radius: var(--r); background: var(--raised); }
+  .layer h3 { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .02em; }
+  .layer .check { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; font-size: 13px; }
+  .layer .mark { display: grid; place-items: center; align-self: center; width: 16px; height: 16px; border-radius: 50%; font-size: 10px; font-weight: 700;
+    line-height: 1; color: var(--surface); background: var(--tone, var(--muted)); }
+  .layer .mark .icon { width: 11px; height: 11px; }
+  .layer .fromto { white-space: nowrap; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .layer .fromto b { color: var(--tone); font-weight: 600; }
 
   /* Key numbers: the tile is the link; its definition sits beside it. */
   .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 12px; }

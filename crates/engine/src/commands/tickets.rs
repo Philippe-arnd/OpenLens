@@ -183,6 +183,45 @@ pub async fn draft<H: Host>(
                 ),
             )
         }
+        // The board's lead when the latest release regressed (#615):
+        // `<environment>:<release>`.
+        "release" => {
+            let (env, rel) = subject
+                .split_once(':')
+                .ok_or("Name the environment and the release.")?;
+            let fe = Filters {
+                environment: env.to_owned(),
+                ..f.clone()
+            };
+            let on = host
+                .board(&p.id, &fe, map.as_ref().map(|(m, v)| (m, *v)))
+                .await
+                .map_err(|e| e.to_string())?;
+            let l = on
+                .release_lead()
+                .filter(|l| l.release == rel)
+                .ok_or("This release is not judged regressed any more.")?;
+            let reasons = on
+                .latest_release
+                .as_ref()
+                .and_then(crate::board_verdict::LatestRelease::report)
+                .map(|r| r.reasons.clone())
+                .unwrap_or_default();
+            (
+                format!("Fix the regression of {rel}: {}", l.headline),
+                l.headline.clone(),
+                std::iter::once(l.evidence.clone()).chain(reasons).collect(),
+                vec![
+                    format!("Releases: {base}/releases?env={env}"),
+                    format!("Focus board: {base}"),
+                ],
+                l.metric.clone(),
+                format!(
+                    "If we fix what {rel} broke ({}), the metric below gets back to its level before {rel}.",
+                    l.next_step
+                ),
+            )
+        }
         "error" => {
             let src = crate::source(map.as_ref().map(|(m, _)| m));
             let groups = crate::error_groups(host.query(), &p.id, &src, &f)

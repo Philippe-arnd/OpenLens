@@ -75,7 +75,7 @@ pub use project_settings::*;
 pub use releases::*;
 pub use routes_page::routes_page;
 pub use settings::*;
-pub(crate) use shell::{Crumbs, NAV, Signal, layout, layout_in, layout_with, signals};
+pub(crate) use shell::{Crumbs, NAV, layout, layout_in, layout_with};
 pub use shell::{NavProject, set_admin_source, set_icon_source, set_nav_project_source};
 pub use slo::{AvailabilityView, availability_card};
 pub use status_page::{
@@ -334,6 +334,8 @@ mod tests {
         let body = [
             &src[src.find("pub fn board(").unwrap()..],
             include_str!("board/focus.rs"),
+            include_str!("board/lead.rs"),
+            include_str!("board/now.rs"),
             include_str!("board/tiles.rs"),
             include_str!("board/charts.rs"),
             include_str!("board/sections.rs"),

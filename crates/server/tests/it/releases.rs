@@ -204,3 +204,49 @@ async fn a_new_error_in_a_release_makes_its_verdict_regressed() {
     let none = get(&h, "/api/projects/default/releases/v9/report", None, true).await;
     assert_eq!(none.status(), StatusCode::BAD_REQUEST);
 }
+
+/// A regression planted in release N+1 (#614, #615): the board's status
+/// strip says it, and its verdict is the lead of what to focus on, in
+/// plain words, with the actions to take.
+#[tokio::test]
+async fn a_regressed_release_leads_the_board_as_its_verdict() {
+    let h = harness();
+    let ago = |hours: i64| (chrono::Utc::now() - chrono::Duration::hours(hours)).to_rfc3339();
+    let mut events = Vec::new();
+    for i in 0..4 {
+        let u = format!("u{i}");
+        for (rel, at) in [("v1", 72), ("v2", 30)] {
+            let s = format!("{rel}-s{i}");
+            events.push(serde_json::json!({"event": "$pageview", "distinct_id": u, "session_id": s, "timestamp": ago(at), "properties": {"$pathname": "/", "$release": rel}}));
+        }
+        events.push(serde_json::json!({"event": "$error", "distinct_id": u, "session_id": format!("v2-s{i}"), "timestamp": ago(29), "properties": {"$message": "TypeError: x is undefined", "$release": "v2"}}));
+    }
+    capture(&h, events).await;
+    openlens_server::flush_now(&h.state).unwrap();
+    let owner = login_cookie(&h).await;
+    let board = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
+    let strip = &board[board.find(r#"aria-label="Production right now""#).unwrap()..];
+    assert!(
+        strip.contains("Release v2") && strip.contains(r#"<strong class="v">Regressed</strong>"#),
+        "{strip}"
+    );
+    let lead = &board[board.find(r#"class="card lead""#).unwrap()..];
+    let lead = &lead[..lead.find("</article>").unwrap()];
+    assert!(
+        lead.contains("Release regressed") && lead.contains("Since v2"),
+        "{lead}"
+    );
+    for action in ["Create ticket", "Errors on v2", "Full verdict"] {
+        assert!(lead.contains(action), "{action}: {lead}");
+    }
+    // Its Create ticket drafts a ticket from the verdict.
+    let r = get(
+        &h,
+        "/p/default/tickets/new?kind=release&subject=production%3Av2",
+        Some(&owner),
+        false,
+    )
+    .await;
+    assert_eq!(r.status(), StatusCode::OK);
+    assert!(body_text(r).await.contains("Fix the regression of v2"));
+}
