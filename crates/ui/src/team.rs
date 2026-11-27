@@ -177,7 +177,11 @@ pub fn heatmap(
         html! {
             div.heading { div {
                 h1 { "Heatmap" }
-                p.muted { span.mono { (map.path) } " · " (compact(map.clicks)) " clicks with a position, last 30 days · median screen " (vw) " px wide" }
+                @if map.path.is_empty() {
+                    p.muted { "No page viewed in the last 30 days." }
+                } @else {
+                    p.muted { span.mono { (map.path) } " · " (compact(map.clicks)) " clicks with a position, last 30 days · median screen " (vw) " px wide" }
+                }
             } }
             form.card.refine method="get" action={ "/p/" (p.id) "/heatmap" } aria-label="Pick a page" {
                 label { "Page"
@@ -187,51 +191,62 @@ pub fn heatmap(
                 @if mode != "clicks" { input type="hidden" name="mode" value=(mode); }
                 button.primary type="submit" { "Show" }
             }
-            @if modes.len() > 1 {
-                nav.tabs aria-label="Mode" {
-                    @for (k, l) in &modes {
-                        a href=(if *k == "clicks" { base.clone() } else { format!("{base}&mode={k}") }) aria-current=[(*k == mode).then_some("page")] { (l) }
+            @if map.path.is_empty() {
+                // The Heatmap tab with no page view yet (#592): say so, no error.
+                section.card.empty.heat-empty {
+                    (crate::tables::empty_art())
+                    div {
+                        h2 { "No page to draw yet" }
+                        p.muted { "The heatmap opens on the most viewed page once page views arrive. " a href={ "/p/" (p.id) "/pages" } { "Pages" } " lists every page with its own heatmap." }
                     }
                 }
-            }
-            @if let Some(href) = overlay {
-                p { a.btn href=(href) { (icon("play")) "See it over the real page" } }
             } @else {
-                p.muted.small.no-replay { (icon("play")) " No recorded visit of this page yet: with session replays on, the map is also drawn over the page as it was recorded." }
-            }
-            @match mode {
-                "scroll" => {
-                    section.card.wide aria-label="Scroll depth" {
-                        h2 { "How far people scroll" }
-                        @if let Some(pg) = page { (scroll_bars(pg)) }
-                    }
-                },
-                _ => {
-                    @let rage = mode == "rage";
-                    @if !map.cells.iter().any(|c| !rage || c.3 > 0) {
-                        section.card { p.muted { @if rage { "No rage click with a position on this page." } @else { "No clicks with a position on this page yet (positions are recorded by SDK 0.1 builds from 2026-11-22 on)." } } }
-                    } @else {
-                        section.card.wide {
-                            (click_svg(map, rage))
-                            p.muted.small { "Each dot is a 2% × 20 px area; darker means more " (if rage { "rage clicks" } else { "clicks" }) ". Red marks rage clicks. Clicks from every screen width are drawn together at the median width: the engine keeps one width per page, not per click, so there is no Mobile, Tablet or Desktop view." }
+                @if modes.len() > 1 {
+                    nav.tabs aria-label="Mode" {
+                        @for (k, l) in &modes {
+                            a href=(if *k == "clicks" { base.clone() } else { format!("{base}&mode={k}") }) aria-current=[(*k == mode).then_some("page")] { (l) }
                         }
                     }
-                    div.grid {
-                        section.card aria-label="Most clicked" {
-                            h2 { (if rage { "Most rage-clicked" } else { "Most clicked" }) }
-                            @match page { Some(pg) => (ranked_labels(&pg.hotspots, rage)), None => (no_labels) }
+                }
+                @if let Some(href) = overlay {
+                    p { a.btn href=(href) { (icon("play")) "See it over the real page" } }
+                } @else {
+                    p.muted.small.no-replay { (icon("play")) " No recorded visit of this page yet: with session replays on, the map is also drawn over the page as it was recorded." }
+                }
+                @match mode {
+                    "scroll" => {
+                        section.card.wide aria-label="Scroll depth" {
+                            h2 { "How far people scroll" }
+                            @if let Some(pg) = page { (scroll_bars(pg)) }
                         }
-                        @if overlay.is_none() && !rage {
-                            section.card aria-label="Scroll depth" {
-                                h2 { "How far people scroll" }
-                                @match page.filter(|_| has_scroll) {
-                                    Some(pg) => (scroll_bars(pg)),
-                                    None => p.muted.small { "No scroll measured on this page." },
+                    },
+                    _ => {
+                        @let rage = mode == "rage";
+                        @if !map.cells.iter().any(|c| !rage || c.3 > 0) {
+                            section.card { p.muted { @if rage { "No rage click with a position on this page." } @else { "No clicks with a position on this page yet (positions are recorded by SDK 0.1 builds from 2026-11-22 on)." } } }
+                        } @else {
+                            section.card.wide {
+                                (click_svg(map, rage))
+                                p.muted.small { "Each dot is a 2% × 20 px area; darker means more " (if rage { "rage clicks" } else { "clicks" }) ". Red marks rage clicks. Clicks from every screen width are drawn together at the median width: the engine keeps one width per page, not per click, so there is no Mobile, Tablet or Desktop view." }
+                            }
+                        }
+                        div.grid {
+                            section.card aria-label="Most clicked" {
+                                h2 { (if rage { "Most rage-clicked" } else { "Most clicked" }) }
+                                @match page { Some(pg) => (ranked_labels(&pg.hotspots, rage)), None => (no_labels) }
+                            }
+                            @if overlay.is_none() && !rage {
+                                section.card aria-label="Scroll depth" {
+                                    h2 { "How far people scroll" }
+                                    @match page.filter(|_| has_scroll) {
+                                        Some(pg) => (scroll_bars(pg)),
+                                        None => p.muted.small { "No scroll measured on this page." },
+                                    }
                                 }
                             }
                         }
-                    }
-                },
+                    },
+                }
             }
         },
     )
