@@ -353,7 +353,7 @@ fn set_feature_updates_one_entry_and_pushes_a_map_that_reads_back() {
         |_| Vec::new(),
     );
     let args = json!({ "project": "app", "message": "route moved",
-        "feature": { "key": "write-entry", "name": "Write", "entry": { "routes": ["/write"] }, "success": "entry_saved" } });
+        "feature": { "key": "write-entry", "name": "Write", "entry": { "routes": ["/write"] }, "success": "entry_saved", "paths": ["src/editor/**"] } });
     let v = tool(&fake, "set_feature", &args).unwrap();
     assert_eq!(v["action"], "updated");
     let (path, body) = fake.sent("PUT", "/api/projects/app/feature-map").unwrap();
@@ -361,6 +361,11 @@ fn set_feature_updates_one_entry_and_pushes_a_map_that_reads_back() {
     let pushed = openlens_featuremap::parse(&body.unwrap()).map.unwrap();
     assert_eq!(pushed.features.len(), 2, "the other entry is kept");
     assert_eq!(pushed.features[0].entry.routes, ["/write"]);
+    assert_eq!(
+        pushed.features[0].paths,
+        ["src/editor/**"],
+        "code paths are carried"
+    );
     assert_eq!(pushed.roles.len(), 1);
 
     // No map yet: the entry starts one.

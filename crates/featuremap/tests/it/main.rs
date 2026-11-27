@@ -3,7 +3,9 @@
 // Test helpers may unwrap: a failure here is a test failure.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use openlens_featuremap::{parse, route_regex, to_yaml};
+use openlens_featuremap::{
+    MAX_CHANGED_FILES, MAX_PATHS, code_path_matches, parse, route_regex, to_yaml, touched_features,
+};
 
 const EXAMPLE: &str = include_str!("../../../../docs/schema/features.example.yaml");
 
@@ -159,4 +161,111 @@ fn overlapping_routes_are_all_listed() {
     assert_eq!(m.features_for_path("/docs/7/edit"), vec!["docs", "edit"]);
     assert_eq!(m.features_for_path("/docs/7"), vec!["docs"]);
     assert!(m.features_for_path("/other").is_empty());
+}
+
+#[test]
+fn code_path_globs_match_within_and_across_folders() {
+    assert!(code_path_matches("src/export/**", "src/export/pdf.rs"));
+    assert!(code_path_matches("src/export/**", "src/export/a/b/c.rs"));
+    assert!(!code_path_matches("src/export/**", "src/exporter/pdf.rs"));
+    // `*` stays inside one folder, `**` crosses any number (zero included).
+    assert!(code_path_matches("src/*.rs", "src/main.rs"));
+    assert!(!code_path_matches("src/*.rs", "src/a/main.rs"));
+    assert!(code_path_matches("src/**/mod.rs", "src/mod.rs"));
+    assert!(code_path_matches("src/**/mod.rs", "src/a/b/mod.rs"));
+    assert!(code_path_matches("**/*.test.ts", "web/x/y.test.ts"));
+    assert!(code_path_matches("app/v?/page.tsx", "app/v2/page.tsx"));
+    assert!(!code_path_matches("app/v?/page.tsx", "app/v10/page.tsx"));
+    // Case-sensitive, like git paths.
+    assert!(!code_path_matches("src/Export/**", "src/export/pdf.rs"));
+}
+
+#[test]
+fn hostile_code_paths_are_refused_with_the_feature_named() {
+    let base = "features:\n  - key: export\n    name: Export\n    success: x\n    paths: ";
+    for bad in [
+        "['/src/**']",
+        "['src/../secrets']",
+        "['./src']",
+        "['src//x']",
+        "['src/']",
+        "['']",
+        "['src/a**']",
+        "['src/{a,b}']",
+        "['src/[ab]']",
+        "['!src']",
+        "['C:/x']",
+        "['src\\\\x']",
+        "[\"src/\\ta\"]",
+    ] {
+        let p = parse(&format!("{base}{bad}\n"));
+        assert!(p.map.is_none(), "{bad} accepted");
+        assert!(
+            p.issues.iter().any(|i| i.level == "error"
+                && i.path == "features[0].paths[0]"
+                && i.message.contains("`export`")),
+            "{bad}: {:?}",
+            p.issues
+        );
+    }
+    let long = format!("{base}['{}']\n", "a/".repeat(150));
+    assert!(parse(&long).map.is_none(), "an overlong glob is refused");
+    let many: Vec<String> = (0..=MAX_PATHS).map(|i| format!("'src/f{i}/**'")).collect();
+    let p = parse(&format!("{base}[{}]\n", many.join(", ")));
+    assert!(p.issues.iter().any(|i| i.path == "features[0].paths"));
+    let ok = parse(&format!("{base}['src/export/**', 'lib/pdf?.rs']\n"));
+    assert!(ok.map.is_some(), "{:?}", ok.issues);
+}
+
+#[test]
+fn changed_files_name_the_features_touched_and_count_the_rest() {
+    let m = parse(
+        "features:\n  - key: export\n    name: Export\n    paths: [src/export/**]\n  - key: pdf\n    name: PDF\n    paths: ['src/export/pdf*.rs', src/pdf/**]\n  - key: search\n    name: Search\n    paths: [src/search/**]\n  - key: nopaths\n    name: No paths\n",
+    )
+    .map
+    .unwrap();
+    let t = touched_features(
+        &m,
+        &[
+            "src/export/csv.rs",
+            "src/export/pdf_page.rs",
+            "./src/pdf/render.rs",
+            "README.md",
+            "docs/x.md",
+        ],
+    );
+    let keys: Vec<&str> = t.features.iter().map(|f| f.key.as_str()).collect();
+    assert_eq!(keys, ["export", "pdf"], "map order, untouched left out");
+    assert_eq!(t.unmatched, 2);
+    let matched = 5 - t.unmatched;
+    assert!(
+        t.features.iter().map(|f| f.files).sum::<usize>() > matched,
+        "one file can touch several features: {t:?}"
+    );
+    assert_eq!(t.skipped, 0);
+    assert!(t.features_with_paths < m.features.len());
+}
+
+#[test]
+fn the_matcher_bounds_hostile_inputs() {
+    // Star-heavy globs against long paths: the matcher backtracks to the
+    // last star only, so this returns at once instead of exploding.
+    let glob = "**/a*a*a*a*a*a*a*a*a*b/**/**/**/**/c";
+    let file = format!("{}/x", "a".repeat(1000));
+    assert!(!code_path_matches(glob, &file));
+    let deep = format!("{}c/d", "a/".repeat(500));
+    assert!(!code_path_matches(glob, &deep));
+    // Too many and too long changed files are counted, not examined.
+    let m = parse("features:\n  - key: all\n    name: All\n    paths: ['**']\n")
+        .map
+        .unwrap();
+    let mut files: Vec<String> = vec!["x".repeat(5000), String::new()];
+    files.extend((0..MAX_CHANGED_FILES + 10).map(|i| format!("f{i}")));
+    let t = touched_features(&m, &files);
+    assert!(t.skipped >= 12, "{t:?}");
+    assert_eq!(t.skipped + t.features[0].files + t.unmatched, files.len());
+    // Unvalidated globs match nothing instead of misbehaving.
+    let mut bad = m.clone();
+    bad.features[0].paths = vec!["../**".into(), "/**".into()];
+    assert!(touched_features(&bad, &["a/b"]).features.is_empty());
 }
