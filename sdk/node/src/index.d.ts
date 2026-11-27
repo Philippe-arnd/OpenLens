@@ -18,11 +18,14 @@ export interface ExceptionContext extends RequestContext {
   method?: string;
   properties?: Record<string, unknown>;
 }
-export interface RequestRecord { method: string; route: string; status: number; ms: number }
+/** One request; `traceId` and `sessionId` are kept if it becomes an exemplar (never a user id). */
+export interface RequestRecord { method: string; route: string; status: number; ms: number; traceId?: string; sessionId?: string }
 export declare const SERVER_ID: "$server";
 export declare const STATS_WINDOW_MS: number;
 export declare const BOUNDS_S: number[];
 export declare const SESSION_HEADER: "x-openlens-session";
+/** Distinct external hosts kept per stats window by `captureOutgoing()`; the rest count as `_OTHER`. */
+export declare const MAX_CLIENT_HOSTS: number;
 export declare class OpenLens {
   constructor(opts: Options);
   capture(distinctId: string, event: string, properties?: Record<string, unknown>): void;
@@ -38,7 +41,11 @@ export declare class OpenLens {
   /** Runtime health: one `$runtime_stats` at the process start, then one per 10-minute window
    * (event-loop delay p50/p99, largest RSS and heap used). On with `express()`. */
   captureRuntime(): void;
-  /** Express middleware: route stats, runtime health and `req.openlens`. `user` reads the signed-in user's id. */
+  /** Outgoing calls (global `fetch`, `http`/`https`) per external host: one `$client_stats` per
+   * method, host and status per 10-minute window. The host only, never the path or query; calls to
+   * the OpenLens host are not counted. Opt-in; `shutdown()` stops it. */
+  captureOutgoing(): void;
+  /** Express middleware: route stats, runtime health and `req.openlens`. `user` reads the signed-in user's id for server errors, never for exemplars. */
   express(opts?: { user?: (req: any) => string | undefined | null }): (req: any, res: any, next: (err?: unknown) => void) => void;
   /** Express error handler: reports the error, then `next(err)`. */
   expressErrors(): (err: unknown, req: any, res: any, next: (err?: unknown) => void) => void;

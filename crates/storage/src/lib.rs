@@ -16,10 +16,12 @@
 //! Layer: L1 (see `docs/architecture.md`).
 
 mod compaction;
+mod disk;
 mod pending;
 pub mod relabel;
 mod segments;
 mod typed;
+pub use disk::{COST_DAYS, DiskUse, disk_use, tree_bytes};
 pub use pending::Pending;
 use pending::projects_of;
 pub use segments::{

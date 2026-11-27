@@ -100,6 +100,10 @@ impl Host for AppState {
     fn data_dir(&self) -> &std::path::Path {
         &self.data_dir
     }
+
+    fn capacity_inputs(&self) -> openlens_engine::capacity::Inputs {
+        crate::capacity::inputs(self)
+    }
 }
 
 /// The caller of a command made from a dashboard request: the viewer's

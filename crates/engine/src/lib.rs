@@ -21,9 +21,13 @@ mod board_range;
 mod board_sessions;
 mod board_success;
 mod board_window;
+/// Capacity follows the host: one disk budget drives recordings a day (#606, D-088).
+pub mod capacity;
 pub mod churn;
 pub mod commands;
 pub mod delivery;
+/// Outgoing dependencies per external host (#608, D-090).
+pub mod dependencies;
 pub mod deploys;
 mod digest;
 mod drift;

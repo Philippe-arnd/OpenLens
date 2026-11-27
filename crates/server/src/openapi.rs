@@ -236,13 +236,19 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "GET",
         "/api/projects/{project}/routes",
         "read",
-        "Server routes of one environment (`env`, production by default) over `days` (1 to 90, default 7), from the server SDKs' route stats: per method and route template, requests, 5xx count and share, p50 and p95 in ms (upper bounds of the duration histogram), the largest duration, the feature whose key action the route is (`server:` in the feature map), the p95 of each of the last ten days (from that day's merged histograms), and how the route moved from the release before to the latest one. Key actions come first, then the routes that got worse, then the largest change; the totals and the counts of worse routes and key actions come with the list.",
+        "Server routes of one environment (`env`, production by default) over `days` (1 to 90, default 7), from the server SDKs' route stats: per method and route template, requests, 5xx count and share, p50 and p95 in ms (upper bounds of the duration histogram), the largest duration, the feature whose key action the route is (`server:` in the feature map), the p95 of each of the last ten days (from that day's merged histograms), how the route moved from the release before to the latest one, and its exemplars (`slowest`: the slowest request of the period; `first_5xx`: the first answered 5xx; each with ms, time, status, and when known trace id and session id). Key actions come first, then the routes that got worse, then the largest change; the totals and the counts of worse routes and key actions come with the list.",
     ),
     (
         "GET",
         "/api/projects/{project}/runtime",
         "read",
         "Runtime health per release of one environment (`env`, production by default), from the Node SDK's runtime stats, newest first: process starts and restarts, restarts per day, the largest RSS and heap used (bytes), event-loop delay p50 and p99 (ms), and next to the release before the RSS growth and the restarts check (the only one judged in the verdict).",
+    ),
+    (
+        "GET",
+        "/api/projects/{project}/dependencies",
+        "read",
+        "Outgoing dependencies of one environment (`env`, production by default) over `days` (1 to 90, default 7), from `http.client.request.duration` (the Node SDK's `captureOutgoing()` or OTLP): per external host (`server.address`, never a path), calls, failed calls (5xx or no response) and their share, calls without a response, p95 in ms (upper bound of the duration histogram), the largest duration, and how the host moved from the release before to the latest one (fails more, slower). Shown, never judged: a dependency never changes a release verdict. The hosts that got worse come first, then the most called.",
     ),
     (
         "POST",
@@ -565,6 +571,12 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "A one-time login link or an invite.",
     ),
     ("GET", "/api/users", "admin", "Dashboard users."),
+    (
+        "GET",
+        "/api/capacity",
+        "admin",
+        "What the disk budget gives (D-088): recordings kept per project a day, with its floor (300), ceiling and reason; replay and event retention, fixed whatever the disk (D-015); the budget (80 % of the data volume minus other files, or `OPENLENS_DISK_BUDGET`), the volume, what OpenLens uses, and each project's bytes a day and share. `derived` is false when the floor applies because the volume or the disk could not be measured.",
+    ),
     (
         "PATCH",
         "/api/users/{id}",

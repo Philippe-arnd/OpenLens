@@ -6,9 +6,10 @@
 //! enums as integers, unknown fields ignored.
 //!
 //! A `oneof` is a set of optional fields on the wire, so each case is its
-//! own optional field here. Fields left out (the scope, exemplars, nested
+//! own optional field here. Fields left out (the scope, span ids, nested
 //! array and map values) are skipped by both decoders without being
-//! built, so they cost no memory and no recursion.
+//! built, so they cost no memory and no recursion. Exemplars (#607) are
+//! read: their value, time, trace id and filtered attributes.
 //!
 //! Before decoding, [`bound_protobuf`] and [`bound_json`] count what the
 //! decoders would allocate, so a 4 MB body of empty messages cannot become
@@ -118,12 +119,14 @@ pub(crate) const CUMULATIVE: i32 = 2;
 /// `DATA_POINT_FLAGS_NO_RECORDED_VALUE_MASK`.
 pub(crate) const NO_RECORDED_VALUE: u32 = 1;
 
-/// `HistogramDataPoint` (exemplars are not read).
+/// `HistogramDataPoint`.
 #[derive(prost::Message, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub(crate) struct HistogramDataPoint {
     #[prost(message, repeated, tag = "9")]
     pub(crate) attributes: Vec<KeyValue>,
+    #[prost(message, repeated, tag = "8")]
+    pub(crate) exemplars: Vec<Exemplar>,
     #[prost(fixed64, tag = "2")]
     #[serde(deserialize_with = "u64_any")]
     pub(crate) start_time_unix_nano: u64,
@@ -150,6 +153,29 @@ pub(crate) struct HistogramDataPoint {
     #[prost(double, optional, tag = "12")]
     #[serde(deserialize_with = "opt_f64")]
     pub(crate) max: Option<f64>,
+}
+
+/// `Exemplar` (#607): one real measurement of a data point. The span id
+/// is not read.
+#[derive(prost::Message, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub(crate) struct Exemplar {
+    #[prost(message, repeated, tag = "7")]
+    pub(crate) filtered_attributes: Vec<KeyValue>,
+    #[prost(fixed64, tag = "2")]
+    #[serde(deserialize_with = "u64_any")]
+    pub(crate) time_unix_nano: u64,
+    #[prost(double, optional, tag = "3")]
+    #[serde(deserialize_with = "opt_f64")]
+    pub(crate) as_double: Option<f64>,
+    #[prost(sfixed64, optional, tag = "6")]
+    #[serde(deserialize_with = "opt_i64")]
+    pub(crate) as_int: Option<i64>,
+    /// 16 bytes; hex in JSON (OTLP's exception to base64). Anything else
+    /// reads as empty: no trace id, never a refusal.
+    #[prost(bytes = "vec", tag = "5")]
+    #[serde(deserialize_with = "hex_id")]
+    pub(crate) trace_id: Vec<u8>,
 }
 
 /// `KeyValue`.
@@ -318,6 +344,15 @@ fn opt_f64<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
     Ok(Option::<F64>::deserialize(d)?.map(|F64(v)| v))
 }
 
+/// A trace id in OTLP JSON: 32 hex digits, else empty.
+fn hex_id<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+    let s = Option::<String>::deserialize(d)?.unwrap_or_default();
+    if s.len() != 32 {
+        return Ok(Vec::new());
+    }
+    Ok(hex::decode(s).unwrap_or_default())
+}
+
 fn vec_u64<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u64>, D::Error> {
     Ok(Vec::<U64>::deserialize(d)?
         .into_iter()
@@ -356,6 +391,7 @@ enum Level {
     Histogram,
     Points,
     Point,
+    Exemplar,
     KeyValue,
 }
 
@@ -377,7 +413,10 @@ fn child(level: Level, field: u64) -> Child {
         (Level::Request, 1) => Child::Each(Level::ResourceMetrics),
         (Level::ResourceMetrics, 1) => Child::One(Level::Resource),
         (Level::ResourceMetrics, 2) => Child::Each(Level::ScopeMetrics),
-        (Level::Resource, 1) | (Level::Point, 9) => Child::Each(Level::KeyValue),
+        (Level::Resource, 1) | (Level::Point, 9) | (Level::Exemplar, 7) => {
+            Child::Each(Level::KeyValue)
+        }
+        (Level::Point, 8) => Child::Each(Level::Exemplar),
         (Level::ScopeMetrics, 2) => Child::Each(Level::Metric),
         (Level::Metric, 9) => Child::One(Level::Histogram),
         (Level::Metric, 5 | 7 | 10 | 11) => Child::One(Level::Points),
@@ -432,8 +471,8 @@ fn skip(buf: &[u8], pos: &mut usize, n: usize) -> Result<(), Refused> {
     Ok(())
 }
 
-/// Walk one message of `level`. The depth is the schema's (six levels at
-/// most), never the input's.
+/// Walk one message of `level`. The depth is the schema's (seven levels
+/// at most), never the input's.
 fn walk(buf: &[u8], level: Level, budget: &mut Budget) -> Result<(), Refused> {
     let mut pos = 0;
     while pos < buf.len() {

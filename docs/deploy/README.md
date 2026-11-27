@@ -19,7 +19,7 @@ The Nomad job, the NixOS module and the panel recipes follow each tool's public 
 ## Requirements
 - **CPU:** one vCPU is plenty for most apps (ingestion is about 80k events/s per vCPU).
 - **Memory:** 1 GiB for up to about 2 M events in 90 days, 2 GiB up to about 4 M (measured: the board's first load takes about 1 s at 1 M, 2.5 s at 2 M, 3 s at 4 M; [benchmarks](../benchmarks.md#at-scale-under-a-memory-cap-460-2026-11-26)). These figures were measured while the board kept the 90-day window in memory, which it no longer does (D-051); the `scale` job will measure them again, larger apps included. See [kubernetes.md](kubernetes.md#sizing) for the details, which apply everywhere.
-- **Disk:** about 11 bytes per event (events kept 400 days) plus replays (kept 30 days). Leave room for one extra copy of the data: it is made before each upgrade.
+- **Disk:** about 11 bytes per event (events kept 400 days) plus replays (kept 30 days, at least 300 recordings a project a day). Leave room for one extra copy of the data: it is made before each upgrade. **A larger disk keeps more recordings a day**, never longer (D-088): see [what grows with the disk](kubernetes.md#what-grows-with-the-disk).
 - **A public HTTPS URL** for the browser SDK, through the reverse proxy you already use (recipes in [docker.md](docker.md#https-and-reverse-proxy)). Set `OPENLENS_PUBLIC_URL` to it so login links and emails point to the right place.
 
 ## Image and release channels
@@ -113,6 +113,7 @@ None of these is needed. Each feature stays off until its variables are set.
 | Weekly digest by email (Mondays, 07:00 UTC) | `OPENLENS_SMTP_URL` (for example `smtps://user:pass@smtp.example.com:465`), `OPENLENS_DIGEST_TO` (comma-separated), optional `OPENLENS_DIGEST_FROM` |
 | Sign-in by email ("Email me a login link" for invited users) | the SMTP settings above and the public URL (`OPENLENS_PUBLIC_URL`; Coolify sets it itself). Links work once, within 15 minutes, and are rate-limited |
 | No daily check for a newer release (the footer's *Update available*) | `OPENLENS_UPDATE_CHECK=off` |
+| Cap what OpenLens may use of its data volume (default: 80 % of the volume minus other files; D-088). A share (`40%`, 1 to 95 %) or bytes (`500GB`, `2TiB`); never past what leaves 5 % free. Recordings kept per project a day follow it, never below 300; retention stays fixed (400 days of events, 30 days of recordings) | `OPENLENS_DISK_BUDGET` |
 
 The digest is always visible in the dashboard (*This week vs last*), and agents can read it with the MCP `digest` tool.
 

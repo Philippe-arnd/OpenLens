@@ -403,7 +403,123 @@ async fn other_metrics_and_points_are_counted_as_rejected() {
     assert!(r.contains_key("GET /kept"));
     assert!(
         !r.contains_key("GET /x"),
-        "client durations are not read yet"
+        "a client duration is never a route, and one without server.address is rejected"
+    );
+}
+
+#[tokio::test]
+async fn client_durations_land_in_the_dependencies_by_host_only() {
+    let h = harness();
+    let t0 = now_ns();
+    let point = |attrs: Vec<serde_json::Value>, count: u64| {
+        serde_json::json!({
+            "attributes": attrs, "startTimeUnixNano": t0.to_string(),
+            "timeUnixNano": (t0 + 60 * SEC).to_string(), "count": count.to_string(),
+            "sum": 0.5, "max": 0.3,
+            "bucketCounts": one_bucket(7, count).iter().map(u64::to_string).collect::<Vec<_>>(),
+            "explicitBounds": BOUNDS_S,
+        })
+    };
+    let kv = |k: &str, v: serde_json::Value| serde_json::json!({ "key": k, "value": v });
+    let s = |v: &str| serde_json::json!({ "stringValue": v });
+    let n = |v: i64| serde_json::json!({ "intValue": v.to_string() });
+    let points = vec![
+        point(
+            vec![
+                kv("http.request.method", s("POST")),
+                kv("server.address", s("API.Stripe.com")),
+                kv("http.response.status_code", n(200)),
+            ],
+            30,
+        ),
+        point(
+            vec![
+                kv("http.request.method", s("POST")),
+                kv("server.address", s("api.stripe.com")),
+                kv("http.response.status_code", n(503)),
+            ],
+            6,
+        ),
+        // No response at all: only an error class.
+        point(
+            vec![
+                kv("http.request.method", s("POST")),
+                kv("server.address", s("api.stripe.com")),
+                kv("error.type", s("ECONNRESET")),
+            ],
+            4,
+        ),
+        // A URL is not a host: rejected, never stored.
+        point(
+            vec![
+                kv("http.request.method", s("GET")),
+                kv(
+                    "server.address",
+                    s("https://api.example.com/v1/users?token=x"),
+                ),
+                kv("http.response.status_code", n(200)),
+            ],
+            5,
+        ),
+    ];
+    let json = serde_json::json!({ "resourceMetrics": [{
+        "resource": { "attributes": [
+            kv("service.version", s("v7")),
+            kv("deployment.environment.name", s("production")),
+        ]},
+        "scopeMetrics": [{ "metrics": [{
+            "name": "http.client.request.duration", "unit": "s",
+            "histogram": { "aggregationTemporality": 1, "dataPoints": points },
+        }]}],
+    }]});
+    let key = h.key.clone();
+    let (status, _, body) = send(
+        &h,
+        "application/json",
+        json.to_string().into_bytes(),
+        Some(("x-openlens-key", &key)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["partialSuccess"]["rejectedDataPoints"], "1", "{v}");
+
+    openlens_server::flush_now(&h.state).unwrap();
+    let r = get(&h, "/api/projects/default/dependencies?days=1", None, true).await;
+    assert_eq!(r.status(), StatusCode::OK);
+    let d: serde_json::Value = serde_json::from_str(&body_text(r).await).unwrap();
+    let hosts = d["hosts"].as_array().unwrap();
+    assert_eq!(hosts.len(), 1, "one host, whatever its case: {d}");
+    let stripe = &hosts[0];
+    assert_eq!(stripe["host"], "api.stripe.com");
+    assert_eq!(stripe["calls"], 40);
+    assert_eq!(stripe["errors"], 10, "5xx and no response both fail");
+    assert_eq!(stripe["no_response"], 4);
+    assert!(stripe["p95_ms"].as_f64().unwrap() > 0.0);
+
+    // Never a route, never user activity, and no path or query stored.
+    assert!(routes(&h, "production").await.is_empty());
+    let q = h.state.clone();
+    let n = |sql: &'static str| {
+        let q = q.clone();
+        async move {
+            q.query.sql("default", sql).await.unwrap().rows[0]["n"]
+                .as_i64()
+                .unwrap()
+        }
+    };
+    assert_eq!(
+        n("SELECT count(*) AS n FROM events WHERE event = '$client_stats'").await,
+        0
+    );
+    assert!(n("SELECT count(*) AS n FROM raw_events WHERE event = '$client_stats'").await > 0);
+    assert_eq!(
+        n(
+            "SELECT count(*) AS n FROM raw_events WHERE event = '$client_stats' \
+           AND (strpos(properties, '/v1') > 0 OR strpos(properties, 'token') > 0)"
+        )
+        .await,
+        0
     );
 }
 
@@ -445,4 +561,177 @@ async fn hostile_otlp_bodies_get_a_400_not_a_crash() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn exemplars_keep_the_slowest_and_first_5xx_with_the_session_never_the_user() {
+    let h = harness();
+    let t0 = now_ns();
+    let attr = |k: &str, v: &str| serde_json::json!({ "key": k, "value": { "stringValue": v } });
+    let point = |status: i64, max: f64, exemplars: serde_json::Value| {
+        serde_json::json!({
+            "attributes": [
+                { "key": "http.request.method", "value": { "stringValue": "GET" } },
+                { "key": "http.route", "value": { "stringValue": "/api/report" } },
+                { "key": "http.response.status_code", "value": { "intValue": status.to_string() } },
+            ],
+            "startTimeUnixNano": t0.to_string(), "timeUnixNano": (t0 + 60 * SEC).to_string(),
+            "count": "3", "sum": 3.0, "max": max,
+            "bucketCounts": one_bucket(11, 3).iter().map(u64::to_string).collect::<Vec<_>>(),
+            "explicitBounds": BOUNDS_S.iter().map(|b| b * 1000.0).collect::<Vec<_>>(),
+            "exemplars": exemplars,
+        })
+    };
+    let ex = |at: u64, ms: f64, trace: &str, attrs: serde_json::Value| {
+        serde_json::json!({ "timeUnixNano": (t0 + at * SEC).to_string(), "asDouble": ms,
+            "traceId": trace, "spanId": "eee19b7ec3c1b174", "filteredAttributes": attrs })
+    };
+    let trace = "5b8efff798038103d269b633813fc60c";
+    let ok = point(
+        200,
+        1800.0,
+        serde_json::json!([
+            ex(
+                1,
+                40.0,
+                trace,
+                serde_json::json!([attr("session.id", "fast")])
+            ),
+            ex(
+                2,
+                1800.0,
+                trace,
+                serde_json::json!([
+                    attr("session.id", "slow-session"),
+                    attr("user.id", "u42"),
+                    attr("http.request.header.authorization", "Bearer secret"),
+                    attr("url.query", "token=secret"),
+                ])
+            ),
+        ]),
+    );
+    let bad = point(
+        503,
+        900.0,
+        serde_json::json!([
+            ex(
+                30,
+                300.0,
+                trace,
+                serde_json::json!([attr("session.id", "later")])
+            ),
+            ex(
+                5,
+                100.0,
+                "not a trace id",
+                serde_json::json!([attr("session.id", "first-5xx"), attr("enduser.id", "u9")])
+            ),
+            ex(40, 900.0, trace, serde_json::json!([])),
+        ]),
+    );
+    let body = serde_json::json!({ "resourceMetrics": [{ "scopeMetrics": [{ "metrics": [{
+        "name": "http.server.request.duration", "unit": "ms",
+        "histogram": { "aggregationTemporality": 1, "dataPoints": [ok, bad] },
+    }]}]}]});
+    let key = h.key.clone();
+    let (status, _, out) = send(
+        &h,
+        "application/json",
+        body.to_string().into_bytes(),
+        Some(("x-openlens-key", &key)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&out));
+
+    let r = &routes(&h, "production").await["GET /api/report"];
+    let slowest = &r["slowest"];
+    assert_eq!(slowest["session_id"], "slow-session");
+    assert!(slowest.get("user").is_none(), "user.id is never kept");
+    assert_eq!(slowest["trace_id"], trace);
+    assert!(
+        slowest["ms"].as_f64().unwrap() > 1000.0,
+        "ms read in the metric's unit"
+    );
+    let first = &r["first_5xx"];
+    assert_eq!(first["session_id"], "first-5xx");
+    assert!(first.get("user").is_none(), "enduser.id is never kept");
+    assert_eq!(first["status"], 503);
+    assert!(
+        first.get("trace_id").is_none(),
+        "an invalid trace id is left out"
+    );
+
+    // At most two exemplars per point, nothing but the session: never a user.
+    let s = h.state.clone();
+    let rows = s
+        .query
+        .sql(
+            "default",
+            "SELECT properties AS p FROM raw_events WHERE event = '$request_stats'",
+        )
+        .await
+        .unwrap();
+    for row in &rows.rows {
+        let p: serde_json::Value = serde_json::from_str(row["p"].as_str().unwrap()).unwrap();
+        let list = p["exemplars"].as_array().unwrap();
+        assert!(!list.is_empty() && list.len() <= 2);
+        let text = p.to_string();
+        assert!(!text.contains("secret") && !text.contains("spanId") && !text.contains("\"fast\""));
+        assert!(
+            !text.contains("u42") && !text.contains("u9") && !text.contains("user.id"),
+            "a user.id or enduser.id sent in an exemplar is never stored"
+        );
+        for e in list {
+            if let Some(a) = e.get("filtered_attributes").and_then(|a| a.as_object()) {
+                assert!(a.keys().all(|k| k == "session.id"), "{a:?}");
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn hostile_exemplars_are_accepted_bounded_and_never_stored_as_sent() {
+    let h = harness();
+    let key = h.key.clone();
+    for (i, (ct, body)) in openlens_testkit::otlp::hostile_exemplar_bodies()
+        .into_iter()
+        .enumerate()
+    {
+        let (status, _, _) = send(&h, ct, body, Some(("x-openlens-key", &key))).await;
+        assert_eq!(status, StatusCode::OK, "body {i} ({ct})");
+    }
+    openlens_server::flush_now(&h.state).unwrap();
+    let s = h.state.clone();
+    let rows = s
+        .query
+        .sql(
+            "default",
+            "SELECT properties AS p FROM raw_events WHERE event = '$request_stats'",
+        )
+        .await
+        .unwrap();
+    assert!(!rows.rows.is_empty());
+    for row in &rows.rows {
+        let text = row["p"].as_str().unwrap();
+        assert!(text.len() < 4_096, "an exemplar never makes a point large");
+        assert!(!text.contains("secret") && !text.contains(&"x".repeat(201)));
+        let p: serde_json::Value = serde_json::from_str(text).unwrap();
+        for e in p["exemplars"].as_array().into_iter().flatten() {
+            assert!(
+                e["value"]
+                    .as_f64()
+                    .is_some_and(|v| (0.0..=86_400.0).contains(&v))
+            );
+            if let Some(t) = e.get("trace_id") {
+                let t = t.as_str().unwrap();
+                assert!(t.len() == 32 && t.bytes().any(|b| b != b'0'));
+            }
+            if let Some(a) = e.get("filtered_attributes").and_then(|a| a.as_object()) {
+                assert!(
+                    a.keys().all(|k| k == "session.id"),
+                    "the session only, never a user: {a:?}"
+                );
+            }
+        }
+    }
 }

@@ -18,6 +18,7 @@ mod board_jobs;
 mod board_query;
 pub mod boards;
 pub mod cache;
+mod capacity;
 mod capture;
 mod check_ins;
 pub mod closed_days;
@@ -176,6 +177,7 @@ pub fn router(state: AppState) -> Router {
         .merge(slo::routes())
         .merge(status_page::routes())
         .merge(check_ins::routes())
+        .merge(capacity::routes())
         .layer(axum::middleware::from_fn(csrf::layer))
         .layer(axum::middleware::from_fn(trusted_headers_layer))
         // Pages, the API and Ask (a few model rounds) get two minutes.
@@ -501,6 +503,9 @@ fn compact(state: &AppState) -> Result<(), String> {
     let _guard = privacy::MAINTENANCE
         .lock()
         .map_err(|_| "maintenance lock poisoned")?;
+    // What the disk holds, for the recordings a day it allows (#606,
+    // D-088): measured at most hourly.
+    capacity::refresh(state);
     for p in state.meta.projects().map_err(|e| e.to_string())? {
         let now = chrono::Utc::now();
         clean_stored_urls(state, &p.id);

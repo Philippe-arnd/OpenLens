@@ -106,13 +106,18 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
     vec![
         ToolSpec {
             name: "routes",
-            description: "The app's server routes over the last `days` (1 to 90, default 7) in one environment (production unless env), from the server SDK's middleware: per method and route template, requests, 5xx count and share, p50 and p95 in ms (upper bounds of the duration histogram), the largest duration, and the feature whose key action the route is (`server:` in the feature map). Release verdicts judge the same routes (5xx share up significantly, or p95 1.5 times and 200 ms slower); `release_report` shows them as `route` checks. Empty, with a note, until the server SDK sends stats.",
+            description: "The app's server routes over the last `days` (1 to 90, default 7) in one environment (production unless env), from the server SDK's middleware: per method and route template, requests, 5xx count and share, p50 and p95 in ms (upper bounds of the duration histogram), the largest duration, the feature whose key action the route is (`server:` in the feature map), and its exemplars: `slowest` (the slowest request of the period) and `first_5xx` (the first answered 5xx), each with ms, time, status and, when known, trace id and session id (open its replay at that time). Release verdicts judge the same routes (5xx share up significantly, or p95 1.5 times and 200 ms slower); `release_report` shows them as `route` checks, a slower route's p95 check with its slowest request as `exemplar`. Empty, with a note, until the server SDK sends stats. `dependencies` lists the app's outgoing calls per external host over the same days (from the Node SDK's `captureOutgoing()` or OTLP `http.client.request.duration`): calls, failed calls (5xx or no response) and their share, p95 in ms, and how each host moved since the release before (`fails_more`, `slower`). Dependencies are shown, never judged: `release_report` lists those that got worse as `dependencies`, and they never change a verdict. A host failing for 15 minutes raises a `dep:<host>` alert.",
             input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"days":{"type":"integer","minimum":1,"maximum":90}}))}),
         },
         ToolSpec {
             name: "runtime",
             description: "Runtime health of the app's server per release in one environment (production unless env), from the Node SDK (on with its Express middleware, or `captureRuntime()`), newest first: process starts and restarts (starts more than 30 minutes after the release's first runtime event), restarts per day, the largest RSS and heap used in bytes, the median of the 10-minute windows' event-loop delay p50 and p99 in ms, and next to the release before: RSS growth (0.25 = 25 % more) and its `restarts` check. Only restarts per day are judged: significantly up, at least twice and 5 more per day, makes a release's verdict regressed (a crash loop); memory and loop delay are shown, never judged. `release_report` carries the same as `runtime`. Empty, with a note, until the SDK sends runtime stats.",
             input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"}}))}),
+        },
+        ToolSpec {
+            name: "capacity",
+            description: "What this OpenLens instance keeps, as its disk allows (D-088): recordings kept per project a day, with `value`, `floor` (300: never less), `ceiling` and a `reason`; replay retention (30 days) and event retention (400 days), fixed whatever the disk (D-015, `derived` false); the disk budget (80 % of the data volume minus other files, or `OPENLENS_DISK_BUDGET`) and where it comes from, the volume, free and used bytes, and each project's bytes a day and share of the budget. `derived` is false when the floor applies because the volume or the disk could not be measured; `reason` says why. Instance-wide: needs the admin token.",
+            input_schema: json!({"type":"object","properties":{}}),
         },
         ToolSpec {
             name: "delete_goal",
@@ -375,18 +380,31 @@ fn churn(c: &Client, args: &Value) -> Result<Value, String> {
     Ok(json!({ "report": report, "winback_flags": flags["flags"] }))
 }
 
+/// The routes, with the outgoing dependencies of the same environment and
+/// days as `dependencies` (#608).
+fn routes(c: &Client, args: &Value) -> Result<Value, String> {
+    let with_days = |base: &str| {
+        let mut path = query(args, base, &["env"]);
+        if let Some(d) = args.get("days").and_then(Value::as_i64) {
+            path.push(if path.contains('?') { '&' } else { '?' });
+            path.push_str(&format!("days={d}"));
+        }
+        path
+    };
+    let mut out = get(c, &with_days("/routes"))?;
+    let dependencies = get(c, &with_days("/dependencies"))?;
+    if let Some(o) = out.as_object_mut() {
+        o.insert("dependencies".into(), dependencies);
+    }
+    Ok(out)
+}
+
 /// Run the tool `name`, or `None` when it is not one of [`specs`].
 pub(crate) fn call(c: &Client, name: &str, args: &Value) -> Option<Result<Value, String>> {
     Some(match name {
-        "routes" => {
-            let mut path = query(args, "/routes", &["env"]);
-            if let Some(d) = args.get("days").and_then(Value::as_i64) {
-                path.push(if path.contains('?') { '&' } else { '?' });
-                path.push_str(&format!("days={d}"));
-            }
-            get(c, &path)
-        }
+        "routes" => routes(c, args),
         "runtime" => get(c, &query(args, "/runtime", &["env"])),
+        "capacity" => get(c, "/api/capacity"),
         "delete_goal" => required(args, "goal").and_then(|g| {
             let path = at(args, &format!("/goals/{}", enc(&g)));
             send(c, "DELETE", &path, None)

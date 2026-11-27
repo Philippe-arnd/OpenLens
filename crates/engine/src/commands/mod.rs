@@ -21,7 +21,9 @@ pub mod alerts;
 pub mod announcements;
 pub mod ask;
 pub mod board;
+pub mod capacity;
 pub mod delivery;
+pub mod dependencies;
 pub mod deploys;
 pub mod explore;
 pub mod flags;
@@ -142,6 +144,8 @@ pub const REGISTRY: &[Spec] = &[
     spec::<routes::List>(),
     // Runtime health per release (#610).
     spec::<runtime::List>(),
+    // Outgoing dependencies per external host (#608).
+    spec::<dependencies::List>(),
     // Uptime history (#559).
     spec::<uptime::GetDays>(),
     spec::<uptime::GetIncidents>(),
@@ -173,6 +177,8 @@ pub const REGISTRY: &[Spec] = &[
     spec::<jobs::List>(),
     spec::<jobs::Remove>(),
     spec::<jobs::SetAvailability>(),
+    // Capacity follows the host (#606).
+    spec::<capacity::Get>(),
 ];
 
 /// A 12-character id from `s` (the first bytes of its SHA-256, in hex).
@@ -262,6 +268,12 @@ pub trait Host: Sync {
     fn random_hex(&self, bytes: usize) -> String;
     /// The data directory (where session recordings are kept).
     fn data_dir(&self) -> &std::path::Path;
+    /// What the capacity derivation reads (#606, D-088): the data
+    /// volume, the last measurement of the disk and the budget override.
+    /// Nothing is known by default, and the floors apply.
+    fn capacity_inputs(&self) -> crate::capacity::Inputs {
+        crate::capacity::Inputs::default()
+    }
 }
 
 /// Something that happened in a project, on the timeline.

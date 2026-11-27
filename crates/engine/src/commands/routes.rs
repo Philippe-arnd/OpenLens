@@ -1,7 +1,9 @@
 //! Server routes as a command (#594, D-083): requests, 5xx share and
 //! durations per route over a period, from the server SDKs' route stats,
 //! each route with its p95 over the last ten days and how it moved since
-//! the release before (#622). The rules are in [`crate::routes`].
+//! the release before (#622), and its exemplars: the slowest request of
+//! the period and the first answered 5xx, with their session (#607). The
+//! rules are in [`crate::routes`].
 
 use serde::{Deserialize, Serialize};
 

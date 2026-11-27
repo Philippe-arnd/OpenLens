@@ -1,7 +1,9 @@
 //! The share of sessions the SDK records for replay (#327, D-035).
 //!
-//! No setting: about [`DAILY_BUDGET`] recordings a day, so the rate is
-//! `min(1, 300 / yesterday's active users)`. Active users are the distinct
+//! No setting: about a budget of recordings a day, so the rate is
+//! `min(1, budget / yesterday's active users)`. The budget is
+//! [`DAILY_BUDGET`] on a small disk and grows with a larger one
+//! ([`crate::capacity`], #606, D-088). Active users are the distinct
 //! people with events yesterday, in the project's time zone (D-017), in
 //! production. With no data yet every session is recorded. Sessions left
 //! out still keep the last minute or two in the browser's memory and send
@@ -13,7 +15,8 @@ use serde::Serialize;
 use crate::{Filters, Result, int};
 use openlens_query::QueryEngine;
 
-/// Recordings a day the rate aims for.
+/// Recordings a day the rate aims for, at least: the floor of the budget
+/// the disk gives ([`crate::capacity`], D-088).
 pub const DAILY_BUDGET: i64 = 300;
 
 /// The replay rate of a project and why.
@@ -25,6 +28,8 @@ pub struct ReplayRate {
     pub active_users: i64,
     /// The day counted (`YYYY-MM-DD`, the project's yesterday).
     pub day: String,
+    /// Recordings a day the rate aims for (D-088).
+    pub budget: i64,
 }
 
 impl ReplayRate {
@@ -35,17 +40,20 @@ impl ReplayRate {
             rate: 1.0,
             active_users: 0,
             day: String::new(),
+            budget: DAILY_BUDGET,
         }
     }
 }
 
-/// `min(1, DAILY_BUDGET / active)`; 1 with nobody active.
+/// `min(1, budget / active)`; 1 with nobody active. The budget is never
+/// below [`DAILY_BUDGET`].
 #[must_use]
-pub fn rate_for(active: i64) -> f64 {
-    if active <= DAILY_BUDGET {
+pub fn rate_for(active: i64, budget: i64) -> f64 {
+    let budget = budget.max(DAILY_BUDGET);
+    if active <= budget {
         1.0
     } else {
-        DAILY_BUDGET as f64 / active as f64
+        budget as f64 / active as f64
     }
 }
 
@@ -59,8 +67,14 @@ pub fn local_today(tz: &str) -> NaiveDate {
 }
 
 /// Count yesterday's active users of `project` (time zone `tz`) and the
-/// rate that follows. One query over the last three days of events.
-pub async fn replay_rate(q: &QueryEngine, project: &str, tz: &str) -> Result<ReplayRate> {
+/// rate that follows for `budget` recordings a day. One query over the
+/// last three days of events.
+pub async fn replay_rate(
+    q: &QueryEngine,
+    project: &str,
+    tz: &str,
+    budget: i64,
+) -> Result<ReplayRate> {
     let f = Filters {
         tz: tz.to_owned(),
         // The team's own sessions are recorded too: they count.
@@ -80,9 +94,11 @@ pub async fn replay_rate(q: &QueryEngine, project: &str, tz: &str) -> Result<Rep
     );
     let r = q.sql(project, &sql).await?;
     let active = r.rows.first().map_or(0, |row| int(row, "n"));
+    let budget = budget.max(DAILY_BUDGET);
     Ok(ReplayRate {
-        rate: rate_for(active),
+        rate: rate_for(active, budget),
         active_users: active,
         day,
+        budget,
     })
 }

@@ -160,9 +160,23 @@ Keep the same admin token Secret.
 
 ## Sizing
 
-- **Disk:** about **11 bytes per event** after compression, and events are kept 400 days. So 1 M events a day needs about 4.5 GB a year. Replays (kept 30 days) often weigh more than events: watch the PVC usage during the first week and size from it.
+- **Disk:** about **11 bytes per event** after compression, and events are kept 400 days. So 1 M events a day needs about 4.5 GB a year. Replays (kept 30 days) often weigh more than events: watch the PVC usage during the first week and size from it. Leave room for one extra copy of the data, made before each upgrade.
 - **CPU:** about **80k events/s per vCPU** at ingestion. The default request (`100m`) is enough for most apps.
 - **Memory:** the default limit of 1 GiB covered about 2 M events in 90 days (peak about 610 MB, first board load about 2.5 s), and 2 GiB about 4 M (peak near 1.07 GB; under 1 GiB the times scattered from 2 to 7 s), measured ([benchmarks](../benchmarks.md#at-scale-under-a-memory-cap-460-2026-11-26)) while the board still kept up to 4 M events of the 90-day window in memory, at about 160 bytes each. It no longer keeps any (D-051): closed days come from daily rollups and every other query reads its own window from the files, so its memory no longer grows with that copy. The `scale` job will measure the limits again; until then, keep these sizes, and give a larger app (measured at 63 M events before the rollups: 2.6 GB peak) 4 GiB.
+
+### What grows with the disk
+
+OpenLens sizes what it keeps from its data volume, with no setting (D-088). Its budget is 80 % of the volume minus what other files on it use; after its own other files (rollups, `meta.db`, backups), half of the rest is for events and recordings and the other half for the copy made before each upgrade. Every hour it measures what each project's events take a day and what one of its recordings takes. Only one thing grows with the room: **the number of recordings kept per project a day**.
+
+| What | On a small disk | On a larger disk |
+| --- | --- | --- |
+| Recordings kept per project a day | 300 (the floor) | more, the same number in every project, as many as fit for 30 days once events and the floor's recordings are paid for, up to 30 000 |
+| Event retention | 400 days | 400 days: fixed ([privacy](../privacy.md), D-015) |
+| Replay retention | 30 days | 30 days: fixed ([privacy](../privacy.md), D-015) |
+
+Retention never follows the disk: personal data is not kept longer because there is room, and you can state a fixed duration. The number of recordings never goes below 300. When the volume fills (other files, larger backups), the next measurement lowers it back toward 300; below that, writes stop at 5 % free, as before. `GET /api/capacity` (admin), the MCP `capacity` tool and the startup log (`capacity from the disk`) show the value in force and why. If the volume's size cannot be read, 300 applies and the answer says so.
+
+To give OpenLens less (a volume shared with other services) or more of the volume, set `OPENLENS_DISK_BUDGET` to a share (`40%`, 1 to 95 %) or a number of bytes (`500GB`, `2TiB`); it never goes past what leaves 5 % free.
 
 ## Security
 

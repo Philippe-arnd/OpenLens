@@ -175,6 +175,7 @@ pub fn check(current: &RuntimeStat, previous: &RuntimeStat) -> Check {
         }
     };
     Check {
+        exemplar: None,
         kind: "runtime",
         key: "restarts_per_day".into(),
         label: "Process restarts per day".into(),

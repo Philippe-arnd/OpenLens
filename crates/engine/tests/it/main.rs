@@ -15,6 +15,7 @@ mod board_cohorts;
 mod board_people;
 mod board_window;
 mod commands;
+mod dependencies;
 mod jobs;
 mod journeys;
 mod maintenance;

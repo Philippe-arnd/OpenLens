@@ -452,6 +452,7 @@ fn label(rule: &str) -> &'static str {
         "failing" => "has many failing requests",
         r if r.starts_with("key:") => "has a key action failing",
         r if r.starts_with("route:") => "has a failing route",
+        r if r.starts_with("dep:") => "has a dependency failing",
         "budget_spent" => "has spent its error budget",
         "budget_burn" => "is burning its error budget fast",
         r if r.starts_with("job:") && r.ends_with(":missed") => "has a job that did not run",
@@ -846,6 +847,54 @@ pub async fn failing_routes<H: Host>(host: &H, p: &Project) {
     }
 }
 
+/// Every 5 minutes (#608, D-090): each external host of production
+/// failing in the latest closed window opens its incident (`dep:<host>`),
+/// announced once it has failed for 15 minutes; a host that recovered
+/// closes it.
+pub async fn failing_dependencies<H: Host>(host: &H, p: &Project) {
+    let Ok(now) = crate::dependencies::failing_hosts(host.query(), &p.id).await else {
+        return;
+    };
+    track_dependencies_at(host, p, &now, chrono::Utc::now().timestamp()).await;
+}
+
+/// [`failing_dependencies`] with the hosts failing at `now` (Unix
+/// seconds): open or keep each one's incident, close the others'.
+pub async fn track_dependencies_at<H: Host>(
+    host: &H,
+    p: &Project,
+    failing: &[crate::dependencies::Failing],
+    now: i64,
+) {
+    for f in failing {
+        let rule = crate::dependencies::rule(&f.host);
+        let seen = Seen {
+            rule: &rule,
+            failing: true,
+            cause: &f.cause,
+            wait: crate::dependencies::FAILING_WAIT_SECS,
+        };
+        Box::pin(track_at(host, &p.id, &p.name, &seen, now)).await;
+    }
+    let since = now - 90 * 86400;
+    for (rule, _, end, cause, _) in host.meta().incidents(&p.id, since).unwrap_or_default() {
+        if end.is_none()
+            && rule.starts_with("dep:")
+            && !failing
+                .iter()
+                .any(|f| crate::dependencies::rule(&f.host) == rule)
+        {
+            let seen = Seen {
+                rule: &rule,
+                failing: false,
+                cause: &cause,
+                wait: crate::dependencies::FAILING_WAIT_SECS,
+            };
+            Box::pin(track_at(host, &p.id, &p.name, &seen, now)).await;
+        }
+    }
+}
+
 /// Many users hitting failing requests or errors in the last 15 minutes,
 /// against the same quarter-hour of the same weekday over four weeks.
 pub async fn failing_spike(query: &QueryEngine, project: &str) -> Option<(bool, String)> {
@@ -894,7 +943,7 @@ pub async fn traffic_stopped(query: &QueryEngine, project: &str) -> Option<(bool
         "SELECT min(date) AS first, \
          count(CASE WHEN date < '{today}' AND date_part('hour', timestamp) = {h} AND date_part('dow', timestamp) = {dow} THEN 1 END) AS same, \
          CAST(max(timestamp) AS VARCHAR) AS last \
-         FROM raw_events WHERE date >= '{since}' AND environment <> 'bot' AND event NOT IN ('$request_stats', '$runtime_stats')"
+         FROM raw_events WHERE date >= '{since}' AND environment <> 'bot' AND event NOT IN ('$request_stats', '$runtime_stats', '$client_stats')"
     );
     let r = query.sql(project, &sql).await.ok()?;
     let row = r.rows.first()?;
@@ -929,50 +978,4 @@ pub async fn traffic_stopped(query: &QueryEngine, project: &str) -> Option<(bool
 }
 
 #[cfg(test)]
-mod tests {
-    use super::Settings;
-
-    #[test]
-    fn settings_have_defaults_and_are_checked() {
-        let s = Settings::default();
-        assert!(s.down && s.traffic && s.email && s.validate().is_ok());
-        assert!(
-            Settings {
-                webhook: "http://x".into(),
-                ..s.clone()
-            }
-            .validate()
-            .is_err()
-        );
-        assert!(
-            Settings {
-                ntfy: "my topic".into(),
-                ..s.clone()
-            }
-            .validate()
-            .is_err()
-        );
-        assert!(
-            Settings {
-                ntfy: "ops-alerts".into(),
-                ..s.clone()
-            }
-            .validate()
-            .is_ok()
-        );
-        assert!(
-            Settings {
-                health_path: "healthz".into(),
-                ..s.clone()
-            }
-            .validate()
-            .is_err()
-        );
-        assert!(Settings { down_wait: 0, ..s }.validate().is_err());
-        let partial: Settings = serde_json::from_str(r#"{"traffic": false}"#).unwrap_or_default();
-        assert!(
-            !partial.traffic && partial.down,
-            "missing fields take the defaults"
-        );
-    }
-}
+mod tests;

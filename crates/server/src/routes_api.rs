@@ -2,6 +2,8 @@
 //! engine's `routes.list` as JSON, and the Quality › Routes page that
 //! shows the same command (#622). Runtime health per release (#610, D-087):
 //! `GET /api/projects/{id}/runtime`, the engine's `runtime.list`.
+//! Outgoing dependencies (#608, D-090): `GET /api/projects/{id}/dependencies`,
+//! the engine's `dependencies.list`.
 
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -9,8 +11,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use openlens_engine::commands::routes::{List, ListInput};
-use openlens_engine::commands::runtime;
 use openlens_engine::commands::{Caller, Command, Error, Host};
+use openlens_engine::commands::{dependencies, runtime};
 use serde::Deserialize;
 
 use crate::api::FilterQuery;
@@ -20,6 +22,10 @@ use crate::{AppState, auth};
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/projects/{project}/routes", get(api))
+        .route(
+            "/api/projects/{project}/dependencies",
+            get(dependencies_api),
+        )
         .route("/p/{project}/routes", get(page))
         .route("/api/projects/{project}/runtime", get(runtime_api))
 }
@@ -50,6 +56,30 @@ pub(crate) async fn api(
         days: q.days,
     };
     match List::run(&state, &Caller::default(), input).await {
+        Ok(d) => Json(d).into_response(),
+        Err(Error::NotFound) => crate::apierr::json(StatusCode::NOT_FOUND, "unknown project"),
+        Err(Error::Invalid(m)) => crate::apierr::json(StatusCode::BAD_REQUEST, m),
+        Err(e) => crate::apierr::json(StatusCode::SERVICE_UNAVAILABLE, e.to_string()),
+    }
+}
+
+/// `GET /api/projects/{id}/dependencies[?env=][&days=]` (bearer):
+/// `dependencies.list`.
+pub(crate) async fn dependencies_api(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(q): Query<RoutesQuery>,
+) -> Response {
+    if !auth::has_bearer(&state, &headers) {
+        return crate::apierr::json(StatusCode::UNAUTHORIZED, "admin bearer token required");
+    }
+    let input = dependencies::ListInput {
+        project: id,
+        environment: q.env,
+        days: q.days,
+    };
+    match dependencies::List::run(&state, &Caller::default(), input).await {
         Ok(d) => Json(d).into_response(),
         Err(Error::NotFound) => crate::apierr::json(StatusCode::NOT_FOUND, "unknown project"),
         Err(Error::Invalid(m)) => crate::apierr::json(StatusCode::BAD_REQUEST, m),
