@@ -133,7 +133,7 @@ impl Command for List {
             errors: hosts.iter().map(|d| d.stat.errors).sum(),
             release,
             previous_release,
-            worse: hosts.iter().filter(|d| worse(*d)).count(),
+            worse: hosts.iter().filter(|d| worse(d)).count(),
             hosts,
             note,
         })

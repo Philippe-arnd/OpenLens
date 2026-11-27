@@ -346,7 +346,7 @@ pub fn changes(current: &[DependencyStat], previous: &[DependencyStat]) -> Vec<D
             slower: pc >= pp * P95_RATIO && pc - pp >= P95_MIN_MS,
         });
     }
-    out.sort_by(|a, b| b.calls.cmp(&a.calls));
+    out.sort_by_key(|a| std::cmp::Reverse(a.calls));
     out
 }
 
