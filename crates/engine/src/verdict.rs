@@ -26,6 +26,10 @@
 //!   toward or away from its target is shown, not judged.
 //! - **Server routes** (#594, D-083): a route's 5xx share and p95, when it
 //!   has enough requests on both releases ([`crate::routes::checks`]).
+//! - **Runtime** (#610, D-087): process restarts per day, judged only when
+//!   they go up significantly (a crash loop, [`crate::runtime::check`]);
+//!   the largest RSS, its growth and the event-loop delay p99 are shown in
+//!   [`Report::runtime`], never judged.
 
 use serde::Serialize;
 
@@ -139,6 +143,9 @@ pub struct Side {
     /// Server routes (#594): requests, 5xx and durations per route.
     #[serde(default)]
     pub routes: Vec<crate::routes::RouteStat>,
+    /// Runtime health (#610): none when the release sent no runtime stats.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<crate::runtime::RuntimeStat>,
 }
 
 fn share(n: i64, of: i64) -> f64 {
@@ -216,7 +223,8 @@ pub enum Outcome {
 /// One number compared.
 #[derive(Debug, Clone, Serialize)]
 pub struct Check {
-    /// `kpi`, `errors`, `vital`, `feature`, `guardrail`, `goal` or `route`.
+    /// `kpi`, `errors`, `vital`, `feature`, `guardrail`, `goal`, `route` or
+    /// `runtime`.
     pub kind: &'static str,
     /// The KPI key, vital or feature.
     pub key: String,
@@ -256,6 +264,11 @@ pub struct Report {
     pub previous: Option<Side>,
     /// Every number compared.
     pub checks: Vec<Check>,
+    /// Runtime health shown next to the release before (#610): RSS and its
+    /// growth, event-loop delay p99, restarts per day. Absent when the
+    /// release sent no runtime stats.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<crate::runtime::RuntimeShown>,
 }
 
 /// The board's *release regression* rule (#227), shared by the verdict:
@@ -435,6 +448,9 @@ pub fn compare(
             goal_checks(g, c, p, &mut checks);
         }
         checks.extend(crate::routes::checks(&c.routes, &p.routes));
+        if let (Some(cr), Some(pr)) = (&c.runtime, &p.runtime) {
+            checks.push(crate::runtime::check(cr, pr));
+        }
     }
     let new_errors: Vec<&NewError> = c
         .new_errors
@@ -470,6 +486,10 @@ pub fn compare(
         current: c.clone(),
         previous: previous.cloned(),
         checks,
+        runtime: c
+            .runtime
+            .as_ref()
+            .map(|cr| crate::runtime::shown(cr, previous.and_then(|p| p.runtime.as_ref()))),
     }
 }
 
@@ -672,6 +692,42 @@ mod tests {
         let quiet = side("v2", 120, 400, 8);
         let r = compare("production", &quiet, Some(&prev), 30, &[]);
         assert!(r.checks.iter().all(|c| c.kind != "route"));
+    }
+
+    #[test]
+    fn a_crash_looping_release_is_regressed_and_memory_growth_is_only_shown() {
+        let runtime = |restarts: i64, rss: i64| crate::runtime::RuntimeStat {
+            starts: restarts + 2,
+            restarts,
+            hours: 48.0,
+            rss_max_bytes: Some(rss),
+            ..crate::runtime::RuntimeStat::default()
+        };
+        let mut prev = side("v1", 120, 400, 8);
+        prev.runtime = Some(runtime(1, 200 << 20));
+        let mut looping = side("v2", 120, 400, 8);
+        looping.runtime = Some(runtime(150, 200 << 20));
+        let r = compare("production", &looping, Some(&prev), 30, &[]);
+        assert_eq!(r.verdict, Some(Verdict::Regressed), "{:?}", r.reasons);
+        assert!(r.reasons.iter().any(|x| x.contains("restarts")));
+        // Three times the memory, restarts as before: still healthy, the
+        // growth shown.
+        let mut leaking = side("v2", 120, 400, 8);
+        leaking.runtime = Some(runtime(1, 600 << 20));
+        let r = compare("production", &leaking, Some(&prev), 30, &[]);
+        assert_eq!(r.verdict, Some(Verdict::Healthy), "{:?}", r.reasons);
+        assert!(
+            r.runtime
+                .as_ref()
+                .and_then(|x| x.rss_growth)
+                .is_some_and(|g| g > 0.0)
+        );
+        // No runtime stats: no runtime check and no runtime fields.
+        let quiet = side("v2", 120, 400, 8);
+        let r = compare("production", &quiet, Some(&prev), 30, &[]);
+        assert!(r.runtime.is_none() && r.checks.iter().all(|c| c.kind != "runtime"));
+        let json = serde_json::to_value(&r).unwrap_or_default();
+        assert!(json.get("runtime").is_none() && json["current"].get("runtime").is_none());
     }
 
     #[test]

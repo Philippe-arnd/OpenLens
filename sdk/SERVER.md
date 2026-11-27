@@ -49,14 +49,14 @@ $ol->capture((string) $user->id, 'invoice_sent'); // sent at the end of the requ
 
 PHP has no background thread: events are sent when 50 are queued and at the end of the request. Under PHP-FPM, that happens after the response if the app calls `fastcgi_finish_request()`.
 
-## Server errors and route stats (Node)
+## Server errors, route stats and runtime health (Node)
 
 ```js
 import express from "express";
 import { OpenLens } from "@openlens/node";
 const ol = new OpenLens({ host: process.env.OPENLENS_HOST, key: process.env.OPENLENS_KEY });
 const app = express();
-app.use(ol.express({ user: (req) => req.user?.id })); // first: route stats + trace context
+app.use(ol.express({ user: (req) => req.user?.id })); // first: route stats, runtime health, trace context
 // … routes …
 app.use(ol.expressErrors()); // last: reports the error, then next(err)
 ol.captureUncaught(); // optional: crashes and unhandled rejections
@@ -66,7 +66,8 @@ ol.captureUncaught(); // optional: crashes and unhandled rejections
 - **Errors:** `ol.captureException(err, { distinctId, route })` anywhere else. A server error is grouped with the other errors, alerted on, and judged per release.
 - **Session link:** the browser SDK adds one header, `x-openlens-session`, to requests to its own origin, so a server error carries the session and its replay. An API on another origin needs `traceOrigins: ["https://api.example.com"]` in the browser config, and its CORS must allow that header. No user id travels in a header: pass `user` to `express()`.
 - **OpenTelemetry:** OpenLens reads W3C trace context and never writes it. When the app's own OpenTelemetry sends `traceparent`, the trace id lands on server errors and failed requests as `trace_id`, so you can open the same request in your tracing tool. OpenLens adds no `traceparent` and no `baggage`: your server keeps its own sampling, and nothing of OpenLens is forwarded to other services.
+- **Runtime health:** `express()` also sends `$runtime_stats` (other frameworks call `ol.captureRuntime()` once at start-up). At start, one event with `process.start: true`, sent by the next flush; then, every 10-minute window, one event with OpenTelemetry's runtime names: `nodejs.eventloop.delay.p50` and `.p99` (seconds, from `perf_hooks.monitorEventLoopDelay`, reset each window), and the window's largest `process.memory.usage` (RSS) and `v8js.memory.heap.used` (bytes), sampled on each flush. No new timer, nothing keeps the process alive, `shutdown()` sends the open window. A release's verdict turns regressed only when its process restarts per day go up significantly (a crash loop); memory and loop delay are shown per release, never judged. There is no switch to turn it off: it costs one small event per process every 10 minutes (D-087).
 - **Release:** keep the same release name on both sides. Both SDKs read the host's commit (`SOURCE_COMMIT` on Coolify) when `release` is not set.
-- **Volume:** a server sends one batch every 5 s and one stats event per route and status code every 10 minutes, far below the capture limits, whatever the traffic.
+- **Volume:** a server sends one batch every 5 s and one stats event per route and status code every 10 minutes (and one runtime event per process), far below the capture limits, whatever the traffic.
 
 Use the same `distinct_id` as the browser SDK's `identify()`, so server and browser events belong to the same person. Success events sent from the server count for the feature map like any other event.

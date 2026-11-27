@@ -14,6 +14,7 @@ Start from the summaries and drill down only where something stands out. Every t
 | How often do we ship, and how often does it break? | `delivery` (optional `env`, `days`): deploy frequency, lead time, change failure rate, time to restore per environment | `releases` |
 | What did this user do (before churning, before an error)? | `user_timeline { distinct_id }`: role history, recordings, latest events | the replay link it returns |
 | Is a server route failing or slower? | `routes` (optional `env`, `days`): requests, 5xx share, p50/p95 per route template and the key actions of the map; `release_report` judges the same routes per release | `errors` (server errors have kind `server`) |
+| Does the new release crash-loop, leak memory or block the event loop? | `runtime` (optional `env`): restarts per day, largest RSS and its growth, event-loop delay p99 per release; only a significant rise in restarts per day makes a verdict regressed | `release_report` (its `runtime` field) |
 | What breaks, for whom? | `errors`: groups with users, roles, releases, places and the original source line | `user_timeline` of an affected user |
 | Are pages slow, and what do we fix first? | `vitals`: each Web Vital explained, p75, rating, thresholds, worst pages and ranked actions | `sql` on `$vital` events |
 | Is the wiring complete? | `verify` (`release_layers`: build fingerprint, deploy hook, releases recorded, verdicts) | `feature_map_lint` |

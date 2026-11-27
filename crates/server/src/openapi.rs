@@ -239,6 +239,12 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "Server routes of one environment (`env`, production by default) over `days` (1 to 90, default 7), from the server SDKs' route stats: per method and route template, requests, 5xx count and share, p50 and p95 in ms (upper bounds of the duration histogram), the largest duration, and the feature whose key action the route is (`server:` in the feature map).",
     ),
     (
+        "GET",
+        "/api/projects/{project}/runtime",
+        "read",
+        "Runtime health per release of one environment (`env`, production by default), from the Node SDK's runtime stats, newest first: process starts and restarts, restarts per day, the largest RSS and heap used (bytes), event-loop delay p50 and p99 (ms), and next to the release before the RSS growth and the restarts check (the only one judged in the verdict).",
+    ),
+    (
         "POST",
         "/api/projects/{project}/deploy-hook",
         "write",

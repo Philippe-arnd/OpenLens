@@ -51,6 +51,8 @@ pub mod replay_rate;
 mod revenue;
 pub mod rollups;
 pub mod routes;
+/// Runtime health per release (#610, D-087).
+pub mod runtime;
 pub mod slo;
 pub mod stats;
 mod tasks;

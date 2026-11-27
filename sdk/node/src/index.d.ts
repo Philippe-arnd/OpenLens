@@ -35,7 +35,10 @@ export declare class OpenLens {
   captureUncaught(): void;
   /** Count one request in its route's 10-minute stats (any framework); `ms` in milliseconds. */
   recordRequest(r: RequestRecord): void;
-  /** Express middleware: route stats and `req.openlens`. `user` reads the signed-in user's id. */
+  /** Runtime health: one `$runtime_stats` at the process start, then one per 10-minute window
+   * (event-loop delay p50/p99, largest RSS and heap used). On with `express()`. */
+  captureRuntime(): void;
+  /** Express middleware: route stats, runtime health and `req.openlens`. `user` reads the signed-in user's id. */
   express(opts?: { user?: (req: any) => string | undefined | null }): (req: any, res: any, next: (err?: unknown) => void) => void;
   /** Express error handler: reports the error, then `next(err)`. */
   expressErrors(): (err: unknown, req: any, res: any, next: (err?: unknown) => void) => void;

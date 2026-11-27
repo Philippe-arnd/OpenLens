@@ -110,6 +110,11 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
             input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"days":{"type":"integer","minimum":1,"maximum":90}}))}),
         },
         ToolSpec {
+            name: "runtime",
+            description: "Runtime health of the app's server per release in one environment (production unless env), from the Node SDK (on with its Express middleware, or `captureRuntime()`), newest first: process starts and restarts (starts more than 30 minutes after the release's first runtime event), restarts per day, the largest RSS and heap used in bytes, the median of the 10-minute windows' event-loop delay p50 and p99 in ms, and next to the release before: RSS growth (0.25 = 25 % more) and its `restarts` check. Only restarts per day are judged: significantly up, at least twice and 5 more per day, makes a release's verdict regressed (a crash loop); memory and loop delay are shown, never judged. `release_report` carries the same as `runtime`. Empty, with a note, until the SDK sends runtime stats.",
+            input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"}}))}),
+        },
+        ToolSpec {
             name: "delete_goal",
             description: "Remove a goal (its id from `goals`). Objectives that used it as a key result keep the others.",
             input_schema: json!({"type":"object","properties":with(json!({"goal":{"type":"string"}})),"required":["goal"]}),
@@ -320,6 +325,7 @@ pub(crate) fn call(c: &Client, name: &str, args: &Value) -> Option<Result<Value,
             }
             get(c, &path)
         }
+        "runtime" => get(c, &query(args, "/runtime", &["env"])),
         "delete_goal" => required(args, "goal").and_then(|g| {
             let path = at(args, &format!("/goals/{}", enc(&g)));
             send(c, "DELETE", &path, None)

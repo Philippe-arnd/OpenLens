@@ -14,6 +14,8 @@
 //! - **Web Vitals**: a scan of the `$vital` events only, p75 per release.
 //! - **Server routes** (#594): the `$request_stats` of each release,
 //!   summed per route ([`crate::routes`]).
+//! - **Runtime** (#610): the `$runtime_stats` of each release
+//!   ([`crate::runtime`]).
 //!
 //! The team's own users are left out, as on the board.
 
@@ -149,12 +151,13 @@ async fn sides(
     let since = (now - chrono::Duration::days(DAYS + 1))
         .format("%Y-%m-%d")
         .to_string();
-    let (kpis, errors, vitals, features, routes) = futures::join!(
+    let (kpis, errors, vitals, features, routes, runtime) = futures::join!(
         q.sql(project, &kpis_sql),
         q.sql(project, &errors_sql),
         q.sql(project, &vitals_sql),
         features_fut,
         crate::routes::by_release(q, project, environment, &since, map.map(|(m, _)| m)),
+        crate::runtime::by_release(q, project, environment, &since),
     );
     let mut out: HashMap<String, Side> = HashMap::new();
     for r in &kpis?.rows {
@@ -218,6 +221,15 @@ async fn sides(
                 ..Side::default()
             })
             .routes = list;
+    }
+    // Runtime (#610): the same, a release without stats has no runtime.
+    for r in runtime? {
+        out.entry(r.release.clone())
+            .or_insert_with(|| Side {
+                release: r.release,
+                ..Side::default()
+            })
+            .runtime = Some(r.stat);
     }
     Ok(out)
 }

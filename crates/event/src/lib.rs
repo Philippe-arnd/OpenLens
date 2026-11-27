@@ -61,6 +61,13 @@ pub mod names {
     /// `max` (seconds) and `bucket_counts`. Not user
     /// activity: the `events` view leaves them out.
     pub const REQUEST_STATS: &str = "$request_stats";
+    /// Runtime health of one server process, sent by the Node SDK (#610,
+    /// D-087): one at the process start (`process.start`) and one per
+    /// 10-minute window, with `nodejs.eventloop.delay.p50` and `.p99`
+    /// (seconds), the largest `process.memory.usage` (RSS) and
+    /// `v8js.memory.heap.used` (bytes). Not user activity: the `events`
+    /// view leaves them out.
+    pub const RUNTIME_STATS: &str = "$runtime_stats";
     /// Distinct id of server events tied to no user (#593): left out of
     /// release shares.
     pub const SERVER_ID: &str = "$server";

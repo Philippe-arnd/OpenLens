@@ -880,7 +880,7 @@ pub async fn traffic_stopped(query: &QueryEngine, project: &str) -> Option<(bool
         "SELECT min(date) AS first, \
          count(CASE WHEN date < '{today}' AND date_part('hour', timestamp) = {h} AND date_part('dow', timestamp) = {dow} THEN 1 END) AS same, \
          CAST(max(timestamp) AS VARCHAR) AS last \
-         FROM raw_events WHERE date >= '{since}' AND environment <> 'bot' AND event <> '$request_stats'"
+         FROM raw_events WHERE date >= '{since}' AND environment <> 'bot' AND event NOT IN ('$request_stats', '$runtime_stats')"
     );
     let r = query.sql(project, &sql).await.ok()?;
     let row = r.rows.first()?;

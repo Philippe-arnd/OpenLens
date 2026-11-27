@@ -30,6 +30,7 @@ pub mod goto;
 pub mod maintenance;
 pub mod releases;
 pub mod routes;
+pub mod runtime;
 pub mod status_page;
 pub mod tickets;
 pub mod uptime;
@@ -138,6 +139,8 @@ pub const REGISTRY: &[Spec] = &[
     spec::<delivery::GetDelivery>(),
     // Server routes (#594).
     spec::<routes::List>(),
+    // Runtime health per release (#610).
+    spec::<runtime::List>(),
     // Uptime history (#559).
     spec::<uptime::GetDays>(),
     spec::<uptime::GetIncidents>(),
