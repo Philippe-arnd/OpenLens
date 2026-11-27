@@ -112,6 +112,21 @@ pub(crate) fn context_bar(
     action: &str,
     with_period: bool,
 ) -> Markup {
+    let (path, page) = split_action(action);
+    context_bar_kept(project, b, f, path, &page, with_period)
+}
+
+/// [`context_bar`] for a page whose own filters are free text (Events,
+/// #589): `page` holds them as raw `(name, value)` pairs, carried by every
+/// chip's form and by the team link, so applying a chip keeps them.
+pub(crate) fn context_bar_kept(
+    project: &str,
+    b: &Board,
+    f: &Filters,
+    path: &str,
+    page: &[(&str, &str)],
+    with_period: bool,
+) -> Markup {
     if shared() {
         return html! {};
     }
@@ -119,9 +134,8 @@ pub(crate) fn context_bar(
     if !envs.iter().any(|e| e == "production") {
         envs.insert(0, "production".into());
     }
-    let (path, page) = split_action(action);
     let to = format!("/p/{project}{path}");
-    let mut team = kept_filters(f, Ctx::Team, &page);
+    let mut team = kept_filters(f, Ctx::Team, page);
     if !f.internal {
         team.push(("internal".into(), "1".into()));
     }
@@ -136,14 +150,14 @@ pub(crate) fn context_bar(
     let release = f.release.as_deref().unwrap_or("All releases");
     html! {
         div.context role="group" aria-label="Filters" {
-            @if with_period { (period_chip(&to, b, f, &page)) }
+            @if with_period { (period_chip(&to, b, f, page)) }
             (chip_pop("env", "Environment", html! { (icon("globe")) (f.environment) }, &to, html! {
                 label.field { "Environment"
                     select name="env" {
                         @for e in &envs { option value=(e) selected[*e == f.environment] { (e) } }
                     }
                 }
-            }, &kept_filters(f, Ctx::Env, &page), ""))
+            }, &kept_filters(f, Ctx::Env, page), ""))
             (chip_pop("role", "Role", html! { (role) }, &to, html! {
                 label.field { "Role"
                     select name="role" {
@@ -153,7 +167,7 @@ pub(crate) fn context_bar(
                         }
                     }
                 }
-            }, &kept_filters(f, Ctx::Role, &page), ""))
+            }, &kept_filters(f, Ctx::Role, page), ""))
             (chip_pop("release", "Release", html! { (icon("release")) (release) }, &to, html! {
                 label.field { "Release"
                     select name="release" {
@@ -163,7 +177,7 @@ pub(crate) fn context_bar(
                         }
                     }
                 }
-            }, &kept_filters(f, Ctx::Release, &page), ""))
+            }, &kept_filters(f, Ctx::Release, page), ""))
             a.chip.is-off[!f.internal] href=(team_href)
                 title=(if f.internal { "The team's own users are counted: leave them out" } else { "The team's own users are left out: count them" }) {
                 (if f.internal { "Team included" } else { "Team excluded" })
@@ -237,33 +251,6 @@ fn period_chip(to: &str, b: &Board, f: &Filters, page: &[(&str, &str)]) -> Marku
         &kept_filters(f, Ctx::Period, page),
         &foot,
     )
-}
-
-pub(crate) fn filter_fields(envs: &[String], b: &Board, f: &Filters) -> Markup {
-    html! {
-            label { "Environment "
-                select name="env" {
-                    @for e in envs { option value=(e) selected[*e == f.environment] { (e) } }
-                }
-            }
-            label { "Role "
-                select name="role" {
-                    option value="" { "All roles" }
-                    @for r in b.roles.iter().filter_map(|r| r.role.as_deref()) {
-                        option value=(r) selected[f.role.as_deref() == Some(r)] { (r) }
-                    }
-                }
-            }
-            label { "Release "
-                select name="release" {
-                    option value="" { "All releases" }
-                    @for r in &b.releases {
-                        option value=(r.release) selected[f.release.as_deref() == Some(r.release.as_str())] { (r.release) }
-                    }
-                }
-            }
-            label.check { input type="checkbox" name="internal" value="1" checked[f.internal]; " Include the team" }
-    }
 }
 
 pub(crate) fn tile(accent: &str, glyph: &str, label: &str, value: &str, hint: &str) -> Markup {
