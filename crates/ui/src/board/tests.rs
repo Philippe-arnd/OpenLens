@@ -142,9 +142,9 @@ fn the_board_reads_in_the_mockup_order() {
     let order = [
         r#"class="card lead""#,
         r#"class="card ranked""#,
-        r#"id="kpi-h""#,
+        r#"id="out-h""#,
         r#"id="au-h""#,
-        r#"id="fp-h""#,
+        r#"id="feat-h""#,
         "Do they come back?",
         "v2 compared with v1",
         r#"id="wv-h""#,
@@ -204,7 +204,7 @@ fn the_release_table_prints_first_seen_as_the_other_screens_do() {
     assert!(!crate::tests::has_iso_time(&html), "{html}");
 }
 
-fn project() -> ProjectInfo<'static> {
+pub(super) fn project() -> ProjectInfo<'static> {
     ProjectInfo {
         id: "p1",
         name: "P",
@@ -220,18 +220,20 @@ fn insight(kind: &'static str, subject: &str) -> Insight {
         next_step: format!("{kind} next step"),
         score: 1.0,
         subject: subject.into(),
+        figure: None,
     }
 }
 
 /// A board with three insights, a window compared with the one before,
 /// a few days of active users, two releases and three cohorts.
-fn full() -> Board {
+pub(super) fn full() -> Board {
     let now = Sessions {
         count: 600,
         avg_secs: 200.0,
         bounce_rate: 0.1,
         error_rate: 0.33,
         tasks_per_user_day: 2.0,
+        tasks_per_session: 2.48,
     };
     Board {
         total_events: 100,
@@ -257,6 +259,7 @@ fn full() -> Board {
                     bounce_rate: 0.1,
                     error_rate: 0.03,
                     tasks_per_user_day: 2.0,
+                    tasks_per_session: 2.6,
                 },
             },
             ..BoardWindow::default()
@@ -315,7 +318,7 @@ fn cohorts() -> Vec<RetentionRow> {
     ]
 }
 
-fn page(b: &Board) -> String {
+pub(super) fn page(b: &Board) -> String {
     board(&project(), b, &Filters::default(), "h", &[], None, &[]).into_string()
 }
 
@@ -324,7 +327,7 @@ fn shared_page(b: &Board) -> String {
 }
 
 /// The part of `html` from `from` to the next `to` after it.
-fn between<'a>(html: &'a str, from: &str, to: &str) -> &'a str {
+pub(super) fn between<'a>(html: &'a str, from: &str, to: &str) -> &'a str {
     let start = html.find(from).unwrap();
     let end = html[start..].find(to).map_or(html.len(), |e| start + e);
     &html[start..end]
@@ -367,13 +370,13 @@ fn the_first_insight_leads_and_the_others_are_ranked() {
 #[test]
 fn every_kpi_delta_has_a_sign_and_says_what_it_compares_with() {
     let html = page(&full());
-    let tiles = between(&html, r#"id="kpi-h""#, "</section>");
+    let tiles = between(&html, r#"id="out-h""#, "</section>");
     let deltas: Vec<&str> = tiles
         .split(r#"<span class="delta "#)
         .skip(1)
         .map(|s| s.split("</div>").next().unwrap())
         .collect();
-    assert_eq!(deltas.len(), 3, "avg session, tasks, errors: {tiles}");
+    assert_eq!(deltas.len(), 3, "reach, value, quality: {tiles}");
     for d in &deltas {
         assert!(
             d.contains("#i-up") || d.contains("#i-down") || d.contains("#i-right"),
@@ -381,7 +384,7 @@ fn every_kpi_delta_has_a_sign_and_says_what_it_compares_with() {
         );
         assert!(d.contains('+') || d.contains('−'), "a sign: {d}");
         assert!(
-            d.contains("vs the 10 days before") || d.contains("was "),
+            d.contains("vs the 10 days before") || d.contains("was ") || d.contains("v1: "),
             "what it is compared with: {d}"
         );
     }
@@ -397,14 +400,14 @@ fn every_kpi_delta_has_a_sign_and_says_what_it_compares_with() {
     let mut fixed = full();
     fixed.window = None;
     let html = page(&fixed);
-    let tiles = between(&html, r#"id="kpi-h""#, "</section>");
+    let tiles = between(&html, r#"id="out-h""#, "</section>");
     assert!(!tiles.contains(r#"class="delta "#) && !tiles.contains("is-alert"));
 }
 
 #[test]
 fn each_kpi_definition_opens_from_its_button() {
     let html = page(&full());
-    let tiles = between(&html, r#"id="kpi-h""#, "</section>");
+    let tiles = between(&html, r#"id="out-h""#, "</section>");
     let targets: Vec<&str> = tiles
         .split("popovertarget=\"")
         .skip(1)
@@ -474,7 +477,7 @@ fn the_shared_board_hides_what_needs_a_login() {
     let b = full();
     let own = page(&b);
     let shared = shared_page(&b);
-    assert!(shared.contains(&b.insights[0].title) && shared.contains("Key numbers"));
+    assert!(shared.contains(&b.insights[0].title) && shared.contains("Outcomes"));
     for needle in [
         "/tickets/new",
         "Create ticket",
@@ -518,12 +521,8 @@ fn a_success_that_fires_on_entry_shows_no_task_time_but_its_finding() {
         task_times: vec![task("export", 60.0), task("home", 0.0)],
         ..full()
     };
-    let html = charts::feature_pulse("p1", &Filters::default(), &b).into_string();
-    // The Completion cell: the last of the feature's row.
-    let cell = |key: &str| {
-        let row = between(&html, &format!("/features/{key}"), "</tr>");
-        row[row.rfind("<td").unwrap()..].to_owned()
-    };
+    let html = features::features("p1", &Filters::default(), &b).into_string();
+    let cell = |key: &str| column_cell(&html, key, "Completion");
     let (export, home) = (cell("export"), cell("home"));
     // The same table still times a real task and shows its completion.
     assert!(
@@ -554,10 +553,135 @@ fn a_success_that_fires_on_entry_shows_no_task_time_but_its_finding() {
         "{anchor} in {health}"
     );
     // The shared board, without a login, keeps the dash and drops the link.
-    let shared =
-        render_shared(|| charts::feature_pulse("p1", &Filters::default(), &b)).into_string();
+    let shared = render_shared(|| features::features("p1", &Filters::default(), &b)).into_string();
     assert!(!shared.contains("/features#"), "{shared}");
     assert!(!shared.contains("Task time: median 0"), "{shared}");
+}
+
+/// The cell of `key`'s row under the `header` column of the Features
+/// table (the columns that vary are the only ones drawn).
+fn column_cell(html: &str, key: &str, header: &str) -> String {
+    let head = between(html, "<thead><tr>", "</tr>");
+    // One piece per header cell, the Feature column first.
+    let col = head
+        .split("</th>")
+        .position(|h| h.contains(header))
+        .unwrap_or_else(|| panic!("no {header} column: {head}"));
+    // The link carries the board's filters (`?env=…`) or none.
+    let at = [format!("/features/{key}\""), format!("/features/{key}?")]
+        .iter()
+        .find_map(|m| html.find(m.as_str()))
+        .unwrap_or_else(|| panic!("no {key} row: {html}"));
+    let row = between(&html[at..], "/features/", "</tr>");
+    // Column 0 is the feature, the row's header; the others are cells.
+    let td = row.split("<td").nth(col).unwrap_or_else(|| panic!("{row}"));
+    format!("<td{td}")
+}
+
+#[test]
+fn the_features_table_tags_each_feature_with_its_insights_and_lists_the_unused() {
+    let mut blind = insight("role_blind_spot", "admin:reports");
+    blind.figure = Some(0.0);
+    let mut stick = insight("stick_driver", "export");
+    stick.figure = Some(5.2);
+    let b = Board {
+        features: vec![
+            used("home", 140, 20),
+            used("reports", 110, 30),
+            used("export", 40, 10),
+            openlens_engine::FeatureUse {
+                users: 0,
+                uses: 0,
+                ..used("billing", 0, 0)
+            },
+        ],
+        insights: vec![blind, stick, insight("release_regression", "v2")],
+        ..full()
+    };
+    let html = features::features("p1", &Filters::default(), &b).into_string();
+    for key in ["reports", "export", "billing"] {
+        let x = b.features.iter().find(|x| x.key == key).unwrap();
+        let signals = b.feature_signals(x);
+        assert!(!signals.is_empty(), "{key}");
+        let tags = column_cell(&html, key, "Signals");
+        for s in &signals {
+            assert!(tags.contains(&s.label), "{} on {key}: {tags}", s.label);
+        }
+    }
+    // The unused feature is a row of its own, tagged as such.
+    let billing = column_cell(&html, "billing", "Signals");
+    assert!(billing.contains("Not used"), "{billing}");
+    // A card about a release tags no feature.
+    let home = column_cell(&html, "home", "Signals");
+    assert!(!home.contains(r#"class="tag "#), "{home}");
+    // Rows with a signal come before the most adopted feature without one.
+    let at = |k: &str| {
+        [format!("/features/{k}\""), format!("/features/{k}?")]
+            .iter()
+            .find_map(|m| html.find(m.as_str()))
+            .unwrap()
+    };
+    assert!(at("reports") < at("home") && at("export") < at("home"));
+    // The old blocks are gone from the board.
+    let page = page(&b);
+    for gone in ["Feature pulse", "Who uses what", "Never used"] {
+        assert!(!page.contains(gone), "{gone}");
+    }
+}
+
+#[test]
+fn role_bars_are_svg_with_a_text_alternative_and_a_dash_at_zero() {
+    let role = |r: &str, users| openlens_engine::RoleUsers {
+        role: Some(r.into()),
+        users,
+    };
+    let b = Board {
+        features: vec![used("reports", 30, 10), used("search", 40, 10)],
+        roles: vec![role("member", 30), role("admin", 10)],
+        role_features: vec![
+            ("member".into(), "reports".into(), 29),
+            ("member".into(), "search".into(), 30),
+            ("admin".into(), "search".into(), 10),
+        ],
+        ..full()
+    };
+    let html = features::features("p1", &Filters::default(), &b).into_string();
+    assert!(!html.contains(" style="), "{html}");
+    let reports = column_cell(&html, "reports", "admin");
+    let search = column_cell(&html, "search", "admin");
+    for bars in [&reports, &search] {
+        assert!(bars.contains(r#"role="img""#), "{bars}");
+        assert!(
+            bars.contains("<title>member ") && bars.contains("admin "),
+            "{bars}"
+        );
+    }
+    // Admins never used reports: a red dash there, none on search.
+    assert!(reports.contains(r#"class="z""#), "{reports}");
+    assert!(!search.contains(r#"class="z""#), "{search}");
+}
+
+#[test]
+fn a_column_with_the_same_value_on_every_row_is_left_out() {
+    // Half of each feature's users complete it; their counts differ.
+    let b = Board {
+        features: vec![used("reports", 40, 20), used("search", 20, 10)],
+        ..full()
+    };
+    let html = features::features("p1", &Filters::default(), &b).into_string();
+    let head = between(&html, "<thead>", "</thead>");
+    assert!(!head.contains("Completion"), "{head}");
+    assert!(
+        head.contains("Users") && head.contains("Adoption"),
+        "{head}"
+    );
+    // With one completion that differs, the column comes back.
+    let b = Board {
+        features: vec![used("reports", 40, 20), used("search", 20, 5)],
+        ..full()
+    };
+    let html = features::features("p1", &Filters::default(), &b).into_string();
+    assert!(between(&html, "<thead>", "</thead>").contains("Completion"));
 }
 
 #[test]

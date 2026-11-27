@@ -37,6 +37,7 @@ pub mod environments;
 mod errors;
 mod events;
 mod explore;
+mod feature_signals;
 pub mod flows;
 pub mod forms;
 pub mod goals;
@@ -73,13 +74,14 @@ pub use board::{board, board_reusing, filter_options};
 pub use board_cost::{Estimate, estimate};
 pub use board_kept::PeriodBlocks;
 pub use board_window::{BoardWindow, Period};
-pub use churn::{AtRisk, ChurnReport, churn};
+pub use churn::{AtRisk, ChurnLine, ChurnReport, churn};
 pub use digest::{Delta, Digest, digest, digest_markdown, release_lines};
 pub use errors::{
     ErrorGroup, LINKED_MAX, LinkedSession, Origin, error_groups, error_groups_of, mark_replays,
 };
 pub use events::*;
 pub use explore::*;
+pub use feature_signals::{FeatureRow, Signal};
 pub use flows::{Flow, FlowLink, FlowQuery, flows};
 pub use inforce::{History, MapAt};
 pub use insights::{CohortStats, FlagCohort, Funnel, FunnelStep, Insight, Journey, Readiness};
@@ -366,6 +368,8 @@ pub struct Sessions {
     /// Completed tasks (success events; feature uses without a map) per
     /// active user-day.
     pub tasks_per_user_day: f64,
+    /// Completed tasks per session, as the releases table counts them.
+    pub tasks_per_session: f64,
 }
 
 /// One Web Vital at p75.
@@ -465,13 +469,16 @@ pub struct Board {
     pub roles: Vec<RoleUsers>,
     /// Weekly retention cohorts (first-seen week × weeks later).
     pub retention: Vec<RetentionRow>,
+    /// The churn rate and median lifetime of the Churn page (#616); none
+    /// when the board did not read them.
+    pub churn: Option<churn::ChurnLine>,
     /// The retention line (#619): week-N return of the oldest and newest
     /// complete cohorts of `retention`, and which way it went.
     pub retention_trend: Option<RetentionTrend>,
     /// Task durations per declared feature with a success event.
     pub task_times: Vec<TaskTime>,
-    /// Who uses what: distinct users per (role, feature), last 30 days,
-    /// ignoring the role filter (the roles × features grid).
+    /// Distinct users per (role, feature), last 30 days, ignoring the
+    /// role filter (the role bars of the board's Features table, #618).
     pub role_features: Vec<(String, String, i64)>,
     /// Latest releases, newest first.
     pub releases: Vec<ReleaseRow>,

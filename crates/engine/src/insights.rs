@@ -29,6 +29,12 @@ pub struct Insight {
     pub score: f64,
     /// Feature, role or release the card is about.
     pub subject: String,
+    /// The card's number for a tag on the board's Features table (#618):
+    /// a stick driver's retention lift (none when nobody without the
+    /// feature stays), a churn point's share of the churned users, a
+    /// blind spot role's adoption, a friction card's finish rate.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub figure: Option<f64>,
 }
 
 /// Why the board has no (or few) insights yet.
@@ -231,6 +237,7 @@ pub(crate) async fn compute(
                     ),
                     score: (ra - rb) * (with.min(without) as f64).sqrt() * 2.0,
                     subject: feat.clone(),
+                    figure: (rb > 0.0).then(|| ra / rb),
                 });
                 // Value moment: the repetition threshold with the best gap.
                 let mut best: Option<(i64, f64, f64, i64)> = None;
@@ -261,6 +268,7 @@ pub(crate) async fn compute(
                         ),
                         score: (a - b) * (wk as f64).sqrt() * 2.2,
                         subject: feat.clone(),
+                        figure: None,
                     });
                 }
             }
@@ -296,6 +304,7 @@ pub(crate) async fn compute(
                 ),
                 score: share * (n_churned as f64).sqrt() * 1.8,
                 subject: place,
+                figure: Some(share),
             });
         }
     }
@@ -342,6 +351,7 @@ pub(crate) async fn compute(
                     next_step: format!("Do {role}s need {feat}? If yes, surface it in their screens; if no, hide it for them."),
                     score: (theirs - mine) * (*n as f64).sqrt() * 1.2,
                     subject: format!("{role}:{feat}"),
+                    figure: Some(mine),
                 });
             }
         }
@@ -379,6 +389,7 @@ pub(crate) async fn compute(
                 ),
                 score: (rn - ro) * (int(new, "sessions") as f64).sqrt() * 2.5,
                 subject: name,
+                figure: None,
             });
         }
     }
@@ -407,6 +418,7 @@ pub(crate) async fn compute(
                     ),
                     score: (1.0 - rate) * (started as f64).sqrt(),
                     subject: feat,
+                    figure: Some(rate),
                 });
             }
         }
@@ -450,6 +462,7 @@ pub(crate) fn slow_pages(vitals: &[crate::Vital], why: &[crate::VitalReport]) ->
         next_step: format!("{first}{worst}"),
         score: (v.samples as f64).sqrt() * 0.5,
         subject: v.name.clone(),
+        figure: None,
     })
 }
 
@@ -697,6 +710,7 @@ pub(crate) fn flag_cards(cohorts: &[FlagCohort]) -> Vec<Insight> {
                 ),
                 score: (w.error_rate - o.error_rate) * (w.sessions as f64).sqrt() * 2.5,
                 subject: c.flag.clone(),
+                figure: None,
             });
         } else if o.tasks_per_session > 0.0
             && w.tasks_per_session > o.tasks_per_session * 1.2
@@ -720,6 +734,7 @@ pub(crate) fn flag_cards(cohorts: &[FlagCohort]) -> Vec<Insight> {
                 next_step: format!("Widen the {} rollout and keep watching errors.", c.flag),
                 score: (w.tasks_per_session / o.tasks_per_session - 1.0) * (w.users as f64).sqrt(),
                 subject: c.flag.clone(),
+                figure: None,
             });
         }
     }
@@ -860,6 +875,7 @@ pub(crate) fn funnel_cards(funnels: &[Funnel]) -> Vec<Insight> {
                 next_step: format!("Look at the {from} → {to} step of {}: what is missing, slow or confusing there?", fun.feature),
                 score: drop * (base as f64).sqrt() * 1.4,
                 subject: format!("{}:{to}", fun.feature),
+                figure: None,
             });
         }
     }

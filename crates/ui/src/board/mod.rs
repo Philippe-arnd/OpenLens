@@ -1,9 +1,9 @@
 //! The Focus board (#543: the v2 layout) and its sections.
 //!
 //! `now`: the status strip, "Production right now" (#614); `focus`: what
-//! to focus on (the lead insight, the ranked list); `tiles`: the key
-//! numbers; `charts`: active users per day, the feature pulse, the
-//! retention line, who uses what and the release comparison;
+//! to focus on (the lead insight, the ranked list); `tiles`: the
+//! outcomes (#616); `charts`: active users per day, the retention line
+//! and the release comparison; `features`: the Features table (#618);
 //! `sections`: the other cards (Web Vitals, revenue, role gaps, funnels,
 //! flags, paths to value), closed disclosures after the release
 //! comparison (#588).
@@ -11,6 +11,7 @@
 use crate::*;
 
 mod charts;
+mod features;
 mod focus;
 mod in_flight;
 mod lead;
@@ -50,8 +51,9 @@ pub fn board_shell(p: &ProjectInfo<'_>, wait: Option<u64>) -> Markup {
 }
 
 /// The Focus board (#543, #588): the page head, the status strip
-/// (#614), what to focus on, the key numbers, active users and the
-/// feature pulse side by side, the retention line (#619) and the release
+/// (#614), what to focus on, the outcomes (#616), active users and in
+/// flight side by side, the Features table (#618), the retention line
+/// (#619) and the release
 /// comparison (closed), then the other cards as closed disclosures. `plain`: optional plain-language `(title, next step)` per
 /// insight (same order), shown instead of the original, which stays as
 /// the tooltip.
@@ -97,16 +99,15 @@ pub fn board(
                 }
                 (now::strip(p.id, f, b))
                 (focus::focus(p.id, f, b, plain))
-                (tiles::key_numbers(p.id, f, b))
+                (tiles::outcomes(p.id, f, b, revenue))
                 div.split {
                     (charts::active_users(p.id, f, b, marks))
                     (in_flight::in_flight(p.id, b))
-                    (charts::feature_pulse(p.id, f, b))
                 }
+                (features::features(p.id, f, b))
                 (charts::retention_line(p.id, f, b))
                 (charts::releases(p.id, f, b))
                 (sections::others(p.id, f, b, revenue))
-                (charts::role_matrix(p.id, f, b))
                 (sections::funnels(p.id, f, b))
                 (sections::flags(p.id, f, b))
                 (sections::journeys(p.id, f, b))
@@ -143,7 +144,7 @@ pub(crate) fn days_before(w: &openlens_engine::BoardWindow) -> String {
 
 /// The page head's one line (#588): the window and what it is compared
 /// with (D-055), or what the board reads without one. The numbers are in
-/// the key numbers and the active users card, not repeated here.
+/// the outcomes and the active users card, not repeated here.
 fn subtitle(b: &Board, f: &Filters, scope: &str) -> Markup {
     match &b.window {
         Some(w) => html! {
@@ -175,5 +176,7 @@ pub(crate) fn window_users(w: &openlens_engine::BoardWindow) -> String {
     )
 }
 
+#[cfg(test)]
+mod outcomes_tests;
 #[cfg(test)]
 mod tests;

@@ -22,10 +22,11 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Map drift | Routes new in the latest release that no feature of the map claims |
 | Counted with | On a feature's releases: the map version in force when the release came out |
 | Production right now | The status strip at the top of the board: the app, the latest release's verdict, open incidents and the setup left, each in a word |
+| Outcomes | On the board: one tile per question (Reach, Value, Retention, Quality, Speed, and Income when there is revenue), each with what it compares with |
 | Period picker | On the board: the form that picks a past release or a date range for the period blocks |
 | Board job | A long period of the board computed in the background after *Run it*: its own page, progress and Cancel, kept an hour for whoever started it |
-| Feature pulse | Per feature: adoption, uses per user, active days, completion and task time |
-| Who uses what | The roles × features grid: the share of each role's users who used each feature |
+| Features (board) | One row per feature: adoption, users, completion, uses per user, a mini bar per role and its signals; the unused features too (#618) |
+| Signals | On a feature's row: short tags taken from the board's insights (stick driver, churn exit, a role at 0%, finish rate) and "not used" |
 | Do they come back? | Weekly retention cohorts |
 | Came back | Resurrected users: active again after a gap longer than the churn window |
 | Why and what to do | Under a Web Vital that is not good: its worst pages, the likely cause and what to fix first |

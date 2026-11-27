@@ -247,6 +247,7 @@ mod tests {
                 next_step: String::new(),
                 score: 1.0,
                 subject: "billing".into(),
+                figure: None,
             }],
             ..Board::default()
         };

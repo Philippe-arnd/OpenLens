@@ -980,6 +980,7 @@
   a.card.kpi:hover { text-decoration: none; border-color: color-mix(in oklab, var(--accent) 35%, var(--line)); }
   a.card.kpi:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .kpi-head { display: flex; align-items: center; min-height: 24px; padding-right: 28px; color: var(--muted); font-size: 13px; }
+  .kpi-head .eyebrow { display: block; margin: 0 0 2px; font-size: 11px; }
   .kpi-mid { display: flex; align-items: end; justify-content: space-between; gap: 8px; }
   .kpi-value { font-size: 30px; font-weight: 600; letter-spacing: -.03em; line-height: 1; font-variant-numeric: tabular-nums; color: var(--ink); }
   .kpi-value small { margin-left: 6px; font-size: 14px; font-weight: 500; letter-spacing: 0; color: var(--muted); }
@@ -990,7 +991,6 @@
   .delta .icon { width: 13px; height: 13px; }
   .kpi.is-alert { border-color: color-mix(in oklab, var(--bad) 45%, var(--line)); }
   .kpi.is-alert .kpi-value { color: var(--bad); }
-  .kpi .spark { flex: none; display: block; width: 84px; height: 28px; color: var(--accent); }
   .kpi-slot > .info { position: absolute; top: 14px; right: 12px; z-index: 1; display: inline-grid; place-items: center;
     width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: help; }
   .kpi-slot > .info:hover { transform: none; background: var(--line-2); color: var(--ink); }
@@ -999,14 +999,14 @@
     border-radius: var(--r-s); background: var(--surface); color: var(--ink); font-size: 12.5px; line-height: 1.45;
     box-shadow: var(--shadow), 0 12px 32px -12px color-mix(in oklab, var(--ink) 30%, transparent); }
   /* Each ⓘ anchors its own popover (ids: the CSP forbids style=). */
-  #kpi-daily-active-users-btn { anchor-name: --kpi-daily-active-users; }
-  #kpi-daily-active-users { position-anchor: --kpi-daily-active-users; }
-  #kpi-stickiness-btn { anchor-name: --kpi-stickiness; }
-  #kpi-stickiness { position-anchor: --kpi-stickiness; }
-  #kpi-avg-session-btn { anchor-name: --kpi-avg-session; }
-  #kpi-avg-session { position-anchor: --kpi-avg-session; }
-  #kpi-tasks-per-user-per-day-btn { anchor-name: --kpi-tasks-per-user-per-day; }
-  #kpi-tasks-per-user-per-day { position-anchor: --kpi-tasks-per-user-per-day; }
+  #kpi-active-users-btn { anchor-name: --kpi-active-users; }
+  #kpi-active-users { position-anchor: --kpi-active-users; }
+  #kpi-tasks-per-session-btn { anchor-name: --kpi-tasks-per-session; }
+  #kpi-tasks-per-session { position-anchor: --kpi-tasks-per-session; }
+  #kpi-largest-paint-p75-btn { anchor-name: --kpi-largest-paint-p75; }
+  #kpi-largest-paint-p75 { position-anchor: --kpi-largest-paint-p75; }
+  #kpi-revenue-btn { anchor-name: --kpi-revenue; }
+  #kpi-revenue { position-anchor: --kpi-revenue; }
   #kpi-sessions-with-errors-btn { anchor-name: --kpi-sessions-with-errors; }
   #kpi-sessions-with-errors { position-anchor: --kpi-sessions-with-errors; }
   @supports (position-area: block-end) {
@@ -1039,10 +1039,10 @@
   .barcell svg { flex: 1; display: block; min-width: 60px; height: 6px; }
   .barcell .bg { fill: var(--line-2); } .barcell .fg { fill: var(--accent); }
   .barcell .num { min-width: 3.5em; }
-  tr.dim th, tr.dim td { color: var(--muted); }
+  .rolebar { display: block; } .rolebar rect { fill: var(--accent); } .rolebar .z { fill: var(--bad); }
   .journeys .arrow { color: var(--muted); }
 
-  /* Cohorts and who uses what: the share printed, the shade by tenths. */
+  /* Cohorts: the share printed, the shade by tenths. */
   .heat th.c { text-align: center; }
   .heat td.c { padding: 2px; text-align: center; border-bottom: 0; }
   .heat .hc { display: block; padding: 8px 4px; border-radius: 6px; font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--ink); }
@@ -1144,9 +1144,6 @@
       transform-box: fill-box; transform-origin: left; animation: grow-x 700ms 200ms var(--ease-out) both;
     }
     @keyframes grow-x { from { scale: 0 1; } }
-
-    .kpi .spark polyline { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 900ms 250ms var(--ease-out) forwards; }
-    @keyframes draw { to { stroke-dashoffset: 0; } }
 
     .heat .hc { animation: fade 500ms var(--ease-out) both; }
     .heat tbody tr:nth-child(2) .hc { animation-delay: 60ms; } .heat tbody tr:nth-child(3) .hc { animation-delay: 120ms; }
@@ -1444,9 +1441,9 @@
      the signals and the page head as one group (16px). */
   .board { gap: 32px; padding-top: 12px; }
   .board > .signals + .page-head { margin-top: -16px; }
-  /* The lead and the ranked list, the chart and the pulse: equal heights. */
+  /* The lead and the ranked list, the chart and in flight: equal heights. */
   .board .focus-grid, .board > .split { align-items: stretch; }
-  /* The pulse's adoption bar takes the room of the columns it lost. */
+  /* Features and funnels: the adoption bar takes the room. */
   table.pulse td.adopt { width: 40%; }
   /* The secondary cards after the release comparison: quieter summaries. */
   .disclose.secondary summary { padding-block: 14px; }

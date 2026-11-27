@@ -92,7 +92,7 @@ async fn a_board_job_runs_in_the_background_and_shows_its_board() {
     let page = location(&r);
     assert!(page.starts_with("/p/default/board/jobs/"), "{page}");
     let html = settled(&h, &page, &owner).await;
-    assert!(html.contains("Daily active users"), "{html}");
+    assert!(html.contains(r#"id="out-h""#), "{html}");
 }
 
 #[tokio::test]
@@ -150,9 +150,9 @@ async fn a_board_job_is_its_starters_alone_limited_and_cancellable() {
     assert!(r.status().is_redirection());
     drop(quiet);
     let html = settled(&h, &bobs, &bob).await;
-    assert!(html.contains("Daily active users"), "{html}");
+    assert!(html.contains(r#"id="out-h""#), "{html}");
     let html = settled(&h, &anas, &ana).await;
-    assert!(html.contains("Daily active users"), "{html}");
+    assert!(html.contains(r#"id="out-h""#), "{html}");
     let html = settled(&h, &mine, &owner).await;
     assert!(html.contains("Cancelled"), "{html}");
     let mine_id = mine.rsplit('/').next().unwrap();

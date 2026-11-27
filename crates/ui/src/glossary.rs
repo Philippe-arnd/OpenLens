@@ -8,24 +8,24 @@ use maud::{Markup, html};
 /// *Revenue*) are matched on the text before ` (`.
 pub(crate) const KPI: &[(&str, &str)] = &[
     (
-        "Daily active users",
-        "Distinct identified users with at least one event today, in your time zone. Robots and, unless ticked, the team are left out.",
+        "Active users",
+        "Distinct identified users with at least one event over the board's period: since the current release (90 days at most; the last 14 days without a release), or the last 30 days on a shared board or one release. Known users: identified users seen in the last 90 days. Today, so far: users with an event today. Robots and, unless ticked, the team are left out.",
     ),
     (
         "Stickiness",
         "Daily active users ÷ monthly active users (last 30 days). Higher means people come back more often.",
     ),
     (
-        "Avg session",
-        "Mean session length over the board's period: since the current release (90 days at most; the last 14 days without a release), or the last 7 days on a shared board. A session ends after 30 minutes without an event. Bounce = sessions with a single page view.",
-    ),
-    (
-        "Tasks per user per day",
-        "Feature uses per active user per day, over the board's period (since the current release, or the last 7 days).",
+        "Tasks per session",
+        "Completed tasks (success events of the feature map, else feature uses) per session over the board's period (since the current release, or the last 7 days), against the previous release's sessions, else the period before.",
     ),
     (
         "Sessions with errors",
         "Share of the board's period's sessions (since the current release, or the last 7 days) with at least one captured error.",
+    ),
+    (
+        "Largest paint p75",
+        "Largest Contentful Paint at the 75th percentile, last 7 days: how long until the main content is on screen. Good up to 2.5 s, poor over 4 s (the public thresholds).",
     ),
     (
         "Changes that moved their metric",
@@ -469,7 +469,7 @@ mod tests {
                     );
                 }
             }
-            // (kpi_to(&detail_url(.., "/path", f), "Label", Kpi { … }, alert)): the board (#543)
+            // (kpi_to(&detail_url(.., "/path", f), "Label", "Question", k, alert)): the board (#543, #616)
             for call in src.split("(kpi_to(").skip(1) {
                 let label = call
                     .split('"')
