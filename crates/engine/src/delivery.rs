@@ -24,7 +24,8 @@ use openlens_query::QueryEngine;
 use serde::Serialize;
 
 use crate::deploys::{self, Seen, Status};
-use crate::releases::{LIVE_SHARE, PRODUCTION, STAGING, WINDOW_DAYS};
+use crate::releases::{LIVE_SHARE, PRODUCTION, Release, STAGING, WINDOW_DAYS};
+use crate::verdict::Verdict;
 use crate::{EngineError, Filters, Result, float, int, text};
 
 /// The default period, in days, and the longest: release traffic is read
@@ -313,6 +314,18 @@ pub fn metrics(
     }
 }
 
+/// The (environment, release) pairs judged *regressed* among `releases`,
+/// as `releases.list` judged them (one environment at a time: the others
+/// have no verdict).
+#[must_use]
+pub fn regressed(releases: &[Release]) -> HashSet<(String, String)> {
+    releases
+        .iter()
+        .filter(|r| r.verdict == Some(Verdict::Regressed))
+        .map(|r| (r.environment.clone(), r.release.clone()))
+        .collect()
+}
+
 /// Mark the changes of `env` whose release was judged regressed as failed.
 fn with_verdicts(changes: &mut [Change], env: &str, known: &Known) {
     for c in changes.iter_mut() {
@@ -559,6 +572,57 @@ mod tests {
         assert_eq!(m.lead_time_samples, 1);
         assert!(m.lead_time_secs > Some(0));
         assert!(m.lead_time_note.is_none());
+    }
+
+    fn judged(env: &str, release: &str, verdict: Option<Verdict>) -> Release {
+        Release {
+            release: release.into(),
+            environment: env.into(),
+            state: crate::releases::State::Superseded,
+            share: 0.0,
+            first_seen: String::new(),
+            last_seen: String::new(),
+            users: 1,
+            events: 1,
+            staging_secs: None,
+            staged_as: None,
+            deployed_at: None,
+            deploy: None,
+            verdict,
+            reasons: Vec::new(),
+        }
+    }
+
+    /// #611: v1 and v2 reached live and both were judged regressed by
+    /// `releases.list`; Delivery showed 0 failed of 2.
+    #[test]
+    fn releases_judged_regressed_fail_their_changes() {
+        let mut per_env = HashMap::new();
+        per_env.insert(
+            PRODUCTION.to_owned(),
+            days(&[&[("v1", 100)], &[("v1", 1), ("v2", 99)]]),
+        );
+        let listed = [
+            judged(PRODUCTION, "v1", Some(Verdict::Regressed)),
+            judged(PRODUCTION, "v2", Some(Verdict::Regressed)),
+            // Another environment's verdict does not fail production's
+            // change of the same name.
+            judged(STAGING, "v3", Some(Verdict::Regressed)),
+            judged(PRODUCTION, "v3", Some(Verdict::Healthy)),
+        ];
+        let known = Known {
+            regressed: regressed(&listed),
+            ..Known::default()
+        };
+        let before = assemble(&per_env, &[], None, (0, 7), "UTC", &Known::default());
+        let after = assemble(&per_env, &[], None, (0, 7), "UTC", &known);
+        let (b, a) = (&before.environments[0], &after.environments[0]);
+        assert!(a.changes > 0);
+        assert_eq!(a.changes, b.changes, "a verdict adds no change");
+        assert!(a.failures > b.failures, "regressed releases fail");
+        assert_eq!(a.failures, a.changes, "every change here was regressed");
+        assert!(a.change_failure_rate > b.change_failure_rate);
+        assert!(!known.regressed.contains(&(PRODUCTION.to_owned(), "v3".to_owned())));
     }
 
     #[test]

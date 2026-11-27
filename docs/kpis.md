@@ -111,7 +111,7 @@ How a project ships, per environment, over a period (the last 90 days by default
 | --- | --- |
 | **Deploy frequency** | Changes shipped per week: succeeded deploys, or releases that reached live or were rolled back. |
 | **Lead time** | Median time from a release's first commit to live (its succeeded deploy, or its first day at 95 %). Needs the commit range `openlens-cli release` records; until it is recorded, lead time is reported *unknown*, with why. |
-| **Change failure rate** | Failed changes ÷ changes. A change fails when its deploy fails, a later deploy reports a rollback, an older release takes the users back (rolled back), or its release's verdict is *regressed*. |
+| **Change failure rate** | Failed changes ÷ changes. A change fails when its deploy fails, a later deploy reports a rollback, an older release takes the users back (rolled back), or its release's verdict is *regressed*. Verdicts are those of the Releases list, judged in one environment at a time: the environment asked for, else production. |
 | **Time to restore** | Median time from a failed change to the rollback that put the previous release back, else to the next shipped change that did not fail. Failures with neither are counted as *not restored yet*. |
 
 ## Where they show up

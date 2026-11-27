@@ -16,7 +16,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use openlens_engine::commands::delivery::{DeliveryInput, GetDelivery};
+use openlens_engine::commands::delivery::{DeliveryInput, with_releases};
 use openlens_engine::commands::deploys::{
     ProjectInput, RecordRelease, RecordReleaseInput, RotateHook,
 };
@@ -80,20 +80,17 @@ async fn render(
         project: p.id.clone(),
         environment: env.clone(),
     };
-    // The delivery card (#523), read alongside: left out when it cannot
+    // The delivery card (#523), read from the same list so the verdicts
+    // that fail its changes (#611) are read once: left out when it cannot
     // be computed.
     let delivery = DeliveryInput {
         project: p.id.clone(),
         environment: env,
         days: None,
     };
-    let (listed, delivery) = tokio::join!(
-        List::run(state, &caller, input),
-        GetDelivery::run(state, &caller, delivery)
-    );
-    let delivery = delivery.ok();
-    match listed {
+    match List::run(state, &caller, input).await {
         Ok(r) => {
+            let delivery = with_releases(state, &caller, delivery, &r).await.ok();
             let info = openlens_ui::ProjectInfo {
                 id: &p.id,
                 name: &p.name,
