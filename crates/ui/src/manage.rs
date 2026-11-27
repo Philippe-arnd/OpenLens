@@ -464,45 +464,24 @@ pub fn errors(
                 .render())
             }
             @if let Some(r) = routes.filter(|r| !r.routes.is_empty()) {
-                (server_routes(r))
+                (server_routes(p.id, r))
             }
         },
     )
 }
 
-/// The server routes of the Errors page (#594): `routes.list`, worst 5xx
-/// share first among the routes with traffic.
-fn server_routes(r: &openlens_engine::commands::routes::Routes) -> Markup {
-    let mut rows: Vec<&openlens_engine::commands::routes::Route> = r.routes.iter().collect();
-    rows.sort_by(|a, b| {
-        b.error_rate
-            .total_cmp(&a.error_rate)
-            .then(b.stat.requests.cmp(&a.stat.requests))
-    });
+/// The server routes on the Errors page (#594): one line and a link, the
+/// table lives on Quality › Routes (#622).
+fn server_routes(pid: &str, r: &openlens_engine::commands::routes::Routes) -> Markup {
     html! {
-        (crate::tables::TableCard {
-            label: "Server routes",
-            head: html! {},
-            cols: &[
-                Col::Shown("Route"), Col::Num("Requests"), Col::Num("5xx"), Col::Num("p50"),
-                Col::Num("p95"), Col::Num("Slowest"),
-            ],
-            body: html! { @for x in rows.iter().take(50) {
-                tr {
-                    th scope="row" {
-                        span.mono { (x.stat.method) " " (x.stat.route) }
-                        @if let Some(k) = &x.stat.key_of { br; span.small.muted { "Key action of " (k) } }
-                    }
-                    td.num { (compact(x.stat.requests)) }
-                    td.num { @if x.stat.errors > 0 { strong { (format!("{:.1} %", x.error_rate * 100.0)) } } @else { span.muted { "0 %" } } }
-                    td.num { (format!("{:.0} ms", x.p50_ms)) }
-                    td.num { (format!("{:.0} ms", x.p95_ms)) }
-                    td.num.muted { (format!("{} ms", x.stat.max_ms)) }
-                }
-            } },
-            foot: html! { div.pager { span { (r.routes.len()) " routes · " (r.environment) " · last " (r.days) " days · worst 5xx first" } } },
-        }
-        .render())
+        section.card { p {
+            (icon("route")) " Server: " strong { (pct(r.errors as f64 / r.requests.max(1) as f64)) }
+            " of " (compact(r.requests)) " requests answered 5xx over the last " (r.days) " days"
+            @if r.worse > 0 {
+                ", " strong { (r.worse) } " " (if r.worse == 1 { "route" } else { "routes" }) " worse than the release before"
+            }
+            ". " a href={ "/p/" (pid) "/routes" } { "Routes →" }
+        } }
     }
 }
 
