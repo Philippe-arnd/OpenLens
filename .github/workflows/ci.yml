@@ -97,7 +97,7 @@ jobs:
           npm ci
           npm run build
           npm run check
-          git diff --exit-code -- dist || (echo "::error::sdk/js/dist is stale: run npm run build and commit"; exit 1)
+          git diff --exit-code -- dist || (echo "::error::sdk/js/dist is stale: the SDK bundle workflow commits it to this branch (or run npm run build and commit)"; exit 1)
       - name: server SDKs (Node, Python, Go, Ruby, PHP; the runner's toolchains)
         run: |
           (cd sdk/node && npm test)
