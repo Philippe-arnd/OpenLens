@@ -181,7 +181,7 @@ pub(crate) fn map_health(pid: &str, h: &openlens_engine::MapHealth) -> Markup {
                     div.card.ranked.findings {
                         ol {
                             @for (i, f) in h.findings.iter().enumerate() {
-                                li.row id=[f.feature.as_deref().map(|k| finding_anchor(&f.kind, Some(k)))] {
+                                li.row id=[f.feature.as_deref().map(|k| finding_anchor(f.kind, Some(k)))] {
                                     span.rank aria-hidden="true" { (format!("{:02}", i + 1)) }
                                     div {
                                         h3 { span.sr-only { "Finding " (i + 1) ": " } (f.message) }
