@@ -393,6 +393,15 @@ pub struct FeatureUse {
     pub declared: bool,
 }
 
+impl FeatureUse {
+    /// Its success event probably fires on entry (the map health
+    /// finding `success_always`, #612).
+    #[must_use]
+    pub fn success_on_entry(&self) -> bool {
+        self.declared && maphealth::success_on_entry(self.users, self.completed_users)
+    }
+}
+
 /// Users per role.
 #[derive(Debug, Clone, Serialize)]
 pub struct RoleUsers {
@@ -488,6 +497,26 @@ pub struct Board {
     /// their events are gone (cold tier, retention) and their rollups were
     /// not made with the map in force, so they count nobody. Oldest first.
     pub unavailable_days: Vec<String>,
+}
+
+impl Board {
+    /// A feature's task time, when it measures one (#612): none when its
+    /// success event fires on entry (every user reaches it, or the median
+    /// task lasts no time at all), since the time from entry to success
+    /// is then not a task.
+    #[must_use]
+    pub fn task_time(&self, feature: &str) -> Option<&TaskTime> {
+        if self
+            .features
+            .iter()
+            .any(|x| x.key == feature && x.success_on_entry())
+        {
+            return None;
+        }
+        self.task_times
+            .iter()
+            .find(|t| t.feature == feature && t.median_secs > 0.0)
+    }
 }
 
 fn int(row: &Map<String, Value>, k: &str) -> i64 {
