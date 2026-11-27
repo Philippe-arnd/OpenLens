@@ -398,7 +398,7 @@ pub fn hostile_otlp_bodies() -> Vec<(&'static str, Vec<u8>)> {
 /// Hostile exemplars (#607): each body is a valid export whose exemplars
 /// are not. Every one must be accepted (exemplars never refuse a point),
 /// with what is stored bounded: no huge value, no attribute but the
-/// session and user, no invalid trace id.
+/// session (the `user.id` sent must be dropped), no invalid trace id.
 pub fn hostile_exemplar_bodies() -> Vec<(&'static str, Vec<u8>)> {
     const PB: &str = "application/x-protobuf";
     const JS: &str = "application/json";

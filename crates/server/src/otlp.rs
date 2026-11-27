@@ -29,9 +29,10 @@
 //! - **Exemplars** (#607, D-089): of each accepted point, the slowest
 //!   exemplar and, for a 5xx point, the first, stored as the Node SDK's
 //!   `exemplars`: value in seconds, time, trace id as hex, and of the
-//!   filtered attributes only `session.id` and `user.id` (`enduser.id`
-//!   read as `user.id`). Every other attribute is dropped; an invalid
-//!   trace id or session is left out, never a refusal.
+//!   filtered attributes only `session.id`. Every other attribute,
+//!   `user.id` and `enduser.id` included, is dropped: an exemplar keeps the
+//!   session, never the user. An invalid trace id or session is left out,
+//!   never a refusal.
 //! - **Safety:** the project key (`x-openlens-key` or `Authorization:
 //!   Bearer`), the per-client and per-key limits of `/capture` (a data
 //!   point costs one event), the disk check, a 4 MB body before and after
@@ -49,9 +50,7 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use chrono::{DateTime, Utc};
-use openlens_engine::routes::{
-    BOUNDS_MS, BUCKETS, MAX_EXEMPLAR_S, MAX_EXEMPLAR_USER, valid_session, valid_trace_id,
-};
+use openlens_engine::routes::{BOUNDS_MS, BUCKETS, MAX_EXEMPLAR_S, valid_session, valid_trace_id};
 use openlens_event::{CaptureBatch, RawEvent, limits, names, normalize_batch};
 use prost::Message;
 use serde_json::{Map, Value, json};
@@ -207,7 +206,9 @@ struct Sample {
     exemplars: Vec<Ex>,
 }
 
-/// One exemplar kept (#607, D-089): nothing else of the request.
+/// One exemplar kept (#607, D-089): nothing else of the request, and never
+/// the user (`$request_stats` belongs to `$server`, so erasing a person
+/// would not reach a user id kept here; the session is erased with them).
 #[derive(Clone, PartialEq)]
 struct Ex {
     /// Seconds.
@@ -216,7 +217,6 @@ struct Ex {
     time: u64,
     trace_id: Option<String>,
     session: Option<String>,
-    user: Option<String>,
 }
 
 /// The exemplars of a point kept (#607): its slowest and, when the point
@@ -245,10 +245,6 @@ fn exemplars(p: &wire::HistogramDataPoint, factor: f64, status: i64) -> Vec<Ex> 
             },
             trace_id,
             session: attr(&e.filtered_attributes, "session.id").filter(|s| valid_session(s)),
-            user: attr(&e.filtered_attributes, "user.id")
-                .or_else(|| attr(&e.filtered_attributes, "enduser.id"))
-                .map(|u| u.trim().chars().take(MAX_EXEMPLAR_USER).collect::<String>())
-                .filter(|u| !u.is_empty()),
         };
         if slowest.as_ref().is_none_or(|s| ex.secs > s.secs) {
             slowest = Some(ex.clone());
@@ -806,9 +802,6 @@ fn exemplars_json(list: &[Ex]) -> Vec<Value> {
             if let Some(s) = &e.session {
                 a.insert("session.id".into(), json!(s));
             }
-            if let Some(u) = &e.user {
-                a.insert("user.id".into(), json!(u));
-            }
             if !a.is_empty() {
                 x.insert("filtered_attributes".into(), Value::Object(a));
             }
@@ -1108,7 +1101,7 @@ mod tests {
     }
 
     #[test]
-    fn a_point_keeps_its_slowest_exemplar_and_first_5xx_and_only_the_session_and_user() {
+    fn a_point_keeps_its_slowest_exemplar_and_first_5xx_and_only_the_session() {
         let p = wire::HistogramDataPoint {
             time_unix_nano: 100,
             exemplars: vec![
@@ -1155,6 +1148,7 @@ mod tests {
                         kv("session.id", "s1"),
                         kv("http.url", "/x?token=secret"),
                         kv("enduser.id", "u1"),
+                        kv("user.id", "u2"),
                     ],
                 )],
                 ..wire::HistogramDataPoint::default()
@@ -1163,10 +1157,14 @@ mod tests {
             200,
         ));
         let text = serde_json::to_string(&all).unwrap();
-        assert!(text.contains("s1") && text.contains("u1") && text.contains(&"ab".repeat(16)));
+        assert!(text.contains("s1") && text.contains(&"ab".repeat(16)));
         assert!(
             !text.contains("secret") && !text.contains("http.url"),
             "other attributes are dropped"
+        );
+        assert!(
+            !text.contains("u1") && !text.contains("u2") && !text.contains("user"),
+            "an exemplar keeps the session, never the user"
         );
     }
 

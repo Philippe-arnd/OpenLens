@@ -564,7 +564,7 @@ async fn hostile_otlp_bodies_get_a_400_not_a_crash() {
 }
 
 #[tokio::test]
-async fn exemplars_keep_the_slowest_and_first_5xx_with_only_the_session_and_user() {
+async fn exemplars_keep_the_slowest_and_first_5xx_with_the_session_never_the_user() {
     let h = harness();
     let t0 = now_ns();
     let attr = |k: &str, v: &str| serde_json::json!({ "key": k, "value": { "stringValue": v } });
@@ -646,7 +646,7 @@ async fn exemplars_keep_the_slowest_and_first_5xx_with_only_the_session_and_user
     let r = &routes(&h, "production").await["GET /api/report"];
     let slowest = &r["slowest"];
     assert_eq!(slowest["session_id"], "slow-session");
-    assert_eq!(slowest["user"], "u42");
+    assert!(slowest.get("user").is_none(), "user.id is never kept");
     assert_eq!(slowest["trace_id"], trace);
     assert!(
         slowest["ms"].as_f64().unwrap() > 1000.0,
@@ -654,14 +654,14 @@ async fn exemplars_keep_the_slowest_and_first_5xx_with_only_the_session_and_user
     );
     let first = &r["first_5xx"];
     assert_eq!(first["session_id"], "first-5xx");
-    assert_eq!(first["user"], "u9", "enduser.id reads as the user");
+    assert!(first.get("user").is_none(), "enduser.id is never kept");
     assert_eq!(first["status"], 503);
     assert!(
         first.get("trace_id").is_none(),
         "an invalid trace id is left out"
     );
 
-    // At most two exemplars per point, nothing but the session and user.
+    // At most two exemplars per point, nothing but the session: never a user.
     let s = h.state.clone();
     let rows = s
         .query
@@ -677,6 +677,15 @@ async fn exemplars_keep_the_slowest_and_first_5xx_with_only_the_session_and_user
         assert!(!list.is_empty() && list.len() <= 2);
         let text = p.to_string();
         assert!(!text.contains("secret") && !text.contains("spanId") && !text.contains("\"fast\""));
+        assert!(
+            !text.contains("u42") && !text.contains("u9") && !text.contains("user.id"),
+            "a user.id or enduser.id sent in an exemplar is never stored"
+        );
+        for e in list {
+            if let Some(a) = e.get("filtered_attributes").and_then(|a| a.as_object()) {
+                assert!(a.keys().all(|k| k == "session.id"), "{a:?}");
+            }
+        }
     }
 }
 
@@ -716,6 +725,12 @@ async fn hostile_exemplars_are_accepted_bounded_and_never_stored_as_sent() {
             if let Some(t) = e.get("trace_id") {
                 let t = t.as_str().unwrap();
                 assert!(t.len() == 32 && t.bytes().any(|b| b != b'0'));
+            }
+            if let Some(a) = e.get("filtered_attributes").and_then(|a| a.as_object()) {
+                assert!(
+                    a.keys().all(|k| k == "session.id"),
+                    "the session only, never a user: {a:?}"
+                );
             }
         }
     }

@@ -200,6 +200,7 @@ fn window(uuid: u32, hours_ago: i64, status: i64, max: f64, session: &str) -> se
                 "value": max,
                 "time": (start + chrono::Duration::minutes(3)).to_rfc3339(),
                 "trace_id": "5b8efff798038103d269b633813fc60c",
+                // A user id sent anyway (an older SDK) is never read back (D-089).
                 "filtered_attributes": { "session.id": session, "user.id": "u1" },
             }],
         },
@@ -238,6 +239,11 @@ async fn the_routes_api_returns_the_slowest_request_and_first_5xx_of_the_period_
     assert_eq!(first["session_id"], "first-failure", "{route}");
     assert!(first["status"].as_i64().unwrap() >= 500);
     assert!(first["time"].as_str().unwrap() < slowest["time"].as_str().unwrap());
+    assert!(
+        slowest.get("user").is_none() && first.get("user").is_none(),
+        "an exemplar keeps the session, never the user"
+    );
+    assert!(!route.to_string().contains("\"u1\""));
 }
 
 fn runtime(uuid: u32, props: serde_json::Value) -> serde_json::Value {

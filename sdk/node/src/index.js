@@ -196,12 +196,12 @@ export class OpenLens {
 
   /**
    * Count one request in its route's stats (any framework). `route` is the
-   * route template (`/api/entries/:id`), never the raw URL. `traceId`,
-   * `sessionId` and `user` (a string, or a function called only when the
-   * request is kept) describe the request if it becomes an exemplar (#607):
-   * the slowest of its key's window, or the first answered 5xx.
+   * route template (`/api/entries/:id`), never the raw URL. `traceId` and
+   * `sessionId` describe the request if it becomes an exemplar (#607): the
+   * slowest of its key's window, or the first answered 5xx. An exemplar
+   * keeps the session, never the user (D-089).
    * @param {{ method: string, route: string, status: number, ms: number,
-   *   traceId?: string, sessionId?: string, user?: string | (() => unknown) }} r
+   *   traceId?: string, sessionId?: string }} r
    */
   recordRequest(r) {
     try {
@@ -271,7 +271,6 @@ export class OpenLens {
           ms,
           traceId: ctx.traceId,
           sessionId: ctx.sessionId,
-          user: ctx.user,
         });
       });
       next();
@@ -644,9 +643,11 @@ export function requestContext(headers) {
 
 /**
  * One exemplar (#607), in OpenTelemetry's shape: the duration (seconds),
- * when it ended, the trace id and, as filtered attributes, the session and
- * the user. Nothing else of the request is ever read: no body, header,
- * cookie, URL or query string.
+ * when it ended, the trace id and, as its only filtered attribute, the
+ * session. Never the user (D-089: `$request_stats` belongs to `$server`, so
+ * erasing a person would not reach a user id kept here; the session is
+ * erased with the person). Nothing else of the request is ever read: no
+ * body, header, cookie, URL or query string.
  */
 function exemplar(r, secs, now) {
   const ex = { value: secs, time: new Date(now).toISOString() };
@@ -655,15 +656,6 @@ function exemplar(r, secs, now) {
   const attrs = {};
   const sid = typeof r.sessionId === "string" ? r.sessionId : "";
   if (/^[A-Za-z0-9_-]{1,100}$/.test(sid)) attrs["session.id"] = sid;
-  let user = r.user;
-  if (typeof user === "function") {
-    try {
-      user = user();
-    } catch {
-      user = undefined;
-    }
-  }
-  if (user !== undefined && user !== null && user !== "") attrs["user.id"] = String(user).slice(0, 200);
   if (Object.keys(attrs).length > 0) ex.filtered_attributes = attrs;
   return ex;
 }

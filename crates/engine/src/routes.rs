@@ -86,7 +86,8 @@ pub struct RouteStat {
 }
 
 /// One real request behind a route's numbers (#607, D-089): what an
-/// exemplar holds once read, never a body, header, cookie or query string.
+/// exemplar holds once read, never a body, header, cookie or query string,
+/// and never the user (the session leads to them, and is erased with them).
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
 pub struct Exemplar {
     /// Its duration, ms.
@@ -101,15 +102,10 @@ pub struct Exemplar {
     /// The OpenLens session it belongs to, when known: its replay at `time`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
-    /// The user the app names (the SDK's `user` callback, `user.id`).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub user: Option<String>,
 }
 
 /// Exemplars read per data point at most.
 pub const MAX_POINT_EXEMPLARS: usize = 4;
-/// Longest user id kept, in characters.
-pub const MAX_EXEMPLAR_USER: usize = 200;
 /// Largest exemplar duration kept, seconds (a day): a bound, not a measure.
 pub const MAX_EXEMPLAR_S: f64 = 86_400.0;
 
@@ -132,8 +128,8 @@ pub fn valid_trace_id(s: &str) -> bool {
 
 /// The exemplars of a stored data point (its `properties` JSON) answered
 /// `status`: at most [`MAX_POINT_EXEMPLARS`], each bounded; one with no
-/// valid duration or time is skipped, an invalid trace id, session or user
-/// is left out.
+/// valid duration or time is skipped, an invalid trace id or session is
+/// left out. Any other attribute (a `user.id` included) is never read.
 #[must_use]
 pub fn exemplars_of(properties: &str, status: i64) -> Vec<Exemplar> {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(properties) else {
@@ -174,10 +170,6 @@ pub fn exemplars_of(properties: &str, status: i64) -> Vec<Exemplar> {
                 session_id: attr("session.id")
                     .filter(|s| valid_session(s))
                     .map(str::to_owned),
-                user: attr("user.id")
-                    .map(str::trim)
-                    .filter(|u| !u.is_empty())
-                    .map(|u| u.chars().take(MAX_EXEMPLAR_USER).collect()),
             })
         })
         .collect()
@@ -1020,6 +1012,11 @@ mod tests {
         assert_eq!(list.len(), 1);
         assert!(list[0].ms > 1000.0 && list[0].status == 503);
         assert!(list[0].trace_id.is_some() && list[0].session_id.is_some());
+        let shown = serde_json::to_string(&list[0]).unwrap();
+        assert!(
+            !shown.contains("u7") && !shown.contains("user"),
+            "a stored user.id is never read back"
+        );
         let hostile = format!(
             r#"{{"exemplars":[{{"value":1,"time":"2026-11-27T10:00:00Z","trace_id":"ZZ{z}","filtered_attributes":{{"session.id":"a b;c","user.id":"{u}"}}}},
             {{"value":-1,"time":"2026-11-27T10:00:00Z"}},{{"value":1e300,"time":"2026-11-27T10:00:00Z"}},
@@ -1031,12 +1028,6 @@ mod tests {
         assert!(list.len() <= MAX_POINT_EXEMPLARS);
         let first = &list[0];
         assert!(first.trace_id.is_none() && first.session_id.is_none());
-        assert!(
-            first
-                .user
-                .as_ref()
-                .is_some_and(|u| u.chars().count() <= MAX_EXEMPLAR_USER)
-        );
         assert!(
             list.iter()
                 .all(|e| e.ms >= 0.0 && e.ms <= MAX_EXEMPLAR_S * 1000.0)
