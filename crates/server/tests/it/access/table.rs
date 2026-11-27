@@ -115,6 +115,13 @@ pub(super) const ROUTES: &[(&str, &str, Access)] = &[
     ("GET", "/api/projects/{project}/incidents", Api),
     ("GET", "/api/projects/{project}/uptime/report", Api),
     ("PUT", "/api/projects/{project}/uptime/target", Api),
+    // Job check-ins (#609): the endpoint takes the project key.
+    ("POST", "/check-in/{key}/{slug}", Public),
+    ("POST", "/check-in/{slug}", Public),
+    ("GET", "/api/projects/{project}/jobs", Api),
+    ("PUT", "/api/projects/{project}/jobs/availability", Api),
+    ("DELETE", "/api/projects/{project}/jobs/{slug}", Api),
+    ("POST", "/api/projects/{project}/jobs/{slug}/check-in", Api),
     ("GET", "/api/projects/{project}/alerts", Api),
     ("PUT", "/api/projects/{project}/alerts", Api),
     ("POST", "/api/projects/{project}/alerts/test", Api),
@@ -235,6 +242,8 @@ pub(super) const ROUTES: &[(&str, &str, Access)] = &[
     ("GET", "/p/{project}/uptime", Read),
     ("POST", "/p/{project}/uptime/maintenance", Write),
     ("POST", "/p/{project}/uptime/target", Write),
+    ("POST", "/p/{project}/uptime/jobs/availability", Write),
+    ("POST", "/p/{project}/uptime/jobs/{slug}/remove", Write),
     (
         "POST",
         "/p/{project}/uptime/maintenance/{window}/{action}",

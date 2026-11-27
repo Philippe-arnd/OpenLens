@@ -139,6 +139,8 @@ pub struct Caches {
     /// apart from capture's so a flood of page views never slows
     /// ingestion.
     pub(crate) status_buckets: Mutex<crate::capture::Buckets>,
+    /// Job check-ins (#609): one token every 10 seconds per job.
+    pub(crate) check_in_buckets: Mutex<crate::capture::Buckets>,
     /// Public status pages as computed, per slug (30 seconds; cleared when
     /// a page's settings change).
     pub(crate) status_pages:
@@ -194,6 +196,7 @@ impl Default for Caches {
             key_buckets: Mutex::default(),
             hook_buckets: Mutex::default(),
             status_buckets: Mutex::default(),
+            check_in_buckets: Mutex::default(),
             status_pages: Bounded::new(crate::status_page::CACHED, crate::status_page::TTL),
             disk_logged: Mutex::default(),
             cookieless: Bounded::new(100_000, 30 * MIN),
@@ -229,6 +232,7 @@ impl Caches {
             ("key_buckets", n(buckets(&self.key_buckets))),
             ("hook_buckets", n(buckets(&self.hook_buckets))),
             ("status_buckets", n(buckets(&self.status_buckets))),
+            ("check_in_buckets", n(buckets(&self.check_in_buckets))),
             ("status_pages", n(self.status_pages.len())),
             ("cookieless", n(self.cookieless.len())),
             ("icons_in_flight", n(self.icons_in_flight.len())),

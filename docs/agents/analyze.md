@@ -35,6 +35,7 @@ Start from the summaries and drill down only where something stands out. Every t
 | Is the app up? Will alerts reach us? | `status` around a deploy; `alerts`: uptime, incidents, settings; `availability` for the SLA windows and the error budget, `uptime_days` for 90 days or a month by day, `incidents` for every incident, page by page | `alert_set { …, test: true }` |
 | Promise an availability (SLO) | `availability_target { target: 0.999 }`, then `availability`: budget spent and left, burn rate; alerts when spent or burning fast | `alert_set { budget_spent, budget_burn }` |
 | A deploy or migration will take the app down | `maintenance_set { action: schedule, minutes, text }` right before, `{ action: end, id }` after: no alert during it, not counted against availability | `maintenance` |
+| Did the cron and background jobs run? | `jobs`: per job its state (learning, ok, missed, failed, slower), last check-in, schedule (declared or learned) and usual time | `check_in { slug }`, `job_set { remove }` |
 | Anything else | `sql` (read-only DataFusion on `events`) | prune with `date >= 'YYYY-MM-DD'` |
 | Deep, offline analysis | `openlens-cli export --from --to --out events.jsonl` (raw events, day by day) | your own tools |
 

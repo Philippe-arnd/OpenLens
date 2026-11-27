@@ -13,6 +13,7 @@ mod announcements;
 mod audience;
 mod board;
 mod board_job;
+mod check_ins;
 mod components;
 mod cost;
 mod delivery;
@@ -50,6 +51,7 @@ pub use announcements::{
 pub use audience::*;
 pub use board::*;
 pub use board_job::{JobView, board_job};
+pub use check_ins::{CheckInRow, CheckInsView, check_ins_card};
 pub use components::*;
 pub use cost::board_confirm;
 pub use detail::Confirm;

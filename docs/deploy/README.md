@@ -138,6 +138,10 @@ status.example.com {
 
 With Nginx: `location = / { proxy_pass http://openlens:8686/status/my-app; }` and `location / { proxy_pass http://openlens:8686; }`. Only the status page and its assets need to be reachable on that host.
 
+## Job check-ins behind a proxy
+
+Cron and background jobs check in at `POST /check-in/<project-key>/<slug>` (or `POST /check-in/<slug>` with the key in `X-OpenLens-Key`, which the server SDKs use; see `sdk/SERVER.md`). OpenLens logs that path as `/check-in/<key>/<slug>`, never the key. A reverse proxy that writes access logs records the full path: either keep `/check-in/` out of its logs, or have scripts send the header form. The route takes no body and answers within 10 seconds.
+
 ## Environments
 
 Every event carries an environment, and the board shows production by default.

@@ -978,6 +978,7 @@ pub(crate) async fn uptime(
         days: days.days,
         notices: crate::announcements::section(&state, &p, &tz).await,
         availability: crate::slo::section(&state, &headers, &p).await,
+        jobs: crate::check_ins::section(&state, &headers, &p, &tz).await,
     };
     let info = openlens_ui::ProjectInfo {
         id: &p.id,

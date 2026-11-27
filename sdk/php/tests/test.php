@@ -40,6 +40,18 @@ check(preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a
 check($ol->isEnabled('beta', 'u1', ['role' => 'admin']), 'flag on for admin');
 check(!$ol->isEnabled('beta', 'u2', ['role' => 'member']), 'flag off for member');
 
+$ciErrors = [];
+$ci = new OpenLens("http://127.0.0.1:$port", 'pk_t', ['onError' => function (\Throwable $e) use (&$ciErrors): void {
+    $ciErrors[] = $e;
+}]);
+check($ci->checkIn('nightly-export', ['status' => 'error', 'ms' => 1234.4, 'expectEvery' => 86400]), 'check-in sent');
+$entries = array_map(fn ($l) => json_decode($l, true), array_values(array_filter(explode("\n", (string) file_get_contents($log)))));
+$checkIns = array_values(array_filter($entries, fn ($e) => isset($e['check_in'])));
+check(count($checkIns) === 1 && $checkIns[0]['key'] === 'pk_t', 'check-in with the key header');
+check(!str_contains($checkIns[0]['check_in'], 'pk_t'), 'key not in the URL');
+check($checkIns[0]['check_in'] === '/check-in/nightly-export?status=error&ms=1234&expectEvery=86400', 'check-in path and query');
+check(!$ci->checkIn('too-fast') && count($ciErrors) === 1, 'a refused check-in is false and reaches onError');
+
 $errors = [];
 $down = new OpenLens('http://127.0.0.1:9', 'pk_t', ['timeout' => 1.0, 'onError' => function (\Throwable $e) use (&$errors): void {
     $errors[] = $e;

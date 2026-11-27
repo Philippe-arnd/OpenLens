@@ -121,6 +121,36 @@ final class OpenLens
         }
     }
 
+    /**
+     * Job check-in (#609): call it at the end of a cron or background job, so
+     * OpenLens alerts when the job does not run, fails or gets slower. Sent at
+     * once (not queued); false on any error, never throws.
+     * `status`: 'ok' (default) or 'error'; `ms`: the run's duration;
+     * `expectEvery`: seconds between runs, instead of the learned schedule.
+     * @param array{status?: string, ms?: int|float, expectEvery?: int|float} $options
+     */
+    public function checkIn(string $slug, array $options = []): bool
+    {
+        $q = [];
+        if (isset($options['status']) && $options['status'] !== '') {
+            $q['status'] = $options['status'];
+        }
+        if (isset($options['ms'])) {
+            $q['ms'] = (string) max(0, (int) round((float) $options['ms']));
+        }
+        if (isset($options['expectEvery'])) {
+            $q['expectEvery'] = (string) (int) round((float) $options['expectEvery']);
+        }
+        $path = '/check-in/' . rawurlencode($slug) . ($q === [] ? '' : '?' . http_build_query($q));
+        try {
+            $this->request('POST', $path, null);
+            return true;
+        } catch (\Throwable $e) {
+            ($this->onError)($e);
+            return false;
+        }
+    }
+
     /** Send queued events now. */
     public function flush(): void
     {

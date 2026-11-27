@@ -20,6 +20,7 @@ mod allowlist;
 mod announcements;
 mod auth;
 mod board_jobs;
+mod check_ins;
 mod environments;
 mod features;
 mod goto;

@@ -91,6 +91,26 @@ module OpenLens
       false
     end
 
+    # Job check-in (#609): call it at the end of a cron or background job,
+    # so OpenLens alerts when the job does not run, fails or gets slower.
+    # status: "ok" (default) or "error"; ms: the run's duration;
+    # expect_every: seconds between runs, instead of the learned schedule.
+    # Sent at once; false on any error, never raises.
+    def check_in(slug, status: nil, ms: nil, expect_every: nil)
+      q = { "status" => status, "ms" => ms&.round&.clamp(0, nil), "expectEvery" => expect_every&.round }.compact
+      path = "/check-in/#{URI.encode_www_form_component(slug.to_s)}"
+      path += "?#{URI.encode_www_form(q)}" unless q.empty?
+      uri = URI("#{@host}#{path}")
+      res = http(uri) { |h| h.post(uri.request_uri, "", "x-openlens-key" => @key) }
+      return true if res.code.to_i < 300
+
+      @on_error.call(RuntimeError.new("OpenLens: check-in returned #{res.code}"))
+      false
+    rescue StandardError => e
+      @on_error.call(e)
+      false
+    end
+
     # Send queued events now.
     def flush
       batch = @lock.synchronize do

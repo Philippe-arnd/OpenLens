@@ -19,6 +19,7 @@ mod board_query;
 pub mod boards;
 pub mod cache;
 mod capture;
+mod check_ins;
 pub mod closed_days;
 mod cold;
 mod commands;
@@ -172,6 +173,7 @@ pub fn router(state: AppState) -> Router {
         .merge(announcements::routes())
         .merge(slo::routes())
         .merge(status_page::routes())
+        .merge(check_ins::routes())
         .layer(axum::middleware::from_fn(csrf::layer))
         .layer(axum::middleware::from_fn(trusted_headers_layer))
         // Pages, the API and Ask (a few model rounds) get two minutes.
@@ -198,7 +200,8 @@ pub fn router(state: AppState) -> Router {
         .layer(axum::middleware::from_fn(web::theme_layer))
         // One span per request, tagged with its id; the id is returned in
         // `x-request-id` (kept from the proxy when it sent one) (#296). A
-        // deploy hook's secret is not logged (#504).
+        // deploy hook's secret is not logged (#504), nor a check-in's
+        // project key (#609).
         .layer(
             tower_http::trace::TraceLayer::new_for_http().make_span_with(
                 |req: &axum::http::Request<axum::body::Body>| {
@@ -207,7 +210,7 @@ pub fn router(state: AppState) -> Router {
                         .get("x-request-id")
                         .and_then(|v| v.to_str().ok())
                         .unwrap_or("");
-                    tracing::info_span!("request", method = %req.method(), path = %hooks::log_path(req.uri().path()), id)
+                    tracing::info_span!("request", method = %req.method(), path = %hooks::log_path(check_ins::log_path(req.uri().path())), id)
                 },
             ),
         )

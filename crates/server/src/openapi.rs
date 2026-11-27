@@ -364,6 +364,31 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "write",
         "Set the availability target of an `environment` (default production) over a rolling 30 days (`uptime.set_target`): `target` a share from 0.5 to 0.99999 (0.999 for 99.9%), or null to remove it.",
     ),
+    // Job check-ins (#609, D-086).
+    (
+        "GET",
+        "/api/projects/{project}/jobs",
+        "read",
+        "Jobs that check in (`jobs.list`): per job its state (learning, ok, missed, failed, slower), last check-in, status and duration, the gap expected between runs (declared with `expectEvery` or learned: the median gap, after 3 gaps), when it counts as missed, and its usual duration; and whether jobs count in availability.",
+    ),
+    (
+        "POST",
+        "/api/projects/{project}/jobs/{slug}/check-in",
+        "write",
+        "Record a check-in of a job (`jobs.check_in`), for a holder of a token rather than the project key: optional JSON `status` (ok or error), `ms` (duration) and `expect_every` (seconds, 10 to 31 days; 0 learns again). One per job every 10 seconds; at most 200 jobs per project.",
+    ),
+    (
+        "DELETE",
+        "/api/projects/{project}/jobs/{slug}",
+        "write",
+        "Remove a job and its check-ins (`jobs.remove`); its open incidents close without a message.",
+    ),
+    (
+        "PUT",
+        "/api/projects/{project}/jobs/availability",
+        "write",
+        "Count jobs in the Uptime page's 24-hour and 7-day availability, or not (`jobs.set_availability`): `on` true or false (default false).",
+    ),
     (
         "GET",
         "/api/projects/{project}/announcements",

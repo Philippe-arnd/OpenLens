@@ -71,3 +71,43 @@ ol.captureUncaught(); // optional: crashes and unhandled rejections
 - **Volume:** a server sends one batch every 5 s and one stats event per route and status code every 10 minutes (and one runtime event per process), far below the capture limits, whatever the traffic.
 
 Use the same `distinct_id` as the browser SDK's `identify()`, so server and browser events belong to the same person. Success events sent from the server count for the feature map like any other event.
+
+## Job check-ins
+
+A cron job, a queue worker or a nightly export that stops running sends no request and raises no error. Make it check in at the end of each run, and OpenLens alerts on the project's channels when a run is **missed** (no check-in for 1.5 times its usual gap), **failed** (the check-in said `error`) or **slower** (twice its usual duration or more). Each alert is sent once and closes with the next check-in that clears it. The jobs are listed on the Uptime page.
+
+From a shell script or a crontab line:
+
+```sh
+0 3 * * * /opt/app/export.sh && curl -fsS -X POST "https://lens.example.com/check-in/$OPENLENS_KEY/nightly-export"
+# a failure, with the run's duration in milliseconds:
+curl -fsS -X POST "https://lens.example.com/check-in/$OPENLENS_KEY/nightly-export?status=error&ms=81234"
+```
+
+From a server SDK (the key travels in the `X-OpenLens-Key` header, `POST /check-in/<slug>`):
+
+```js
+await ol.checkIn("nightly-export", { status: "ok", ms: Date.now() - started });
+```
+
+```python
+ol.check_in("nightly-export", status="ok", ms=elapsed_ms)
+```
+
+```go
+ol.CheckIn(ctx, "nightly-export", openlens.CheckInOptions{Duration: time.Since(start)})
+```
+
+```ruby
+OL.check_in("nightly-export", status: "ok", ms: elapsed_ms)
+```
+
+```php
+$ol->checkIn('nightly-export', ['status' => 'ok', 'ms' => $elapsedMs]);
+```
+
+- **Schedule:** learned, no cron expression to type: the median gap between the last check-ins, once there are four. One long pause or a manual rerun does not move it. To give it instead, add `expectEvery` (seconds, 10 to 31 days) to a check-in (`expect_every` in Python and Ruby, `ExpectEvery` in Go); `expectEvery=0` goes back to learning.
+- **Slug:** 1 to 64 lowercase letters, digits, `_` or `-`. One check-in per job every 10 seconds (a 429 with `Retry-After` beyond); at most 200 jobs per project (remove one on the Uptime page).
+- **Never in the way:** the SDK call is sent at once, returns false on any error and never throws. The `curl` line's `-f` makes a refused check-in fail the cron line, so the cron's own mail shows it.
+- **Key in the path:** the `curl` form puts the project key in the URL. OpenLens never logs it, but a reverse proxy in front may: prefer the header form (`curl -H "X-OpenLens-Key: $OPENLENS_KEY" -X POST https://lens.example.com/check-in/nightly-export`) when your proxy logs paths.
+- **Availability:** jobs are not counted in the Uptime page's availability unless an admin ticks *Count jobs in availability* on the Jobs card. Then each check-in counts as a check and each missed run as a failed one, in the last 24 hours and 7 days.

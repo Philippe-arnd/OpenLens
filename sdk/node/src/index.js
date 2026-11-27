@@ -372,6 +372,34 @@ export class OpenLens {
     }
   }
 
+  /**
+   * Job check-in (#609): call it at the end of a cron or background job, so
+   * OpenLens alerts when the job does not run, fails or gets slower. Sent at
+   * once (not queued); resolves to false on any error, never throws.
+   * @param {string} slug 1 to 64 of a-z, 0-9, `_` and `-`
+   * @param {{ status?: "ok" | "error", ms?: number, expectEvery?: number }} [opts]
+   *   `ms`: the run's duration; `expectEvery`: seconds between runs, instead
+   *   of the schedule OpenLens learns.
+   */
+  async checkIn(slug, opts = {}) {
+    try {
+      const q = new URLSearchParams();
+      if (opts.status) q.set("status", opts.status);
+      if (opts.ms !== undefined) q.set("ms", String(Math.max(0, Math.round(opts.ms))));
+      if (opts.expectEvery !== undefined) q.set("expectEvery", String(Math.round(opts.expectEvery)));
+      const qs = q.toString();
+      const r = await this.fetch(
+        `${this.host}/check-in/${encodeURIComponent(String(slug))}${qs ? `?${qs}` : ""}`,
+        { method: "POST", headers: { "x-openlens-key": this.key } },
+      );
+      if (!r.ok) this.onError(new Error(`OpenLens check-in failed: HTTP ${r.status}`));
+      return r.ok;
+    } catch (e) {
+      this.onError(e);
+      return false;
+    }
+  }
+
   /** Send queued events now. */
   async flush(all = false) {
     this.sampleRuntime();

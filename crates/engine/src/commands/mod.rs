@@ -27,6 +27,7 @@ pub mod explore;
 pub mod flags;
 pub mod goals;
 pub mod goto;
+pub mod jobs;
 pub mod maintenance;
 pub mod releases;
 pub mod routes;
@@ -167,6 +168,11 @@ pub const REGISTRY: &[Spec] = &[
     spec::<status_page::Get>(),
     spec::<status_page::Set>(),
     spec::<status_page::GetPublic>(),
+    // Job check-ins (#609).
+    spec::<jobs::CheckIn>(),
+    spec::<jobs::List>(),
+    spec::<jobs::Remove>(),
+    spec::<jobs::SetAvailability>(),
 ];
 
 /// A 12-character id from `s` (the first bytes of its SHA-256, in hex).
