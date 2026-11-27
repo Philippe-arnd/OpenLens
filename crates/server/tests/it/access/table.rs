@@ -349,6 +349,7 @@ pub(super) const ROUTES: &[(&str, &str, Access)] = &[
     ("GET", "/assets/player.js", Public),
     ("GET", "/assets/player.css", Public),
     ("GET", "/assets/app.css", Public),
+    ("GET", "/assets/app/{file}", Public),
     ("GET", "/assets/favicon.svg", Public),
     ("GET", "/favicon.ico", Public),
     ("GET", "/theme/{mode}", Public),

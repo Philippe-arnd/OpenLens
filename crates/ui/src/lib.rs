@@ -80,8 +80,33 @@ pub use status_page::{
 pub use team::*;
 pub use totp::{TotpCard, login_code, totp_recovery_codes};
 
-/// Stylesheet, served at `/assets/app.css`.
+/// Stylesheet, served at [`css_href`] (and at `/assets/app.css` for pages
+/// cached before #579).
 pub const CSS: &str = include_str!("../assets/app.css");
+
+/// The stylesheet's file name under `/assets/app/`: the start of its
+/// SHA-256 and `.css`. A new release changes the name, so the browser may
+/// keep the file for a year (#579).
+pub fn css_file() -> &'static str {
+    static FILE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    FILE.get_or_init(|| {
+        use sha2::Digest;
+        use std::fmt::Write;
+        let digest = sha2::Sha256::digest(CSS.as_bytes());
+        let mut name = String::with_capacity(20);
+        for b in digest.iter().take(8) {
+            let _ = write!(name, "{b:02x}");
+        }
+        name.push_str(".css");
+        name
+    })
+}
+
+/// Where every page links the stylesheet: `/assets/app/<hash>.css`.
+pub fn css_href() -> &'static str {
+    static HREF: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    HREF.get_or_init(|| format!("/assets/app/{}", css_file()))
+}
 
 /// The favicon: the logo blob, still.
 pub const FAVICON: &str = include_str!("../assets/favicon.svg");
@@ -416,3 +441,27 @@ mod diff_tests {
 
 #[cfg(test)]
 mod motion_tests;
+
+#[cfg(test)]
+mod css_budget_tests {
+    /// The gzip budget of `app.css` (docs/design/ui-v2/README.md §3.1),
+    /// revised in #579 to the pruned size rounded up to the next kB: the
+    /// hashed, immutable URL makes it a once-per-release download.
+    const BUDGET_GZ: usize = 23 * 1024;
+
+    fn gzip_best(s: &str) -> usize {
+        use std::io::Write;
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+        gz.write_all(s.as_bytes()).unwrap_or_else(|e| panic!("{e}"));
+        gz.finish().unwrap_or_else(|e| panic!("{e}")).len()
+    }
+
+    #[test]
+    fn the_stylesheet_stays_within_its_gzip_budget() {
+        let size = gzip_best(crate::CSS);
+        assert!(
+            size <= BUDGET_GZ,
+            "app.css is {size} bytes gzipped, over its {BUDGET_GZ}-byte budget (§3.1)"
+        );
+    }
+}

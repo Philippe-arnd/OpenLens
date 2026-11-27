@@ -161,7 +161,7 @@ pub fn status_page(v: &Public, slug: &str) -> Markup {
                 meta name="color-scheme" content="light dark";
                 meta http-equiv="refresh" content="60";
                 title { (v.name) " status" }
-                link rel="stylesheet" href="/assets/app.css";
+                link rel="stylesheet" href=(crate::css_href());
                 link rel="icon" href={ (base) "/icon" };
                 link rel="alternate" type="application/atom+xml" title={ (v.name) " announcements" } href={ (base) "/feed.atom" };
             }

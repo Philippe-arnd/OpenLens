@@ -259,7 +259,8 @@ fn crawl(server: &Server) -> Result<Site, String> {
         queue.push_back((format!("{root}/{p}"), 1));
     }
     let mut seen: BTreeSet<String> = queue.iter().map(|(u, _)| u.clone()).collect();
-    let mut asset_urls = BTreeSet::new();
+    // The "not in the demo" page links the unhashed stylesheet (#579).
+    let mut asset_urls = BTreeSet::from(["/assets/app.css".to_owned()]);
     while let Some((url, depth)) = queue.pop_front() {
         if site.pages.len() >= MAX_PAGES {
             break;

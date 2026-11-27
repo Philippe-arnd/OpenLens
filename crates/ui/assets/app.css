@@ -220,7 +220,6 @@
   .login form { display: flex; flex-direction: column; gap: 10px; margin-top: 18px; }
   .login label { font-size: 12px; color: var(--muted); }
   .alert { background: color-mix(in oklab, var(--bad) var(--tint), transparent); color: var(--bad); padding: 8px 12px; border-radius: var(--r-s); font-size: 13px; }
-  .wave { display: inline-block; transform-origin: 70% 70%; }
   .empty h2 { margin-top: 22px; color: var(--ink); }
   .empty .blob { display: block; width: 56px; height: 56px; margin-bottom: 6px; }
   pre.copy { white-space: pre-wrap; word-break: break-all; background: var(--raised); border: 1px dashed var(--line); padding: 12px; border-radius: var(--r-s); user-select: all; }
@@ -518,10 +517,7 @@
   .field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--ink); font-weight: 500; }
   .field input, .field select { height: 38px; font-size: 14px; }
   .field small { color: var(--muted); font-weight: 400; font-size: var(--step--1); line-height: 1.45; }
-  /* Settings → Alerts: one row per rule, a checkbox drawn as a switch. */
-  form.settings label.alert-row { display: grid; grid-template-columns: auto minmax(0, 1fr); flex-direction: row; align-items: start; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line-2); grid-column: 1 / -1; }
-  form.settings label.alert-row b { display: block; font-weight: 550; color: var(--ink); }
-  form.settings label.alert-row small { display: block; color: var(--muted); font-size: 12.5px; }
+  /* Settings: a checkbox drawn as a switch. */
   form.settings input.switch { appearance: none; width: 34px; height: 20px; margin: 1px 0 0; border-radius: var(--r-pill); background: var(--line); position: relative; cursor: pointer; border: 0; padding: 0; min-width: 0; }
   input.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); }
   form.settings input.switch:checked { background: var(--good); }
@@ -888,7 +884,7 @@
 
 /* Focus board v2 (#543) */
 @layer components {
-  .board { display: flex; flex-direction: column; gap: 28px; }
+  .board { display: flex; flex-direction: column; }
   .board .card, .board .card + .card { margin: 0; }
   .board h2, .board h3 { margin: 0; }
   .board .signals { margin: 0; }
@@ -1020,7 +1016,6 @@
   .barcell svg { flex: 1; display: block; min-width: 60px; height: 6px; }
   .barcell .bg { fill: var(--line-2); } .barcell .fg { fill: var(--accent); }
   .barcell .num { min-width: 3.5em; }
-  table.pulse td.adopt { width: 34%; }
   tr.dim th, tr.dim td { color: var(--muted); }
   .journeys .arrow { color: var(--muted); }
 
@@ -1088,11 +1083,9 @@
     a.stretch .details { transition: opacity 150ms; }
     input.switch::after { transition: translate 120ms var(--ease-out); }
 
-    /* The logo morphs slowly; the waving hand and the board's wait indicators move on their own */
+    /* The logo morphs slowly; the board's wait indicators move on their own */
     .blob { animation: morph 8s ease-in-out infinite; }
     @keyframes morph { 50% { border-radius: 58% 42% 37% 63% / 61% 52% 48% 39%; transform: rotate(20deg); } }
-    .wave { animation: wave 2.6s ease-in-out infinite; }
-    @keyframes wave { 0%, 60%, 100% { transform: rotate(0); } 10%, 30% { transform: rotate(14deg); } 20% { transform: rotate(-8deg); } }
     .board-waiting .spinner { animation: ol-spin 0.8s linear infinite; }
     .board-waiting .waiting-bar span { animation: ol-slide 1.4s ease-in-out infinite; }
     @keyframes ol-spin { to { transform: rotate(360deg); } }
