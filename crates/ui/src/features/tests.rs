@@ -274,7 +274,10 @@ fn the_capacity_card_prints_the_engines_reasons_or_why_the_floors_apply() {
     let html = page(&floors);
     assert!(html.contains("The floors apply"), "{html}");
     assert!(html.contains(&esc(&floors.reason)), "{html}");
-    assert!(html.contains("not known yet") && !html.contains(">0 kB<"), "{html}");
+    assert!(
+        html.contains("not known yet") && !html.contains(">0 kB<"),
+        "{html}"
+    );
     // A measured disk: the values follow it, the floors line goes, and an
     // override is named next to the budget.
     let gb = 1_000_000_000u64;
