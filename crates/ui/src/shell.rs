@@ -1,8 +1,8 @@
 //! The shell (#540): the sidebar (brand, project switcher, Go to…, the
-//! eight sections, the user menu), the sticky top bar with the breadcrumb
+//! nine sections, the user menu), the sticky top bar with the breadcrumb
 //! and a place for the page's context, the section tabs under it, and the
 //! signals line. No script: the user menu is a native `popover`, the
-//! sections have `accesskey` 1–8.
+//! sections have `accesskey` 1–9 (v2.1 order, #621).
 //!
 //! Moved out of `lib.rs` (the file-length check) when the shell changed.
 
@@ -18,8 +18,11 @@ pub(crate) struct NavGroup {
     pub(crate) tabs: &'static [(&'static str, &'static str, &'static [&'static str])],
 }
 
-/// The project sidebar: eight entries instead of twenty-one (#402). Every
-/// page keeps its URL; a section opens its first tab.
+/// The project sidebar (#402, v2.1 #621): nine entries in the method's
+/// order, Releases first among the data sections (the "compare" step).
+/// Every page keeps its URL; a section opens its first tab. Pages that do
+/// not exist yet get no tab (Routes in Quality, Retention in People), and
+/// Delivery stays a card on the Releases page until it has its own page.
 pub(crate) const NAV: &[NavGroup] = &[
     NavGroup {
         label: "Focus board",
@@ -32,13 +35,27 @@ pub(crate) const NAV: &[NavGroup] = &[
         tabs: &[("/ask", "Ask", &["Ask"])],
     },
     NavGroup {
+        label: "Releases",
+        icon: "release",
+        tabs: &[
+            ("/releases", "Releases", &["Releases"]),
+            ("/timeline", "Timeline", &["Timeline"]),
+        ],
+    },
+    NavGroup {
         label: "Live",
         icon: "pulse",
         tabs: &[
             ("/live", "Live", &["Live"]),
             ("/uptime", "Uptime", &["Uptime"]),
-            ("/timeline", "Timeline", &["Timeline"]),
-            ("/releases", "Releases", &["Releases"]),
+        ],
+    },
+    NavGroup {
+        label: "Quality",
+        icon: "alert",
+        tabs: &[
+            ("/errors", "Errors", &["Errors"]),
+            ("/replays", "Replays", &["Replays", "Replay"]),
         ],
     },
     NavGroup {
@@ -54,21 +71,13 @@ pub(crate) const NAV: &[NavGroup] = &[
         ],
     },
     NavGroup {
-        label: "Quality",
-        icon: "alert",
-        tabs: &[
-            ("/errors", "Errors", &["Errors"]),
-            ("/replays", "Replays", &["Replays", "Replay"]),
-        ],
-    },
-    NavGroup {
         label: "People",
         icon: "globe",
         tabs: &[
             ("/audience", "Audience", &["Audience", "Person"]),
-            ("/acquisition", "Acquisition", &["Acquisition"]),
             ("/churn", "Churn", &["Churn"]),
-            ("/goals", "Goals", &["Goals"]),
+            ("/acquisition", "Acquisition", &["Acquisition"]),
+            ("/revenue", "Revenue", &["Revenue"]),
         ],
     },
     NavGroup {
@@ -76,6 +85,7 @@ pub(crate) const NAV: &[NavGroup] = &[
         icon: "layers",
         tabs: &[
             ("/features", "Feature map", &["Feature map"]),
+            ("/goals", "Goals", &["Goals"]),
             ("/flags", "Flags", &["Flags"]),
             ("/surveys", "Surveys", &["Surveys"]),
             ("/tickets", "Tickets", &["Tickets", "New ticket"]),
@@ -590,7 +600,8 @@ mod tests {
     fn the_sidebar_has_distinct_icons_and_every_page_keeps_its_url() {
         let icons: std::collections::HashSet<_> = NAV.iter().map(|g| g.icon).collect();
         assert_eq!(icons.len(), NAV.len(), "one distinct icon per entry");
-        assert!(NAV.len() <= 8);
+        // One digit per access key (#621: nine entries, 1–9).
+        assert!(NAV.len() <= 9);
         let paths: Vec<_> = NAV
             .iter()
             .flat_map(|g| g.tabs.iter().map(|t| t.0))
@@ -613,6 +624,8 @@ mod tests {
             "/goals",
             "/tickets",
             "/timeline",
+            "/releases",
+            "/revenue",
             "/flows",
             "/features",
             "/digest",
@@ -686,6 +699,51 @@ mod tests {
         }
         let behaviour = NAV.iter().position(|g| g.label == "Behaviour").unwrap() + 1;
         assert!(html.contains(&format!("accesskey=\"{behaviour}\" aria-current=\"page\"")));
+    }
+
+    #[test]
+    fn moved_pages_have_their_new_section_in_the_trail_the_tabs_and_the_sidebar() {
+        let p = ProjectInfo {
+            id: "d",
+            name: "Demo",
+            key: "k",
+        };
+        // #621: Timeline under Releases, Goals under Product, Revenue under People.
+        for (title, section, first, path) in [
+            ("Timeline", "Releases", "/releases", "/timeline"),
+            ("Releases", "Releases", "/releases", "/releases"),
+            ("Goals", "Product", "/features", "/goals"),
+            ("Revenue", "People", "/audience", "/revenue"),
+        ] {
+            let c = Crumbs::of(title, Some(&p)).render().into_string();
+            assert!(
+                c.contains(&format!("href=\"/p/d{first}\">{section}<")),
+                "{title}: {c}"
+            );
+            assert!(
+                c.contains(&format!("aria-current=\"page\">{title}<")),
+                "{title}"
+            );
+            let tabs = section_tabs(title, &p).into_string();
+            assert!(
+                tabs.contains(&format!("aria-label=\"{section}\"")),
+                "{title}"
+            );
+            assert!(
+                tabs.contains(&format!("href=\"/p/d{path}\" aria-current=\"page\"")),
+                "{title}: {tabs}"
+            );
+            let html = layout(title, Some(&p), html! {}).into_string();
+            let key = NAV.iter().position(|g| g.label == section).unwrap() + 1;
+            assert!(
+                html.contains(&format!("accesskey=\"{key}\" aria-current=\"page\"")),
+                "{title}"
+            );
+            assert_eq!(html.matches("aria-current=\"page\"").count(), 3, "{title}");
+        }
+        let live = section_tabs("Live", &p).into_string();
+        assert!(!live.contains("/timeline") && !live.contains("/releases"));
+        assert!(!section_tabs("Churn", &p).into_string().contains("/goals"));
     }
 
     #[test]
