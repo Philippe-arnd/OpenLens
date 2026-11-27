@@ -106,7 +106,7 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
     vec![
         ToolSpec {
             name: "routes",
-            description: "The app's server routes over the last `days` (1 to 90, default 7) in one environment (production unless env), from the server SDK's middleware: per method and route template, requests, 5xx count and share, p50 and p95 in ms (upper bounds of the duration histogram), the largest duration, and the feature whose key action the route is (`server:` in the feature map). Release verdicts judge the same routes (5xx share up significantly, or p95 1.5 times and 200 ms slower); `release_report` shows them as `route` checks. Empty, with a note, until the server SDK sends stats.",
+            description: "The app's server routes over the last `days` (1 to 90, default 7) in one environment (production unless env), from the server SDK's middleware: per method and route template, requests, 5xx count and share, p50 and p95 in ms (upper bounds of the duration histogram), the largest duration, the feature whose key action the route is (`server:` in the feature map), and its exemplars: `slowest` (the slowest request of the period) and `first_5xx` (the first answered 5xx), each with ms, time, status and, when known, trace id, session id (open its replay at that time) and user. Release verdicts judge the same routes (5xx share up significantly, or p95 1.5 times and 200 ms slower); `release_report` shows them as `route` checks, a slower route's p95 check with its slowest request as `exemplar`. Empty, with a note, until the server SDK sends stats.",
             input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"days":{"type":"integer","minimum":1,"maximum":90}}))}),
         },
         ToolSpec {

@@ -178,6 +178,68 @@ async fn the_errors_page_tells_the_origin_and_links_a_server_error_to_its_replay
     );
 }
 
+/// A window's data point of `GET /api/export` answered `status`, its
+/// slowest request taking `max` seconds in session `session` (#607).
+fn window(uuid: u32, hours_ago: i64, status: i64, max: f64, session: &str) -> serde_json::Value {
+    let start = chrono::Utc::now() - chrono::Duration::hours(hours_ago);
+    let mut b = [0; 15];
+    b[12] = 4;
+    serde_json::json!({
+        "event": "$request_stats",
+        "distinct_id": "$server",
+        "uuid": format!("0191f0c0-0000-7000-8000-{uuid:012}"),
+        "timestamp": start.to_rfc3339(),
+        "properties": {
+            "$lib": "node", "$environment": "production", "$release": "v4",
+            "$metric": "http.server.request.duration", "$unit": "s",
+            "http.request.method": "GET", "http.route": "/api/export",
+            "http.response.status_code": status,
+            "count": 4, "sum": max * 2.0, "min": 0.01, "max": max,
+            "bucket_counts": b, "$window_s": 600,
+            "exemplars": [{
+                "value": max,
+                "time": (start + chrono::Duration::minutes(3)).to_rfc3339(),
+                "trace_id": "5b8efff798038103d269b633813fc60c",
+                "filtered_attributes": { "session.id": session, "user.id": "u1" },
+            }],
+        },
+    })
+}
+
+#[tokio::test]
+async fn the_routes_api_returns_the_slowest_request_and_first_5xx_of_the_period_across_windows() {
+    let h = harness();
+    let events = vec![
+        window(21, 5, 200, 0.4, "early"),
+        window(22, 3, 200, 6.5, "slowest"),
+        window(23, 1, 200, 0.9, "late"),
+        window(24, 4, 500, 0.2, "first-failure"),
+        window(25, 2, 500, 3.0, "later-failure"),
+    ];
+    let body = serde_json::json!({ "key": h.key, "batch": events }).to_string();
+    let (status, v) = post(&h, "/capture", body.into_bytes(), false).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    openlens_server::flush_now(&h.state).unwrap();
+
+    let r = get(&h, "/api/projects/default/routes?days=1", None, true).await;
+    assert_eq!(r.status(), StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_str(&body_text(r).await).unwrap();
+    let route = v["routes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["route"] == "/api/export")
+        .unwrap();
+    let slowest = &route["slowest"];
+    assert_eq!(slowest["session_id"], "slowest", "{route}");
+    assert!(slowest["ms"].as_f64().unwrap() >= route["p95_ms"].as_f64().unwrap());
+    assert_eq!(slowest["trace_id"], "5b8efff798038103d269b633813fc60c");
+    let first = &route["first_5xx"];
+    assert_eq!(first["session_id"], "first-failure", "{route}");
+    assert!(first["status"].as_i64().unwrap() >= 500);
+    assert!(first["time"].as_str().unwrap() < slowest["time"].as_str().unwrap());
+}
+
 fn runtime(uuid: u32, props: serde_json::Value) -> serde_json::Value {
     // A `$runtime_stats` event as the Node SDK sends it (#610).
     let mut p =

@@ -1,6 +1,7 @@
 //! OTLP/HTTP metrics bodies for `/v1/metrics` (#605): a small protobuf
 //! encoder for the messages the server reads, written from the public
-//! opentelemetry-proto field numbers, and the hostile-input corpus.
+//! opentelemetry-proto field numbers, and the hostile-input corpus
+//! (exemplars too, #607).
 
 /// An attribute value.
 #[derive(Debug, Clone)]
@@ -34,6 +35,34 @@ pub struct Point {
     pub bounds: Vec<f64>,
     /// Add one exemplar (a trace id and a value).
     pub exemplar: bool,
+    /// More exemplars (#607).
+    pub exemplars: Vec<Exemplar>,
+}
+
+/// One `Exemplar` (#607).
+#[derive(Debug, Clone, Default)]
+pub struct Exemplar {
+    /// `timeUnixNano`.
+    pub time: u64,
+    /// `asDouble`, in the metric's unit.
+    pub value: f64,
+    /// `traceId` (16 bytes when valid).
+    pub trace_id: Vec<u8>,
+    /// `filteredAttributes`.
+    pub attrs: Vec<(String, Value)>,
+}
+
+fn exemplar(e: &Exemplar) -> Vec<u8> {
+    let mut ex = Vec::new();
+    for (k, v) in &e.attrs {
+        bytes(&mut ex, 7, &key_value(k, v));
+    }
+    fixed64(&mut ex, 2, e.time);
+    double(&mut ex, 3, e.value);
+    if !e.trace_id.is_empty() {
+        bytes(&mut ex, 5, &e.trace_id);
+    }
+    ex
 }
 
 impl Point {
@@ -147,6 +176,9 @@ fn point(p: &Point) -> Vec<u8> {
         bytes(&mut ex, 5, &[0xab; 16]);
         bytes(&mut out, 8, &ex);
     }
+    for e in &p.exemplars {
+        bytes(&mut out, 8, &exemplar(e));
+    }
     if let Some(m) = p.min {
         double(&mut out, 11, m);
     }
@@ -156,7 +188,8 @@ fn point(p: &Point) -> Vec<u8> {
     out
 }
 
-fn metric(m: &Metric) -> Vec<u8> {
+/// A metric whose histogram points each get `extra` appended (raw fields).
+fn metric_with(m: &Metric, extra: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     bytes(&mut out, 1, m.name.as_bytes());
     bytes(&mut out, 3, m.unit.as_bytes());
@@ -164,7 +197,9 @@ fn metric(m: &Metric) -> Vec<u8> {
         Data::Histogram(temporality, points) => {
             let mut h = Vec::new();
             for p in points {
-                bytes(&mut h, 1, &point(p));
+                let mut raw = point(p);
+                raw.extend_from_slice(extra);
+                bytes(&mut h, 1, &raw);
             }
             key(&mut h, 2, 0);
             varint(&mut h, *temporality as u64);
@@ -187,6 +222,10 @@ fn metric(m: &Metric) -> Vec<u8> {
 /// An `ExportMetricsServiceRequest` with one resource (its string
 /// attributes) and one scope holding `metrics`, protobuf-encoded.
 pub fn request(resource: &[(&str, &str)], metrics: &[Metric]) -> Vec<u8> {
+    request_with(resource, metrics, &[])
+}
+
+fn request_with(resource: &[(&str, &str)], metrics: &[Metric], extra: &[u8]) -> Vec<u8> {
     let mut res = Vec::new();
     for (k, v) in resource {
         bytes(&mut res, 1, &key_value(k, &Value::Str((*v).into())));
@@ -196,7 +235,7 @@ pub fn request(resource: &[(&str, &str)], metrics: &[Metric]) -> Vec<u8> {
     bytes(&mut name, 1, b"openlens-test");
     bytes(&mut scope, 1, &name);
     for m in metrics {
-        bytes(&mut scope, 2, &metric(m));
+        bytes(&mut scope, 2, &metric_with(m, extra));
     }
     let mut rm = Vec::new();
     bytes(&mut rm, 1, &res);
@@ -294,6 +333,17 @@ pub fn hostile_otlp_bodies() -> Vec<(&'static str, Vec<u8>)> {
         "[".repeat(5_000),
         "]".repeat(5_000)
     );
+    // 300,000 empty exemplars (`42 00`) on one point: a flood of structs
+    // since exemplars are decoded (#607).
+    let exemplar_flood = request_with(
+        &[],
+        &[Metric {
+            name: "http.server.request.duration".into(),
+            unit: "s".into(),
+            data: Data::Histogram(1, vec![good()]),
+        }],
+        &[0x42, 0x00].repeat(300_000),
+    );
     let json_too_many = format!(
         r#"{{"resourceMetrics":[{{"scopeMetrics":[{{"metrics":[{{"name":"x","gauge":{{"dataPoints":[{}]}}}}]}}]}}]}}"#,
         vec!["{}"; 10_001].join(",")
@@ -311,6 +361,7 @@ pub fn hostile_otlp_bodies() -> Vec<(&'static str, Vec<u8>)> {
         (PB, duration(vec![negative])),
         (PB, duration(vec![infinite_bound])),
         (PB, duration(vec![reversed])),
+        (PB, exemplar_flood),
         (JS, b"not json".to_vec()),
         (JS, b"null".to_vec()),
         (JS, json_deep.into_bytes()),
@@ -340,6 +391,96 @@ pub fn hostile_otlp_bodies() -> Vec<(&'static str, Vec<u8>)> {
         (
             JS,
             json_body(r#""count":"3","bucketCounts":["1","1","1"],"explicitBounds":[0.5,0.1]"#),
+        ),
+    ]
+}
+
+/// Hostile exemplars (#607): each body is a valid export whose exemplars
+/// are not. Every one must be accepted (exemplars never refuse a point),
+/// with what is stored bounded: no huge value, no attribute but the
+/// session and user, no invalid trace id.
+pub fn hostile_exemplar_bodies() -> Vec<(&'static str, Vec<u8>)> {
+    const PB: &str = "application/x-protobuf";
+    const JS: &str = "application/json";
+    let huge = "x".repeat(1_000_000);
+    let mut attrs: Vec<(String, Value)> = (0..1_000)
+        .map(|i| {
+            (
+                format!("http.request.header.{i}"),
+                Value::Str("secret".into()),
+            )
+        })
+        .collect();
+    attrs.push(("session.id".into(), Value::Str(huge.clone())));
+    attrs.push(("user.id".into(), Value::Str(huge.clone())));
+    let point = |exemplars: Vec<Exemplar>| Point {
+        exemplars,
+        ..Point::route("GET", "/hostile", 503)
+    };
+    let at = good().time;
+    let bad = vec![
+        Exemplar {
+            time: at,
+            value: 0.5,
+            trace_id: vec![0xab; 5],
+            attrs,
+        },
+        Exemplar {
+            time: at,
+            value: f64::NAN,
+            trace_id: vec![0; 16],
+            ..Exemplar::default()
+        },
+        Exemplar {
+            time: 0,
+            value: 1e300,
+            ..Exemplar::default()
+        },
+        Exemplar {
+            time: u64::MAX,
+            value: -1.0,
+            ..Exemplar::default()
+        },
+    ];
+    let pb = duration(vec![Point {
+        start: good().start,
+        time: good().time,
+        count: 3,
+        sum: Some(0.3),
+        buckets: vec![1, 2],
+        bounds: vec![0.1],
+        ..point(bad)
+    }]);
+    let json = |exemplars: &str| {
+        json_body(&format!(
+            r#""count":"3","bucketCounts":["1","2"],"explicitBounds":[0.1],"exemplars":[{exemplars}]"#
+        ))
+    };
+    vec![
+        (PB, pb),
+        (
+            JS,
+            json(
+                r#"{"timeUnixNano":"1700000030000000000","asDouble":0.2,"traceId":"zz8efff798038103d269b633813fc6zz"}"#,
+            ),
+        ),
+        (
+            JS,
+            json(&format!(
+                r#"{{"timeUnixNano":"1700000030000000000","asDouble":0.2,"traceId":"{huge}"}}"#
+            )),
+        ),
+        (
+            JS,
+            json(
+                r#"{"timeUnixNano":"1700000030000000000","asInt":"9223372036854775807","traceId":"00000000000000000000000000000000"}"#,
+            ),
+        ),
+        (
+            JS,
+            json(&format!(
+                r#"{{"asDouble":"Infinity","filteredAttributes":[{{"key":"user.id","value":{{"stringValue":"{huge}"}}}}]}}"#
+            )),
         ),
     ]
 }

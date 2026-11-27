@@ -164,6 +164,83 @@ test("the Express middleware records the route template and reads, never writes,
   assert.ok(!routes.some((r) => r.includes("123")));
 });
 
+test("exemplars: the slowest request and the first 5xx of each key are kept, nothing else", async () => {
+  const { s, got, host } = await collector();
+  const ol = new OpenLens({ host, key: "k", flushInterval: 60000 });
+  const trace = (c) => c.repeat(32);
+  let asked = 0;
+  const user = (name) => () => {
+    asked += 1;
+    return name;
+  };
+  const rec = (status, ms, sessionId, name) =>
+    ol.recordRequest({ method: "GET", route: "/api/report", status, ms, traceId: trace("a"), sessionId, user: user(name) });
+  rec(200, 40, "s-fast", "u1");
+  rec(200, 1800, "s-slow", "u2");
+  rec(200, 90, "s-mid", "u3");
+  rec(503, 120, "s-first", "u4");
+  rec(503, 3000, "s-slowest-5xx", "u5");
+  rec(503, 50, "s-last", "u6");
+  await ol.shutdown();
+  s.close();
+  const stats = got.filter((e) => e.event === "$request_stats");
+  const by = (code) => stats.find((e) => e.properties["http.response.status_code"] === code).properties.exemplars;
+  const ok = by(200);
+  assert.equal(ok.length, 1, "below 500: the slowest only");
+  assert.equal(ok[0].filtered_attributes["session.id"], "s-slow");
+  assert.equal(ok[0].filtered_attributes["user.id"], "u2");
+  assert.equal(ok[0].trace_id, trace("a"));
+  assert.equal(ok[0].value, 1.8, "seconds");
+  assert.ok(!Number.isNaN(Date.parse(ok[0].time)));
+  const bad = by(503);
+  assert.equal(bad.length, 2, "5xx: the slowest and the first");
+  const sessions = bad.map((e) => e.filtered_attributes["session.id"]).sort();
+  assert.deepEqual(sessions, ["s-first", "s-slowest-5xx"]);
+  assert.ok(asked < 6, "the user callback runs only for requests kept");
+  for (const e of [...ok, ...bad]) {
+    assert.deepEqual(Object.keys(e).sort().filter((k) => !["filtered_attributes", "time", "trace_id", "value"].includes(k)), []);
+    assert.deepEqual(Object.keys(e.filtered_attributes).filter((k) => !["session.id", "user.id"].includes(k)), []);
+  }
+});
+
+test("an exemplar never keeps a request body, header, cookie or query string", async () => {
+  const { s, got, host } = await collector();
+  const ol = new OpenLens({ host, key: "k", flushInterval: 60000 });
+  const secret = "s3cr3t-value";
+  const mw = ol.express({ user: (req) => req.user.id });
+  const handlers = {};
+  const req = {
+    method: "POST",
+    baseUrl: "/api",
+    route: { path: "/login" },
+    url: `/api/login?token=${secret}`,
+    originalUrl: `/api/login?token=${secret}`,
+    query: { token: secret },
+    body: { password: secret },
+    cookies: { sid: secret },
+    user: { id: "u7" },
+    headers: {
+      authorization: `Bearer ${secret}`,
+      cookie: `sid=${secret}`,
+      "x-api-key": secret,
+      "x-openlens-session": "s9",
+      traceparent: `00-${"b".repeat(32)}-${"c".repeat(16)}-01`,
+    },
+  };
+  mw(req, { statusCode: 500, on: (ev, f) => (handlers[ev] = f) }, () => {});
+  handlers.finish();
+  await ol.shutdown();
+  s.close();
+  const stats = got.filter((e) => e.event === "$request_stats");
+  assert.equal(stats.length, 1);
+  const ex = stats[0].properties.exemplars;
+  assert.ok(ex.length >= 1);
+  assert.equal(ex[0].filtered_attributes["session.id"], "s9");
+  assert.equal(ex[0].filtered_attributes["user.id"], "u7");
+  assert.equal(ex[0].trace_id, "b".repeat(32));
+  assert.ok(!JSON.stringify(stats).includes(secret), "no body, header, cookie or query string");
+});
+
 test("hostile trace and session headers are ignored", () => {
   assert.deepEqual(requestContext({ traceparent: `00-${"0".repeat(32)}-${"c".repeat(16)}-01` }), {});
   assert.deepEqual(requestContext({ traceparent: `ff-${"a".repeat(32)}-${"c".repeat(16)}-01` }), {});

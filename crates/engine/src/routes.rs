@@ -15,6 +15,11 @@
 //!   last hour is far above its previous seven days.
 //! - **Key actions:** a feature map's `server:` routes. Their regression is
 //!   named as such, and their alert is urgent (quiet hours never hold it).
+//! - **Exemplars** (#607, D-089): a point may carry real requests
+//!   (`exemplars`, OpenTelemetry's shape). Per route, the slowest of the
+//!   period and its first 5xx are returned ([`Exemplar`]), with their
+//!   session when known, so a page can open the replay at that time; a
+//!   slower route's p95 check carries its slowest.
 //!
 //! The stats are read from `raw_events`: the `events` view leaves them
 //! out, so no user KPI ever counts them.
@@ -72,6 +77,190 @@ pub struct RouteStat {
     pub buckets: Vec<i64>,
     /// The feature whose key action this route is (`server:` in the map).
     pub key_of: Option<String>,
+    /// The slowest request of the period with an exemplar (#607).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slowest: Option<Exemplar>,
+    /// The first request of the period answered 5xx with an exemplar.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_5xx: Option<Exemplar>,
+}
+
+/// One real request behind a route's numbers (#607, D-089): what an
+/// exemplar holds once read, never a body, header, cookie or query string.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct Exemplar {
+    /// Its duration, ms.
+    pub ms: f64,
+    /// When it was measured (RFC 3339, UTC).
+    pub time: String,
+    /// The status code it was answered.
+    pub status: i64,
+    /// Its trace id (32 hex digits), when the app traces.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+    /// The OpenLens session it belongs to, when known: its replay at `time`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    /// The user the app names (the SDK's `user` callback, `user.id`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+}
+
+/// Exemplars read per data point at most.
+pub const MAX_POINT_EXEMPLARS: usize = 4;
+/// Longest user id kept, in characters.
+pub const MAX_EXEMPLAR_USER: usize = 200;
+/// Largest exemplar duration kept, seconds (a day): a bound, not a measure.
+pub const MAX_EXEMPLAR_S: f64 = 86_400.0;
+
+/// A session id as the SDKs send it: 1 to 100 of `A-Za-z0-9_-`.
+#[must_use]
+pub fn valid_session(s: &str) -> bool {
+    (1..=100).contains(&s.len())
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+/// A W3C trace id: 32 lowercase hex digits, not all zero.
+#[must_use]
+pub fn valid_trace_id(s: &str) -> bool {
+    s.len() == 32
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        && s.bytes().any(|b| b != b'0')
+}
+
+/// The exemplars of a stored data point (its `properties` JSON) answered
+/// `status`: at most [`MAX_POINT_EXEMPLARS`], each bounded; one with no
+/// valid duration or time is skipped, an invalid trace id, session or user
+/// is left out.
+#[must_use]
+pub fn exemplars_of(properties: &str, status: i64) -> Vec<Exemplar> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(properties) else {
+        return Vec::new();
+    };
+    let Some(list) = v.get("exemplars").and_then(serde_json::Value::as_array) else {
+        return Vec::new();
+    };
+    list.iter()
+        .take(MAX_POINT_EXEMPLARS)
+        .filter_map(|e| {
+            let secs = e
+                .get("value")
+                .and_then(serde_json::Value::as_f64)
+                .filter(|s| s.is_finite() && (0.0..=MAX_EXEMPLAR_S).contains(s))?;
+            let time = e
+                .get("time")
+                .and_then(serde_json::Value::as_str)
+                .filter(|t| t.len() <= 64)
+                .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())?
+                .with_timezone(&chrono::Utc)
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            let attrs = e.get("filtered_attributes");
+            let attr = |k: &str| {
+                attrs
+                    .and_then(|a| a.get(k))
+                    .and_then(serde_json::Value::as_str)
+            };
+            Some(Exemplar {
+                ms: (secs * 1_000_000.0).round() / 1000.0,
+                time,
+                status,
+                trace_id: e
+                    .get("trace_id")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|t| valid_trace_id(t))
+                    .map(str::to_owned),
+                session_id: attr("session.id")
+                    .filter(|s| valid_session(s))
+                    .map(str::to_owned),
+                user: attr("user.id")
+                    .map(str::trim)
+                    .filter(|u| !u.is_empty())
+                    .map(|u| u.chars().take(MAX_EXEMPLAR_USER).collect()),
+            })
+        })
+        .collect()
+}
+
+/// A route's two exemplars.
+#[derive(Debug, Clone, Default)]
+struct Picked {
+    slowest: Option<Exemplar>,
+    first_5xx: Option<Exemplar>,
+}
+
+/// The SQL reading, per route (and per the `extra` expression, selected as
+/// `part`) where `w` holds, the data point with exemplars and the slowest
+/// request (`slow_rk = 1`) and the first data point answered 5xx with
+/// exemplars (`err_rk = 1`), with their properties; `limit` rows at most.
+fn exemplars_sql(w: &str, extra: Option<&str>, limit: usize) -> String {
+    let route = attr_sql("http\\.route", "\"((?:[^\"\\\\]|\\\\.){1,300})\"");
+    let method = attr_sql("http\\.request\\.method", "\"([A-Z]{1,10})\"");
+    let status = int_sql("http\\.response\\.status_code");
+    let max = secs_sql("max");
+    let (sel, part) = extra.map_or((String::new(), String::new()), |e| {
+        (format!("{e} AS part, "), "part, ".to_owned())
+    });
+    format!(
+        "WITH s AS (SELECT {sel}{method} AS method, {route} AS route, {status} AS status, \
+         CASE WHEN {status} >= 500 THEN 1 ELSE 0 END AS bad, {max} AS mx, timestamp AS ts, \
+         properties AS props FROM raw_events WHERE event = '{event}' AND {w} \
+         AND properties LIKE '%\"exemplars\":[{{%'), \
+         r AS (SELECT *, row_number() OVER (PARTITION BY {part}method, route ORDER BY mx DESC, ts) AS slow_rk, \
+         row_number() OVER (PARTITION BY {part}method, route, bad ORDER BY ts, mx DESC) AS err_rk FROM s \
+         WHERE method IS NOT NULL AND route IS NOT NULL) \
+         SELECT {part}method, route, status, bad, slow_rk, err_rk, props FROM r \
+         WHERE slow_rk = 1 OR (bad = 1 AND err_rk = 1) LIMIT {limit}",
+        event = openlens_event::names::REQUEST_STATS,
+    )
+}
+
+/// The exemplars of [`exemplars_sql`]'s rows, by (`part`, route name).
+fn picked(
+    rows: &[serde_json::Map<String, serde_json::Value>],
+) -> HashMap<(Option<String>, String), Picked> {
+    let mut out: HashMap<(Option<String>, String), Picked> = HashMap::new();
+    for r in rows {
+        let (Some(method), Some(route), Some(props)) =
+            (text(r, "method"), text(r, "route"), text(r, "props"))
+        else {
+            continue;
+        };
+        let status = int(r, "status");
+        let list = exemplars_of(&props, status);
+        let e = out
+            .entry((text(r, "part"), format!("{method} {route}")))
+            .or_default();
+        if int(r, "slow_rk") == 1
+            && let Some(x) = list.iter().max_by(|a, b| a.ms.total_cmp(&b.ms))
+            && e.slowest.as_ref().is_none_or(|s| x.ms > s.ms)
+        {
+            e.slowest = Some(x.clone());
+        }
+        if int(r, "bad") == 1
+            && int(r, "err_rk") == 1
+            && let Some(x) = list.iter().min_by(|a, b| a.time.cmp(&b.time))
+            && e.first_5xx.as_ref().is_none_or(|s| x.time < s.time)
+        {
+            e.first_5xx = Some(x.clone());
+        }
+    }
+    out
+}
+
+/// Put each route's exemplars of `part` on it.
+fn attach(
+    list: &mut [RouteStat],
+    picked: &HashMap<(Option<String>, String), Picked>,
+    part: Option<&str>,
+) {
+    for s in list {
+        if let Some(p) = picked.get(&(part.map(str::to_owned), s.name())) {
+            s.slowest.clone_from(&p.slowest);
+            s.first_5xx.clone_from(&p.first_5xx);
+        }
+    }
 }
 
 impl RouteStat {
@@ -160,20 +349,36 @@ fn normalize(r: &str) -> String {
     }
 }
 
+/// The SQL of property `k` (a regex-escaped key) matching `pat`.
+fn attr_sql(k: &str, pat: &str) -> String {
+    format!("regexp_match(properties, '\"{k}\":{pat}')[1]")
+}
+
+/// The SQL of integer property `k`, 0 when absent.
+fn int_sql(k: &str) -> String {
+    format!(
+        "COALESCE(CAST({} AS BIGINT), 0)",
+        attr_sql(k, "([0-9]{1,18})")
+    )
+}
+
+/// The SQL of property `k` in seconds, 0 when absent.
+fn secs_sql(k: &str) -> String {
+    format!(
+        "COALESCE(CAST({} AS DOUBLE), 0)",
+        attr_sql(k, "([0-9]{1,12}(?:\\.[0-9]{1,9})?(?:[eE][-+]?[0-9]{1,3})?)")
+    )
+}
+
 /// The SQL summing the stats per route (and per the `extra` expression,
 /// selected as `part`) where `w` holds, `limit` rows at most; each
 /// histogram bucket is its own column.
 fn stats_sql(w: &str, extra: Option<&str>, limit: usize) -> String {
     // One data point of `http.server.request.duration` (#601): OpenTelemetry
     // semantic-convention attributes, durations in seconds.
-    let attr = |k: &str, pat: &str| format!("regexp_match(properties, '\"{k}\":{pat}')[1]");
-    let int_of = |k: &str| format!("COALESCE(CAST({} AS BIGINT), 0)", attr(k, "([0-9]{1,18})"));
-    let secs_of = |k: &str| {
-        format!(
-            "COALESCE(CAST({} AS DOUBLE), 0)",
-            attr(k, "([0-9]{1,12}(?:\\.[0-9]{1,9})?(?:[eE][-+]?[0-9]{1,3})?)")
-        )
-    };
+    let attr = attr_sql;
+    let int_of = int_sql;
+    let secs_of = secs_sql;
     let buckets: Vec<String> = (1..=BUCKETS)
         .map(|i| {
             format!(
@@ -215,6 +420,8 @@ fn row_stat(
         max_ms: int(r, "max_ms"),
         buckets: (1..=BUCKETS).map(|i| int(r, &format!("b{i}"))).collect(),
         key_of: None,
+        slowest: None,
+        first_5xx: None,
     };
     s.key_of = keys.get(&s.name()).cloned();
     Some(s)
@@ -241,11 +448,15 @@ pub async fn list(
         "date >= '{since}' AND timestamp >= now() - INTERVAL '{days} days' AND environment = {env}"
     );
     let keys = key_actions(map);
-    let r = q
-        .with_params(&params)
-        .sql(project, &stats_sql(&w, None, MAX_ROUTES))
-        .await?;
-    Ok(r.rows.iter().filter_map(|x| row_stat(x, &keys)).collect())
+    let qp = q.with_params(&params);
+    let (sums, picks) = (
+        stats_sql(&w, None, MAX_ROUTES),
+        exemplars_sql(&w, None, MAX_ROUTES * 2),
+    );
+    let (r, ex) = futures::join!(qp.sql(project, &sums), qp.sql(project, &picks));
+    let mut out: Vec<RouteStat> = r?.rows.iter().filter_map(|x| row_stat(x, &keys)).collect();
+    attach(&mut out, &picked(&ex?.rows), None);
+    Ok(out)
 }
 
 /// Each release's routes in `environment` since `since` (a `YYYY-MM-DD`
@@ -268,15 +479,21 @@ pub(crate) async fn by_release(
         "date >= '{since}' AND environment = {env} AND release IS NOT NULL AND release <> ''"
     );
     let keys = key_actions(map);
-    let r = q
-        .with_params(&params)
-        .sql(project, &stats_sql(&w, Some("release"), MAX_ROUTES))
-        .await?;
+    let qp = q.with_params(&params);
+    let (sums, picks) = (
+        stats_sql(&w, Some("release"), MAX_ROUTES),
+        exemplars_sql(&w, Some("release"), MAX_ROUTES * 2),
+    );
+    let (r, ex) = futures::join!(qp.sql(project, &sums), qp.sql(project, &picks));
     let mut out: HashMap<String, Vec<RouteStat>> = HashMap::new();
-    for x in &r.rows {
+    for x in &r?.rows {
         if let (Some(release), Some(s)) = (text(x, "part"), row_stat(x, &keys)) {
             out.entry(release).or_default().push(s);
         }
+    }
+    let ex = picked(&ex?.rows);
+    for (release, list) in &mut out {
+        attach(list, &ex, Some(release.as_str()));
     }
     Ok(out)
 }
@@ -548,6 +765,7 @@ pub fn checks(current: &[RouteStat], previous: &[RouteStat]) -> Vec<Check> {
             current: rc,
             outcome,
             judged: true,
+            exemplar: None,
             note: format!(
                 "5xx of {}: {:.1}% → {:.1}% ({} requests)",
                 label(c),
@@ -573,6 +791,13 @@ pub fn checks(current: &[RouteStat], previous: &[RouteStat]) -> Vec<Check> {
             outcome,
             judged: true,
             note: format!("p95 of {}: {pp:.0} ms → {pc:.0} ms", label(c)),
+            // The request to open for a slower route (#607): shown, the
+            // outcome is the histogram's alone.
+            exemplar: if outcome == Outcome::Worse {
+                c.slowest.clone()
+            } else {
+                None
+            },
         });
     }
     out
@@ -674,7 +899,7 @@ mod tests {
             sum_ms: 0,
             max_ms: 20_000,
             buckets,
-            key_of: None,
+            ..RouteStat::default()
         }
     }
 
@@ -755,6 +980,70 @@ mod tests {
         assert!(m.worse && m.errors_moved && !h.worse && !h.errors_moved);
         assert!(m.size > h.size && m.size >= 1.0);
         assert!(m.previous_error_rate < m.error_rate);
+    }
+
+    #[test]
+    fn a_slower_routes_check_carries_its_slowest_request_and_keeps_its_outcome() {
+        let before = [stat(400, 0, 390, 4)];
+        let mut slow = stat(400, 0, 100, 9);
+        let plain = checks(std::slice::from_ref(&slow), &before);
+        slow.slowest = Some(Exemplar {
+            ms: 980.0,
+            session_id: Some("s1".into()),
+            ..Exemplar::default()
+        });
+        let with = checks(std::slice::from_ref(&slow), &before);
+        let p95 = |list: &[Check]| {
+            list.iter()
+                .find(|c| c.key.starts_with("p95:"))
+                .map(|c| (c.outcome, c.exemplar.clone()))
+        };
+        let (Some((o1, e1)), Some((o2, e2))) = (p95(&plain), p95(&with)) else {
+            panic!("the p95 is judged");
+        };
+        assert_eq!(o1, o2, "an exemplar never changes the outcome");
+        assert!(e1.is_none() && e2 == slow.slowest);
+        // A route that did not get slower carries none.
+        let mut same = before[0].clone();
+        same.slowest = slow.slowest.clone();
+        assert!(
+            checks(&[same], &before)
+                .iter()
+                .all(|c| c.exemplar.is_none())
+        );
+    }
+
+    #[test]
+    fn hostile_exemplars_are_bounded_and_their_bad_fields_left_out() {
+        let good = r#"{"value":1.5,"time":"2026-11-27T10:00:00.000Z","trace_id":"5b8efff798038103d269b633813fc60c","filtered_attributes":{"session.id":"s-1","user.id":"u7"}}"#;
+        let list = exemplars_of(&format!(r#"{{"exemplars":[{good}]}}"#), 503);
+        assert_eq!(list.len(), 1);
+        assert!(list[0].ms > 1000.0 && list[0].status == 503);
+        assert!(list[0].trace_id.is_some() && list[0].session_id.is_some());
+        let hostile = format!(
+            r#"{{"exemplars":[{{"value":1,"time":"2026-11-27T10:00:00Z","trace_id":"ZZ{z}","filtered_attributes":{{"session.id":"a b;c","user.id":"{u}"}}}},
+            {{"value":-1,"time":"2026-11-27T10:00:00Z"}},{{"value":1e300,"time":"2026-11-27T10:00:00Z"}},
+            {{"value":1,"time":"yesterday"}},{{"value":"1","time":"2026-11-27T10:00:00Z"}},{good},{good},{good}]}}"#,
+            z = "0".repeat(30),
+            u = "x".repeat(10_000)
+        );
+        let list = exemplars_of(&hostile, 200);
+        assert!(list.len() <= MAX_POINT_EXEMPLARS);
+        let first = &list[0];
+        assert!(first.trace_id.is_none() && first.session_id.is_none());
+        assert!(
+            first
+                .user
+                .as_ref()
+                .is_some_and(|u| u.chars().count() <= MAX_EXEMPLAR_USER)
+        );
+        assert!(
+            list.iter()
+                .all(|e| e.ms >= 0.0 && e.ms <= MAX_EXEMPLAR_S * 1000.0)
+        );
+        assert!(!valid_trace_id(&"0".repeat(32)));
+        assert!(exemplars_of("not json", 200).is_empty());
+        assert!(exemplars_of(r#"{"exemplars":"x"}"#, 200).is_empty());
     }
 
     #[test]

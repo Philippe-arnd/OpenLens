@@ -178,8 +178,12 @@ export class OpenLens {
 
   /**
    * Count one request in its route's stats (any framework). `route` is the
-   * route template (`/api/entries/:id`), never the raw URL.
-   * @param {{ method: string, route: string, status: number, ms: number }} r
+   * route template (`/api/entries/:id`), never the raw URL. `traceId`,
+   * `sessionId` and `user` (a string, or a function called only when the
+   * request is kept) describe the request if it becomes an exemplar (#607):
+   * the slowest of its key's window, or the first answered 5xx.
+   * @param {{ method: string, route: string, status: number, ms: number,
+   *   traceId?: string, sessionId?: string, user?: string | (() => unknown) }} r
    */
   recordRequest(r) {
     try {
@@ -205,6 +209,15 @@ export class OpenLens {
       let i = BOUNDS_S.findIndex((b) => secs <= b);
       if (i < 0) i = BOUNDS_S.length;
       s.buckets[i] += 1;
+      // Exemplars (#607): the slowest request and, for 5xx, the first; two
+      // small objects per key at most, built only when kept.
+      const slower = !s.slowest || secs > s.slowest.value;
+      const first = status >= 500 && !s.first;
+      if (slower || first) {
+        const ex = exemplar(r, secs, now);
+        if (slower) s.slowest = ex;
+        if (first) s.first = ex;
+      }
     } catch (e) {
       this.onError(e);
     }
@@ -232,7 +245,16 @@ export class OpenLens {
       if (typeof opts.user === "function") req.openlens.user = () => safeCall(opts.user, req);
       res.on("finish", () => {
         const ms = Number(process.hrtime.bigint() - t0) / 1e6;
-        this.recordRequest({ method: req.method, route: routeOf(req), status: res.statusCode, ms });
+        const ctx = req.openlens || {};
+        this.recordRequest({
+          method: req.method,
+          route: routeOf(req),
+          status: res.statusCode,
+          ms,
+          traceId: ctx.traceId,
+          sessionId: ctx.sessionId,
+          user: ctx.user,
+        });
       });
       next();
     };
@@ -365,6 +387,7 @@ export class OpenLens {
           max: round6(s.max),
           bucket_counts: s.buckets,
           $window_s: STATS_WINDOW_MS / 1000,
+          ...exemplarsProp(s),
         },
         undefined,
         new Date(s.start),
@@ -446,6 +469,39 @@ export function requestContext(headers) {
   const sid = String(headers[SESSION_HEADER] || "").trim();
   if (/^[A-Za-z0-9_-]{1,100}$/.test(sid)) ctx.sessionId = sid;
   return ctx;
+}
+
+/**
+ * One exemplar (#607), in OpenTelemetry's shape: the duration (seconds),
+ * when it ended, the trace id and, as filtered attributes, the session and
+ * the user. Nothing else of the request is ever read: no body, header,
+ * cookie, URL or query string.
+ */
+function exemplar(r, secs, now) {
+  const ex = { value: secs, time: new Date(now).toISOString() };
+  const trace = typeof r.traceId === "string" ? r.traceId : "";
+  if (/^[0-9a-f]{32}$/.test(trace) && !/^0+$/.test(trace)) ex.trace_id = trace;
+  const attrs = {};
+  const sid = typeof r.sessionId === "string" ? r.sessionId : "";
+  if (/^[A-Za-z0-9_-]{1,100}$/.test(sid)) attrs["session.id"] = sid;
+  let user = r.user;
+  if (typeof user === "function") {
+    try {
+      user = user();
+    } catch {
+      user = undefined;
+    }
+  }
+  if (user !== undefined && user !== null && user !== "") attrs["user.id"] = String(user).slice(0, 200);
+  if (Object.keys(attrs).length > 0) ex.filtered_attributes = attrs;
+  return ex;
+}
+
+/** The `exemplars` of a key's window: its slowest and its first 5xx, once each. */
+function exemplarsProp(s) {
+  const kept = [s.slowest, s.first].filter((ex, i, all) => ex && all.indexOf(ex) === i);
+  const list = kept.map((ex) => ({ ...ex, value: round6(ex.value) }));
+  return list.length > 0 ? { exemplars: list } : {};
 }
 
 /** Start of the stats window that holds `ms`. */

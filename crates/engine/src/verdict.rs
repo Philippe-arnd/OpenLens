@@ -240,6 +240,11 @@ pub struct Check {
     pub judged: bool,
     /// In plain words.
     pub note: String,
+    /// A slower route's slowest request in this release (#607, D-089),
+    /// with its session when known: the structured part of its reason, for
+    /// a page to open the replay at that time. Never changes the outcome.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exemplar: Option<crate::routes::Exemplar>,
 }
 
 /// A release compared with the one before it.
@@ -307,6 +312,7 @@ fn share_check(
         Some(_) => Outcome::Same,
     };
     Check {
+        exemplar: None,
         kind: "kpi",
         key: key.to_owned(),
         label: label.to_owned(),
@@ -344,6 +350,7 @@ pub fn compare(
         let better = stats::two_proportions(c.error_rate(), c.sessions, p.error_rate(), p.sessions)
             .is_some_and(|pv| pv < ALPHA && c.error_rate() < p.error_rate());
         checks.push(Check {
+            exemplar: None,
             kind: "kpi",
             key: "error_rate".into(),
             label: "Sessions with errors".into(),
@@ -383,6 +390,7 @@ pub fn compare(
         ));
         let per_user = |s: &Side| share(s.sessions, s.users);
         checks.push(Check {
+            exemplar: None,
             kind: "kpi",
             key: "sessions_per_user".into(),
             label: "Sessions per user".into(),
@@ -402,6 +410,7 @@ pub fn compare(
             let enough = cv.samples >= MIN_SESSIONS && pv.samples >= MIN_SESSIONS;
             let (rc, rp) = (rating_rank(name, cv.p75), rating_rank(name, pv.p75));
             checks.push(Check {
+                exemplar: None,
                 kind: "vital",
                 key: name.to_owned(),
                 label: format!("{name} p75"),
@@ -459,6 +468,7 @@ pub fn compare(
         .collect();
     for e in &new_errors {
         checks.push(Check {
+            exemplar: None,
             kind: "errors",
             key: e.fingerprint.clone(),
             label: "New error".into(),
@@ -510,6 +520,7 @@ fn goal_checks(g: &Goal, c: &Side, p: &Side, checks: &mut Vec<Check>) {
             Outcome::Same
         };
         checks.push(Check {
+            exemplar: None,
             kind: "guardrail",
             key: gr.kpi.clone(),
             label: label.clone(),
@@ -532,6 +543,7 @@ fn goal_checks(g: &Goal, c: &Side, p: &Side, checks: &mut Vec<Check>) {
     let (label, _, _) = kpi_info(&g.kpi);
     let gap = |v: f64| (g.target - v).abs();
     checks.push(Check {
+        exemplar: None,
         kind: "goal",
         key: g.kpi.clone(),
         label: label.clone(),
