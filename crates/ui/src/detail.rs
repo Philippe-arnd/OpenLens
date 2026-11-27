@@ -256,6 +256,11 @@ mod tests {
         assert!(html.contains(">ev-0<"));
         let all = "href=\"/p/p1/events?person=ana&amp;days=90\"";
         assert!(html.matches(all).count() >= 2, "header and table head");
+        // The trail ends on the person, its section one step back.
+        let trail = &html[html.find("class=\"crumbs\"").unwrap()..];
+        let trail = &trail[..trail.find("</nav>").unwrap()];
+        assert!(trail.contains("aria-current=\"page\">ana<"), "{trail}");
+        assert!(trail.contains("href=\"/p/p1/audience\""), "{trail}");
         let last = html.rfind("class=\"card").unwrap();
         assert!(html[last..].starts_with("class=\"card danger\""));
     }
