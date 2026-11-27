@@ -112,21 +112,6 @@ fn unguarded(decls: &[Decl]) -> Vec<String> {
         .collect()
 }
 
-/// Motion declared before the motion layer (#552). The `utilities` layer
-/// switches it all off under `reduce`; anything new goes in the motion
-/// layer instead.
-const LEGACY: [&str; 9] = [
-    "button { transition }",
-    ".blob { animation }",
-    ".tile { transition }",
-    ".spark .bar { transition }",
-    ".wave { animation }",
-    ".board-waiting .spinner { animation }",
-    ".board-waiting .waiting-bar span { animation }",
-    "a.stretch .details { transition }",
-    "input.switch::after { transition }",
-];
-
 fn is_layout(prop: &str) -> bool {
     let p = prop.trim_start_matches("min-").trim_start_matches("max-");
     matches!(
@@ -215,10 +200,9 @@ fn layout_animated(decls: &[Decl]) -> Vec<String> {
 #[test]
 fn everything_that_moves_waits_for_no_preference() {
     let (decls, blocks) = walk(crate::CSS).unwrap_or_else(|e| panic!("{e}"));
-    let new: Vec<String> = unguarded(&decls)
-        .into_iter()
-        .filter(|d| !LEGACY.contains(&d.as_str()))
-        .collect();
+    // Everything that moves, the logo included (#591), is in the motion
+    // layer: no exception list.
+    let new = unguarded(&decls);
     assert!(new.is_empty(), "motion outside no-preference: {new:?}");
     let vt: Vec<&Vec<String>> = blocks
         .iter()
