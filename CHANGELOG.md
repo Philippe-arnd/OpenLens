@@ -4,6 +4,17 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **Heatmap tab** (#592): *Behaviour → Heatmap* opens the click heatmap of the most viewed page; `/p/{id}/heatmap` works without `path`, and with no page yet shows an empty state.
+
+
+### Fixed
+
+- **The dashboard now looks like the UI v2 design** (#586): buttons, type sizes, corners, headings, tags, tables and inputs follow the v2 tokens instead of the older styles left underneath (#587); the Focus board has one subtitle line, lighter ranked insights, a four-column Feature pulse and its secondary blocks folded after the cohorts and the release comparison (#588); Events puts environment, role, release and the team in the top-bar chips and keeps its own filters on one row (#589); the Person page lists the latest 30 events so the Privacy card shows (#590); the sign-in page says *Sign in* with the agent hint, and the colour-blob logo is back everywhere and changes shape again, unless the system asks for less motion (#591).
+- **Status pills were 130 px tall on some pages** (#587): the status page's container rule applied to every status pill.
+
+
 ## [0.6.0] - 2026-11-26
 
 ### Changed
