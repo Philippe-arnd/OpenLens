@@ -81,6 +81,9 @@ pub(crate) async fn project_for_key(
 #[derive(Default)]
 pub(crate) struct Buckets {
     map: HashMap<String, (f64, std::time::Instant)>,
+    /// A fixed "now" set by tests: the buckets stop refilling, so the
+    /// outcome does not depend on how fast the machine is (#595).
+    frozen: Option<std::time::Instant>,
 }
 
 /// Keys a [`Buckets`] holds at most (then idle ones go, then the oldest).
@@ -92,9 +95,14 @@ impl Buckets {
         self.map.len()
     }
 
+    /// Stop the clock: from now on no bucket refills (tests only).
+    pub(crate) fn freeze(&mut self) {
+        self.frozen = Some(std::time::Instant::now());
+    }
+
     /// Take `cost` tokens from `key`'s bucket; false when it is empty.
     pub(crate) fn take(&mut self, key: &str, cost: f64, rate: f64, burst: f64) -> bool {
-        let now = std::time::Instant::now();
+        let now = self.frozen.unwrap_or_else(std::time::Instant::now);
         if self.map.len() > MAX_BUCKETS {
             // Forget idle keys (a full bucket is the same as no entry).
             self.map.retain(|_, (tokens, at)| {
