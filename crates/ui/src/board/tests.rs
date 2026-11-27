@@ -104,14 +104,80 @@ fn the_board_names_the_window_it_reads() {
         ..BoardWindow::default()
     });
     assert_eq!(period(&b, "last 7 days"), "since v2.1 (4 days)");
-    let line = b
-        .window
-        .as_ref()
-        .map(|w| window_line(w).into_string())
-        .unwrap_or_default();
-    assert!(line.contains("Since v2.1 (4 days)"), "{line}");
-    assert!(line.contains("against the 4 days before"), "{line}");
-    assert!(line.contains("users (+"), "more users than before: {line}");
+    // One line under the title (#588), the users in the chart card.
+    let head = subtitle(&b, &Filters::default(), "everyone").into_string();
+    assert!(head.contains("Since v2.1 (4 days)"), "{head}");
+    assert!(head.contains("compared with the 4 days before."), "{head}");
+    let users = b.window.as_ref().map(window_users).unwrap_or_default();
+    assert_eq!(users, "12 users, +20% against the 4 days before");
+}
+
+#[test]
+fn the_page_head_says_the_window_once() {
+    let html = page(&full());
+    let head = between(
+        &html,
+        r#"<div class="page-head">"#,
+        r#"<div class="actions">"#,
+    );
+    assert_eq!(head.matches("<p").count(), 1, "one subtitle: {head}");
+    assert!(head.contains("compared with the 10 days before."), "{head}");
+    // The window's users moved to the active users card.
+    let au = between(&html, r#"id="au-h""#, "</section>");
+    assert!(
+        au.contains("144 users, -4% against the 10 days before"),
+        "{au}"
+    );
+}
+
+#[test]
+fn the_board_reads_in_the_mockup_order() {
+    let mut b = full();
+    b.role_gaps = vec![("Admin ".into(), 3)];
+    let html = page(&b);
+    let at = |needle: &str| {
+        html.find(needle)
+            .unwrap_or_else(|| panic!("{needle} missing: {html}"))
+    };
+    let order = [
+        r#"class="card lead""#,
+        r#"class="card ranked""#,
+        r#"id="kpi-h""#,
+        r#"id="au-h""#,
+        r#"id="fp-h""#,
+        "Do they come back?",
+        "v2 compared with v1",
+        r#"id="wv-h""#,
+        r#"id="gaps-h""#,
+    ];
+    for w in order.windows(2) {
+        assert!(at(w[0]) < at(w[1]), "{} before {}", w[0], w[1]);
+    }
+    // The cohorts are open, the release comparison and the secondary
+    // cards closed.
+    assert!(html.contains("<details class=\"card disclose\" open>"));
+    assert_eq!(
+        html.matches(r#"<details class="card disclose secondary">"#)
+            .count(),
+        2,
+        "Web Vitals and role gaps, closed: {html}"
+    );
+    // On a share link, the secondary cards keep their content, not the
+    // links to their pages.
+    let shared = shared_page(&b);
+    let gaps = between(&shared, r#"id="gaps-h""#, "</details>");
+    assert!(gaps.contains("Admin ") && !gaps.contains("<a "), "{gaps}");
+}
+
+#[test]
+fn ranked_insights_carry_no_next_step() {
+    let b = full();
+    let html = page(&b);
+    let ranked = between(&html, r#"class="card ranked""#, "</ol>");
+    assert!(!ranked.contains("Next step"), "{ranked}");
+    assert!(!ranked.contains(&b.insights[1].next_step), "{ranked}");
+    let lead = between(&html, r#"class="card lead""#, r#"class="card ranked""#);
+    assert!(lead.contains("Next step") && lead.contains(&b.insights[0].next_step));
 }
 
 #[test]
