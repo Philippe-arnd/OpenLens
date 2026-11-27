@@ -2649,6 +2649,7 @@ version = "0.7.0"
 dependencies = [
  "chrono",
  "chrono-tz",
+ "flate2",
  "maud",
  "openlens-engine",
  "openlens-errors",
@@ -2659,6 +2660,7 @@ dependencies = [
  "openlens-replay",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

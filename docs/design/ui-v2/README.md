@@ -72,7 +72,7 @@ Replace `crates/ui/assets/app.css` with the layered structure in `mockups/v2.css
   This removes the palette that is declared three times today (`:root`, `[data-theme="dark"]`, `prefers-color-scheme`).
 - **Tints use `color-mix(in oklab, …)`, never `in oklch`.** Mixing in oklch with white or a neutral swings the hue (violet turns pink). The reference file already does this.
 - Keep what `app.css` does well: WCAG 1.4.1 underlines on links in text, 24 px minimum targets for small links, `tabular-nums`, `:focus-visible` rings, `prefers-reduced-motion`.
-- Budget: the whole stylesheet stays under 12 kB gzipped. Serve it with a content hash in the URL and `Cache-Control: immutable`.
+- Budget: the whole stylesheet stays within 23 kB gzipped (gzip -9). It is served at `/assets/app/<hash>.css`, where the hash is the start of its SHA-256, with `Cache-Control: public, max-age=31536000, immutable`; `/assets/app.css` still answers, with a short cache, for pages cached before. The budget was 12 kB; #579 revised it. A safe prune (unused rules, declarations a later identical rule overrides) only took the file from 22.3 kB to 22.2 kB, and reaching 12 kB means merging the v2 component blocks, which needs a computed-style comparison of every screen. Because the URL changes only when the file does, a browser downloads it once per release, so the larger size is a one-off cost. The test `the_stylesheet_stays_within_its_gzip_budget` (`crates/ui`) fails above the budget, which leaves little headroom on purpose: a v2.1 change that adds CSS should remove some too.
 
 ### 3.2 Tokens
 
@@ -288,5 +288,5 @@ Overlaying the **live** app (the SDK draws the map inside the customer's own pag
 - With `prefers-reduced-motion: reduce`, nothing animates.
 - axe-core reports no violations on the demo screens. Text contrast is ≥ 4.5:1, and ≥ 3:1 for large text and UI parts.
 - Keyboard: every action is reachable with Tab, popovers close with Escape, `accesskey` 1–8 works, and focus is always visible.
-- The stylesheet is ≤ 12 kB gzipped, and no page grows by more than 10 % in HTML bytes.
+- The stylesheet is ≤ 23 kB gzipped (revised from 12 kB in #579, see §3.1), and no page grows by more than 10 % in HTML bytes.
 - `cargo xtask ci` passes, and the PR says what ran.

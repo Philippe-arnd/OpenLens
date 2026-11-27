@@ -11,6 +11,10 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 - **Heatmap tab** (#592): *Behaviour → Heatmap* opens the click heatmap of the most viewed page; `/p/{id}/heatmap` works without `path`, and with no page yet shows an empty state.
 
 
+### Changed
+
+- **The sidebar follows the method** (#621): Focus board, Ask, Releases, Live, Quality, Behaviour, People, Product, Settings, with access keys 1 to 9 in that order. Releases is its own section (Releases and Timeline, moved from Live); Goals moved from People to Product; Revenue is now a People tab. Every page keeps its URL.
+
 ### Fixed
 
 - **Logo colours**: the blob logo is back in its v1 colours (violet, blue, green, amber, pink); the v2 palette had turned it into the muted status tones.

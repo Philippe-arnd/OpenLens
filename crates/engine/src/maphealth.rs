@@ -211,6 +211,16 @@ fn finding(
     }
 }
 
+/// Whether a feature's success event probably fires on entry rather than
+/// when the user gets value: every one of enough users reached it. Map
+/// health reports it as a `success_always` finding; the board shows no
+/// task time for it, since the time from entry to success is then
+/// meaningless (#612).
+#[must_use]
+pub fn success_on_entry(users: i64, success_users: i64) -> bool {
+    users >= MIN_USERS && success_users >= users
+}
+
 /// Fold measured usage into the health report (pure, so it is tested
 /// without data files).
 #[must_use]
@@ -305,7 +315,7 @@ pub fn assess(m: &FeatureMap, u: &Usage) -> MapHealth {
                 )),
                 r.users,
             ));
-        } else if r.users >= MIN_USERS && r.success_users >= r.users {
+        } else if success_on_entry(r.users, r.success_users) {
             r.status = "issues";
             findings.push(finding(
                 "success_always",

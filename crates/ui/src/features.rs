@@ -123,6 +123,24 @@ fn finding_ticket(pid: &str, f: &openlens_engine::maphealth::Finding) -> String 
     )
 }
 
+/// The anchor of a map health finding on the feature map page, so other
+/// screens link to the finding itself (#612). Only letters, digits, `-`
+/// and `_` are kept from the feature key.
+pub(crate) fn finding_anchor(kind: &str, feature: Option<&str>) -> String {
+    let key: String = feature
+        .unwrap_or("")
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    format!("finding-{kind}-{key}")
+}
+
 /// The measured health of the map (#240, #551): the score as a lead card,
 /// the findings as a ranked list in the order given (highest impact
 /// first), each with its suggested change folded and its ticket; then the
@@ -163,7 +181,7 @@ pub(crate) fn map_health(pid: &str, h: &openlens_engine::MapHealth) -> Markup {
                     div.card.ranked.findings {
                         ol {
                             @for (i, f) in h.findings.iter().enumerate() {
-                                li.row {
+                                li.row id=[f.feature.as_deref().map(|k| finding_anchor(f.kind, Some(k)))] {
                                     span.rank aria-hidden="true" { (format!("{:02}", i + 1)) }
                                     div {
                                         h3 { span.sr-only { "Finding " (i + 1) ": " } (f.message) }
