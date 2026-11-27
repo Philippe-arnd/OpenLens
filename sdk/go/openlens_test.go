@@ -87,3 +87,47 @@ func TestRequiresHostAndKey(t *testing.T) {
 		t.Fatal("missing key accepted")
 	}
 }
+
+func TestCheckIn(t *testing.T) {
+	var mu sync.Mutex
+	var seen []*http.Request
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, r)
+		n := len(seen)
+		mu.Unlock()
+		if n > 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	var errs int
+	ol, err := New(Config{Host: srv.URL, Key: "pk_t", FlushInterval: time.Minute, OnError: func(error) { mu.Lock(); errs++; mu.Unlock() }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ol.Shutdown()
+	ctx := context.Background()
+	if !ol.CheckIn(ctx, "nightly-export", CheckInOptions{Status: "error", Duration: 1500 * time.Millisecond, ExpectEvery: 24 * time.Hour}) {
+		t.Fatal("first check-in should succeed")
+	}
+	mu.Lock()
+	r := seen[0]
+	mu.Unlock()
+	q := r.URL.Query()
+	if r.Method != http.MethodPost || r.URL.Path != "/check-in/nightly-export" || r.Header.Get("x-openlens-key") != "pk_t" {
+		t.Fatalf("request %s %s", r.Method, r.URL)
+	}
+	if q.Get("status") != "error" || q.Get("ms") != "1500" || q.Get("expectEvery") != "86400" || q.Get("key") != "" {
+		t.Fatalf("query %v", q)
+	}
+	if ol.CheckIn(ctx, "nightly-export", CheckInOptions{}) {
+		t.Fatal("a refused check-in reports false")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if errs < 1 {
+		t.Fatal("the refusal goes to OnError")
+	}
+}

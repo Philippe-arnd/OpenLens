@@ -472,6 +472,9 @@ async fn operators_get_metrics_readiness_and_request_ids() {
 #[tokio::test]
 async fn capture_is_rate_limited_per_client_behind_a_proxy() {
     let h = harness();
+    // The bucket refills at 50/s: on a loaded machine it could keep up with
+    // the test, so its clock stops and only the burst counts (#595).
+    openlens_server::freeze_client_rate_limits(&h.state);
     let mut limited = None;
     for i in 0..5000 {
         let r = router(h.state.clone())
@@ -480,9 +483,7 @@ async fn capture_is_rate_limited_per_client_behind_a_proxy() {
                     .header("content-type", "text/plain")
                     .header("x-forwarded-for", "203.0.113.9")
                     // The limit applies before the body is read: a body the
-                    // server rejects at once keeps each request fast, so the
-                    // bucket (50/s) cannot refill faster than the test sends
-                    // on a slow disk.
+                    // server rejects at once keeps the test short.
                     .body(Body::from("not a batch"))
                     .unwrap(),
             )

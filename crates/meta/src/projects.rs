@@ -172,6 +172,8 @@ impl Meta {
                 "announcements",
                 "announcement_updates",
                 "status_pages",
+                "jobs",
+                "job_runs",
             ] {
                 tx.execute(&format!("DELETE FROM {table} WHERE project = ?1"), [id])?;
             }

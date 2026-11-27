@@ -56,6 +56,7 @@ fn incident_kind(rule: &str) -> &'static str {
             "error budget"
         }
         r if r.starts_with("error:") => "new error",
+        r if r.starts_with("job:") => "job",
         r if r.starts_with("env:") => "environment check",
         _ => "regression",
     }

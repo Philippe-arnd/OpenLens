@@ -164,6 +164,8 @@ pub(crate) async fn tick(state: &AppState, minute: u64) {
             }
         }
         Box::pin(environments(state, &p, &s, minute)).await;
+        // Job check-ins (#609): missed, failed or slower runs.
+        Box::pin(openlens_engine::commands::jobs::alert_pass(state, &p)).await;
         if s.regressions && minute % 60 == 1 {
             Box::pin(cmd::regressions(state, &p)).await;
         }

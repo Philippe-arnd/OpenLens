@@ -194,6 +194,8 @@ pub struct UptimeView<'a> {
     pub notices: Option<Markup>,
     /// The availability card (#560), from [`availability_card`].
     pub availability: Option<Markup>,
+    /// The Jobs card (#609).
+    pub jobs: CheckInsView,
 }
 
 /// A day bar's tooltip: the day, its availability and incidents.
@@ -250,6 +252,7 @@ pub fn uptime(p: &ProjectInfo<'_>, v: &UptimeView<'_>) -> Markup {
                     }
                 }
             }
+            (check_ins_card(p, &v.jobs))
             @if let Some(a) = &v.availability { (a) }
             (crate::maintenance::maintenance_card(p.id, &v.maintenance))
             @if let Some(n) = &v.notices { (n) }

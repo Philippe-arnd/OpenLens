@@ -1,7 +1,8 @@
 //! Server route stats (#593, #594): what the Node SDK sends is read back
 //! per route by `GET /api/projects/{id}/routes`, shown on Quality › Routes
 //! (#622) and summed up on the Errors page, and never counted as user
-//! activity.
+//! activity. Runtime stats (#610) the same way, per release by
+//! `GET /api/projects/{id}/runtime`.
 
 use super::*;
 
@@ -175,4 +176,95 @@ async fn the_errors_page_tells_the_origin_and_links_a_server_error_to_its_replay
             .iter()
             .any(|s| s["session"] == "rec-1" && s["replay"] == true)
     );
+}
+
+fn runtime(uuid: u32, props: serde_json::Value) -> serde_json::Value {
+    // A `$runtime_stats` event as the Node SDK sends it (#610).
+    let mut p =
+        serde_json::json!({ "$lib": "node", "$environment": "production", "$release": "v3" });
+    if let (Some(a), Some(b)) = (p.as_object_mut(), props.as_object()) {
+        a.extend(b.clone());
+    }
+    serde_json::json!({
+        "event": "$runtime_stats",
+        "distinct_id": "$server",
+        "uuid": format!("0191f0c0-0000-7000-8000-{uuid:012}"),
+        "properties": p,
+    })
+}
+
+#[tokio::test]
+async fn runtime_stats_are_read_per_release_and_never_count_as_users_or_events() {
+    let h = harness();
+    let events = vec![
+        runtime(
+            11,
+            serde_json::json!({ "process.start": true, "process.memory.usage": 50_000_000, "v8js.memory.heap.used": 20_000_000 }),
+        ),
+        runtime(
+            12,
+            serde_json::json!({
+                "process.memory.usage": 300_000_000, "v8js.memory.heap.used": 120_000_000,
+                "nodejs.eventloop.delay.p50": 0.011, "nodejs.eventloop.delay.p99": 0.25, "$window_s": 600,
+            }),
+        ),
+        runtime(
+            13,
+            serde_json::json!({
+                "process.memory.usage": 100_000_000, "v8js.memory.heap.used": 40_000_000,
+                "nodejs.eventloop.delay.p50": 0.010, "nodejs.eventloop.delay.p99": 0.02, "$window_s": 600,
+            }),
+        ),
+    ];
+    let body = serde_json::json!({ "key": h.key, "batch": events }).to_string();
+    let (status, v) = post(&h, "/capture", body.into_bytes(), false).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    openlens_server::flush_now(&h.state).unwrap();
+
+    let r = get(&h, "/api/projects/default/runtime", None, true).await;
+    assert_eq!(r.status(), StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_str(&body_text(r).await).unwrap();
+    let rel = &v["releases"][0];
+    assert_eq!(rel["release"], "v3");
+    let stats = &rel["stats"];
+    assert_eq!(stats["starts"], 1, "one process start");
+    assert!(
+        stats["rss_max_bytes"].as_i64().unwrap() >= 300_000_000,
+        "the largest RSS, not the last or the first"
+    );
+    let (p50, p99) = (
+        stats["loop_delay_p50_ms"].as_f64().unwrap(),
+        stats["loop_delay_p99_ms"].as_f64().unwrap(),
+    );
+    assert!(p99 > p50 && p50 >= 10.0, "seconds read as ms");
+    assert!(
+        rel["restarts"].is_null(),
+        "no release before to compare with"
+    );
+
+    // Runtime stats are not user activity: no event, no user in `events`,
+    // which the board, the rollups and every KPI read.
+    let n = |sql: &'static str| {
+        let s = h.state.clone();
+        async move {
+            s.query.sql("default", sql).await.unwrap().rows[0]["n"]
+                .as_i64()
+                .unwrap()
+        }
+    };
+    assert_eq!(
+        n("SELECT count(*) AS n FROM events WHERE event = '$runtime_stats'").await,
+        0
+    );
+    assert_eq!(
+        n("SELECT count(DISTINCT distinct_id) AS n FROM events WHERE distinct_id = '$server'")
+            .await,
+        0
+    );
+    assert!(n("SELECT count(*) AS n FROM raw_events WHERE event = '$runtime_stats'").await > 0);
+
+    // Another environment has none: a note, not zeros.
+    let r = get(&h, "/api/projects/default/runtime?env=staging", None, true).await;
+    let v: serde_json::Value = serde_json::from_str(&body_text(r).await).unwrap();
+    assert!(v["releases"].as_array().unwrap().is_empty() && v["note"].is_string());
 }

@@ -53,6 +53,9 @@ serde_norway = "0.9"
 ureq = { version = "3", features = ["json"] }
 lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "rustls-tls", "hostname"] }
 serde_urlencoded = "0.7"
+# OTLP/HTTP protobuf bodies (#605, D-085), hand-written message structs, no
+# protoc or prost-build. Apache-2.0.
+prost = { version = "0.14", default-features = false, features = ["derive", "std"] }
 tempfile = "3"
 
 [workspace.lints.rust]

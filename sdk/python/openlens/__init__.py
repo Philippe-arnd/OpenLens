@@ -118,6 +118,38 @@ class OpenLens:
             self.on_error(e)
             return False
 
+    def check_in(
+        self,
+        slug: str,
+        status: Optional[str] = None,
+        ms: Optional[float] = None,
+        expect_every: Optional[float] = None,
+    ) -> bool:
+        """Job check-in (#609): call it at the end of a cron or background
+        job, so OpenLens alerts when the job does not run, fails or gets
+        slower. `status` is "ok" (default) or "error", `ms` the run's
+        duration, `expect_every` the seconds between runs (instead of the
+        schedule OpenLens learns). Sent at once; False on any error, never
+        raises."""
+        q: dict[str, str] = {}
+        if status:
+            q["status"] = status
+        if ms is not None:
+            q["ms"] = str(max(0, round(ms)))
+        if expect_every is not None:
+            q["expectEvery"] = str(round(expect_every))
+        try:
+            url = f"{self.host}/check-in/{urllib.parse.quote(str(slug), safe='')}"
+            if q:
+                url += f"?{urllib.parse.urlencode(q)}"
+            req = urllib.request.Request(url, data=b"", method="POST", headers={"x-openlens-key": self.key})
+            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                r.read()
+            return True
+        except Exception as e:  # noqa: BLE001 - never raise into the app
+            self.on_error(e)
+            return False
+
     def flush(self) -> None:
         """Send queued events now."""
         with self._lock:
