@@ -329,7 +329,10 @@ mod tests {
         let w = f.clause_span(r.current, now).unwrap_or_default();
         assert!(w.contains("date >= '2026-10-23'"), "{w}");
         assert!(w.contains("date <= '2026-10-25'"), "{w}");
-        assert!(w.contains("timestamp < now() - INTERVAL"), "{w}");
+        // The bounds are the range's own instants (#568): it ends at
+        // midnight in Paris after the 25th.
+        assert!(w.contains("timestamp >= CAST('2026-10-23T22:00:00"), "{w}");
+        assert!(w.contains("timestamp < CAST('2026-10-25T23:00:00"), "{w}");
         // The same two days in UTC are 48 hours.
         let u = range("UTC", day("2026-10-24"), day("2026-10-25"), now);
         assert!(u.is_ok_and(|u| u.current.start - u.current.end == 48 * 3600));
