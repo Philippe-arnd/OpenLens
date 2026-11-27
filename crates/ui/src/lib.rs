@@ -18,6 +18,8 @@ mod check_ins;
 mod components;
 mod cost;
 mod delivery;
+mod dependencies_table;
+pub use dependencies_table::ErrorsBackend;
 mod detail;
 mod entry;
 mod environments;

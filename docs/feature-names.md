@@ -15,6 +15,7 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Time in staging | On the Releases page: from a build's first event in staging to its first in production |
 | Release verdict | On the Releases page: healthy, regressed or inconclusive, a release against the one before it |
 | Server routes | Quality › Routes (#622) and `routes`: requests, 5xx share and response times per server route template, from the server SDK, with a ten-day p95 line and the move since the release before; the Errors page keeps one line and a link |
+| Dependencies | Errors › Dependencies (#630) and `dependencies`: the external hosts the backend calls (host only), with calls, failed share and p95 and the move since the release before; in the verdict's Backend group, shown and never judged |
 | Runtime health | In `runtime` and `release_report`: process restarts per day, memory (RSS) and event-loop delay per release, from the Node SDK |
 | Key action | A server route a feature of the map declares under `server:`; its regression is named in the verdict and its alert is urgent |
 | Deploy hook | The project's secret URL that platforms post their deploy notifications to |

@@ -1,5 +1,6 @@
 //! Outgoing dependencies (#608, D-090): a host failing for 15 minutes is
-//! announced once under `dep:<host>`, and closes when it recovers.
+//! announced once under `dep:<host>`, and closes when it recovers; only
+//! hosts are ever read back, never a path or a query (#630).
 
 use openlens_engine::commands::Host;
 use openlens_engine::commands::alerts::track_dependencies_at;
@@ -61,4 +62,66 @@ async fn a_short_failure_is_recorded_but_never_announced() {
     track_dependencies_at(&h, &p, &[], t0 + 600).await;
     assert!(!open(&h, &p.id));
     assert!(h.sent().is_empty(), "ten minutes of failures say nothing");
+}
+
+/// Stats stored with a URL in `server.address` (a client that skipped
+/// the ingestion's check) are never read back as a host: the Errors
+/// page's Dependencies table shows hosts only (#630).
+#[tokio::test]
+async fn only_hosts_are_read_back_never_a_path_or_a_query() {
+    let at = chrono::Utc::now() - chrono::Duration::hours(1);
+    let ev = |n: usize, address: &str| {
+        let mut buckets = vec![0; openlens_engine::routes::BUCKETS];
+        buckets[3] = 60;
+        openlens_event::Event {
+            uuid: format!("dep-{n}"),
+            project: "p".into(),
+            event: openlens_event::names::CLIENT_STATS.into(),
+            distinct_id: "$server".into(),
+            session_id: None,
+            timestamp: at,
+            received_at: at,
+            url: None,
+            path: None,
+            feature: None,
+            role: None,
+            account: None,
+            plan: None,
+            environment: "production".into(),
+            release: Some("v1".into()),
+            flags: None,
+            properties: serde_json::json!({
+                "http.request.method": "GET", "http.response.status_code": 200,
+                "server.address": address, "count": 60, "sum": 2.4, "max": 0.05,
+                "bucket_counts": buckets, "$window_s": 600,
+            })
+            .to_string(),
+        }
+    };
+    let evs = [
+        ev(1, "api.stripe.com"),
+        ev(2, "https://api.example.com/v1/users?token=secret"),
+        ev(3, "api.example.com/v1/users"),
+        ev(4, "api.example.com?token=secret"),
+    ];
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) =
+        openlens_storage::Writer::open(dir.path(), openlens_storage::FlushPolicy::default())
+            .unwrap();
+    w.append(&evs).unwrap();
+    w.flush().unwrap();
+    let q = openlens_query::QueryEngine::new(dir.path(), openlens_query::Limits::default());
+    let hosts = openlens_engine::dependencies::list(&q, "p", "production", 1)
+        .await
+        .unwrap();
+    assert!(
+        hosts.iter().any(|h| h.host == "api.stripe.com"),
+        "{hosts:?}"
+    );
+    assert!(
+        hosts
+            .iter()
+            .all(|h| !h.host.contains(['/', '?', '=']) && !h.host.contains("secret")),
+        "{hosts:?}"
+    );
 }

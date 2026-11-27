@@ -78,7 +78,7 @@ fn worse_names(r: &Report) -> Vec<String> {
 }
 
 /// The Backend group of a verdict; none when the release sent no server
-/// stats and has no new server error.
+/// stats, has no new server error and no dependency that got worse.
 #[must_use]
 pub fn backend_layer(r: &Report) -> Option<Layer> {
     let worse = worse_names(r);
@@ -169,8 +169,12 @@ pub fn backend_layer(r: &Report) -> Option<Layer> {
             key: false,
         });
     }
-    let more =
-        worse.len().saturating_sub(MAX_WORSE) + new_errors.len().saturating_sub(MAX_NEW_ERRORS);
+    // Outgoing dependencies (#630): shown, never judged.
+    let (deps, deps_more) = outgoing::rows(r);
+    rows.extend(deps);
+    let more = worse.len().saturating_sub(MAX_WORSE)
+        + new_errors.len().saturating_sub(MAX_NEW_ERRORS)
+        + deps_more;
     (!rows.is_empty()).then_some(Layer {
         name: "Backend",
         rows,
@@ -443,5 +447,6 @@ pub async fn latest(
     }
 }
 
+mod outgoing;
 #[cfg(test)]
 mod tests;
