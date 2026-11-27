@@ -44,9 +44,16 @@ pub fn person(
             }
         } @else { p.muted { "Anonymous visitor, never logged in." } }
     };
-    layout(
+    // The trail ends on the person (#590): `… › Audience › u276`.
+    let mut crumbs = Crumbs::of("Person", Some(p));
+    if let Some(last) = crumbs.0.last_mut() {
+        last.1 = Some(format!("/p/{}/audience", p.id));
+    }
+    crumbs.0.push((who.to_owned(), None));
+    layout_with(
         "Person",
         Some(p),
+        &crumbs,
         html! {
             (entity(who, html! { span.mono { (who) } }, facts, html! { a.btn href=(all_events) { "All their events" } }))
             div.kpis {
