@@ -10,14 +10,38 @@ export interface Options {
   onError?: (e: unknown) => void;
   fetch?: typeof fetch;
 }
+/** Request context the middleware puts on `req.openlens`. */
+export interface RequestContext { traceId?: string; sessionId?: string; distinctId?: string }
+export interface ExceptionContext extends RequestContext {
+  route?: string;
+  method?: string;
+  properties?: Record<string, unknown>;
+}
+export interface RequestRecord { method: string; route: string; status: number; ms: number }
+export declare const SERVER_ID: "$server";
+export declare const STATS_WINDOW_MS: number;
+export declare const BUCKETS_MS: number[];
 export declare class OpenLens {
   constructor(opts: Options);
   capture(distinctId: string, event: string, properties?: Record<string, unknown>): void;
   feature(distinctId: string, key: string, properties?: Record<string, unknown>): void;
   identify(distinctId: string, dims?: Dimensions): void;
   isEnabled(flag: string, distinctId: string, dims?: Dimensions): Promise<boolean>;
-  flush(): Promise<void>;
+  /** Send a server exception as `$error` (`$kind: "server"`). */
+  captureException(err: unknown, ctx?: ExceptionContext): void;
+  /** Report uncaught exceptions and unhandled rejections (opt-in). */
+  captureUncaught(): void;
+  /** Count one request in its route's 10-minute stats (any framework). */
+  recordRequest(r: RequestRecord): void;
+  /** Express middleware: route stats and `req.openlens`. `user` reads the signed-in user's id. */
+  express(opts?: { user?: (req: any) => string | undefined | null }): (req: any, res: any, next: (err?: unknown) => void) => void;
+  /** Express error handler: reports the error, then `next(err)`. */
+  expressErrors(): (err: unknown, req: any, res: any, next: (err?: unknown) => void) => void;
+  /** Send queued events now; `all` also sends the stats of the open window. */
+  flush(all?: boolean): Promise<void>;
   shutdown(): Promise<void>;
 }
+export declare function requestContext(headers: Record<string, string | string[] | undefined>): RequestContext;
+export declare function appFrame(stack?: string): string | undefined;
 export declare function detectRelease(env: Record<string, string | undefined>): string | undefined;
 export default OpenLens;

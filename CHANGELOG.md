@@ -6,6 +6,8 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Added
 
+- **Server errors and route stats from Node** (#593): `captureException` sends a server exception as an error of kind *server*, grouped, alerted on and judged per release like a browser error; `express()` and `expressErrors()` (or `recordRequest` for other frameworks) count requests per route template in 10-minute windows (count, 5xx, duration histogram), never one event per request; `captureUncaught()` is opt-in. The browser SDK adds `traceparent` and `baggage` to same-origin requests (and to `traceOrigins`), so a server error carries its session and replay, and failed requests carry their trace id.
+- **Server routes in the release verdict and the alerts** (#594): a route with 50 requests or more on both releases makes the release *regressed* when its 5xx share rises significantly (2 points at least) or its p95 is 1.5 times and 200 ms slower; new server errors are named as such. Every 10 minutes, a production route answering 5xx to 10 % or more of its last hour's requests (three times its usual share) opens an incident under *failing requests*. A feature map can declare its key actions (`server: ["POST /api/auth/sign-in"]`): their regressions are named, and their alert is urgent (quiet hours never hold it). The Errors page lists the server routes; `GET /api/projects/{id}/routes` and the MCP tool `routes` return them.
 - **Heatmap tab** (#592): *Behaviour → Heatmap* opens the click heatmap of the most viewed page; `/p/{id}/heatmap` works without `path`, and with no page yet shows an empty state.
 
 

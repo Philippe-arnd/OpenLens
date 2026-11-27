@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import { OpenLens, detectRelease } from "../src/index.js";
+import { OpenLens, detectRelease, requestContext } from "../src/index.js";
 
 function server(handler) {
   return new Promise((resolve) => {
@@ -74,4 +74,94 @@ test("release defaults to the host's commit, shortened, and an explicit one wins
     if (saved === undefined) delete process.env.SOURCE_COMMIT;
     else process.env.SOURCE_COMMIT = saved;
   }
+});
+
+function collector() {
+  const got = [];
+  return server((req, res) => {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      if (req.url.startsWith("/capture")) got.push(...JSON.parse(body).batch);
+      res.end("{}");
+    });
+  }).then((s) => ({ s, got, host: `http://localhost:${s.address().port}` }));
+}
+
+test("a server exception is a $error of kind server, grouped by the app's own frame", async () => {
+  const { s, got, host } = await collector();
+  const ol = new OpenLens({ host, key: "k", flushInterval: 60000 });
+  const err = new TypeError("boom 42");
+  err.stack = "TypeError: boom 42\n    at x (node:internal/foo:1:2)\n    at y (/app/node_modules/lib/i.js:3:4)\n    at handler (/app/dist/routes/entries.js:12:5)";
+  ol.captureException(err, { sessionId: "s1", traceId: "a".repeat(32), route: "/api/entries/:id" });
+  ol.captureException(err); // the same object is reported once
+  for (let i = 0; i < 10; i++) ol.captureException(new Error("same"));
+  await ol.shutdown();
+  s.close();
+  const errs = got.filter((e) => e.event === "$error");
+  const boom = errs.filter((e) => e.properties.$message.includes("boom"));
+  assert.equal(boom.length, 1);
+  assert.equal(boom[0].properties.$kind, "server");
+  assert.equal(boom[0].properties.$source, "/app/dist/routes/entries.js:12:5");
+  assert.equal(boom[0].session_id, "s1");
+  assert.equal(boom[0].distinct_id, "$server");
+  assert.ok(errs.filter((e) => e.properties.$message === "Error: same").length < 10, "the same message is damped");
+});
+
+test("requests are aggregated per route and status class, never one event each", async () => {
+  const { s, got, host } = await collector();
+  const ol = new OpenLens({ host, key: "k", flushInterval: 60000 });
+  for (let i = 0; i < 50; i++) ol.recordRequest({ method: "get", route: "/api/entries/:id", status: 200, ms: i });
+  ol.recordRequest({ method: "GET", route: "/api/entries/:id", status: 503, ms: 9000 });
+  ol.recordRequest({ method: "POST", route: "/api/login", status: 500, ms: 3 });
+  await ol.shutdown();
+  s.close();
+  const stats = got.filter((e) => e.event === "$request_stats");
+  assert.ok(stats.length < 51, "aggregated");
+  const ok = stats.find((e) => e.properties.$route === "/api/entries/:id" && e.properties.$status_class === "2xx");
+  const bad = stats.find((e) => e.properties.$route === "/api/entries/:id" && e.properties.$status_class === "5xx");
+  assert.equal(ok.properties.$count, 50);
+  assert.equal(ok.properties.$buckets.reduce((a, b) => a + b, 0), 50);
+  assert.ok(bad.properties.$errors > 0 && ok.properties.$errors === 0);
+  assert.ok(bad.properties.$max_ms > ok.properties.$max_ms);
+  assert.ok(stats.every((e) => e.distinct_id === "$server"));
+});
+
+test("the Express middleware records the route template and reads trace context", async () => {
+  const { s, got, host } = await collector();
+  const ol = new OpenLens({ host, key: "k", flushInterval: 60000 });
+  const mw = ol.express({ user: () => "u7" });
+  const handlers = {};
+  const res = { statusCode: 500, on: (ev, f) => (handlers[ev] = f) };
+  const req = {
+    method: "POST",
+    baseUrl: "/api",
+    route: { path: "/entries/:id" },
+    headers: { traceparent: `00-${"b".repeat(32)}-${"c".repeat(16)}-01`, baggage: "openlens-session=s9, openlens-distinct=anon%201, other=x" },
+  };
+  mw(req, res, () => {});
+  assert.deepEqual({ ...req.openlens, user: undefined }, { traceId: "b".repeat(32), sessionId: "s9", distinctId: "anon 1", user: undefined });
+  ol.expressErrors()(new Error("db down"), req, res, () => {});
+  handlers.finish();
+  // A raw URL never becomes a route.
+  const req2 = { method: "GET", originalUrl: "/users/123", headers: {} };
+  const h2 = {};
+  ol.express()(req2, { statusCode: 404, on: (ev, f) => (h2[ev] = f) }, () => {});
+  h2.finish();
+  await ol.shutdown();
+  s.close();
+  const err = got.find((e) => e.event === "$error");
+  assert.equal(err.distinct_id, "u7");
+  assert.equal(err.session_id, "s9");
+  assert.equal(err.properties.$trace_id, "b".repeat(32));
+  assert.equal(err.properties.$route, "/api/entries/:id");
+  const routes = got.filter((e) => e.event === "$request_stats").map((e) => e.properties.$route);
+  assert.ok(routes.includes("/api/entries/:id") && routes.includes("(unmatched)"));
+  assert.ok(!routes.some((r) => r.includes("123")));
+});
+
+test("hostile trace headers are ignored", () => {
+  assert.deepEqual(requestContext({ traceparent: `00-${"0".repeat(32)}-${"c".repeat(16)}-01` }), {});
+  assert.deepEqual(requestContext({ traceparent: "garbage", baggage: "openlens-session=%E0%A4%A" }), {});
+  assert.equal(requestContext({ baggage: `openlens-session=${"x".repeat(5000)}` }).sessionId.length, 200);
 });

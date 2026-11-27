@@ -23,6 +23,7 @@ features:
     success: entry_saved
     area: Journal            # optional: one-level group for the board and the map
     renamed_from: [editor]   # optional: former keys; their events count here
+    server: ["POST /api/entries"]  # optional: key actions on the server (route stats, #594)
   - key: ai-insights
     name: AI insights
     purpose: Weekly reflection generated from past entries.

@@ -635,9 +635,18 @@ async fn errors_page(
         name: &p.name,
         key: &p.api_key,
     };
-    let (b, groups) = tokio::join!(
+    let routes_in = openlens_engine::commands::routes::ListInput {
+        project: p.id.clone(),
+        environment: Some(f.environment.clone()),
+        days: None,
+    };
+    let caller = openlens_engine::commands::Caller::default();
+    let (b, groups, routes) = tokio::join!(
         openlens_engine::filter_options(&state.query, &p.id, &f, map.as_ref().map(|(m, _)| m)),
-        openlens_engine::error_groups(&state.query, &p.id, &src, &f)
+        openlens_engine::error_groups(&state.query, &p.id, &src, &f),
+        <openlens_engine::commands::routes::List as openlens_engine::commands::Command>::run(
+            &state, &caller, routes_in
+        )
     );
     match (b, groups) {
         (Ok(mut b), Ok(g)) => {
@@ -650,7 +659,7 @@ async fn errors_page(
             let original = crate::resolve_frames(&state, &p.id, &g).await;
             html(
                 StatusCode::OK,
-                openlens_ui::errors(&info, &b, &g, &original, &f),
+                openlens_ui::errors(&info, &b, &g, &original, &f, routes.ok().as_ref()),
             )
         }
         (Err(e), _) | (_, Err(e)) => html(

@@ -49,4 +49,23 @@ $ol->capture((string) $user->id, 'invoice_sent'); // sent at the end of the requ
 
 PHP has no background thread: events are sent when 50 are queued and at the end of the request. Under PHP-FPM, that happens after the response if the app calls `fastcgi_finish_request()`.
 
+## Server errors and route stats (Node)
+
+```js
+import express from "express";
+import { OpenLens } from "@openlens/node";
+const ol = new OpenLens({ host: process.env.OPENLENS_HOST, key: process.env.OPENLENS_KEY });
+const app = express();
+app.use(ol.express({ user: (req) => req.user?.id })); // first: route stats + trace context
+// … routes …
+app.use(ol.expressErrors()); // last: reports the error, then next(err)
+ol.captureUncaught(); // optional: crashes and unhandled rejections
+```
+
+- **Route stats:** each request counts in its route template (`/api/entries/:id`, never the raw URL) and status class, in 10-minute windows: count, 5xx, duration histogram. Other frameworks call `ol.recordRequest({ method, route, status, ms })`.
+- **Errors:** `ol.captureException(err, { distinctId, route })` anywhere else. A server error is grouped with the other errors, alerted on, and judged per release.
+- **Session link:** the browser SDK adds `traceparent` and `baggage` to requests to its own origin, so a server error carries the session (and its replay) and the user. An API on another origin needs `traceOrigins: ["https://api.example.com"]` in the browser config, and its CORS must allow the `traceparent` and `baggage` headers.
+- **Release:** keep the same release name on both sides. Both SDKs read the host's commit (`SOURCE_COMMIT` on Coolify) when `release` is not set.
+- **Volume:** a server sends one batch every 5 s and one stats event per route and status class every 10 minutes, far below the capture limits, whatever the traffic.
+
 Use the same `distinct_id` as the browser SDK's `identify()`, so server and browser events belong to the same person. Success events sent from the server count for the feature map like any other event.

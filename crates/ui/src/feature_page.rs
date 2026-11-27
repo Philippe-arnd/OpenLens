@@ -284,6 +284,7 @@ mod tests {
             area: None,
             requires: vec![],
             renamed_from: vec![],
+            server: vec![],
         };
         let ctx = openlens_engine::FeatureContext::default();
         let filters = Filters {
