@@ -37,6 +37,7 @@ pub mod environments;
 mod errors;
 mod events;
 mod explore;
+mod feature_paths;
 mod feature_signals;
 pub mod flows;
 pub mod forms;
@@ -84,6 +85,7 @@ pub use errors::{
 };
 pub use events::*;
 pub use explore::*;
+pub use feature_paths::{FeaturePaths, RoleMatrix, feature_paths, role_matrix};
 pub use feature_signals::{FeatureRow, Signal};
 pub use flows::{Flow, FlowLink, FlowQuery, flows};
 pub use inforce::{History, MapAt};

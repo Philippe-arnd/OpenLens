@@ -269,7 +269,8 @@ pub(crate) fn heatmap_href(pid: &str, path: &str) -> String {
 /// Per-page hotspots (#548: one table): views as a bar, scroll depth, the
 /// most clicked element, rage clicks, the Web Vitals measured on the page
 /// (`vitals`: the vitals report, whose worst pages carry a p75 per page)
-/// and a link to the page's heatmap.
+/// and a link to the page's heatmap, under the Web Vitals of the whole
+/// site (the board's card until #620).
 pub fn pages(
     p: &ProjectInfo<'_>,
     b: &Board,
@@ -291,6 +292,7 @@ pub fn pages(
         context_bar(p.id, b, f, "/pages", false),
         html! {
             div.heading { div { h1 { "Pages" } p.muted { "How far people scroll, what they click, where they get frustrated. Last 30 days; Web Vitals: p75 over 7 days, on the slowest pages." } } }
+            (crate::vitals::web_vitals(p.id, f, vitals))
             @if list.is_empty() {
                 section.card { p.muted { "No page views yet." } }
             } @else {
