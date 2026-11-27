@@ -779,25 +779,35 @@ function autocapture() {
   });
   trackVitals((name, value, rating, facts) => track("$vital", { ...facts, $name: name, $value: value, $rating: rating }));
   const own = (u) => !!cfg && u.startsWith(cfg.host);
-  const failed = (method, rawUrl, status) => {
+  const failed = (method, rawUrl, status, trace) => {
     let path = rawUrl;
     try {
       const u = new URL(rawUrl, location.href);
       path = u.host === location.host ? u.pathname : u.host + u.pathname;
     } catch {
     }
-    track("$request_failed", { $method: method.toUpperCase(), $path: path.slice(0, 300), $status: status });
+    track("$request_failed", { $method: method.toUpperCase(), $path: path.slice(0, 300), $status: status, $trace_id: trace });
   };
   if (origFetch) {
     const f = origFetch;
     window.fetch = function(input, init2) {
+      var _a;
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       const method = (init2 == null ? void 0 : init2.method) || (input instanceof Request ? input.method : "GET");
+      let trace;
+      if (!own(url) && traced(url)) {
+        try {
+          const h = new Headers((_a = init2 == null ? void 0 : init2.headers) != null ? _a : input instanceof Request ? input.headers : void 0);
+          trace = traceHeaders((k) => h.get(k), (k, v) => h.set(k, v));
+          init2 = { ...init2, headers: h };
+        } catch {
+        }
+      }
       const p = f.call(window, input, init2);
       if (!own(url)) {
         p.then(
-          (r) => r.status >= 500 && failed(method, url, r.status),
-          () => failed(method, url, 0)
+          (r) => r.status >= 500 && failed(method, url, r.status, trace),
+          () => failed(method, url, 0, trace)
         );
       }
       return p;
@@ -806,13 +816,51 @@ function autocapture() {
   const open = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function(method, url, ...rest) {
     const u = String(url);
+    const r = open.call(this, method, url, ...rest);
     if (!own(u)) {
+      let trace;
+      if (traced(u)) {
+        try {
+          trace = traceHeaders(() => null, (k, v) => this.setRequestHeader(k, v));
+        } catch {
+        }
+      }
       this.addEventListener("loadend", () => {
-        if (this.status >= 500 || this.status === 0) failed(method, u, this.status);
+        if (this.status >= 500 || this.status === 0) failed(method, u, this.status, trace);
       });
     }
-    return open.call(this, method, url, ...rest);
+    return r;
   };
+}
+function traced(rawUrl) {
+  var _a;
+  if (!cfg || consent !== "granted") return false;
+  try {
+    const o = new URL(rawUrl, location.href).origin;
+    return o === location.origin || ((_a = cfg.traceOrigins) != null ? _a : []).some((t) => t.replace(/\/$/, "") === o);
+  } catch {
+    return false;
+  }
+}
+function hex(bytes2) {
+  const a = new Uint8Array(bytes2);
+  crypto.getRandomValues(a);
+  return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+function traceHeaders(get, set) {
+  var _a, _b;
+  const own = /^[0-9a-f]{2}-([0-9a-f]{32})-/.exec((_a = get("traceparent")) != null ? _a : "");
+  let trace = own == null ? void 0 : own[1];
+  if (!trace) {
+    trace = hex(16);
+    set("traceparent", `00-${trace}-${hex(8)}-01`);
+  }
+  if (!(cfg == null ? void 0 : cfg.cookieless)) {
+    const ids = `openlens-session=${encodeURIComponent(state.sid)},openlens-distinct=${encodeURIComponent((_b = state.uid) != null ? _b : state.anon)}`;
+    const prev = get("baggage");
+    set("baggage", prev ? `${prev},${ids}` : ids);
+  }
+  return trace;
 }
 function init(config) {
   var _a, _b, _c;

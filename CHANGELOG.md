@@ -6,6 +6,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ### Added
 
+- **Server errors and route stats from Node** (#593): `captureException` sends a server exception as an error of kind *server*, grouped, alerted on and judged per release like a browser error; `express()` and `expressErrors()` (or `recordRequest` for other frameworks) count requests per route template in 10-minute windows (count, 5xx, duration histogram), never one event per request; `captureUncaught()` is opt-in. The browser SDK adds `traceparent` and `baggage` to same-origin requests (and to `traceOrigins`), so a server error carries its session and replay, and failed requests carry their trace id.
 - **Heatmap tab** (#592): *Behaviour → Heatmap* opens the click heatmap of the most viewed page; `/p/{id}/heatmap` works without `path`, and with no page yet shows an empty state.
 
 

@@ -661,3 +661,15 @@ The questions "is this component under maintenance at t?" and "how many seconds 
 - **No script in HTML:** the UI v2 rule is "no `<script>` in any HTML"; an inline rule set would be its only exception, and the narrow keyword is not understood outside Chromium.
 
 **Consequences:** UI v2 item 13 is dropped. Revisit if Firefox and Safari ship speculation rules by default and a page's cost can be bounded (for example, prefetch limited to pages served from a cache).
+
+## D-082 (2026-11-27, agent for #593, owner-confirmed) Backend signal: server errors as `$error`, route stats aggregated in the SDK, trace headers same-origin by default
+
+**Decision:**
+- A server exception is a plain `$error` with `$kind: "server"` and `$lib: "node"`; its `$source` is the first stack frame outside `node_modules`, so its group (message @ file) never merges with a browser one. Every reader of `$error` (Errors page, new-group alert, release verdict) gets it with no change.
+- Requests are counted **in the SDK**: one `$request_stats` event per (method, route template, status class) per 10-minute window, with the count, the 5xx count, the duration sum and maximum, and a fixed histogram (5 ms to 10 s, 12 buckets). Never one event per request. At most 500 keys per window. A request with no matched route counts as `(unmatched)`: a raw URL never becomes a route.
+- Server events tied to no user use the distinct id `$server`. The `events` view leaves `$request_stats` out (the board, rollups and KPIs never see them); release shares leave `$server` out.
+- The browser SDK adds W3C `traceparent` (kept if the app already set one) and `baggage` (`openlens-session`, `openlens-distinct`) to requests to its own origin, and to the origins listed in the one new option `traceOrigins`. Nothing is added without consent; in cookieless mode only `traceparent` is sent.
+
+**Why:** at 25K monthly users one event per request would be 10 to 50 times the product events and break the D-023 sizing; the aggregate is bounded by routes × windows. Reusing `$error` avoids touching every error reader. Cross-origin headers need the API's CORS to allow them, so widening is the app's choice (`traceOrigins` is the one optional override, rule 17). Full traces (spans, OTLP) stay out of scope.
+
+**Consequences:** the per-route p95 is read from merged histograms, so it is an upper bucket bound, not an exact value. A server error with no user counts as one anonymous id in error user counts. Python, Go, Ruby and PHP get the same calls in a follow-up.

@@ -54,6 +54,14 @@ pub mod names {
     pub const VITAL: &str = "$vital";
     /// A failed network request (`$path`, `$status`).
     pub const REQUEST_FAILED: &str = "$request_failed";
+    /// Server request stats of one route in one 10-minute window, sent by
+    /// the server SDKs (#593): `$method`, `$route`, `$status_class`,
+    /// `$count`, `$errors`, `$sum_ms`, `$max_ms`, `$buckets`. Not user
+    /// activity: the `events` view leaves them out.
+    pub const REQUEST_STATS: &str = "$request_stats";
+    /// Distinct id of server events tied to no user (#593): left out of
+    /// release shares.
+    pub const SERVER_ID: &str = "$server";
 }
 
 /// One event as sent by an SDK.
