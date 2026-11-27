@@ -16,7 +16,7 @@ pub(crate) fn auth_page(title: &str, body: Markup) -> Markup {
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 meta name="color-scheme" content="light dark";
                 title { (title) " · OpenLens" }
-                link rel="stylesheet" href="/assets/app.css";
+                link rel="stylesheet" href=(crate::css_href());
                 link rel="icon" type="image/svg+xml" href="/assets/favicon.svg";
             }
             body {

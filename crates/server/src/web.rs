@@ -249,6 +249,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/assets/player.js", get(player_js))
         .route("/assets/player.css", get(player_css))
         .route("/assets/app.css", get(css))
+        .route("/assets/app/{file}", get(css_hashed))
         .route("/assets/favicon.svg", get(favicon))
         .route("/favicon.ico", get(favicon))
         .route("/theme/{mode}", get(set_theme))
@@ -304,11 +305,29 @@ async fn favicon() -> Response {
         .into_response()
 }
 
+/// The stylesheet at its old, unhashed URL, for pages cached before #579:
+/// a short cache, since its content changes with each release.
 async fn css() -> Response {
     (
         [
             (header::CONTENT_TYPE, "text/css; charset=utf-8"),
             (header::CACHE_CONTROL, "public, max-age=3600"),
+        ],
+        openlens_ui::CSS,
+    )
+        .into_response()
+}
+
+/// The stylesheet at its content-hashed URL (#579), cached for a year: a
+/// new release links a new name. Only the current name answers.
+async fn css_hashed(Path(file): Path<String>) -> Response {
+    if file != openlens_ui::css_file() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    (
+        [
+            (header::CONTENT_TYPE, "text/css; charset=utf-8"),
+            (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
         ],
         openlens_ui::CSS,
     )

@@ -386,7 +386,7 @@ fn shared_layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -
                 meta name="color-scheme" content="light dark";
                 meta name="robots" content="noindex";
                 title { (title) @if let Some(p) = project { " · " (p.name) } " · OpenLens" }
-                link rel="stylesheet" href="/assets/app.css";
+                link rel="stylesheet" href=(crate::css_href());
                 link rel="icon" type="image/svg+xml" href="/assets/favicon.svg";
             }
             body.shared {
@@ -472,7 +472,7 @@ fn page(
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 meta name="color-scheme" content="light dark";
                 title { (title) " · OpenLens" }
-                link rel="stylesheet" href="/assets/app.css";
+                link rel="stylesheet" href=(crate::css_href());
                 link rel="icon" type="image/svg+xml" href="/assets/favicon.svg";
             }
             body {

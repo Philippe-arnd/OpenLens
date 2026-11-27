@@ -943,3 +943,33 @@ async fn a_long_range_shows_its_cost_and_runs_once_confirmed() {
     .await;
     assert_eq!(r.status(), StatusCode::OK);
 }
+
+/// Pages link the stylesheet at its content-hashed URL, cached for a year;
+/// only the current hash answers, and the old URL still works (#579).
+#[tokio::test]
+async fn the_stylesheet_has_an_immutable_hashed_url() {
+    let h = harness();
+    let login = body_text(get(&h, "/login", None, false).await).await;
+    let href = openlens_ui::css_href();
+    assert!(login.contains(&format!("href=\"{href}\"")), "{login}");
+    assert!(!login.contains("href=\"/assets/app.css\""));
+    let r = get(&h, href, None, false).await;
+    assert_eq!(r.status(), StatusCode::OK);
+    let cache = r.headers()["cache-control"].to_str().unwrap().to_owned();
+    assert!(cache.contains("immutable"), "{cache}");
+    assert_eq!(body_text(r).await, openlens_ui::CSS);
+    for stale in ["/assets/app/0000000000000000.css", "/assets/app/x"] {
+        assert_eq!(
+            get(&h, stale, None, false).await.status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+    let old = get(&h, "/assets/app.css", None, false).await;
+    assert_eq!(old.status(), StatusCode::OK);
+    assert!(
+        !old.headers()["cache-control"]
+            .to_str()
+            .unwrap()
+            .contains("immutable")
+    );
+}
