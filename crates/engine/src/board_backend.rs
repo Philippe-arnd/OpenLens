@@ -20,7 +20,7 @@ use serde::Serialize;
 
 use crate::routes::{self, RouteStat};
 use crate::verdict::Outcome;
-use crate::{Filters, Result, Span, interval, text};
+use crate::{Filters, Result, Span, before, text};
 
 /// One key action over the window.
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
@@ -176,25 +176,24 @@ pub(crate) async fn read(
     f: &Filters,
     (current, previous): (Span, Span),
     map: Option<&FeatureMap>,
+    now: chrono::DateTime<chrono::Utc>,
 ) -> Result<ServerLine> {
-    let now = chrono::Utc::now();
+    // The spans were resolved at `now` (the board's): the bounds are its
+    // instants, not the query's own `now()` (#568).
     let since = (now - chrono::Duration::seconds(previous.start)).format("%Y-%m-%d");
     let mut w = format!(
-        "date >= '{since}' AND timestamp >= now() - INTERVAL '{}' AND environment = $env",
-        interval(previous.start)
+        "date >= '{since}' AND timestamp >= {} AND environment = $env",
+        before(now, previous.start)
     );
     if current.end > 0 {
-        w.push_str(&format!(
-            " AND timestamp < now() - INTERVAL '{}'",
-            interval(current.end)
-        ));
+        w.push_str(&format!(" AND timestamp < {}", before(now, current.end)));
     }
     if f.release.is_some() {
         w.push_str(" AND release = $release");
     }
     let part = format!(
-        "CASE WHEN timestamp >= now() - INTERVAL '{}' THEN 'now' ELSE 'before' END",
-        interval(current.start)
+        "CASE WHEN timestamp >= {} THEN 'now' ELSE 'before' END",
+        before(now, current.start)
     );
     let keys = routes::key_actions(map);
     let r = q

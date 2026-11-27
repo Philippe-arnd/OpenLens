@@ -569,7 +569,7 @@ pub async fn board_reusing(
         tasks::resurrected(q, project, &p90, f, churn),
         tasks::retention(q, project, &p90, f, ident),
         crate::churn::line(q, project, map.map(|(m, _)| m), f, &src, ident),
-        crate::board_backend::read(q, project, f, server_spans, map.map(|(m, _)| m)),
+        crate::board_backend::read(q, project, f, server_spans, map.map(|(m, _)| m), now),
     )?;
     b.server = Some(server);
     b.churn = Some(churn_line);
