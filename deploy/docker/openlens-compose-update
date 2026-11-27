@@ -16,6 +16,10 @@
 #   so and goes on.
 # - A failed image is remembered in DIR/.openlens-failed-images, so the next
 #   run waits for another image instead of trying the same one every day.
+# - The image it runs is kept under the local tag openlens-compose-update:previous
+#   until the update is over: with Docker's containerd image store, an image
+#   whose last tag moves can no longer be named by its id, and going back
+#   needs it.
 # - If the previous image does not start either (the new one wrote a data
 #   format it refuses), the script stops and says how to restore the upgrade
 #   backup by hand (docs/deploy/docker.md#roll-back).
@@ -53,15 +57,23 @@ cid=$(container)
   || die "$SERVICE has no healthcheck: add the one from docs/deploy/docker.md"
 old=$(docker inspect -f '{{.Image}}' "$cid")
 failed=.openlens-failed-images
+keep=openlens-compose-update:previous
+
+# Hold the running image before the pull moves its tag.
+docker tag "$old" "$keep" || die "cannot keep a reference to the running image $old"
+restore() { docker tag "$keep" "$image"; }
+forget() { docker image rm "$keep" > /dev/null 2>&1 || true; }
 
 docker compose pull -q "$SERVICE"
 new=$(docker image inspect -f '{{.Id}}' "$image")
 if [ "$new" = "$old" ]; then
+  forget
   log "$image is up to date"
   exit 0
 fi
 if grep -qxF "$new" "$failed" 2> /dev/null; then
-  docker tag "$old" "$image"
+  restore
+  forget
   log "the image behind $image failed here before; waiting for the next one (remove it from $failed to retry)"
   exit 0
 fi
@@ -70,7 +82,8 @@ if command -v cosign > /dev/null; then
   ref=$(docker image inspect -f '{{index .RepoDigests 0}}' "$image")
   if ! cosign verify "$ref" --certificate-oidc-issuer https://token.actions.githubusercontent.com \
     --certificate-identity-regexp "$IDENTITY" > /dev/null; then
-    docker tag "$old" "$image"
+    restore
+    forget
     die "the signature of $ref does not verify; staying on the current image"
   fi
 else
@@ -99,15 +112,17 @@ wait_healthy() {
 log "recreating $SERVICE on the new $image"
 docker compose up -d --pull never "$SERVICE"
 if wait_healthy; then
+  forget
   log "updated: $image is now $new"
   exit 0
 fi
 
 log "the new image did not come up healthy, going back to $old"
 echo "$new" >> "$failed"
-docker tag "$old" "$image"
+restore
 docker compose up -d --pull never "$SERVICE"
 if wait_healthy; then
+  forget
   die "rolled back to the previous image; the new $image failed its health check (docker compose logs $SERVICE)"
 fi
 die "the previous image does not start either: restore the upgrade backup, see docs/deploy/docker.md#roll-back"

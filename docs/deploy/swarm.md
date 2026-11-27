@@ -14,7 +14,7 @@ docker stack deploy -c openlens.yaml openlens
 docker service logs openlens_openlens | grep -i owner   # first start: a single-use owner link, valid 1 hour
 ```
 
-The stack publishes port 8686 through the routing mesh: put your reverse proxy with HTTPS in front ([docker.md](docker.md#https-and-reverse-proxy)) and keep the port closed to the outside. The image runs on `linux/amd64` and `linux/arm64` nodes.
+The stack publishes port 8686 on the labelled node itself (`mode: host`), not through the routing mesh, so OpenLens sees the client's address: put your reverse proxy with HTTPS in front, pointed at that node ([docker.md](docker.md#https-and-reverse-proxy)) and keep the port closed to the outside. The image runs on `linux/amd64` and `linux/arm64` nodes.
 
 What the stack sets:
 
@@ -25,11 +25,13 @@ What the stack sets:
 
 ## Updates
 
-The stack follows a channel: a minor such as `:0.6` (patches only) or `:latest`, never `:edge`. Swarm pins the image to its digest at deploy time, so ask it to look at the tag again, for example from a daily cron line:
+The stack follows a channel: a minor such as `:0.6` (patches only) or `:latest`, never `:edge`. Swarm pins the image to its digest at deploy time, so deploy the stack again to make it look at the tag, for example from a daily cron line (with the stack file where you keep it):
 
 ```sh
-17 4 * * * docker service update --quiet --image ghcr.io/philippe-arnd/openlens:0.6 openlens_openlens
+17 4 * * * docker stack deploy -c /srv/openlens/openlens.yaml openlens > /dev/null
 ```
+
+`docker stack deploy` resolves the tag to its digest on every run. Do not use `docker service update --image` with the same tag for this: on current Docker it can leave the service without a digest, and from then on the same command changes nothing, so no new image ever arrives.
 
 When the digest behind the tag has not changed, nothing restarts. When it has, Swarm replaces the task and rolls back if the new one fails. A rolled-back image is tried again on the next run, until a newer one is out. `docker service inspect openlens_openlens --format '{{.UpdateStatus.State}}'` says `completed` or `rollback_completed`.
 

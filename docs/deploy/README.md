@@ -69,7 +69,7 @@ The provenance records the ref the workflow ran on: `main` for build releases an
 - **Following a channel, with a rollback when the new version is not healthy:**
   - binary + systemd: `openlens-update` and its daily timer check the checksum and the build provenance before installing, and go back to the previous release (and if needed to the upgrade backup) when the new one is not healthy ([systemd.md](systemd.md#hands-off-updates));
   - Docker Compose: `openlens-compose-update` from cron, back to the previous image on failure ([docker.md](docker.md#updates));
-  - Swarm: `docker service update --image` from cron, rolled back by Swarm itself ([swarm.md](swarm.md#updates));
+  - Swarm: `docker stack deploy` again from cron, rolled back by Swarm itself ([swarm.md](swarm.md#updates));
   - Nomad: `openlens-nomad-update` from cron runs the job on the digest behind the channel, reverted by Nomad on failure ([nomad.md](nomad.md#updates));
   - NixOS: the system's own upgrades, with the release tag pinned in the flake; `nixos-rebuild switch --rollback` goes back ([nixos.md](nixos.md#updates));
   - Kubernetes: the chart's opt-in `autoUpdate` CronJob restarts the pod on its channel tag (no automatic rollback), or Argo CD Image Updater / Flux bump the tag in Git ([kubernetes.md](kubernetes.md#hands-off-updates));
