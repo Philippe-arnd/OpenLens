@@ -212,10 +212,12 @@ pub fn from_deploys(deploys: &[(&Deploy, Option<String>)]) -> Vec<Change> {
     let mut out: Vec<Change> = Vec::new();
     for (d, release) in deploys {
         match Status::parse(&d.status) {
+            // A deploy not tied to traffic yet keeps the release it names
+            // (a release recorded before its first user, #633).
             Some(Status::Succeeded) => out.push(Change {
                 at: d.at,
                 live_at: d.at,
-                release: release.clone(),
+                release: release.clone().or_else(|| d.release.clone()),
                 shipped: true,
                 failed: false,
                 restored_at: None,
