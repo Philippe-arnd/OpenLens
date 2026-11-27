@@ -394,6 +394,7 @@ mod tests {
             next_step: "Look at what happens in billing.".into(),
             score: 1.0,
             subject: "billing".into(),
+            figure: None,
         });
         let p = ProjectInfo {
             id: "p",
