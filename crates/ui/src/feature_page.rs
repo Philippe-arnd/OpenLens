@@ -25,6 +25,9 @@ pub struct FeaturePage<'a> {
     pub prev: Option<(&'a str, &'a str)>,
     /// See `prev`.
     pub next: Option<(&'a str, &'a str)>,
+    /// Its funnel and paths to success, on the Overview tab (#620); `None`
+    /// on the other tabs, or when they could not be computed.
+    pub paths: Option<&'a openlens_engine::FeaturePaths>,
 }
 
 fn trend(now: i64, before: i64) -> String {
@@ -242,6 +245,7 @@ pub fn feature_page(v: &FeaturePage<'_>) -> Markup {
                         @if !v.ctx.area_peers.is_empty() { p.small { "Same area: " @for (i, k) in v.ctx.area_peers.iter().enumerate() { @if i > 0 { ", " } a href={ "/p/" (v.p.id) "/features/" (k) } { (k) } } } }
                     }
                 }
+                (paths(f, v.paths))
                 @if !v.ctx.relations.is_empty() {
                     (relations(v.p.id, &v.ctx.relations))
                 }
@@ -258,6 +262,49 @@ pub fn feature_page(v: &FeaturePage<'_>) -> Markup {
             }
         },
     )
+}
+
+/// Its funnel and the paths to its success (#620, on the board until
+/// then), or why there is none.
+fn paths(f: &openlens_featuremap::Feature, x: Option<&openlens_engine::FeaturePaths>) -> Markup {
+    let Some(x) = x else {
+        return html! {
+            section.card.wide { p.muted { "The funnel and the paths to success are not available right now. Reload the page in a moment." } }
+        };
+    };
+    html! {
+        section.card.wide aria-labelledby="fun-h" {
+            h2 id="fun-h" { (icon("funnel")) "Funnel" }
+            @match &x.funnel {
+                None => p.muted { "No funnel: it needs 2 to 8 steps, declared under " code { "steps:" } " in the feature map (the success event ends them)." },
+                Some(fun) => {
+                    div.scroll {
+                        table.pulse {
+                            thead { tr { th scope="col" { "Step" } th scope="col" { "Reached" } (th_num("Users")) (th_num("Time from the step before")) } }
+                            tbody { @for (i, st) in fun.steps.iter().enumerate() {
+                                tr {
+                                    th scope="row" { span.muted { (i + 1) ". " } (st.event) }
+                                    td.adopt { (crate::board::barcell(st.conversion)) }
+                                    td.num { (compact(st.users)) }
+                                    td.num.muted { @if i > 0 { (duration(st.median_secs)) } }
+                                }
+                            } }
+                        }
+                    }
+                    p.muted.small { "Its declared steps, in order, within a day of the first, last 30 days. The time is the median from the step before." }
+                }
+            }
+        }
+        section.card.wide aria-labelledby="paths-h" {
+            h2 id="paths-h" { (icon("task")) "Paths to its success" }
+            @if f.success.is_none() {
+                p.muted { "No success event declared, so no path leads to one." }
+            } @else {
+                p.muted.small { "The last features users started in the day before reaching it for the first time, last 30 days." }
+                (crate::audience::journey_list(&x.journeys, &|k: &str| k.to_owned()))
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -307,10 +354,96 @@ mod tests {
             versions: &[],
             prev: None,
             next: None,
+            paths: None,
         })
         .into_string();
         assert!(!crate::tests::has_iso_time(&html), "{html}");
         // Paris is ahead of UTC in November.
         assert!(html.contains("2026-11-16 21:49"), "{html}");
+    }
+
+    #[test]
+    fn the_overview_holds_its_funnel_and_its_paths_to_success() {
+        // #620: the board's Funnels and Journeys are on each feature's page.
+        let p = ProjectInfo {
+            id: "p1",
+            name: "P",
+            key: "k",
+        };
+        let mut feature = openlens_featuremap::Feature {
+            key: "export".into(),
+            name: "Export".into(),
+            purpose: None,
+            owner: None,
+            entry: openlens_featuremap::Entry::default(),
+            steps: vec!["export_open".into()],
+            success: Some("export_done".into()),
+            area: None,
+            requires: vec![],
+            renamed_from: vec![],
+            server: vec![],
+        };
+        let step = |event: &str, users, conversion| openlens_engine::FunnelStep {
+            event: event.into(),
+            users,
+            conversion,
+            median_secs: 90.0,
+        };
+        let paths = openlens_engine::FeaturePaths {
+            funnel: Some(openlens_engine::Funnel {
+                feature: "export".into(),
+                steps: vec![step("export_open", 10, 1.0), step("export_done", 4, 0.4)],
+            }),
+            journeys: vec![openlens_engine::Journey {
+                success: "export_done".into(),
+                feature: "export".into(),
+                path: vec!["search".into()],
+                users: 4,
+                share: 1.0,
+            }],
+        };
+        let ctx = openlens_engine::FeatureContext::default();
+        let filters = Filters::default();
+        let render = |feature: &openlens_featuremap::Feature, tab, paths| {
+            feature_page(&FeaturePage {
+                p: &p,
+                feature,
+                ctx: &ctx,
+                tab,
+                filters: &filters,
+                replays: &[],
+                versions: &[],
+                prev: None,
+                next: None,
+                paths,
+            })
+            .into_string()
+        };
+        let html = render(&feature, "overview", Some(&paths));
+        let funnel = &html[html.find(r#"id="fun-h""#).unwrap()..];
+        let funnel = &funnel[..funnel.find("</section>").unwrap()];
+        assert!(
+            funnel.find("export_open") < funnel.find("export_done"),
+            "{funnel}"
+        );
+        assert!(funnel.contains("<th scope=\"row\">"), "{funnel}");
+        let journeys = &html[html.find(r#"id="paths-h""#).unwrap()..];
+        assert!(
+            journeys.contains("<ul class=\"journeys\">") && journeys.contains(">search<"),
+            "{journeys}"
+        );
+        // Another tab does not compute them; a failed computation says so.
+        assert!(!render(&feature, "errors", None).contains(r#"id="fun-h""#));
+        assert!(render(&feature, "overview", None).contains("not available right now"));
+        // Nothing declared: each block says what to declare.
+        feature.steps.clear();
+        feature.success = None;
+        let html = render(
+            &feature,
+            "overview",
+            Some(&openlens_engine::FeaturePaths::default()),
+        );
+        assert!(html.contains("No funnel: it needs 2 to 8 steps"), "{html}");
+        assert!(html.contains("No success event declared"), "{html}");
     }
 }

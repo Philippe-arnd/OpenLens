@@ -286,6 +286,10 @@ pub(crate) const COLUMNS: &[(&str, &str)] = &[
         "Median time from the first use to the success event (p90 below).",
     ),
     (
+        "Time from the step before",
+        "Median time from the step before to this one, for the users who reached both, in order.",
+    ),
+    (
         "Succeeded",
         "Users who reached its declared success event, ÷ its users.",
     ),
@@ -428,7 +432,7 @@ mod tests {
             include_str!("board/focus.rs"),
             include_str!("board/tiles.rs"),
             include_str!("board/charts.rs"),
-            include_str!("board/sections.rs"),
+            include_str!("vitals.rs"),
             include_str!("events.rs"),
             include_str!("audience.rs"),
             include_str!("settings.rs"),
@@ -528,7 +532,7 @@ mod tests {
             include_str!("board/focus.rs"),
             include_str!("board/tiles.rs"),
             include_str!("board/charts.rs"),
-            include_str!("board/sections.rs"),
+            include_str!("vitals.rs"),
             include_str!("events.rs"),
             include_str!("audience.rs"),
             include_str!("settings.rs"),

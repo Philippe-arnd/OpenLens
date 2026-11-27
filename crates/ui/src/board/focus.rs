@@ -74,7 +74,15 @@ fn links(pid: &str, f: &Filters, b: &Board, c: &Insight) -> Vec<(String, String)
                 )]
             })
             .unwrap_or_default(),
-        "funnel_drop" => vec![(detail_url(pid, "/flows", f), "Funnels".to_owned())],
+        // The subject is `feature:step`; the funnel is on the feature's
+        // page since #620.
+        "funnel_drop" => {
+            let key = s.split_once(':').map_or(s.as_str(), |(k, _)| k);
+            vec![(
+                detail_url(pid, &format!("/features/{}", url_enc(key)), f),
+                "Its funnel".to_owned(),
+            )]
+        }
         "role_blind_spot" => vec![(
             detail_url(pid, "/breakdown?by=role", f),
             "Break down by role".to_owned(),

@@ -255,3 +255,104 @@ fn feature_flow_colours_nodes_by_class_and_keeps_the_table_as_a_disclosure() {
     assert!(html.contains("<details class=\"card disclose flow-table\""));
     assert!(part(&html, "<details", "</details>").contains("As a table"));
 }
+
+#[test]
+fn feature_flow_shows_the_paths_to_success_that_left_the_board() {
+    // #620: the board's "Paths to value" is on Feature flow's "Paths to
+    // success" tab, with the features' names.
+    let flow = openlens_engine::Flow::default();
+    let j = openlens_engine::Journey {
+        success: "export_done".into(),
+        feature: "export".into(),
+        path: vec!["home".into(), "search".into()],
+        users: 5,
+        share: 0.5,
+    };
+    let b = Board {
+        journeys: vec![j],
+        ..Board::default()
+    };
+    let names = [("search".to_owned(), "Search".to_owned())];
+    let render = |to_success| {
+        flows(
+            &demo(),
+            &b,
+            &Filters::default(),
+            &flow,
+            &names,
+            None,
+            to_success,
+        )
+        .into_string()
+    };
+    let html = render(true);
+    clean(&html);
+    let card = part(&html, r#"id="pts-h""#, "</section>");
+    assert!(card.contains("Paths to success"), "{card}");
+    let path = part(card, "<ul class=\"journeys\">", "</ul>");
+    assert!(
+        path.find(">home<") < path.find(">Search<")
+            && path.find(">Search<") < path.find("export_done"),
+        "{path}"
+    );
+    assert!(path.contains("5 users"), "{path}");
+    // Not on the tab that starts from the start.
+    assert!(!render(false).contains(r#"id="pts-h""#));
+    // Without a path, the card says why.
+    let none = flows(
+        &demo(),
+        &Board::default(),
+        &Filters::default(),
+        &flow,
+        &[],
+        None,
+        true,
+    )
+    .into_string();
+    assert!(part(&none, r#"id="pts-h""#, "</section>").contains("No path yet"));
+}
+
+/// A Web Vital as the engine reports it.
+fn vital(name: &'static str, p75: f64, rating: &'static str) -> openlens_engine::VitalReport {
+    openlens_engine::VitalReport {
+        name,
+        title: name,
+        feels: "",
+        unit: "ms",
+        good: 2500.0,
+        poor: 4000.0,
+        p75: Some(p75),
+        rating,
+        samples: 121,
+        worst_pages: vec![],
+        dominant_cause: None,
+        elements: vec![],
+        devices: vec![],
+        likely_cause: None,
+        causes: vec![],
+        actions: vec!["Make the hero image smaller"],
+    }
+}
+
+#[test]
+fn the_pages_page_holds_the_web_vitals_that_left_the_board() {
+    // #620: the board's Web Vitals card, its "why and what to do" under
+    // a vital that is not good, is on Pages (the Speed tile's page).
+    let vitals = [vital("LCP", 4800.0, "poor"), vital("INP", 120.0, "good")];
+    let html = pages(
+        &demo(),
+        &Board::default(),
+        &[],
+        &vitals,
+        &Filters::default(),
+    )
+    .into_string();
+    clean(&html);
+    let card = part(&html, r#"id="wv-h""#, "</section>");
+    assert!(card.contains("LCP") && card.contains("INP"), "{card}");
+    assert_eq!(card.matches("Why and what to do").count(), 1, "{card}");
+    assert!(card.contains("Make the hero image smaller"), "{card}");
+    // Nothing measured: the card says so.
+    let html = pages(&demo(), &Board::default(), &[], &[], &Filters::default()).into_string();
+    assert!(part(&html, r#"id="wv-h""#, "</section>").contains("No measurements yet"));
+}

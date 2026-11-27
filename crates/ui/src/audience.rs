@@ -133,6 +133,7 @@ pub fn flows(
                     }
                 }
             }
+            @if to_success { (paths_to_success(&b.journeys, &label)) }
             @if flow.sessions > 0 {
                 details.card.disclose.flow-table {
                     summary {
@@ -155,6 +156,46 @@ pub fn flows(
             }
         },
     )
+}
+
+/// The paths to a first success (#620, the board's "Paths to value"
+/// until then): the last features users started before reaching each
+/// success event for the first time. `name`: a feature's name from its key.
+fn paths_to_success(
+    journeys: &[openlens_engine::Journey],
+    name: &dyn Fn(&str) -> String,
+) -> Markup {
+    html! {
+        section.card.pad.stack aria-labelledby="pts-h" {
+            div.section-head { h2 id="pts-h" { "Paths to success" } }
+            p.muted.small { "The last features each user started in the day before reaching a success event for the first time, last 30 days: the 3 most taken per success event." }
+            (journey_list(journeys, name))
+        }
+    }
+}
+
+/// Paths into a first success, one line each: the features, the success
+/// event, and how many users took the path. Shared by Feature flow and a
+/// feature's page.
+pub(crate) fn journey_list(
+    journeys: &[openlens_engine::Journey],
+    name: &dyn Fn(&str) -> String,
+) -> Markup {
+    html! {
+        @if journeys.is_empty() {
+            p.muted { "No path yet. A path shows once 3 users took it to a first success; success events come from the feature map." }
+        } @else {
+            ul.journeys {
+                @for j in journeys {
+                    li {
+                        @for step in &j.path { span.tag { (name(step)) } span.arrow aria-hidden="true" { "→" } }
+                        span.tag.tone-good { (icon("task")) (j.success) }
+                        span.muted { (compact(j.users)) " users · " (pct(j.share)) " of those who got there" }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// One check as shown: (time, ok, status, ms, error).

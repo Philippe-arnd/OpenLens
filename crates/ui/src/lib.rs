@@ -45,6 +45,7 @@ mod slo;
 mod status_page;
 mod team;
 mod totp;
+mod vitals;
 mod world;
 pub use announcements::{
     NoticeForm, NoticeRow, NoticesView, OfferRow, linked, notice_page, notices,
@@ -338,7 +339,7 @@ mod tests {
             include_str!("board/now.rs"),
             include_str!("board/tiles.rs"),
             include_str!("board/charts.rs"),
-            include_str!("board/sections.rs"),
+            include_str!("board/features.rs"),
             include_str!("board/in_flight.rs"),
         ]
         .concat();
@@ -357,12 +358,11 @@ mod tests {
                 "card without a detail: {line}"
             );
         }
-        // The other cards are disclosures (#588) through `disclose(…)`,
-        // whose body ends with the link to their page.
-        let sections = include_str!("board/sections.rs");
-        assert!(
-            sections.contains(r#"@if !shared() { p.small { a href=(href) { (more) " →" } } }"#)
-        );
+        // The other cards left for the pages that own them (#620): no
+        // disclosure stays on the board, and the one block no card or tile
+        // pointed at, the paths to a first success, has its link.
+        assert!(!body.contains("details.card"), "a disclosure on the board");
+        assert!(body.contains(r#"a href=(detail_url(pid, "/flows?to=success", f))"#));
         let f = Filters {
             environment: "production".into(),
             role: Some("admin".into()),
