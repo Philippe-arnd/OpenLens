@@ -124,8 +124,10 @@ fn start_of(zone: chrono_tz::Tz, d: NaiveDate) -> DateTime<Utc> {
 /// A window and its comparison from the instant `start` to `end` (now at
 /// the latest) at `now`.
 fn spans(start: DateTime<Utc>, end: DateTime<Utc>, now: DateTime<Utc>) -> (Span, Span) {
-    let back = (now - start).num_seconds().max(1);
-    let len = (end.min(now) - start).num_seconds().clamp(1, back);
+    // Rounded up, so the window starts at or before `start` (#568).
+    let up = crate::board_window::whole_seconds_up;
+    let back = up(now - start).max(1);
+    let len = up(end.min(now) - start).clamp(1, back);
     (
         Span {
             start: back,
@@ -329,7 +331,10 @@ mod tests {
         let w = f.clause_span(r.current, now).unwrap_or_default();
         assert!(w.contains("date >= '2026-10-23'"), "{w}");
         assert!(w.contains("date <= '2026-10-25'"), "{w}");
-        assert!(w.contains("timestamp < now() - INTERVAL"), "{w}");
+        // The bounds are the range's own instants (#568): it ends at
+        // midnight in Paris after the 25th.
+        assert!(w.contains("timestamp >= CAST('2026-10-23T22:00:00"), "{w}");
+        assert!(w.contains("timestamp < CAST('2026-10-25T23:00:00"), "{w}");
         // The same two days in UTC are 48 hours.
         let u = range("UTC", day("2026-10-24"), day("2026-10-25"), now);
         assert!(u.is_ok_and(|u| u.current.start - u.current.end == 48 * 3600));

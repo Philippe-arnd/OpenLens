@@ -7,7 +7,11 @@ use super::*;
 use openlens_engine::Window;
 
 fn ev(n: usize, release: Option<&str>, user: usize, hours_ago: i64) -> Event {
-    let ts = Utc::now() - Duration::hours(hours_ago);
+    ev_at(n, release, user, Utc::now() - Duration::hours(hours_ago))
+}
+
+fn ev_at(n: usize, release: Option<&str>, user: usize, ts: chrono::DateTime<Utc>) -> Event {
+    let hours_ago = (Utc::now() - ts).num_hours();
     Event {
         uuid: format!("w-{n}"),
         project: "p".into(),
@@ -30,13 +34,24 @@ fn ev(n: usize, release: Option<&str>, user: usize, hours_ago: i64) -> Event {
 }
 
 fn store(rows: &[(Option<&str>, std::ops::Range<usize>, i64)]) -> (tempfile::TempDir, QueryEngine) {
+    let now = Utc::now();
+    let at: Vec<_> = rows
+        .iter()
+        .map(|(r, users, h)| (*r, users.clone(), now - Duration::hours(*h)))
+        .collect();
+    store_at(&at)
+}
+
+fn store_at(
+    rows: &[(Option<&str>, std::ops::Range<usize>, chrono::DateTime<Utc>)],
+) -> (tempfile::TempDir, QueryEngine) {
     let dir = tempfile::tempdir().unwrap();
     let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
     let mut evs = Vec::new();
-    for (release, users, hours_ago) in rows {
+    for (release, users, ts) in rows {
         for u in users.clone() {
             let n = evs.len();
-            evs.push(ev(n, *release, u, *hours_ago));
+            evs.push(ev_at(n, *release, u, *ts));
         }
     }
     w.append(&evs).unwrap();
@@ -55,20 +70,21 @@ fn release_window() -> Filters {
 #[tokio::test]
 async fn the_window_starts_at_the_current_release_and_compares_the_same_length_before() {
     // v1 for weeks, then v2 about three days ago, which now has all the
-    // traffic. Every event is at noon UTC, counted from yesterday's noon,
-    // so none sits near a day boundary whatever the hour the test runs at
-    // (it was flaky when events were whole days before `now`).
+    // traffic. Every event is at noon UTC sharp, counted from yesterday's
+    // noon, so none sits near a day boundary whatever the hour the test
+    // runs at. v2's first event is on a whole minute, where its window
+    // starts: it was counted before the window when the query's own
+    // `now()`, a little later than the board's, set the bounds (#568).
     let now = Utc::now();
     let noon = (now.date_naive() - Duration::days(1))
         .and_hms_opt(12, 0, 0)
         .unwrap()
         .and_utc();
-    let h = (now - noon).num_hours();
-    let (_d, q) = store(&[
-        (Some("v1"), 0..4, h + 19 * 24),
-        (Some("v1"), 0..2, h + 4 * 24),
-        (Some("v2"), 0..4, h + 2 * 24),
-        (Some("v2"), 0..4, h),
+    let (_d, q) = store_at(&[
+        (Some("v1"), 0..4, noon - Duration::days(19)),
+        (Some("v1"), 0..2, noon - Duration::days(4)),
+        (Some("v2"), 0..4, noon - Duration::days(2)),
+        (Some("v2"), 0..4, noon),
     ]);
     let b = board(&q, "p", &release_window(), None).await.unwrap();
     let w = b.window.as_ref().unwrap();

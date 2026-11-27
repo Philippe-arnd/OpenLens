@@ -265,15 +265,19 @@ impl Filters {
         let since = (now - Duration::seconds(s.start)).format("%Y-%m-%d");
         // The values are placeholders, filled from `params()` (#310): the
         // engine runs every query of a function on `q.with_params`.
+        // The bounds are the instants `now` gives, not the query's own
+        // `now()`: the span was resolved from `now` (a release window
+        // starts at the release's first event), and the query runs later,
+        // which moved the release's first events out of its window (#568).
         let mut w = format!(
-            "date >= '{since}' AND timestamp >= now() - INTERVAL '{}'",
-            interval(s.start)
+            "date >= '{since}' AND timestamp >= {}",
+            before(now, s.start)
         );
         if s.end > 0 {
             let until = (now - Duration::seconds(s.end)).format("%Y-%m-%d");
             w.push_str(&format!(
-                " AND date <= '{until}' AND timestamp < now() - INTERVAL '{}'",
-                interval(s.end)
+                " AND date <= '{until}' AND timestamp < {}",
+                before(now, s.end)
             ));
         }
         w.push_str(" AND environment = $env");
@@ -315,12 +319,14 @@ impl Span {
 
 /// An SQL interval of `secs` seconds, in days when it is whole days (the
 /// fixed windows' clause is unchanged).
-fn interval(secs: i64) -> String {
-    if secs % 86_400 == 0 {
-        format!("{} days", secs / 86_400)
-    } else {
-        format!("{secs} seconds")
-    }
+/// The instant `secs` seconds before `now`, as a SQL timestamp literal
+/// (UTC, to the microsecond).
+fn before(now: chrono::DateTime<Utc>, secs: i64) -> String {
+    let t = now - Duration::seconds(secs);
+    format!(
+        "CAST('{}' AS TIMESTAMP)",
+        t.format("%Y-%m-%dT%H:%M:%S%.6fZ")
+    )
 }
 
 /// Headline user numbers.
