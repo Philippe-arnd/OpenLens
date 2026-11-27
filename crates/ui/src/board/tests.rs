@@ -476,3 +476,74 @@ fn the_shared_board_hides_what_needs_a_login() {
         assert!(!shared.contains(needle), "the shared board hides {needle}");
     }
 }
+
+/// A feature used by `users`, `completed_users` of whom reached its
+/// declared success event.
+fn used(key: &str, users: i64, completed_users: i64) -> openlens_engine::FeatureUse {
+    openlens_engine::FeatureUse {
+        key: key.into(),
+        name: None,
+        uses: users * 3,
+        users,
+        completed: completed_users,
+        completed_users,
+        user_days: users,
+        declared: true,
+    }
+}
+
+#[test]
+fn a_success_that_fires_on_entry_shows_no_task_time_but_its_finding() {
+    let task = |feature: &str, median_secs: f64| openlens_engine::TaskTime {
+        feature: feature.into(),
+        median_secs,
+        p90_secs: median_secs * 2.0,
+        tasks: 40,
+    };
+    // Home's success is its page view: every user reaches it at once.
+    let b = Board {
+        features: vec![used("export", 40, 10), used("home", 40, 40)],
+        task_times: vec![task("export", 60.0), task("home", 0.0)],
+        ..full()
+    };
+    let html = charts::feature_pulse("p1", &Filters::default(), &b).into_string();
+    // The Completion cell: the last of the feature's row.
+    let cell = |key: &str| {
+        let row = between(&html, &format!("/features/{key}"), "</tr>");
+        row[row.rfind("<td").unwrap()..].to_owned()
+    };
+    let (export, home) = (cell("export"), cell("home"));
+    // The same table still times a real task and shows its completion.
+    assert!(
+        export.contains("Task time") && export.contains('%'),
+        "{export}"
+    );
+    assert!(!home.contains("Task time"), "{home}");
+    assert!(!home.contains('%'), "no completion either: {home}");
+    // It links to the Map health finding, which carries that anchor.
+    let prefix = "href=\"/p/p1/features#";
+    let at = home.find(prefix).unwrap() + prefix.len();
+    let anchor = &home[at..at + home[at..].find('"').unwrap()];
+    let h = openlens_engine::MapHealth {
+        findings: vec![openlens_engine::maphealth::Finding {
+            kind: "success_always",
+            level: "warning",
+            feature: Some("home".into()),
+            message: "every user reaches it".into(),
+            evidence: "40 of 40".into(),
+            fix: None,
+            impact: 40,
+        }],
+        ..openlens_engine::MapHealth::default()
+    };
+    let health = crate::features::map_health("p1", &h).into_string();
+    assert!(
+        health.contains(&format!("id=\"{anchor}\"")),
+        "{anchor} in {health}"
+    );
+    // The shared board, without a login, keeps the dash and drops the link.
+    let shared =
+        render_shared(|| charts::feature_pulse("p1", &Filters::default(), &b)).into_string();
+    assert!(!shared.contains("/features#"), "{shared}");
+    assert!(!shared.contains("Task time: median 0"), "{shared}");
+}

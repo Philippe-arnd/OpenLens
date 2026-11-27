@@ -166,9 +166,19 @@ pub(super) fn feature_pulse(pid: &str, f: &Filters, b: &Board) -> Markup {
                                     th scope="row" { (feature_link(pid, &x.key, x.name.as_deref().unwrap_or(&x.key), x.declared, f)) }
                                     td.adopt title={ (compact(x.users)) (if x.users == 1 { " user" } else { " users" }) } { (barcell((x.users as f64 / mau).min(1.0))) }
                                     td.num title=(format!("On {:.1} days per user", ratio(x.user_days, x.users))) { (format!("{:.1}", ratio(x.uses, x.users))) }
-                                    td.num title=[b.task_times.iter().find(|t| t.feature == x.key).map(|t| format!("Task time: median {}, p90 {}", duration(t.median_secs), duration(t.p90_secs)))] {
-                                        @if x.declared && x.completed_users > 0 { (pct(ratio(x.completed_users, x.users).min(1.0))) }
-                                        @else { span.muted title="No success event declared or reached yet" { "—" } }
+                                    @if x.success_on_entry() {
+                                        // Its success fires on entry: every user "completes"
+                                        // at once, so neither a completion nor a task time
+                                        // means anything (#612). The finding says what to fix.
+                                        td.num {
+                                            @if shared() { span.muted title=(ON_ENTRY) { "—" } }
+                                            @else { a.muted href=(on_entry_finding(pid, &x.key)) title=(ON_ENTRY) { "—" } }
+                                        }
+                                    } @else {
+                                        td.num title=[b.task_time(&x.key).map(|t| format!("Task time: median {}, p90 {}", duration(t.median_secs), duration(t.p90_secs)))] {
+                                            @if x.declared && x.completed_users > 0 { (pct(ratio(x.completed_users, x.users).min(1.0))) }
+                                            @else { span.muted title="No success event declared or reached yet" { "—" } }
+                                        }
                                     }
                                 }
                             }
@@ -187,6 +197,18 @@ pub(super) fn feature_pulse(pid: &str, f: &Filters, b: &Board) -> Markup {
             }
         }
     }
+}
+
+/// Why a feature shows no completion or task time: its success event fires
+/// on entry (#612).
+const ON_ENTRY: &str = "Every user reaches the success event: it probably fires on entry, so there is no task to time. See Map health.";
+
+/// The map health finding for a success event that fires on entry.
+fn on_entry_finding(pid: &str, key: &str) -> String {
+    format!(
+        "/p/{pid}/features#{}",
+        crate::features::finding_anchor("success_always", Some(key))
+    )
 }
 
 /// A share's shade, in tenths (`p0`…`p10`): the cell's class.
