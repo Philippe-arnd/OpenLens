@@ -391,7 +391,7 @@ fn shared_layout(title: &str, project: Option<&ProjectInfo<'_>>, body: Markup) -
                 (icons::sprite())
                 div.content {
                     header.shared-banner {
-                        span.brand-mark aria-hidden="true" {}
+                        span.blob aria-hidden="true" {}
                         strong { "OpenLens" }
                         @if let Some(p) = project { span.muted { (p.name) } }
                         span.pill { "Read-only view" }

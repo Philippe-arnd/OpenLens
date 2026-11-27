@@ -23,7 +23,7 @@ pub(crate) fn auth_page(title: &str, body: Markup) -> Markup {
                 (icons::sprite())
                 main.auth {
                     section.card.auth-card aria-labelledby="auth-h" {
-                        div.brand { span.brand-mark aria-hidden="true" {} "OpenLens" }
+                        div.brand { span.blob aria-hidden="true" {} "OpenLens" }
                         (body)
                     }
                     p.auth-foot { "OpenLens " (env!("CARGO_PKG_VERSION")) }
@@ -46,12 +46,13 @@ fn token_form(primary: bool, focus: bool) -> Markup {
     }
 }
 
-/// Login page.
+/// Sign-in page (#591): the admin token first, and the agent's login link
+/// as the other way in.
 pub fn login(failed: bool, sso: bool, email: bool, password: bool) -> Markup {
     auth_page(
-        "Log in",
+        "Sign in",
         html! {
-            h1 #auth-h { "Log in" }
+            h1 #auth-h { "Sign in" }
             @if password {
                 p { "Sign in with your email and password." }
                 @if failed { p.alert role="alert" { "That didn't work. Check and try again; after a few failed tries, wait 15 minutes." } }
@@ -75,6 +76,8 @@ pub fn login(failed: bool, sso: bool, email: bool, password: bool) -> Markup {
                 p { "Paste the admin token, or open the login link your agent sent you." }
                 @if failed { p.alert role="alert" { "That token didn't work. Try again?" } }
                 (token_form(true, true))
+                div.or { "or" }
+                p.hint { "Ask your agent for a link: " code { "openlens-cli login-link --email you@…" } }
             }
             @if sso {
                 div.or { "or" }
@@ -99,7 +102,7 @@ pub fn login(failed: bool, sso: bool, email: bool, password: bool) -> Markup {
 /// valid for the person it was sent to (#315).
 pub fn login_continue(action: &str) -> Markup {
     auth_page(
-        "Log in",
+        "Sign in",
         html! {
             h1 #auth-h { "Hello" }
             p { "This link opens your board once. Continue to log in." }
@@ -217,6 +220,25 @@ mod tests {
         }
         assert!(all.contains("href=\"/oidc/start\""));
         assert!(all.matches("class=\"or\"").count() >= 2);
+        // The token page offers the agent's login link after an "or" (#591).
+        let or = token.find("class=\"or\"").unwrap();
+        let hint = token.find("class=\"hint\"").unwrap();
+        assert!(or < hint && token[hint..].contains("openlens-cli login-link"));
+    }
+
+    #[test]
+    fn every_brand_outside_the_shell_is_the_morphing_blob() {
+        let shared = render_shared(|| message("Gone", "This link expired.")).into_string();
+        for html in [
+            login(false, false, false, false).into_string(),
+            login(true, true, true, true).into_string(),
+            login_continue("/l/abc").into_string(),
+            welcome(false, None).into_string(),
+            crate::login_code("ch", true).into_string(),
+            shared,
+        ] {
+            assert!(html.contains("class=\"blob\"") && !html.contains("brand-mark"));
+        }
     }
 
     #[test]
