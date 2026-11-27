@@ -4,7 +4,7 @@ Thin clients for events that happen on the server: a payment confirmed, an expor
 
 | Language | Path | Install (once published) |
 | --- | --- | --- |
-| Node ≥ 18 | `sdk/node` | `npm install @openlens/node` |
+| Node ≥ 18 | `sdk/node` | `npm install @openlens-obs/node` |
 | Python ≥ 3.9 | `sdk/python` | `pip install openlens` |
 | Go ≥ 1.21 | `sdk/go` | `go get github.com/Philippe-arnd/OpenLens/sdk/go` |
 | Ruby ≥ 3.0 | `sdk/ruby` | `gem install openlens` |
@@ -13,7 +13,7 @@ Thin clients for events that happen on the server: a payment confirmed, an expor
 Until they are published, copy the single source file: `sdk/node/src/index.js`, `sdk/python/openlens/__init__.py`, `sdk/go/openlens.go`, `sdk/ruby/lib/openlens.rb` or `sdk/php/src/OpenLens.php`. The Go module can already be fetched from the repository.
 
 ```js
-import { OpenLens } from "@openlens/node";
+import { OpenLens } from "@openlens-obs/node";
 const ol = new OpenLens({ host: process.env.OPENLENS_HOST, key: process.env.OPENLENS_KEY, release: process.env.GIT_SHA });
 ol.identify(user.id, { role: user.role, account: user.orgId });
 ol.capture(user.id, "invoice_sent");
@@ -53,7 +53,7 @@ PHP has no background thread: events are sent when 50 are queued and at the end 
 
 ```js
 import express from "express";
-import { OpenLens } from "@openlens/node";
+import { OpenLens } from "@openlens-obs/node";
 const ol = new OpenLens({ host: process.env.OPENLENS_HOST, key: process.env.OPENLENS_KEY });
 const app = express();
 app.use(ol.express({ user: (req) => req.user?.id })); // first: route stats, runtime health, trace context

@@ -1,18 +1,19 @@
 name: npm
 
-# Publishes @openlens/web to npm on v* tags (and on demand, as a dry run).
+# Publishes @openlens-obs/web and @openlens-obs/node to npm on v* tags (and
+# on demand, as a dry run; a run by hand on a tag can publish it).
 # Publishing uses npm trusted publishing (OIDC, with provenance): configure
-# it once on npmjs.com for this repository and this workflow. Without it, an
-# NPM_TOKEN repository secret works too (needed for the very first publish,
-# before a trusted publisher can be set on the package). Provenance needs a
-# public repository.
+# it once on npmjs.com for this repository and this workflow, per package.
+# Before that, an NPM_TOKEN repository secret works too (needed for the very
+# first publish, before a trusted publisher can be set on the package).
+# Provenance needs a public repository.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Pack and check only, publish nothing"
+        description: "Pack and check only, publish nothing (only a tag can be published)"
         type: boolean
         default: true
 
@@ -22,23 +23,36 @@ permissions:
 
 jobs:
   publish:
-    name: build, check, publish @openlens/web
+    name: build, check, publish ${{ matrix.package }}
     # Pre-release snapshots (vX.Y.Z-YYMMDD-sha) are not published to npm.
     if: ${{ !github.event.repository.private && !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: "@openlens-obs/web"
+            dir: sdk/js
+          - package: "@openlens-obs/node"
+            dir: sdk/node
     defaults:
       run:
-        working-directory: sdk/js
+        working-directory: ${{ matrix.dir }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-      - run: npm ci
-      - run: npm run build && npm run check
-      - name: committed bundle is up to date
-        run: git diff --exit-code -- dist
+      - name: build and check (browser SDK)
+        if: matrix.dir == 'sdk/js'
+        run: |
+          npm ci
+          npm run build && npm run check
+          git diff --exit-code -- dist
+      - name: test (Node SDK, no dependencies)
+        if: matrix.dir == 'sdk/node'
+        run: npm test
       - name: tag matches package version
         if: github.ref_type == 'tag'
         run: |
@@ -46,7 +60,7 @@ jobs:
           test "v$v" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != package v$v"; exit 1; }
       - run: npm pack --dry-run
       - name: publish
-        if: github.ref_type == 'tag' || !inputs.dry_run
+        if: github.ref_type == 'tag' && (github.event_name == 'push' || !inputs.dry_run)
         run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

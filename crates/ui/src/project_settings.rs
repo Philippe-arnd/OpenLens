@@ -283,7 +283,7 @@ fn install(p: &ProjectInfo<'_>, v: &SettingsView<'_>, base: &str) -> Markup {
         v.host, p.key
     );
     let npm = format!(
-        "import {{ init }} from '@openlens/web';\ninit({{ host: '{}', key: '{}' }});",
+        "import {{ init }} from '@openlens-obs/web';\ninit({{ host: '{}', key: '{}' }});",
         v.host, p.key
     );
     let server = format!("OPENLENS_HOST={}\nOPENLENS_KEY={}", v.host, p.key);

@@ -144,13 +144,13 @@ fn empty(pid: &str) -> Markup {
             div {
                 h2 id="no-routes" { "No server routes yet" }
                 p {
-                    "Routes come from your backend. Install " code { "@openlens/node" }
+                    "Routes come from your backend. Install " code { "@openlens-obs/node" }
                     " and mount its Express middleware before your routes: every route template then gets its requests, "
                     "its share answered 5xx and its p95 here, sent as one small summary per route every 10 minutes, never one call per request. "
                     "Release verdicts start judging the backend, and the key actions declared in the feature map are flagged when they degrade."
                 }
                 p { "Another Node framework can record each request itself with " code { "recordRequest" } ". The other server SDKs do not send route stats yet." }
-                pre { code { "import { OpenLens } from \"@openlens/node\";\nconst ol = new OpenLens({ host, key });\napp.use(ol.express()); // first, before the routes" } }
+                pre { code { "import { OpenLens } from \"@openlens-obs/node\";\nconst ol = new OpenLens({ host, key });\napp.use(ol.express()); // first, before the routes" } }
                 div.actions { a.btn.sm href={ "/p/" (pid) "/settings/install" } { "Install guide" } }
             }
         }
@@ -247,7 +247,7 @@ mod tests {
             &routes(Vec::new()),
         )
         .into_string();
-        assert!(html.contains("@openlens/node") && !html.contains("<table"));
+        assert!(html.contains("@openlens-obs/node") && !html.contains("<table"));
     }
 
     #[test]

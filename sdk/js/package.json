@@ -1,6 +1,6 @@
 {
-  "name": "@openlens/web",
-  "version": "0.1.0",
+  "name": "@openlens-obs/web",
+  "version": "0.8.0",
   "description": "OpenLens browser SDK: one dependency for product analytics by role, feature and release.",
   "keywords": [
     "analytics",

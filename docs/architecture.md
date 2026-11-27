@@ -3,7 +3,7 @@
 One process, few moving parts. The server takes events over HTTP, appends them to a write-ahead log, flushes them into compressed columnar Parquet files, and answers queries with DataFusion. Metadata (projects, keys, persons and role history, flags, feature maps, login links) lives in SQLite. The UI is server-rendered HTML (maud) with SVG charts, served by the same binary. The only script on the dashboard is the replay player, on the replay page.
 
 ```
-browser SDK (@openlens/web, /c.js)          agents (openlens-cli, MCP)
+browser SDK (@openlens-obs/web, /c.js)          agents (openlens-cli, MCP)
    │ POST /capture  GET /flags  POST /r (replay)        │ HTTP API + admin token
    ▼                                                    ▼
 ┌──────────────────────────── openlens (one binary) ─────────────────────────────┐

@@ -1,6 +1,6 @@
 // Tasks: a tiny SPA wired to OpenLens with the npm package
 // (docs/agents/wire.md, step 2, "SPA"). The server injects its config.
-import openlens from "@openlens/web";
+import openlens from "@openlens-obs/web";
 
 declare global {
   interface Window {

@@ -27,11 +27,11 @@ A layered workspace, `cargo xtask ci`, AGENTS.md, Docker and compose with the he
 - **`POST /capture`:** batched and gzip-compressed, with a key per project, and safe against hostile input. Events go to the WAL, then to **daily** Parquet partitions (`project=/date=`), with compaction.
 - **Metadata:** projects, persons, role history (D-009).
 - **`environment` and `release`** on every event (D-012).
-- **`@openlens/web` SDK** (4.6 kB gz), served at `/c.js`. It covers autocapture (page views, SPA routes, clicks, submits, rage clicks, scroll depth), `identify(id, { role, account, plan })`, sessions, errors, Web Vitals, failed requests, environment and release detection, consent and DNT.
+- **`@openlens-obs/web` SDK** (4.6 kB gz), served at `/c.js`. It covers autocapture (page views, SPA routes, clicks, submits, rage clicks, scroll depth), `identify(id, { role, account, plan })`, sessions, errors, Web Vitals, failed requests, environment and release detection, consent and DNT.
 - **Query engine:** DataFusion over the partitions, with read-only SQL per project.
 - **Dashboard:** login with the admin token or a one-time link.
 - **Deployment:** the Coolify one-click template and the GHCR image, with no required environment variables.
-- 📦 `@openlens/web` on npm: the package and `.github/workflows/npm.yml` are ready, and it publishes on `v*` tags once the repo is public and npm trusted publishing is configured. Until then, use the script tag or a `file:` dependency.
+- 📦 `@openlens-obs/web` on npm: it publishes on `v*` tags with `@openlens-obs/node`, from v0.8.0 on (`.github/workflows/npm.yml`). Until then, use the script tag or a `file:` dependency.
 
 **Exit:** `docker compose up`, then a page with one script tag. Its events, sessions, errors and vitals show on the dashboard within ~10 s, and `scripts/smoke.sh` passes in CI.
 

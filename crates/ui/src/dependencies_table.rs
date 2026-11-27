@@ -49,7 +49,7 @@ fn empty() -> Markup {
             p {
                 "This table lists the external services your backend calls, by host: how many calls, the share that failed "
                 "(a 5xx or no response) and their p95. Call " code { "ol.captureOutgoing()" } " once at start-up with "
-                code { "@openlens/node" } ", or export OpenTelemetry's " code { "http.client.request.duration" }
+                code { "@openlens-obs/node" } ", or export OpenTelemetry's " code { "http.client.request.duration" }
                 " over OTLP to " code { "/v1/metrics" } ". Only the host is kept, never the path or the query."
             }
         }
