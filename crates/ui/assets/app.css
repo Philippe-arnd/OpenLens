@@ -1429,3 +1429,9 @@
   .disclose.secondary summary { padding-block: 14px; }
   .disclose.secondary summary h2 { font-size: var(--step-1); }
 }
+
+/* Events and Person fidelity (#589, #590) */
+@layer components {
+  /* Events: the page's own filters on one row, the short ones narrower. */
+  .refine label.sm { flex-basis: 110px; max-width: 150px; }
+}
