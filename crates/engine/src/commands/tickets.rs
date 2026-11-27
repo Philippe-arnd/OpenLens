@@ -25,7 +25,7 @@ use crate::Filters;
 use crate::goals;
 
 /// Days after the release before the effect is measured.
-const CHECK_DAYS: i64 = 14;
+pub(crate) const CHECK_DAYS: i64 = 14;
 
 /// A ticket made from a finding.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -90,7 +90,7 @@ pub struct GitHub {
     pub token: String,
 }
 
-fn load(meta: &Meta, project: &str) -> Vec<Ticket> {
+pub(crate) fn load(meta: &Meta, project: &str) -> Vec<Ticket> {
     meta.project_setting(project, "tickets")
         .ok()
         .flatten()

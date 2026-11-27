@@ -481,6 +481,10 @@ pub struct Board {
     /// (#403): a one-line strip at the top of the board.
     #[serde(skip)]
     pub setup: Option<(usize, usize)>,
+    /// Set by the server (#617): goals, tickets and flags in flight, for
+    /// the card next to the usage chart.
+    #[serde(skip)]
+    pub in_flight: commands::in_flight::InFlight,
     /// Environments seen.
     pub environments: Vec<String>,
     /// Raw role values no rule of the feature map matches, with user counts.

@@ -337,6 +337,7 @@ mod tests {
             include_str!("board/tiles.rs"),
             include_str!("board/charts.rs"),
             include_str!("board/sections.rs"),
+            include_str!("board/in_flight.rs"),
         ]
         .concat();
         assert!(

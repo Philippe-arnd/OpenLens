@@ -684,7 +684,24 @@ pub fn close_periods(meta: &Meta, project: &str, ev: &Evaluated) {
             )
         })
         .collect();
-    if let Ok(j) = serde_json::to_string(&json!({ "at_risk": at_risk, "goals": snapshot })) {
+    // The numbers behind the lines, for the board's In flight card
+    // (#617): each goal's value and status, and the first suggested
+    // target, as the Goals page shows them.
+    let rows: Vec<MeasuredGoal> = ev
+        .rows
+        .iter()
+        .map(|r| (r.goal.id.clone(), r.current, r.status.clone()))
+        .collect();
+    let suggestion = ev.choices.first().map(|c| super::in_flight::Suggestion {
+        kpi: c.kpi.clone(),
+        label: c.label.clone(),
+        share: c.share,
+        current: c.current,
+        target: c.suggested,
+    });
+    if let Ok(j) = serde_json::to_string(&json!({
+        "at_risk": at_risk, "goals": snapshot, "rows": rows, "suggestion": suggestion,
+    })) {
         let _ = meta.set_project_setting(project, "goals_snapshot", &j);
     }
 }
@@ -701,6 +718,29 @@ pub fn snapshot(meta: &Meta, project: &str) -> (Vec<String>, Vec<(String, String
     (
         serde_json::from_value(v["at_risk"].clone()).unwrap_or_default(),
         serde_json::from_value(v["goals"].clone()).unwrap_or_default(),
+    )
+}
+
+/// A goal as the hourly pass measured it: (goal id, value, status).
+pub type MeasuredGoal = (String, Option<f64>, String);
+
+/// The last hourly snapshot's numbers (#617): each goal as measured, and
+/// the first suggested target. Empty before the first pass that stored
+/// them.
+#[must_use]
+pub fn measured(
+    meta: &Meta,
+    project: &str,
+) -> (Vec<MeasuredGoal>, Option<super::in_flight::Suggestion>) {
+    let v: serde_json::Value = meta
+        .project_setting(project, "goals_snapshot")
+        .ok()
+        .flatten()
+        .and_then(|j| serde_json::from_str(&j).ok())
+        .unwrap_or_default();
+    (
+        serde_json::from_value(v["rows"].clone()).unwrap_or_default(),
+        serde_json::from_value(v["suggestion"].clone()).ok(),
     )
 }
 

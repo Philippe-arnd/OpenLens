@@ -157,6 +157,8 @@ pub(crate) fn render_board(
     };
     if let Ok(b) = board.as_mut() {
         b.objectives_at_risk = crate::goals::snapshot(state, &p.id).0;
+        // Stored rows only (goals, tickets, flags), no query (#617).
+        b.in_flight = openlens_engine::commands::in_flight::in_flight(&state.meta, &p.id, b);
         if admin {
             b.setup = crate::settings::setup_left(state, &p.id);
         }
