@@ -50,7 +50,8 @@ pub(super) fn dau_chart(series: &[(String, i64)]) -> Markup {
 }
 
 /// The active users card: the day chart, the changes of those days (the
-/// timeline's marks), and who uses the app.
+/// timeline's marks), the window's users against the days before (#588:
+/// no longer under the page title), and who uses the app.
 pub(super) fn active_users(pid: &str, f: &Filters, b: &Board, marks: &[Mark]) -> Markup {
     let on: Vec<&Mark> = marks
         .iter()
@@ -82,7 +83,13 @@ pub(super) fn active_users(pid: &str, f: &Filters, b: &Board, marks: &[Mark]) ->
                     }
                 }
             }
-            p.muted.small { (b.window.as_ref().map_or("Last 14 days", |w| w.label.as_str())) ". Hover a bar for the day." }
+            p.muted.small {
+                @match &b.window {
+                    Some(w) => { (w.label) ": " (super::window_users(w)) "." }
+                    None => { "Last 14 days." }
+                }
+                " Hover a bar for the day."
+            }
             @if !roles.is_empty() {
                 div.who {
                     span.muted { "Who uses the app, " (super::period(b, "last 30 days")) ":" }
@@ -116,16 +123,18 @@ pub(crate) fn bar_with(frac: f64, text: &str) -> Markup {
 }
 
 /// Feature pulse: for each used feature, how many of the active users
-/// adopt it, how often and on how many days they come back to it, and how
-/// many reach its success event; then the declared features nobody used.
+/// adopt it, how often they use it, and how many reach its success event;
+/// then the declared features nobody used. The mockup's four columns
+/// (#588): the users, days per user and task time are the cells' titles.
 pub(super) fn feature_pulse(pid: &str, f: &Filters, b: &Board) -> Markup {
     // Adoption is over the active users of the same period: the last 30
     // days (MAU), or the release window (D-055).
-    let mau = b
+    let active = b
         .window
         .as_ref()
         .map_or(b.users.mau, |w| w.current.users)
-        .max(1) as f64;
+        .max(1);
+    let mau = active as f64;
     let ratio = |a: i64, n: i64| a as f64 / n.max(1) as f64;
     let used: Vec<_> = b.features.iter().filter(|x| x.users > 0).collect();
     let unused: Vec<_> = b
@@ -135,7 +144,10 @@ pub(super) fn feature_pulse(pid: &str, f: &Filters, b: &Board) -> Markup {
         .collect();
     html! {
         section.card.pad.stack aria-labelledby="fp-h" {
-            div.section-head { h2 id="fp-h" { (to(&detail_url(pid, "/features", f), "Feature pulse")) } }
+            div.section-head {
+                h2 id="fp-h" { (to(&detail_url(pid, "/features", f), "Feature pulse")) }
+                @if !shared() { a.small href=(detail_url(pid, "/features", f)) { "Feature map" } }
+            }
             @if used.is_empty() {
                 p.muted { "No feature has been used yet. Features come from " code { "data-feature" } " attributes and the feature map." }
             }
@@ -144,36 +156,26 @@ pub(super) fn feature_pulse(pid: &str, f: &Filters, b: &Board) -> Markup {
                     table.pulse {
                         thead { tr {
                             th scope="col" { "Feature" }
-                            th scope="col" { "Adoption" }
-                            (th_num("Users"))
+                            (th_def("Adoption"))
                             (th_num("Uses / user"))
-                            (th_num("Days / user"))
                             (th_num("Completion"))
-                            (th_num("Task time"))
                         } }
                         tbody {
                             @for x in &used {
                                 tr {
                                     th scope="row" { (feature_link(pid, &x.key, x.name.as_deref().unwrap_or(&x.key), x.declared, f)) }
-                                    td.adopt { (barcell((x.users as f64 / mau).min(1.0))) }
-                                    td.num { (compact(x.users)) }
-                                    td.num { (format!("{:.1}", ratio(x.uses, x.users))) }
-                                    td.num { (format!("{:.1}", ratio(x.user_days, x.users))) }
-                                    td.num {
+                                    td.adopt title={ (compact(x.users)) (if x.users == 1 { " user" } else { " users" }) } { (barcell((x.users as f64 / mau).min(1.0))) }
+                                    td.num title=(format!("On {:.1} days per user", ratio(x.user_days, x.users))) { (format!("{:.1}", ratio(x.uses, x.users))) }
+                                    td.num title=[b.task_times.iter().find(|t| t.feature == x.key).map(|t| format!("Task time: median {}, p90 {}", duration(t.median_secs), duration(t.p90_secs)))] {
                                         @if x.declared && x.completed_users > 0 { (pct(ratio(x.completed_users, x.users).min(1.0))) }
                                         @else { span.muted title="No success event declared or reached yet" { "—" } }
-                                    }
-                                    td.num {
-                                        @if let Some(t) = b.task_times.iter().find(|t| t.feature == x.key) {
-                                            (duration(t.median_secs)) br; span.muted.small { "p90 " (duration(t.p90_secs)) }
-                                        } @else { span.muted { "—" } }
                                     }
                                 }
                             }
                             @for x in &unused {
                                 tr.dim {
                                     th scope="row" { (feature_link(pid, &x.key, x.name.as_deref().unwrap_or(&x.key), true, f)) }
-                                    td colspan="6" { span.tag.tone-warn { (icon("ban")) "Never used, " (super::period(b, "last 30 days")) } }
+                                    td colspan="3" { span.tag.tone-warn { (icon("ban")) "Never used " (super::period(b, "in the last 30 days")) } }
                                 }
                             }
                         }
@@ -181,10 +183,7 @@ pub(super) fn feature_pulse(pid: &str, f: &Filters, b: &Board) -> Markup {
                 }
             }
             @if !used.is_empty() {
-                p.muted.small { (b.window.as_ref().map_or("Last 30 days", |w| w.label.as_str())) ". Adoption is the share of active users (" (if b.window.is_some() { "in that period" } else { "MAU" }) ") who used the feature; completion is the share of them who reached its success event; task time runs from the first use to that event (within 30 minutes)." }
-            }
-            @if !unused.is_empty() {
-                p.muted.small { "Never used: declared in the feature map, but nobody reached them. Hidden, broken, or not needed?" }
+                p.muted.small { "Adoption: share of the " (compact(active)) " active users who used the feature. Completion: share of them who reached its success event." }
             }
         }
     }
@@ -244,7 +243,7 @@ pub(super) fn cohorts(pid: &str, f: &Filters, b: &Board) -> Markup {
 }
 
 /// Roles × features: the share of each role's users who used each
-/// feature in the last 30 days. One hue, darker = more adoption; the number
+/// feature in the last 30 days, a closed disclosure (#588). One hue, darker = more adoption; the number
 /// is always printed, so colour is never the only cue.
 pub(super) fn role_matrix(pid: &str, f: &Filters, b: &Board) -> Markup {
     let roles: Vec<(&str, i64)> = b
@@ -266,9 +265,13 @@ pub(super) fn role_matrix(pid: &str, f: &Filters, b: &Board) -> Markup {
             .map_or(0, |x| x.2)
     };
     let flt = f;
-    html! {
-        section.card.pad.stack aria-labelledby="who-h" {
-            div.section-head { h2 id="who-h" { (to(&detail_url(pid, "/features", f), "Who uses what")) } }
+    let hint = format!("{} roles × {} features", roles.len(), feats.len());
+    super::sections::disclose(
+        "who-h",
+        "Who uses what",
+        super::sections::hint(&hint),
+        (&detail_url(pid, "/features", f), "Feature map"),
+        html! {
             div.scroll {
                 table.heat {
                     thead { tr { th scope="col" { "Feature" } @for (r, n) in &roles { th.c scope="col" { (r) br; span.muted.small { (compact(*n)) " users" } } } } }
@@ -286,8 +289,8 @@ pub(super) fn role_matrix(pid: &str, f: &Filters, b: &Board) -> Markup {
                 }
             }
             p.muted.small { "Share of each role's users who used the feature, " (super::period(b, "last 30 days")) ". Empty cells are features a role never touches." }
-        }
-    }
+        },
+    )
 }
 
 /// One compared metric: label, new value, old value, whether higher is

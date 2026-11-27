@@ -268,6 +268,10 @@ pub(crate) const COLUMNS: &[(&str, &str)] = &[
         "% users",
         "Share of active users who used it (last 30 days).",
     ),
+    (
+        "Adoption",
+        "Share of the period's active users who used the feature; hover for the count.",
+    ),
     ("Uses / user", "Average uses per user."),
     (
         "Days / user",

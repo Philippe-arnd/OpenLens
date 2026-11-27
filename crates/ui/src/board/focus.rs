@@ -1,7 +1,8 @@
 //! What to focus on (#543): the first insight as the lead card (rank,
 //! tag, evidence, a before/after comparison when the board holds both
 //! values, the next step, one primary action), the others as a ranked
-//! list. On a share link, the actions that need a login are left out.
+//! list (rank, title, tag and evidence, links; #588: no next step there).
+//! On a share link, the actions that need a login are left out.
 
 use crate::*;
 use openlens_engine::Insight;
@@ -257,9 +258,6 @@ pub(super) fn focus(pid: &str, f: &Filters, b: &Board, plain: &[(String, String)
                                                 h3 { span.sr-only { "Insight " (i + 1) ": " } (c.title) }
                                             }
                                             div.meta { (tag(c.kind)) span { (c.evidence) } }
-                                            p.step title=[pl.map(|_| format!("Original: {}", c.next_step))] {
-                                                span.label { "Next step: " } (pl.map_or(c.next_step.as_str(), |x| x.1.as_str()))
-                                            }
                                             @if !shared() {
                                                 div.links {
                                                     @for (href, label) in links(pid, f, b, c) { a href=(href) { (label) } }
