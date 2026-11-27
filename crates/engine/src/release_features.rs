@@ -302,3 +302,25 @@ pub fn by_release(
     }
     out
 }
+
+/// The releases that touched `key` (#576), under it or a former key.
+pub(crate) fn touched_by(
+    history: &crate::inforce::History,
+    key: &str,
+    def: Option<&openlens_featuremap::Feature>,
+) -> Vec<(String, i64)> {
+    let names: Vec<&str> = std::iter::once(key)
+        .chain(
+            def.into_iter()
+                .flat_map(|d| d.renamed_from.iter().map(String::as_str)),
+        )
+        .collect();
+    history
+        .touched
+        .iter()
+        .filter_map(|(release, fs)| {
+            let f = fs.iter().find(|f| names.contains(&f.key.as_str()))?;
+            Some((release.clone(), f.files))
+        })
+        .collect()
+}

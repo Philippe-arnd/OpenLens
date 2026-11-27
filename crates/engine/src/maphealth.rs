@@ -702,28 +702,6 @@ pub struct FeatureFlag {
     pub success_users: i64,
 }
 
-/// The releases that touched `key` (#576), under it or a former key.
-fn touched_by(
-    history: &crate::inforce::History,
-    key: &str,
-    def: Option<&openlens_featuremap::Feature>,
-) -> Vec<(String, i64)> {
-    let names: Vec<&str> = std::iter::once(key)
-        .chain(
-            def.into_iter()
-                .flat_map(|d| d.renamed_from.iter().map(String::as_str)),
-        )
-        .collect();
-    history
-        .touched
-        .iter()
-        .filter_map(|(release, fs)| {
-            let f = fs.iter().find(|f| names.contains(&f.key.as_str()))?;
-            Some((release.clone(), f.files))
-        })
-        .collect()
-}
-
 /// [`FeatureContext`] for `key` (its current key or a former one).
 /// `history` holds the stored map versions and the recorded releases, for
 /// the releases (#283, D-070); record what they derived with
@@ -830,7 +808,7 @@ pub async fn feature_context(
             .map(|x| x.key.clone())
             .collect(),
         releases: rel?,
-        touched_by: touched_by(history, &key, def.as_ref()),
+        touched_by: crate::release_features::touched_by(history, &key, def.as_ref()),
         relations: health
             .relations
             .iter()
