@@ -109,6 +109,8 @@ Optional fields:
 | `area: Writing` | Group features (one level only). The map page and `map_overview` roll uses and users up by area. |
 | `requires: [write-entry]` | Features a user normally uses first. The **adoption ladder** shows how many go from one to the next, and the health check flags a requirement most users skip. Unknown keys and loops are refused. |
 | `renamed_from: [editor]` | Keep history across a rename: events still tagged with the old key count for the new one. A former key cannot still be a feature. |
+| `server: ["POST /api/entries"]` | The feature's key actions on the server, `METHOD /route` as the server SDK reports it. A regression of one is named in the release verdict, and its alert is urgent. |
+| `paths: ["src/export/**"]` | The feature's code, as globs from the repository root: `*` (inside one folder), `**` (any depth), `?` (one character), at most 20 per feature, 200 characters each, no leading `/` and no `..`. A release's changed files are matched against them to say which features it touched; files matching no feature point at gaps in the map. Keep them current when code moves. |
 
 Older servers refuse maps with these fields (the format is strict): upgrade the server before pushing them.
 

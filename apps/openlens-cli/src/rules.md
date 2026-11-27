@@ -4,8 +4,11 @@
 
 - The app's features, success events and roles are declared in `openlens.features.yaml`.
 - When you add, rename or remove a user-facing feature, update that file in the same change:
-  its code paths (its `entry` routes and the `data-feature` attribute on its main control)
-  and its `success` event. Add `data-feature="<key>"` to the feature's main control.
+  its entry points (its `entry` routes and the `data-feature` attribute on its main control),
+  its `paths` (globs of its code from the repository root, like `src/export/**`) and its
+  `success` event. Add `data-feature="<key>"` to the feature's main control.
+- When you move, add or delete code, keep the `paths` of the features it belongs to current:
+  each release's changed files are matched against them to say which features it touched.
 - When you add or rename a user role, map its raw value under `roles:`.
 - Run `openlens-cli features lint --src .` before committing, then `openlens-cli features push` on deploy.
 - The MCP tool `suggested_features` lists pages and `data-feature` values used in production that

@@ -8,7 +8,12 @@
 //!
 //! Layer: L2 (see `docs/architecture.md`).
 
+mod paths;
 mod resolver;
+pub use paths::{
+    MAX_CHANGED_FILES, MAX_FILE_PATH_LEN, MAX_GLOB_CHECKS, MAX_PATH_LEN, MAX_PATHS, Touched,
+    TouchedFeature, check_code_path, code_path_matches, touched_features,
+};
 pub use resolver::Resolver;
 
 use serde::{Deserialize, Serialize};
@@ -117,6 +122,12 @@ pub struct Feature {
     /// urgent.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub server: Vec<String>,
+    /// The feature's code paths (#576, D-092): globs relative to the
+    /// repository root (`src/export/**`), kept current by the app's agents.
+    /// A release's changed files matched against them give the features it
+    /// touched ([`touched_features`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<String>,
 }
 
 /// Entry points of a feature.
@@ -354,6 +365,24 @@ pub fn validate(m: &FeatureMap) -> Vec<Issue> {
                 v.push(err(
                     format!("{p}.server[{j}]"),
                     "a key action is `METHOD /route` as the server SDK reports it: `POST /api/auth/sign-in`",
+                ));
+            }
+        }
+        if f.paths.len() > MAX_PATHS {
+            v.push(err(
+                format!("{p}.paths"),
+                format!(
+                    "feature `{}` lists {} code paths: at most {MAX_PATHS}; use `**` to cover a folder (`src/export/**`)",
+                    f.key,
+                    f.paths.len()
+                ),
+            ));
+        }
+        for (j, g) in f.paths.iter().enumerate() {
+            if let Err(why) = check_code_path(g) {
+                v.push(err(
+                    format!("{p}.paths[{j}]"),
+                    format!("feature `{}`: {why}", f.key),
                 ));
             }
         }

@@ -219,7 +219,8 @@ pub fn feature_page(v: &FeaturePage<'_>) -> Markup {
                         h2 { (icon("route")) "How it is reached" }
                         @if f.entry.routes.is_empty() { p.empty-line { "No route declared." } }
                         ul { @for r in &f.entry.routes { li { code { (r) } } } }
-                        @if !f.steps.is_empty() { p.small { "Steps: " (f.steps.join(" → ")) } }                    }
+                        @if !f.steps.is_empty() { p.small { "Steps: " (f.steps.join(" → ")) } }
+                        @if !f.paths.is_empty() { p.small { "Code: " @for (i, g) in f.paths.iter().enumerate() { @if i > 0 { ", " } code { (g) } } } }                    }
                     section.card.mini {
                         h2 { (icon("users")) "Who uses it" }
                         @if v.ctx.roles.is_empty() { p.empty-line { "Nobody in the last 30 days." } }
@@ -285,6 +286,7 @@ mod tests {
             requires: vec![],
             renamed_from: vec![],
             server: vec![],
+            paths: vec![],
         };
         let ctx = openlens_engine::FeatureContext::default();
         let filters = Filters {

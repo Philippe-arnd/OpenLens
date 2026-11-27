@@ -24,6 +24,7 @@ features:
     area: Journal            # optional: one-level group for the board and the map
     renamed_from: [editor]   # optional: former keys; their events count here
     server: ["POST /api/entries"]  # optional: key actions on the server (route stats, #594)
+    paths: ["src/entries/**", "src/editor/*.ts"]  # optional: code paths, so a release's changed files name the features it touched (#576)
   - key: ai-insights
     name: AI insights
     purpose: Weekly reflection generated from past entries.
