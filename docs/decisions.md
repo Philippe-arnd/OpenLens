@@ -685,3 +685,18 @@ The questions "is this component under maintenance at t?" and "how many seconds 
 **Why:** fixed defaults over settings (rule 17); a ratio alone flags noise on fast routes (5 → 10 ms), a fixed delta alone misses slow ones, so both. Key actions in the map keep one place of truth for what matters, and guessing (`auth`, `login`) would be wrong for many apps.
 
 **Consequences:** blocking an automerge on a regressed verdict is out of scope; a deploy step can already wait for the verdict (`openlens-cli release`, #521).
+
+## D-084 (2026-11-27, agent for #601, owner request) OpenTelemetry alignment: trace context read, never written; semantic-convention names
+
+Supersedes the trace-header and naming parts of D-082 (nothing of it was released).
+
+**Decision:**
+- **Read, never write.** The browser SDK no longer adds `traceparent` or `baggage`. It reads the app's own `traceparent` on fetch and puts its trace id on `$request_failed` as `trace_id`; the Node middleware reads the incoming `traceparent` (`ff` versions and all-zero ids refused) and puts it on server errors as `trace_id`.
+- **The session link is one header of ours,** `x-openlens-session` (same origin and `traceOrigins`, with consent, none in cookieless mode). No user id travels in a header: the middleware's `user` callback names the user.
+- **Route stats are data points of `http.server.request.duration`:** attributes `http.request.method`, `http.route`, `http.response.status_code` (the exact code), unit seconds, fields `count`, `sum`, `min`, `max`, `bucket_counts`, on OpenTelemetry's default explicit bounds (0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10 s; 15 buckets). The server derives the 5xx count from the status code.
+- **Server errors** keep OpenLens's `$error` fields (shared with the browser and used for grouping) and add `exception.type`, `http.route`, `http.request.method` and `trace_id`.
+- **No sampling in OpenLens.** Stats count every request and every error is sent (5 of one message per minute at most); the app's server, as the root of its traces, keeps deciding its own trace sampling.
+
+**Why:** the sampled flag has no neutral value: `01` would make a `ParentBased` OpenTelemetry server record every trace, `00` none, and the parent span it names would never exist. OpenTelemetry forwards `baggage` on outgoing calls, so session and user ids would have reached third-party APIs. Standard names let the same numbers be read next to an OpenTelemetry backend.
+
+**Consequences:** without OpenTelemetry in the browser there is no `trace_id`: the session header still ties a server error to its replay. The status code instead of its class means more keys per window, still bounded at 500.

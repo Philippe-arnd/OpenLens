@@ -55,8 +55,10 @@ pub mod names {
     /// A failed network request (`$path`, `$status`).
     pub const REQUEST_FAILED: &str = "$request_failed";
     /// Server request stats of one route in one 10-minute window, sent by
-    /// the server SDKs (#593): `$method`, `$route`, `$status_class`,
-    /// `$count`, `$errors`, `$sum_ms`, `$max_ms`, `$buckets`. Not user
+    /// the server SDKs (#593): one data point of OpenTelemetry's
+    /// `http.server.request.duration` histogram (#601): `http.request.method`,
+    /// `http.route`, `http.response.status_code`, `count`, `sum`, `min`,
+    /// `max` (seconds) and `bucket_counts`. Not user
     /// activity: the `events` view leaves them out.
     pub const REQUEST_STATS: &str = "$request_stats";
     /// Distinct id of server events tied to no user (#593): left out of
