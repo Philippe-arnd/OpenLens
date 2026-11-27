@@ -720,7 +720,8 @@ function traced(rawUrl: string): boolean {
 function linkHeaders(get: (k: string) => string | null, set: (k: string, v: string) => void): string | undefined {
   if (!cfg?.cookieless && !get("x-openlens-session")) set("x-openlens-session", state.sid);
   const m = /^[0-9a-f]{2}-([0-9a-f]{32})-[0-9a-f]{16}-[0-9a-f]{2}$/.exec((get("traceparent") ?? "").trim());
-  return m && !/^0+$/.test(m[1]) ? m[1] : undefined;
+  const id = m?.[1];
+  return id && !/^0+$/.test(id) ? id : undefined;
 }
 
 /** Start OpenLens. Safe to call once; later calls are ignored. */
