@@ -113,8 +113,17 @@ pub(crate) fn latest(pid: &str, l: &LatestVerdict, tz: &str) -> Markup {
                 }
             }
             (layers(&l.layers))
+            // Runtime (#631): its line, or how to get one.
+            @match &l.runtime {
+                Some(rt) => (crate::release_runtime::line(rt, previous)),
+                None => (crate::release_runtime::missing()),
+            }
             @if !l.backend {
-                p.muted.small { "No server route stats for this release: its backend is not judged. The Node SDK sends them (Quality › Routes)." }
+                @if l.runtime.is_some() {
+                    p.muted.small { "No server route stats for this release: its routes are not judged. The Node SDK sends them (Quality › Routes)." }
+                } @else {
+                    p.muted.small { "No server route stats for this release: its backend is not judged. The Node SDK sends them (Quality › Routes)." }
+                }
             }
             @if let Some(n) = &l.note { p.muted.small { (n) } }
         }
@@ -191,6 +200,7 @@ mod tests {
             layers,
             backend,
             routes,
+            runtime: None,
             note: None,
         }
     }

@@ -39,6 +39,7 @@ mod people;
 mod profile;
 mod project_settings;
 mod release_notes;
+mod release_runtime;
 mod release_verdict;
 mod releases;
 mod routes_page;

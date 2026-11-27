@@ -78,7 +78,9 @@ fn worse_names(r: &Report) -> Vec<String> {
 }
 
 /// The Backend group of a verdict; none when the release sent no server
-/// stats, has no new server error and no dependency that got worse.
+/// stats, no runtime stats, has no new server error and no dependency
+/// that got worse. A crash loop (restarts per day up significantly, #610)
+/// leads it (#631).
 #[must_use]
 pub fn backend_layer(r: &Report) -> Option<Layer> {
     let worse = worse_names(r);
@@ -168,6 +170,21 @@ pub fn backend_layer(r: &Report) -> Option<Layer> {
             outcome: Outcome::TooFew,
             key: false,
         });
+    }
+    // Restarts per day (#610, #631): the runtime's only judged number.
+    if let Some(c) = r.checks.iter().find(|c| c.kind == "runtime") {
+        let row = Row {
+            label: c.label.clone(),
+            from: c.previous.map(|p| format!("{p:.1}")),
+            to: format!("{:.1}", c.current),
+            outcome: c.outcome,
+            key: false,
+        };
+        if c.outcome == Outcome::Worse {
+            rows.insert(0, row);
+        } else {
+            rows.push(row);
+        }
     }
     // Outgoing dependencies (#630): shown, never judged.
     let (deps, deps_more) = outgoing::rows(r);
@@ -315,6 +332,10 @@ pub struct LatestVerdict {
     pub backend: bool,
     /// Routes worse than the release before.
     pub routes: Vec<WorseRoute>,
+    /// Runtime health next to the release before (#610, #631): none when
+    /// the release sent no runtime stats.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<crate::runtime::RuntimeShown>,
     /// Why the routes' errors and sessions are missing, when they could
     /// not be read.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -443,6 +464,7 @@ pub async fn latest(
         layers: crate::board_verdict::layers(r),
         backend: !r.current.routes.is_empty(),
         routes,
+        runtime: r.runtime.clone(),
         note,
     }
 }

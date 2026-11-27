@@ -168,6 +168,7 @@ pub fn releases(
                                 @if !x.reasons.is_empty() {
                                     ul.reasons { @for reason in x.reasons.iter().take(3) { li { (reason) } } }
                                 }
+                                (crate::release_runtime::compact_line(x.runtime.as_ref()))
                             }
                             td.when.muted { (x.first_seen) }
                             td.when.muted { (x.last_seen) }
@@ -216,7 +217,7 @@ pub fn releases(
                         strong { "Rolled back" } ": it had the majority, then an older release took it back. "
                         strong { "Failed" } " and " strong { "deploying" } ": a deploy the hook reported, with no traffic. "
                         "Time in staging runs from the build's first event in staging to its first in production. " }
-                    p.muted.small { strong { "Verdict" } ": once a release has 30 sessions and 8 users, or is a day old, it is compared with the release before it in the environment (errors, new error groups, bounce, tasks, Web Vitals, features with a success event, guardrails, and the 5xx share and p95 of each server route with enough requests on both): "
+                    p.muted.small { strong { "Verdict" } ": once a release has 30 sessions and 8 users, or is a day old, it is compared with the release before it in the environment (errors, new error groups, bounce, tasks, Web Vitals, features with a success event, guardrails, the 5xx share and p95 of each server route with enough requests on both, and process restarts per day, where a sharp rise is a crash loop; memory and event-loop delay are shown, not judged): "
                         strong { "healthy" } " when nothing got worse, " strong { "regressed" } " when something did, " strong { "inconclusive" } " with too little traffic or nothing to compare with. Production is judged unless one environment is picked. Users are compared with the release before it in the same environment." }
                 }
             }
@@ -256,6 +257,7 @@ mod tests {
             deploy: Some(Status::Succeeded),
             verdict: Some(Verdict::Regressed),
             reasons: vec!["New error: TypeError <x> (3 users, 5 times)".into()],
+            runtime: None,
         };
         let failed = Release {
             release: "v3".into(),
@@ -319,6 +321,7 @@ mod tests {
             deploy: None,
             verdict: Some(Verdict::Healthy),
             reasons: Vec::new(),
+            runtime: None,
         };
         let new = Release {
             release: "v2".into(),
@@ -363,6 +366,100 @@ mod tests {
             "{v2}"
         );
         assert!(!v1.contains("class=\"delta "), "{v1}");
+        assert!(!html.contains("style=") && !html.contains("<script"));
+    }
+
+    #[test]
+    fn without_runtime_stats_no_runtime_line_and_one_explanation_on_the_release_page_only() {
+        use openlens_engine::runtime::RuntimeShown;
+        use openlens_engine::verdict_backend::LatestVerdict;
+        let p = ProjectInfo {
+            id: "demo",
+            name: "Demo",
+            key: "k",
+        };
+        let old = Release {
+            release: "v1".into(),
+            environment: "production".into(),
+            state: State::Superseded,
+            share: 0.0,
+            first_seen: "2026-11-10 10:00".into(),
+            last_seen: "2026-11-20 10:00".into(),
+            users: 10,
+            events: 50,
+            staging_secs: None,
+            staged_as: None,
+            deployed_at: None,
+            deploy: None,
+            verdict: Some(Verdict::Healthy),
+            reasons: Vec::new(),
+            runtime: None,
+        };
+        let rt = RuntimeShown {
+            restarts_per_day: Some(70.0),
+            previous_restarts_per_day: Some(0.5),
+            rss_max_bytes: Some(300 << 20),
+            previous_rss_max_bytes: Some(200 << 20),
+            rss_growth: Some(0.5),
+            loop_delay_p99_ms: Some(40.0),
+            previous_loop_delay_p99_ms: Some(20.0),
+        };
+        let new = Release {
+            release: "v2".into(),
+            state: State::Live,
+            verdict: Some(Verdict::Regressed),
+            runtime: Some(rt.clone()),
+            ..old.clone()
+        };
+        let page = |runtime: Option<RuntimeShown>| {
+            let r = Releases {
+                days: 90,
+                timezone: "UTC".into(),
+                measure: "distinct users per day",
+                releases: vec![new.clone(), old.clone()],
+                deploys: Vec::new(),
+                deploy_hook: None,
+                notes: Default::default(),
+                latest: Some(LatestVerdict {
+                    release: "v2".into(),
+                    environment: "production".into(),
+                    previous_release: Some("v1".into()),
+                    verdict: Some(Verdict::Regressed),
+                    layers: Vec::new(),
+                    backend: false,
+                    routes: Vec::new(),
+                    runtime,
+                    note: None,
+                }),
+            };
+            let hook = HookView {
+                admin: false,
+                new_url: None,
+            };
+            releases(&p, &r, None, &hook).into_string()
+        };
+        let row = |html: &str, name: &str| {
+            html.split("<tr>")
+                .find(|r| r.contains(&format!("<code>{name}</code>")))
+                .unwrap_or_default()
+                .to_owned()
+        };
+        // The list: a line for the release with stats, none for the other,
+        // and never the explanation.
+        let html = page(None);
+        assert!(row(&html, "v2").contains("Runtime"), "{html}");
+        assert!(!row(&html, "v1").contains("Runtime"), "{html}");
+        let table_end = html.find("</table>").unwrap_or(0);
+        assert!(!html[..table_end].contains("captureRuntime"));
+        // The Release page: one line says how to get them, and no numbers.
+        let card = &html[html.find("ver-h").unwrap_or(0)..];
+        assert_eq!(card.matches("captureRuntime()").count(), 1, "{card}");
+        assert!(!card.contains("Largest RSS"), "{card}");
+        // With stats: the line, each number next to v1, no explanation.
+        let html = page(Some(rt));
+        let card = &html[html.find("ver-h").unwrap_or(0)..];
+        assert!(card.contains("Largest RSS") && card.contains("on v1"), "{card}");
+        assert!(!card.contains("captureRuntime"), "{card}");
         assert!(!html.contains("style=") && !html.contains("<script"));
     }
 }

@@ -155,20 +155,22 @@ fn key_route(r: &Report, c: &Check) -> bool {
         })
 }
 
-/// How bad a worse check is, for the headline: a key action that fails
-/// more first, then errors, a feature that stopped finishing, the other
-/// routes, the vitals, the other KPIs, the rest.
+/// How bad a worse check is, for the headline: a crash loop first (#631:
+/// the server restarting explains the rest), then a key action that fails
+/// more, errors, a feature that stopped finishing, the other routes, the
+/// vitals, the other KPIs, the rest.
 fn weight(r: &Report, c: &Check) -> (u8, f64) {
     let moved = c.previous.map_or(c.current, |p| (c.current - p).abs());
     let rank = match (c.kind, c.key.as_str()) {
-        ("route", k) if k.starts_with("5xx:") && key_route(r, c) => 0,
-        ("kpi", "error_rate") => 1,
-        ("errors", _) if !server_error(r, c) => 2,
-        ("feature", _) => 3,
-        ("route", _) => 4,
-        ("vital", _) => 5,
-        ("kpi", _) => 6,
-        _ => 7,
+        ("runtime", "restarts_per_day") => 0,
+        ("route", k) if k.starts_with("5xx:") && key_route(r, c) => 1,
+        ("kpi", "error_rate") => 2,
+        ("errors", _) if !server_error(r, c) => 3,
+        ("feature", _) => 4,
+        ("route", _) => 5,
+        ("vital", _) => 6,
+        ("kpi", _) => 7,
+        _ => 8,
     };
     (rank, moved)
 }
@@ -269,6 +271,18 @@ fn wording(r: &Report, c: &Check) -> (String, String, Option<String>) {
                 )
             }
         }
+        ("runtime", _) => (
+            format!(
+                "{since}, the server process keeps restarting: {:.1} restarts a day, {:.1} on {}",
+                c.current,
+                c.previous.unwrap_or(0.0),
+                r.previous_release.as_deref().unwrap_or("the release before")
+            ),
+            format!(
+                "Read the server's logs on {rel} just before a restart: find what makes the process exit (an uncaught error, memory running out)."
+            ),
+            None,
+        ),
         ("kpi", "bounce_rate") => (
             format!("{since}, more sessions end at once: {}", from_to()),
             format!("Look at the entry pages on {rel}: find what makes people leave at once."),

@@ -158,3 +158,44 @@ fn a_slower_route_names_its_slowest_request_and_one_only_failing_more_none() {
         "{f:?}"
     );
 }
+
+/// #610's crash loop: 1 restart in 48 h on v1, 150 on v2.
+fn looping(mut prev: Side, mut new: Side) -> Report {
+    let runtime = |restarts: i64| crate::runtime::RuntimeStat {
+        starts: restarts + 2,
+        restarts,
+        hours: 48.0,
+        rss_max_bytes: Some(200 << 20),
+        ..crate::runtime::RuntimeStat::default()
+    };
+    prev.runtime = Some(runtime(1));
+    new.runtime = Some(runtime(150));
+    compare("production", &new, Some(&prev), 30, &[])
+}
+
+#[test]
+fn a_crash_loop_leads_the_verdict_before_a_broken_key_route() {
+    // Alone, without route stats: regressed, a Backend group, the restarts
+    // named in the lead.
+    let r = looping(side("v1"), side("v2"));
+    assert_eq!(r.verdict, Some(Verdict::Regressed), "{:?}", r.reasons);
+    let g = backend_layer(&r).unwrap();
+    assert_eq!(g.rows[0].outcome, Outcome::Worse, "{g:?}");
+    assert!(g.rows[0].label.contains("restarts"), "{g:?}");
+    let lead = crate::board_verdict::lead(&r).unwrap();
+    assert!(lead.headline.contains("restart"), "{}", lead.headline);
+    // With the sign-in route broken too, the crash loop still leads: it
+    // explains the rest.
+    let b = broken();
+    let (prev, new) = (b.previous.clone().unwrap(), b.current.clone());
+    let r = looping(prev, new);
+    let g = backend_layer(&r).unwrap();
+    assert!(g.rows[0].label.contains("restarts"), "{g:?}");
+    assert!(g.rows.iter().any(|x| x.label.contains("/api/auth/sign-in")));
+    let lead = crate::board_verdict::lead(&r).unwrap();
+    assert!(
+        lead.headline.contains("restart") && !lead.headline.contains("sign-in"),
+        "{}",
+        lead.headline
+    );
+}
