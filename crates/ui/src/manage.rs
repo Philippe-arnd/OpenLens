@@ -596,7 +596,7 @@ pub fn replays(
 
 /// Why sessions are recorded at the current rate (#327, D-035).
 fn rate_reason(r: &openlens_engine::ReplayRate) -> String {
-    let budget = openlens_engine::replay_rate::DAILY_BUDGET;
+    let budget = r.budget;
     let triggers = "plus every session with an error or a rage click";
     if r.rate < 1.0 {
         let pct = r.rate * 100.0;
@@ -687,4 +687,21 @@ pub fn player(
             script src="/assets/player.js" defer {}
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_rate_reason_names_the_budget_in_force() {
+        let floor = openlens_engine::replay_rate::DAILY_BUDGET;
+        let r = openlens_engine::ReplayRate {
+            rate: 0.5,
+            active_users: 10_000,
+            day: "2026-11-26".into(),
+            budget: floor * 3,
+        };
+        let why = super::rate_reason(&r);
+        assert!(why.contains(&r.budget.to_string()), "{why}");
+        assert!(!why.contains(&format!("{floor} recordings")), "{why}");
+    }
 }

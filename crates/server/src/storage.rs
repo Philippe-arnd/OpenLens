@@ -6,6 +6,7 @@
 use axum::extract::{Form, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
+use openlens_engine::commands::{Caller, Command};
 use serde::Deserialize;
 
 use crate::AppState;
@@ -76,6 +77,13 @@ async fn render(state: &AppState, notice: Option<String>, error: Option<String>)
         cold_from_env: crate::cold::from_env(),
         cold_blocked: crate::cold::blocked(meta),
         cold_days: crate::cold::cold_days(&state.data_dir).len(),
+        capacity: openlens_engine::commands::capacity::Get::run(
+            state,
+            &Caller::default(),
+            openlens_engine::commands::capacity::GetInput::default(),
+        )
+        .await
+        .map_err(|e| e.to_string()),
         notice,
         error,
     };
