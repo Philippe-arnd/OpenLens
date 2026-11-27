@@ -32,6 +32,11 @@ export interface Config {
     consent?: "granted" | "pending" | "denied";
     /** Record sessions for replay, inputs masked (default true). Loads `/r.js` lazily. */
     replay?: boolean;
+    /** Other origins (`https://api.example.com`) whose requests carry the
+     * trace headers that tie a server error to this session (#593, D-082).
+     * The page's own origin always does; another origin must allow the
+     * `traceparent` and `baggage` headers in its CORS answer. */
+    traceOrigins?: string[];
 }
 export interface Dimensions {
     role?: string;

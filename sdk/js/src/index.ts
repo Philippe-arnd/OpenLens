@@ -40,6 +40,11 @@ export interface Config {
   consent?: "granted" | "pending" | "denied";
   /** Record sessions for replay, inputs masked (default true). Loads `/r.js` lazily. */
   replay?: boolean;
+  /** Other origins (`https://api.example.com`) whose requests carry the
+   * trace headers that tie a server error to this session (#593, D-082).
+   * The page's own origin always does; another origin must allow the
+   * `traceparent` and `baggage` headers in its CORS answer. */
+  traceOrigins?: string[];
 }
 
 export interface Dimensions {
@@ -638,7 +643,7 @@ function autocapture(): void {
 
   // Failed requests: path and status only, never bodies. Our own calls are skipped.
   const own = (u: string) => !!cfg && u.startsWith(cfg.host);
-  const failed = (method: string, rawUrl: string, status: number) => {
+  const failed = (method: string, rawUrl: string, status: number, trace?: string) => {
     let path = rawUrl;
     try {
       const u = new URL(rawUrl, location.href);
@@ -646,18 +651,28 @@ function autocapture(): void {
     } catch {
       // keep the raw value
     }
-    track("$request_failed", { $method: method.toUpperCase(), $path: path.slice(0, 300), $status: status });
+    track("$request_failed", { $method: method.toUpperCase(), $path: path.slice(0, 300), $status: status, $trace_id: trace });
   };
   if (origFetch) {
     const f = origFetch;
     window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       const method = init?.method || (input instanceof Request ? input.method : "GET");
+      let trace: string | undefined;
+      if (!own(url) && traced(url)) {
+        try {
+          const h = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+          trace = traceHeaders((k) => h.get(k), (k, v) => h.set(k, v));
+          init = { ...init, headers: h };
+        } catch {
+          // leave the request as the app wrote it
+        }
+      }
       const p = f.call(window, input, init);
       if (!own(url)) {
         p.then(
-          (r) => r.status >= 500 && failed(method, url, r.status),
-          () => failed(method, url, 0),
+          (r) => r.status >= 500 && failed(method, url, r.status, trace),
+          () => failed(method, url, 0, trace),
         );
       }
       return p;
@@ -666,13 +681,59 @@ function autocapture(): void {
   const open = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function (this: XMLHttpRequest, method: string, url: string | URL, ...rest: unknown[]) {
     const u = String(url);
+    const r = (open as (...a: unknown[]) => void).call(this, method, url, ...rest);
     if (!own(u)) {
+      let trace: string | undefined;
+      if (traced(u)) {
+        try {
+          // The app cannot read back what it set, so ours never overrides it.
+          trace = traceHeaders(() => null, (k, v) => this.setRequestHeader(k, v));
+        } catch {
+          // not opened, or a header the browser refuses
+        }
+      }
       this.addEventListener("loadend", () => {
-        if (this.status >= 500 || this.status === 0) failed(method, u, this.status);
+        if (this.status >= 500 || this.status === 0) failed(method, u, this.status, trace);
       });
     }
-    return (open as (...a: unknown[]) => void).call(this, method, url, ...rest);
+    return r;
   } as typeof XMLHttpRequest.prototype.open;
+}
+
+/** Should this request carry the trace headers? Same origin, or one the
+ * app listed in `traceOrigins`, and only with consent (#593). */
+function traced(rawUrl: string): boolean {
+  if (!cfg || consent !== "granted") return false;
+  try {
+    const o = new URL(rawUrl, location.href).origin;
+    return o === location.origin || (cfg.traceOrigins ?? []).some((t) => t.replace(/\/$/, "") === o);
+  } catch {
+    return false;
+  }
+}
+
+function hex(bytes: number): string {
+  const a = new Uint8Array(bytes);
+  crypto.getRandomValues(a);
+  return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Add W3C `traceparent` (unless the app already set one, whose trace id
+ * is kept) and `baggage` with the session and user ids. Returns the trace id. */
+function traceHeaders(get: (k: string) => string | null, set: (k: string, v: string) => void): string | undefined {
+  const own = /^[0-9a-f]{2}-([0-9a-f]{32})-/.exec(get("traceparent") ?? "");
+  let trace = own?.[1];
+  if (!trace) {
+    trace = hex(16);
+    set("traceparent", `00-${trace}-${hex(8)}-01`);
+  }
+  // Cookieless mode has no ids of its own to send (the server derives them).
+  if (!cfg?.cookieless) {
+    const ids = `openlens-session=${encodeURIComponent(state.sid)},openlens-distinct=${encodeURIComponent(state.uid ?? state.anon)}`;
+    const prev = get("baggage");
+    set("baggage", prev ? `${prev},${ids}` : ids);
+  }
+  return trace;
 }
 
 /** Start OpenLens. Safe to call once; later calls are ignored. */
