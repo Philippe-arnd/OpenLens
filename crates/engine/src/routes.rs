@@ -151,12 +151,7 @@ fn stats_sql(w: &str, extra: Option<&str>) -> String {
     // One data point of `http.server.request.duration` (#601): OpenTelemetry
     // semantic-convention attributes, durations in seconds.
     let attr = |k: &str, pat: &str| format!("regexp_match(properties, '\"{k}\":{pat}')[1]");
-    let int_of = |k: &str| {
-        format!(
-            "COALESCE(CAST({} AS BIGINT), 0)",
-            attr(k, "([0-9]{1,18})")
-        )
-    };
+    let int_of = |k: &str| format!("COALESCE(CAST({} AS BIGINT), 0)", attr(k, "([0-9]{1,18})"));
     let secs_of = |k: &str| {
         format!(
             "COALESCE(CAST({} AS DOUBLE), 0)",

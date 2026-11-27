@@ -51,7 +51,10 @@ async fn route_stats_are_summed_per_route_shown_and_kept_out_of_user_activity() 
     assert_eq!(route["requests"], 100);
     assert_eq!(route["errors"], 10);
     assert!(route["p95_ms"].as_f64().unwrap() > route["p50_ms"].as_f64().unwrap());
-    assert!(route["max_ms"].as_i64().unwrap() >= 900, "seconds read as ms");
+    assert!(
+        route["max_ms"].as_i64().unwrap() >= 900,
+        "seconds read as ms"
+    );
 
     // Stats are not user activity: the events view never has them.
     let n = |sql: &'static str| {
