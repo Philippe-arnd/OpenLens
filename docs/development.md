@@ -37,6 +37,7 @@ Besides fmt, clippy, tests, layers and cargo-deny, the gate runs checks that rea
 
 ### MCP parity
 Every engine command (`openlens_engine::commands::REGISTRY`) must be reachable from MCP (rule 10). The test in `apps/openlens-cli/src/mcp_parity.rs` (`cargo test -p openlens-cli mcp_parity`, D-058) compares the registry with the tools `openlens-cli mcp` lists, through three lists in that file: `TOOL_OF` maps each command to the tool that runs it (names differ, and one tool may run several commands), `PENDING` lists commands with no tool yet, and `NOT_COMMANDS` lists tools whose logic is not a command yet (`sql` is the raw SQL escape hatch). A new command fails the test until it gets a tool or a `PENDING` entry, a new tool until it is mapped or listed, and an entry that names nothing fails too. Adding a tool for a pending command means moving it from `PENDING` to `TOOL_OF`.
+- **SDK bundle** (`sdk-bundle.yml`): on a pull request from a branch of this repository that changes `sdk/js`, rebuilds the committed browser bundle (`sdk/js/dist`) and pushes it to the branch when it differs, so nobody builds it locally. Pushed with `RELEASE_TOKEN`, the commit starts a new CI run; with the workflow token it does not (push any commit to re-run).
 - **Image** (`release.yml`): Docker build, compose, smoke test, then publish to GHCR. It runs nightly, on tags, on demand, or when packaging changes.
 
 ## Coverage and mutants
