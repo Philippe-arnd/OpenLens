@@ -22,6 +22,7 @@ pub mod announcements;
 pub mod ask;
 pub mod board;
 pub mod delivery;
+pub mod dependencies;
 pub mod deploys;
 pub mod explore;
 pub mod flags;
@@ -142,6 +143,8 @@ pub const REGISTRY: &[Spec] = &[
     spec::<routes::List>(),
     // Runtime health per release (#610).
     spec::<runtime::List>(),
+    // Outgoing dependencies per external host (#608).
+    spec::<dependencies::List>(),
     // Uptime history (#559).
     spec::<uptime::GetDays>(),
     spec::<uptime::GetIncidents>(),

@@ -200,6 +200,10 @@ pub(crate) async fn tick(state: &AppState, minute: u64) {
         if s.failing && minute % 10 == 6 {
             Box::pin(cmd::failing_routes(state, &p)).await;
         }
+        // Failing outgoing dependencies (#608): the latest closed window.
+        if s.failing && minute % 5 == 1 {
+            Box::pin(cmd::failing_dependencies(state, &p)).await;
+        }
         // Error budgets of the environments with a target (#560).
         if minute % 5 == 2 {
             Box::pin(openlens_engine::slo::alert_pass(

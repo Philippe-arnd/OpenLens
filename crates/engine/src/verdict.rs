@@ -30,6 +30,9 @@
 //!   they go up significantly (a crash loop, [`crate::runtime::check`]);
 //!   the largest RSS, its growth and the event-loop delay p99 are shown in
 //!   [`Report::runtime`], never judged.
+//! - **Outgoing dependencies** (#608, D-090): a host that fails more or
+//!   got slower is listed in [`Report::dependencies`], shown, never
+//!   judged: a dependency's trouble is usually not the release's fault.
 
 use serde::Serialize;
 
@@ -146,6 +149,10 @@ pub struct Side {
     /// Runtime health (#610): none when the release sent no runtime stats.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<crate::runtime::RuntimeStat>,
+    /// Outgoing dependencies (#608): calls, failures and durations per
+    /// external host; empty when the release sent no client stats.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dependencies: Vec<crate::dependencies::DependencyStat>,
 }
 
 fn share(n: i64, of: i64) -> f64 {
@@ -274,6 +281,11 @@ pub struct Report {
     /// release sent no runtime stats.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<crate::runtime::RuntimeShown>,
+    /// Outgoing dependencies that fail more or got slower than on the
+    /// release before (#608, D-090). Shown, never judged: they are not
+    /// checks and never change the verdict. Absent when none did.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dependencies: Vec<crate::dependencies::DependencyChange>,
 }
 
 /// The board's *release regression* rule (#227), shared by the verdict:
@@ -500,6 +512,9 @@ pub fn compare(
             .runtime
             .as_ref()
             .map(|cr| crate::runtime::shown(cr, previous.and_then(|p| p.runtime.as_ref()))),
+        dependencies: previous
+            .map(|p| crate::dependencies::shown(&c.dependencies, &p.dependencies))
+            .unwrap_or_default(),
     }
 }
 
@@ -740,6 +755,42 @@ mod tests {
         assert!(r.runtime.is_none() && r.checks.iter().all(|c| c.kind != "runtime"));
         let json = serde_json::to_value(&r).unwrap_or_default();
         assert!(json.get("runtime").is_none() && json["current"].get("runtime").is_none());
+    }
+
+    #[test]
+    fn a_dependency_that_fails_or_slows_down_is_shown_and_never_changes_the_outcome() {
+        let host = |errors: i64, bucket: usize| crate::dependencies::DependencyStat {
+            host: "api.stripe.com".into(),
+            calls: 500,
+            errors,
+            buckets: {
+                let mut b = vec![0; crate::routes::BUCKETS];
+                b[bucket] = 500;
+                b
+            },
+            max_ms: 20_000,
+            ..crate::dependencies::DependencyStat::default()
+        };
+        let mut prev = side("v1", 150, 500, 10);
+        prev.dependencies = vec![host(0, 5)];
+        let quiet = side("v2", 120, 400, 8);
+        let baseline = compare("production", &quiet, Some(&prev), 30, &[]);
+        let mut broken = quiet.clone();
+        broken.dependencies = vec![host(400, 12)];
+        let r = compare("production", &broken, Some(&prev), 30, &[]);
+        assert_eq!(r.verdict, baseline.verdict, "{:?}", r.reasons);
+        assert_eq!(r.checks.len(), baseline.checks.len(), "never a check");
+        let shown = r.dependencies.first().expect("the regression is shown");
+        assert!(shown.fails_more && shown.slower);
+        // A regressed release stays regressed for its own reasons, and a
+        // dependency does not add one.
+        let mut bad = side("v2", 120, 400, 80);
+        let regressed = compare("production", &bad, Some(&prev), 30, &[]);
+        bad.dependencies = vec![host(400, 12)];
+        let r = compare("production", &bad, Some(&prev), 30, &[]);
+        assert_eq!(r.verdict, regressed.verdict);
+        assert_eq!(r.reasons, regressed.reasons);
+        assert!(baseline.dependencies.is_empty());
     }
 
     #[test]

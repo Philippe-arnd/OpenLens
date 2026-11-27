@@ -106,7 +106,7 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
     vec![
         ToolSpec {
             name: "routes",
-            description: "The app's server routes over the last `days` (1 to 90, default 7) in one environment (production unless env), from the server SDK's middleware: per method and route template, requests, 5xx count and share, p50 and p95 in ms (upper bounds of the duration histogram), the largest duration, the feature whose key action the route is (`server:` in the feature map), and its exemplars: `slowest` (the slowest request of the period) and `first_5xx` (the first answered 5xx), each with ms, time, status and, when known, trace id, session id (open its replay at that time) and user. Release verdicts judge the same routes (5xx share up significantly, or p95 1.5 times and 200 ms slower); `release_report` shows them as `route` checks, a slower route's p95 check with its slowest request as `exemplar`. Empty, with a note, until the server SDK sends stats.",
+            description: "The app's server routes over the last `days` (1 to 90, default 7) in one environment (production unless env), from the server SDK's middleware: per method and route template, requests, 5xx count and share, p50 and p95 in ms (upper bounds of the duration histogram), the largest duration, the feature whose key action the route is (`server:` in the feature map), and its exemplars: `slowest` (the slowest request of the period) and `first_5xx` (the first answered 5xx), each with ms, time, status and, when known, trace id, session id (open its replay at that time) and user. Release verdicts judge the same routes (5xx share up significantly, or p95 1.5 times and 200 ms slower); `release_report` shows them as `route` checks, a slower route's p95 check with its slowest request as `exemplar`. Empty, with a note, until the server SDK sends stats. `dependencies` lists the app's outgoing calls per external host over the same days (from the Node SDK's `captureOutgoing()` or OTLP `http.client.request.duration`): calls, failed calls (5xx or no response) and their share, p95 in ms, and how each host moved since the release before (`fails_more`, `slower`). Dependencies are shown, never judged: `release_report` lists those that got worse as `dependencies`, and they never change a verdict. A host failing for 15 minutes raises a `dep:<host>` alert.",
             input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"days":{"type":"integer","minimum":1,"maximum":90}}))}),
         },
         ToolSpec {
@@ -375,17 +375,29 @@ fn churn(c: &Client, args: &Value) -> Result<Value, String> {
     Ok(json!({ "report": report, "winback_flags": flags["flags"] }))
 }
 
+/// The routes, with the outgoing dependencies of the same environment and
+/// days as `dependencies` (#608).
+fn routes(c: &Client, args: &Value) -> Result<Value, String> {
+    let with_days = |base: &str| {
+        let mut path = query(args, base, &["env"]);
+        if let Some(d) = args.get("days").and_then(Value::as_i64) {
+            path.push(if path.contains('?') { '&' } else { '?' });
+            path.push_str(&format!("days={d}"));
+        }
+        path
+    };
+    let mut out = get(c, &with_days("/routes"))?;
+    let dependencies = get(c, &with_days("/dependencies"))?;
+    if let Some(o) = out.as_object_mut() {
+        o.insert("dependencies".into(), dependencies);
+    }
+    Ok(out)
+}
+
 /// Run the tool `name`, or `None` when it is not one of [`specs`].
 pub(crate) fn call(c: &Client, name: &str, args: &Value) -> Option<Result<Value, String>> {
     Some(match name {
-        "routes" => {
-            let mut path = query(args, "/routes", &["env"]);
-            if let Some(d) = args.get("days").and_then(Value::as_i64) {
-                path.push(if path.contains('?') { '&' } else { '?' });
-                path.push_str(&format!("days={d}"));
-            }
-            get(c, &path)
-        }
+        "routes" => routes(c, args),
         "runtime" => get(c, &query(args, "/runtime", &["env"])),
         "delete_goal" => required(args, "goal").and_then(|g| {
             let path = at(args, &format!("/goals/{}", enc(&g)));

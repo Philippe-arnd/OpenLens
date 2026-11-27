@@ -16,6 +16,8 @@
 //!   summed per route ([`crate::routes`]).
 //! - **Runtime** (#610): the `$runtime_stats` of each release
 //!   ([`crate::runtime`]).
+//! - **Outgoing dependencies** (#608): the `$client_stats` of each
+//!   release, summed per host ([`crate::dependencies`]), shown only.
 //!
 //! The team's own users are left out, as on the board.
 
@@ -151,13 +153,14 @@ async fn sides(
     let since = (now - chrono::Duration::days(DAYS + 1))
         .format("%Y-%m-%d")
         .to_string();
-    let (kpis, errors, vitals, features, routes, runtime) = futures::join!(
+    let (kpis, errors, vitals, features, routes, runtime, dependencies) = futures::join!(
         q.sql(project, &kpis_sql),
         q.sql(project, &errors_sql),
         q.sql(project, &vitals_sql),
         features_fut,
         crate::routes::by_release(q, project, environment, &since, map.map(|(m, _)| m)),
         crate::runtime::by_release(q, project, environment, &since),
+        crate::dependencies::by_release(q, project, environment, &since),
     );
     let mut out: HashMap<String, Side> = HashMap::new();
     for r in &kpis?.rows {
@@ -230,6 +233,16 @@ async fn sides(
                 ..Side::default()
             })
             .runtime = Some(r.stat);
+    }
+    // Outgoing dependencies (#608): shown only, a release without client
+    // stats has none.
+    for (release, list) in dependencies? {
+        out.entry(release.clone())
+            .or_insert_with(|| Side {
+                release,
+                ..Side::default()
+            })
+            .dependencies = list;
     }
     Ok(out)
 }

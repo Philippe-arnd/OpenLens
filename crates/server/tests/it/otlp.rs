@@ -403,7 +403,123 @@ async fn other_metrics_and_points_are_counted_as_rejected() {
     assert!(r.contains_key("GET /kept"));
     assert!(
         !r.contains_key("GET /x"),
-        "client durations are not read yet"
+        "a client duration is never a route, and one without server.address is rejected"
+    );
+}
+
+#[tokio::test]
+async fn client_durations_land_in_the_dependencies_by_host_only() {
+    let h = harness();
+    let t0 = now_ns();
+    let point = |attrs: Vec<serde_json::Value>, count: u64| {
+        serde_json::json!({
+            "attributes": attrs, "startTimeUnixNano": t0.to_string(),
+            "timeUnixNano": (t0 + 60 * SEC).to_string(), "count": count.to_string(),
+            "sum": 0.5, "max": 0.3,
+            "bucketCounts": one_bucket(7, count).iter().map(u64::to_string).collect::<Vec<_>>(),
+            "explicitBounds": BOUNDS_S,
+        })
+    };
+    let kv = |k: &str, v: serde_json::Value| serde_json::json!({ "key": k, "value": v });
+    let s = |v: &str| serde_json::json!({ "stringValue": v });
+    let n = |v: i64| serde_json::json!({ "intValue": v.to_string() });
+    let points = vec![
+        point(
+            vec![
+                kv("http.request.method", s("POST")),
+                kv("server.address", s("API.Stripe.com")),
+                kv("http.response.status_code", n(200)),
+            ],
+            30,
+        ),
+        point(
+            vec![
+                kv("http.request.method", s("POST")),
+                kv("server.address", s("api.stripe.com")),
+                kv("http.response.status_code", n(503)),
+            ],
+            6,
+        ),
+        // No response at all: only an error class.
+        point(
+            vec![
+                kv("http.request.method", s("POST")),
+                kv("server.address", s("api.stripe.com")),
+                kv("error.type", s("ECONNRESET")),
+            ],
+            4,
+        ),
+        // A URL is not a host: rejected, never stored.
+        point(
+            vec![
+                kv("http.request.method", s("GET")),
+                kv(
+                    "server.address",
+                    s("https://api.example.com/v1/users?token=x"),
+                ),
+                kv("http.response.status_code", n(200)),
+            ],
+            5,
+        ),
+    ];
+    let json = serde_json::json!({ "resourceMetrics": [{
+        "resource": { "attributes": [
+            kv("service.version", s("v7")),
+            kv("deployment.environment.name", s("production")),
+        ]},
+        "scopeMetrics": [{ "metrics": [{
+            "name": "http.client.request.duration", "unit": "s",
+            "histogram": { "aggregationTemporality": 1, "dataPoints": points },
+        }]}],
+    }]});
+    let key = h.key.clone();
+    let (status, _, body) = send(
+        &h,
+        "application/json",
+        json.to_string().into_bytes(),
+        Some(("x-openlens-key", &key)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["partialSuccess"]["rejectedDataPoints"], "1", "{v}");
+
+    openlens_server::flush_now(&h.state).unwrap();
+    let r = get(&h, "/api/projects/default/dependencies?days=1", None, true).await;
+    assert_eq!(r.status(), StatusCode::OK);
+    let d: serde_json::Value = serde_json::from_str(&body_text(r).await).unwrap();
+    let hosts = d["hosts"].as_array().unwrap();
+    assert_eq!(hosts.len(), 1, "one host, whatever its case: {d}");
+    let stripe = &hosts[0];
+    assert_eq!(stripe["host"], "api.stripe.com");
+    assert_eq!(stripe["calls"], 40);
+    assert_eq!(stripe["errors"], 10, "5xx and no response both fail");
+    assert_eq!(stripe["no_response"], 4);
+    assert!(stripe["p95_ms"].as_f64().unwrap() > 0.0);
+
+    // Never a route, never user activity, and no path or query stored.
+    assert!(routes(&h, "production").await.is_empty());
+    let q = h.state.clone();
+    let n = |sql: &'static str| {
+        let q = q.clone();
+        async move {
+            q.query.sql("default", sql).await.unwrap().rows[0]["n"]
+                .as_i64()
+                .unwrap()
+        }
+    };
+    assert_eq!(
+        n("SELECT count(*) AS n FROM events WHERE event = '$client_stats'").await,
+        0
+    );
+    assert!(n("SELECT count(*) AS n FROM raw_events WHERE event = '$client_stats'").await > 0);
+    assert_eq!(
+        n(
+            "SELECT count(*) AS n FROM raw_events WHERE event = '$client_stats' \
+           AND (strpos(properties, '/v1') > 0 OR strpos(properties, 'token') > 0)"
+        )
+        .await,
+        0
     );
 }
 

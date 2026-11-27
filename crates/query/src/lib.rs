@@ -49,12 +49,15 @@ const ALIAS_TTL: Duration = Duration::from_secs(30);
 const REQUEST_STATS: &str = "$request_stats";
 /// `openlens_event::names::RUNTIME_STATS` (#610), not user activity.
 const RUNTIME_STATS: &str = "$runtime_stats";
+/// `openlens_event::names::CLIENT_STATS` (#608), not user activity.
+const CLIENT_STATS: &str = "$client_stats";
 
 /// The `events` table as callers see it: `raw_events` with every
 /// anonymous id found in `person_aliases` replaced by its user, through
 /// the scalar function `person_of` (a lookup in the cached alias map, not
 /// a join: a join would build its hash table on the events), when `merge`
-/// is set, and without server request and runtime stats (#593, #610).
+/// is set, and without server request, runtime and client stats (#593,
+/// #610, #608).
 /// Derived from the data, so it also fixes what was stored before, and
 /// nothing is rewritten. The typed columns read the text on rows
 /// stored before they existed (#449, see `typed`).
@@ -70,14 +73,15 @@ fn events_view_sql(merge: bool) -> String {
             }
         })
         .collect();
-    // Server request and runtime stats (#593, #610) are aggregates, not
+    // Server request, runtime and client stats (#593, #610, #608) are aggregates, not
     // user activity: the board, the rollups and every KPI read `events`,
     // so they never see them. Their readers query `raw_events`.
     format!(
-        "SELECT {}, r.date FROM raw_events r WHERE r.event NOT IN ('{}', '{}')",
+        "SELECT {}, r.date FROM raw_events r WHERE r.event NOT IN ('{}', '{}', '{}')",
         cols.join(", "),
         REQUEST_STATS,
-        RUNTIME_STATS
+        RUNTIME_STATS,
+        CLIENT_STATS
     )
 }
 

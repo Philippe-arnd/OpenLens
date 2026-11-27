@@ -68,6 +68,15 @@ pub mod names {
     /// `v8js.memory.heap.used` (bytes). Not user activity: the `events`
     /// view leaves them out.
     pub const RUNTIME_STATS: &str = "$runtime_stats";
+    /// Outgoing calls to one external host in one 10-minute window, sent
+    /// by the Node SDK (`captureOutgoing()`) and OTLP (#608, D-090): one
+    /// data point of OpenTelemetry's `http.client.request.duration`
+    /// histogram: `http.request.method`, `server.address` (the host only),
+    /// `http.response.status_code` (0 without a response, then
+    /// `error.type`), `count`, `sum`, `min`, `max` (seconds) and
+    /// `bucket_counts`. Not user activity: the `events` view leaves them
+    /// out.
+    pub const CLIENT_STATS: &str = "$client_stats";
     /// Distinct id of server events tied to no user (#593): left out of
     /// release shares.
     pub const SERVER_ID: &str = "$server";

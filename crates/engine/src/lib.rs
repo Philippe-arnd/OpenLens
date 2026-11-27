@@ -24,6 +24,8 @@ mod board_window;
 pub mod churn;
 pub mod commands;
 pub mod delivery;
+/// Outgoing dependencies per external host (#608, D-090).
+pub mod dependencies;
 pub mod deploys;
 mod digest;
 mod drift;

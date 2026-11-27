@@ -245,6 +245,12 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "Runtime health per release of one environment (`env`, production by default), from the Node SDK's runtime stats, newest first: process starts and restarts, restarts per day, the largest RSS and heap used (bytes), event-loop delay p50 and p99 (ms), and next to the release before the RSS growth and the restarts check (the only one judged in the verdict).",
     ),
     (
+        "GET",
+        "/api/projects/{project}/dependencies",
+        "read",
+        "Outgoing dependencies of one environment (`env`, production by default) over `days` (1 to 90, default 7), from `http.client.request.duration` (the Node SDK's `captureOutgoing()` or OTLP): per external host (`server.address`, never a path), calls, failed calls (5xx or no response) and their share, calls without a response, p95 in ms (upper bound of the duration histogram), the largest duration, and how the host moved from the release before to the latest one (fails more, slower). Shown, never judged: a dependency never changes a release verdict. The hosts that got worse come first, then the most called.",
+    ),
+    (
         "POST",
         "/api/projects/{project}/deploy-hook",
         "write",

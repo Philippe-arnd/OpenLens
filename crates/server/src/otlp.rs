@@ -7,13 +7,16 @@
 //!   `/capture`. gRPC is out of scope.
 //! - **Read:** the `http.server.request.duration` explicit-bucket
 //!   histogram with `http.request.method`, `http.route` and
-//!   `http.response.status_code`; resource `service.version` is the
-//!   release and `deployment.environment.name` the environment. Every
-//!   other metric and data point is counted in
-//!   `partialSuccess.rejectedDataPoints`.
-//! - **Stored:** each data point becomes one `$request_stats` event with
-//!   the fields the Node SDK sends (D-084), so the routes, the verdict and
-//!   the alerts read it unchanged. Durations become seconds; other bucket
+//!   `http.response.status_code`, and (#608, D-090)
+//!   `http.client.request.duration` with `http.request.method`,
+//!   `server.address`, `http.response.status_code` and `error.type`;
+//!   resource `service.version` is the release and
+//!   `deployment.environment.name` the environment. Every other metric
+//!   and data point is counted in `partialSuccess.rejectedDataPoints`.
+//! - **Stored:** each data point becomes one `$request_stats` event (or
+//!   `$client_stats` for the client metric) with the fields the Node SDK
+//!   sends (D-084, D-090), so the routes, the dependencies, the verdict
+//!   and the alerts read it unchanged. Durations become seconds; other bucket
 //!   bounds are re-bucketed into OpenLens's by upper bound, so p95 stays
 //!   an upper bound.
 //! - **Temporality:** delta points are stored as they are. For cumulative
@@ -63,6 +66,8 @@ mod wire;
 
 /// The metric read.
 pub(crate) const METRIC: &str = "http.server.request.duration";
+/// The outgoing calls' metric read (#608, D-090).
+pub(crate) const CLIENT_METRIC: &str = "http.client.request.duration";
 /// Largest body, before and after gzip (D-085).
 pub(crate) const MAX_BODY: usize = 4 * 1024 * 1024;
 /// Data points per request, of every metric (D-085).
@@ -81,6 +86,10 @@ pub(crate) const SERIES_CAP: usize = 50_000;
 pub(crate) const SERIES_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 /// Longest route kept, in characters (as the Node SDK).
 const MAX_ROUTE: usize = 300;
+/// Longest host kept, in bytes (a DNS name's limit).
+const MAX_HOST: usize = 253;
+/// Longest `error.type` kept, in bytes.
+const MAX_ERROR_TYPE: usize = 64;
 
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
@@ -190,7 +199,7 @@ struct Sample {
     /// A fingerprint of the source bounds and unit.
     layout: u64,
     method: String,
-    route: String,
+    target: Target,
     status: i64,
     release: Option<String>,
     environment: Option<String>,
@@ -255,6 +264,16 @@ fn exemplars(p: &wire::HistogramDataPoint, factor: f64, status: i64) -> Vec<Ex> 
         out.push(f);
     }
     out
+}
+
+/// What a data point is about.
+#[derive(Clone)]
+enum Target {
+    /// `http.server.request.duration`: the route template.
+    Route(String),
+    /// `http.client.request.duration` (#608): the host called and, for a
+    /// call without a response, its `error.type`.
+    Host { host: String, error: Option<String> },
 }
 
 /// What a request holds once read.
@@ -324,6 +343,34 @@ fn method_of(raw: Option<String>) -> String {
     } else {
         "OTHER".to_owned()
     }
+}
+
+/// The host of `server.address`, lowercased: a DNS name or an IP address
+/// (`[A-Za-z0-9._:-]`, brackets of an IPv6 address dropped), at most 253
+/// bytes; `None` for anything else (a URL, a path, credentials).
+fn host_of(raw: Option<String>) -> Option<String> {
+    let h = raw?
+        .trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_ascii_lowercase();
+    let ok = (1..=MAX_HOST).contains(&h.len())
+        && h.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_' | b':'));
+    ok.then_some(h)
+}
+
+/// An `error.type`: at most 64 bytes of `[A-Za-z0-9._:-]`, else `_OTHER`
+/// (OpenTelemetry's fallback value).
+fn error_type_of(raw: Option<String>) -> Option<String> {
+    let e = raw?.trim().to_owned();
+    if e.is_empty() {
+        return None;
+    }
+    let ok = e.len() <= MAX_ERROR_TYPE
+        && e.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_' | b':'));
+    Some(if ok { e } else { "_OTHER".to_owned() })
 }
 
 /// Attributes in a fixed order, each part length-prefixed.
@@ -463,16 +510,17 @@ fn read(enc: Enc, raw: &[u8], project: &str) -> Result<Parsed, Bad> {
         let res_canon = canon(res);
         for m in rm.scope_metrics.iter().flat_map(|s| &s.metrics) {
             let histogram_points = m.histogram.as_ref().map_or(0, |h| h.data_points.len());
-            if m.name != METRIC {
+            let client = m.name == CLIENT_METRIC;
+            if m.name != METRIC && !client {
                 out.reject(
                     m.other_points() + histogram_points,
-                    "only http.server.request.duration is read",
+                    "only http.server.request.duration and http.client.request.duration are read",
                 );
                 continue;
             }
             out.reject(
                 m.other_points(),
-                "http.server.request.duration must be an explicit-bucket histogram",
+                "a request duration must be an explicit-bucket histogram",
             );
             let Some(h) = &m.histogram else {
                 continue;
@@ -480,7 +528,7 @@ fn read(enc: Enc, raw: &[u8], project: &str) -> Result<Parsed, Bad> {
             let Some(factor) = unit_factor(&m.unit) else {
                 out.reject(
                     histogram_points,
-                    "the unit of http.server.request.duration must be s or ms",
+                    "the unit of a request duration must be s or ms",
                 );
                 continue;
             };
@@ -501,11 +549,23 @@ fn read(enc: Enc, raw: &[u8], project: &str) -> Result<Parsed, Bad> {
                     out.accepted += 1;
                     continue;
                 }
-                let Some(route) =
-                    attr(&p.attributes, "http.route").filter(|r| !r.trim().is_empty())
-                else {
-                    out.reject(1, "a data point has no http.route");
-                    continue;
+                let target = if client {
+                    let Some(host) = host_of(attr(&p.attributes, "server.address")) else {
+                        out.reject(1, "a client data point has no valid server.address");
+                        continue;
+                    };
+                    Target::Host {
+                        host,
+                        error: error_type_of(attr(&p.attributes, "error.type")),
+                    }
+                } else {
+                    let Some(route) =
+                        attr(&p.attributes, "http.route").filter(|r| !r.trim().is_empty())
+                    else {
+                        out.reject(1, "a data point has no http.route");
+                        continue;
+                    };
+                    Target::Route(route.chars().take(MAX_ROUTE).collect())
                 };
                 out.accepted += 1;
                 let status = attr(&p.attributes, "http.response.status_code")
@@ -530,11 +590,17 @@ fn read(enc: Enc, raw: &[u8], project: &str) -> Result<Parsed, Bad> {
                     layout: layout_of(&p.explicit_bounds, factor),
                     bounds,
                     method: method_of(attr(&p.attributes, "http.request.method")),
-                    route: route.chars().take(MAX_ROUTE).collect(),
+                    target,
                     status,
                     release: release.clone(),
                     environment: environment.clone(),
-                    exemplars: exemplars(p, factor, status),
+                    // Exemplars belong to server routes (#607); a client
+                    // point keeps none (D-090).
+                    exemplars: if client {
+                        Vec::new()
+                    } else {
+                        exemplars(p, factor, status)
+                    },
                 });
             }
         }
@@ -751,7 +817,8 @@ fn exemplars_json(list: &[Ex]) -> Vec<Value> {
         .collect()
 }
 
-/// The `$request_stats` event of a window, as the Node SDK sends it.
+/// The `$request_stats` (or `$client_stats`, #608) event of a window, as
+/// the Node SDK sends it.
 fn raw_event(w: &Sample) -> RawEvent {
     let from = if w.start > 0 { w.start } else { w.time };
     let timestamp = rfc3339(from);
@@ -768,10 +835,25 @@ fn raw_event(w: &Sample) -> RawEvent {
     if let Some(r) = &w.release {
         p.insert("$release".into(), json!(r));
     }
-    p.insert("$metric".into(), json!(METRIC));
+    let event = match &w.target {
+        Target::Route(route) => {
+            p.insert("$metric".into(), json!(METRIC));
+            p.insert("http.route".into(), json!(route));
+            names::REQUEST_STATS
+        }
+        Target::Host { host, error } => {
+            p.insert("$metric".into(), json!(CLIENT_METRIC));
+            p.insert("server.address".into(), json!(host));
+            // `error.type` describes a call without a response; a call
+            // that got one is described by its status code.
+            if let (Some(e), 0) = (error, w.status) {
+                p.insert("error.type".into(), json!(e));
+            }
+            names::CLIENT_STATS
+        }
+    };
     p.insert("$unit".into(), json!("s"));
     p.insert("http.request.method".into(), json!(w.method));
-    p.insert("http.route".into(), json!(w.route));
     p.insert("http.response.status_code".into(), json!(w.status));
     p.insert("count".into(), json!(w.count));
     p.insert("sum".into(), json!(round6(w.sum)));
@@ -787,7 +869,7 @@ fn raw_event(w: &Sample) -> RawEvent {
         p.insert("exemplars".into(), Value::Array(ex));
     }
     RawEvent {
-        event: names::REQUEST_STATS.to_owned(),
+        event: event.to_owned(),
         distinct_id: Some(names::SERVER_ID.to_owned()),
         timestamp,
         properties: Some(p),
@@ -970,7 +1052,7 @@ mod tests {
             bounds: vec![0.1],
             layout: 7,
             method: "GET".into(),
-            route: "/a".into(),
+            target: Target::Route("/a".into()),
             status: 200,
             release: None,
             environment: None,
@@ -1086,6 +1168,24 @@ mod tests {
             !text.contains("secret") && !text.contains("http.url"),
             "other attributes are dropped"
         );
+    }
+
+    #[test]
+    fn a_server_address_keeps_the_host_and_nothing_else() {
+        assert_eq!(
+            host_of(Some(" API.Stripe.com ".into())).as_deref(),
+            Some("api.stripe.com")
+        );
+        assert_eq!(host_of(Some("[::1]".into())).as_deref(), Some("::1"));
+        for bad in [
+            "https://api.stripe.com/v1/charges",
+            "admin:hunter2\u{40}api.example",
+            "api.stripe.com/v1?key=sk",
+            "",
+        ] {
+            assert!(host_of(Some(bad.into())).is_none(), "{bad}");
+        }
+        assert!(host_of(Some("a".repeat(MAX_HOST + 1))).is_none());
     }
 
     #[test]

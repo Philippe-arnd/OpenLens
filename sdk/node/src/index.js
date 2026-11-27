@@ -3,6 +3,7 @@
 // `flushAt` events). Errors never throw into the app: they go to `onError`.
 
 import { monitorEventLoopDelay } from "node:perf_hooks";
+import diagnostics from "node:diagnostics_channel";
 
 /** @typedef {{ role?: string, account?: string, plan?: string }} Dimensions */
 
@@ -27,6 +28,21 @@ const LOOP_RESOLUTION_MS = 20;
 const MAX_LOOP_DELAY_S = 3600;
 /** Whether a client already sent this process's start (#610): once per process. */
 let processStartSent = false;
+/** Distinct external hosts kept per window by `captureOutgoing()` (#608):
+ * calls to any other host count under `_OTHER`. */
+export const MAX_CLIENT_HOSTS = 50;
+/** Distinct (method, host, status, error) keys kept per window: a bound on memory. */
+const MAX_CLIENT_KEYS = 500;
+/** Node's documented diagnostics channels for outgoing HTTP requests (#608):
+ * `http`/`https` client requests, and undici's, which the global `fetch` uses. */
+const CLIENT_CHANNELS = {
+  httpStart: "http.client.request.start",
+  httpResponse: "http.client.response.finish",
+  httpError: "http.client.request.error",
+  undiciCreate: "undici:request:create",
+  undiciHeaders: "undici:request:headers",
+  undiciError: "undici:request:error",
+};
 
 /** Variables hosts set to the deployed commit, in order of preference (#495). */
 const COMMIT_VARS = [
@@ -73,6 +89,8 @@ export class OpenLens {
     this.queue = [];
     /** @type {Map<string, any>} */
     this.stats = new Map();
+    /** @type {Map<string, any>} */
+    this.clientStats = new Map();
     this.seenErrors = new Map();
     this.reported = new WeakSet();
     this.seenMinute = 0;
@@ -272,6 +290,149 @@ export class OpenLens {
   }
 
   /**
+   * Outgoing calls (#608): per external host, the duration and outcome of
+   * the app's HTTP calls (global `fetch` and `http`/`https`), read from
+   * Node's diagnostics channels; one `$client_stats` per (method, host,
+   * status) per stats window, with OpenTelemetry's
+   * `http.client.request.duration` histogram. Only the host is kept, never
+   * the path, the query or credentials. Calls to the OpenLens host are not
+   * counted. Opt-in; calling it again does nothing; `shutdown()` stops it.
+   * Does nothing where Node has no diagnostics channels.
+   */
+  captureOutgoing() {
+    if (this.outgoing) return;
+    try {
+      if (!diagnostics || typeof diagnostics.channel !== "function") return;
+      let own = "";
+      try {
+        own = new URL(this.host).hostname.toLowerCase();
+      } catch {
+        own = "";
+      }
+      const started = new WeakMap();
+      const begin = (request) => {
+        if (request && typeof request === "object") started.set(request, process.hrtime.bigint());
+      };
+      const end = (request, method, host, status, error) => {
+        if (!request || typeof request !== "object") return;
+        const t0 = started.get(request);
+        if (t0 === undefined) return;
+        started.delete(request);
+        const h = clientHost(host);
+        if (!h || h === own) return;
+        const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+        this.recordCall({ method, host: h, status, error, ms });
+      };
+      const undiciHost = (request) => {
+        try {
+          return new URL(String(request.origin)).hostname;
+        } catch {
+          return undefined;
+        }
+      };
+      /** @type {[string, (m: any) => void][]} */
+      const handlers = [
+        [CLIENT_CHANNELS.httpStart, (m) => begin(m && m.request)],
+        [
+          CLIENT_CHANNELS.httpResponse,
+          (m) => m && m.request && end(m.request, m.request.method, m.request.host, m.response && m.response.statusCode),
+        ],
+        [
+          CLIENT_CHANNELS.httpError,
+          (m) => m && m.request && end(m.request, m.request.method, m.request.host, 0, errorType(m.error)),
+        ],
+        [CLIENT_CHANNELS.undiciCreate, (m) => begin(m && m.request)],
+        [
+          CLIENT_CHANNELS.undiciHeaders,
+          (m) => m && m.request && end(m.request, m.request.method, undiciHost(m.request), m.response && m.response.statusCode),
+        ],
+        [
+          CLIENT_CHANNELS.undiciError,
+          (m) => m && m.request && end(m.request, m.request.method, undiciHost(m.request), 0, errorType(m.error)),
+        ],
+      ];
+      const subscribed = [];
+      for (const [name, fn] of handlers) {
+        const safe = (message) => {
+          try {
+            fn(message);
+          } catch (e) {
+            this.onError(e);
+          }
+        };
+        try {
+          // The module's `subscribe()` (Node >= 18.7) keeps the channel
+          // alive; on older Node the channel object is kept here.
+          const ch = diagnostics.channel(name);
+          if (typeof diagnostics.subscribe === "function") diagnostics.subscribe(name, safe);
+          else ch.subscribe(safe);
+          subscribed.push([name, safe, ch]);
+        } catch (e) {
+          this.onError(e);
+        }
+      }
+      this.outgoing = subscribed;
+    } catch (e) {
+      this.onError(e);
+    }
+  }
+
+  /** @private Count one outgoing call in its host's stats. */
+  recordCall(c) {
+    try {
+      const start = windowStart(Date.now());
+      const method = clientMethod(c.method);
+      const raw = Math.trunc(Number(c.status) || 0);
+      const status = raw >= 100 && raw < 600 ? raw : 0;
+      const error = status === 0 ? c.error || "_OTHER" : "";
+      // A bound on hosts per window: the rest count together.
+      if (!this.clientHosts || this.clientHosts.start !== start) this.clientHosts = { start, hosts: new Set() };
+      const seen = this.clientHosts.hosts;
+      let host = c.host;
+      if (!seen.has(host)) {
+        if (seen.size >= MAX_CLIENT_HOSTS) host = "_OTHER";
+        else seen.add(host);
+      }
+      const key = `${start} ${method} ${host} ${status} ${error}`;
+      let s = this.clientStats.get(key);
+      const secs = Math.max(0, Number(c.ms) || 0) / 1000;
+      if (!s) {
+        if (this.clientStats.size >= MAX_CLIENT_KEYS) return;
+        s = { start, method, host, status, error, count: 0, sum: 0, min: secs, max: 0, buckets: new Array(BOUNDS_S.length + 1).fill(0) };
+        this.clientStats.set(key, s);
+      }
+      addSample(s, secs);
+    } catch (e) {
+      this.onError(e);
+    }
+  }
+
+  /** @private Turn the outgoing calls of closed windows (all of them when `all`) into events. */
+  drainClientStats(all) {
+    const open = windowStart(Date.now());
+    for (const [key, s] of this.clientStats) {
+      if (!all && s.start >= open) continue;
+      this.clientStats.delete(key);
+      // One data point of OpenTelemetry's `http.client.request.duration`.
+      const props = {
+        $metric: "http.client.request.duration",
+        $unit: "s",
+        "http.request.method": s.method,
+        "server.address": s.host,
+        "http.response.status_code": s.status,
+        count: s.count,
+        sum: round6(s.sum),
+        min: round6(s.min),
+        max: round6(s.max),
+        bucket_counts: s.buckets,
+        $window_s: STATS_WINDOW_MS / 1000,
+      };
+      if (s.error) props["error.type"] = s.error;
+      this.push("$client_stats", SERVER_ID, props, undefined, new Date(s.start));
+    }
+  }
+
+  /**
    * Runtime health (#610): event-loop delay, memory and process starts.
    * At once, one `$runtime_stats` with `process.start: true` (sent by the
    * next flush, so a process that crash-loops is still counted); then, for
@@ -428,6 +589,7 @@ export class OpenLens {
     this.sampleRuntime();
     this.drainRuntime(all);
     this.drainStats(all);
+    this.drainClientStats(all);
     if (this.queue.length === 0) return;
     const batch = this.queue.splice(0, this.queue.length);
     try {
@@ -445,6 +607,15 @@ export class OpenLens {
   /** Flush and stop the timer (call on shutdown). */
   async shutdown() {
     clearInterval(this.timer);
+    for (const [name, fn, ch] of this.outgoing || []) {
+      try {
+        if (typeof diagnostics.unsubscribe === "function") diagnostics.unsubscribe(name, fn);
+        else ch.unsubscribe(fn);
+      } catch {
+        // already gone
+      }
+    }
+    this.outgoing = undefined;
     await this.flush(true);
     this.runtime?.loop?.disable();
     this.runtime = undefined;
@@ -502,6 +673,40 @@ function exemplarsProp(s) {
   const kept = [s.slowest, s.first].filter((ex, i, all) => ex && all.indexOf(ex) === i);
   const list = kept.map((ex) => ({ ...ex, value: round6(ex.value) }));
   return list.length > 0 ? { exemplars: list } : {};
+}
+
+/** Add one duration (seconds) to a histogram data point. */
+function addSample(s, secs) {
+  s.count += 1;
+  s.sum += secs;
+  if (secs < s.min) s.min = secs;
+  if (secs > s.max) s.max = secs;
+  let i = BOUNDS_S.findIndex((b) => secs <= b);
+  if (i < 0) i = BOUNDS_S.length;
+  s.buckets[i] += 1;
+}
+
+/** The host of an outgoing call, lowercased: a DNS name or an IP address
+ * only (brackets of an IPv6 address dropped), at most 253 characters;
+ * `undefined` for anything else. Never a path, a query or credentials. */
+function clientHost(raw) {
+  if (typeof raw !== "string") return undefined;
+  const h = raw.trim().replace(/^\[|\]$/g, "").toLowerCase();
+  return /^[a-z0-9._:-]{1,253}$/.test(h) ? h : undefined;
+}
+
+/** `GET`, `POST`…, else `_OTHER` (OpenTelemetry's value for an unknown method). */
+function clientMethod(raw) {
+  const m = String(raw || "GET").toUpperCase();
+  return /^[A-Z]{1,10}$/.test(m) ? m : "_OTHER";
+}
+
+/** The class of a failed call: the error's code (`ECONNREFUSED`), else its
+ * name (`TimeoutError`), at most 64 characters; never its message. */
+function errorType(err) {
+  const pick = (v) => (typeof v === "string" && /^[A-Za-z0-9._:-]{1,64}$/.test(v) ? v : undefined);
+  if (!err || typeof err !== "object") return "_OTHER";
+  return pick(err.code) || pick(err.cause && err.cause.code) || pick(err.name) || "_OTHER";
 }
 
 /** Start of the stats window that holds `ms`. */
