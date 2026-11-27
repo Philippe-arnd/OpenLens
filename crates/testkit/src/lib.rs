@@ -2,6 +2,8 @@
 //!
 //! Only dev-dependencies may use this crate (`cargo xtask layers`).
 
+pub mod otlp;
+
 /// Hostile JSON bodies for `/capture`. Every crash fix adds its input here.
 pub fn hostile_capture_bodies() -> Vec<Vec<u8>> {
     let deep = format!(

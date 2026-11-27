@@ -27,6 +27,7 @@ mod goto;
 mod hooks;
 mod ingest;
 mod manage;
+mod otlp;
 mod pages;
 mod privacy;
 mod releases;

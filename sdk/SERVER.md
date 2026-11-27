@@ -111,3 +111,36 @@ $ol->checkIn('nightly-export', ['status' => 'ok', 'ms' => $elapsedMs]);
 - **Never in the way:** the SDK call is sent at once, returns false on any error and never throws. The `curl` line's `-f` makes a refused check-in fail the cron line, so the cron's own mail shows it.
 - **Key in the path:** the `curl` form puts the project key in the URL. OpenLens never logs it, but a reverse proxy in front may: prefer the header form (`curl -H "X-OpenLens-Key: $OPENLENS_KEY" -X POST https://lens.example.com/check-in/nightly-export`) when your proxy logs paths.
 - **Availability:** jobs are not counted in the Uptime page's availability unless an admin ticks *Count jobs in availability* on the Jobs card. Then each check-in counts as a check and each missed run as a failed one, in the last 24 hours and 7 days.
+
+## Already on OpenTelemetry
+
+An app whose server already exports OpenTelemetry metrics needs no OpenLens SDK for its route stats: point an OTLP/HTTP exporter at OpenLens with one header, the project key. OpenLens reads the `http.server.request.duration` histogram (method, route template, status code) and stores each data point as the Node SDK's route stats, so the routes table, the verdict and the alerts work the same. Resource `service.version` is the release and `deployment.environment.name` the environment. Metrics only: no spans, no traces.
+
+With an OpenTelemetry Collector (protobuf and gzip, its defaults):
+
+```yaml
+exporters:
+  otlp_http/openlens:          # `otlphttp` in older Collectors
+    endpoint: https://lens.example.com   # /v1/metrics is appended
+    headers:
+      x-openlens-key: pk_your_project_key
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      exporters: [otlp_http/openlens]
+```
+
+With the Node SDK's `@opentelemetry/exporter-metrics-otlp-http` (JSON), through the standard variables:
+
+```sh
+OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=https://lens.example.com/v1/metrics
+OTEL_EXPORTER_OTLP_METRICS_HEADERS=x-openlens-key=pk_your_project_key
+OTEL_RESOURCE_ATTRIBUTES=service.version=$GIT_SHA,deployment.environment.name=production
+OTEL_SEMCONV_STABILITY_OPT_IN=http   # HTTP instrumentations that still emit the old http.server.duration
+```
+
+- **Both temporalities:** cumulative (every SDK's default) and delta. For cumulative points OpenLens stores the difference with the last point it saw; an app restart (a new start time) starts over, and a retried export adds nothing.
+- **Any bucket bounds:** OpenTelemetry's defaults are read as they are; other bounds are folded into them by upper bound, so p95 is never under-reported. Units `s` and `ms` both work.
+- **Everything else is dropped and counted:** other metrics (including `http.client.request.duration`, for now) come back in the response's `partialSuccess.rejectedDataPoints`. A data point needs `http.route`.
+- **Limits:** 4 MB per request and 10,000 data points; the capture rate limits apply (one data point counts as one event). OTLP over gRPC is not served: let the Collector convert.

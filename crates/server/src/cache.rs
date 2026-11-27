@@ -182,6 +182,13 @@ pub struct Caches {
     /// Long boards computed in the background (#515), each private to
     /// whoever started it; finished ones kept an hour.
     pub(crate) board_jobs: crate::board_jobs::BoardJobs,
+    /// OTLP cumulative histograms (#605, D-085): the last point of each
+    /// series, keyed by a hash of project, resource, attributes and start
+    /// time; the least recently updated go first.
+    pub(crate) otlp_series: Bounded<String, crate::otlp::Last>,
+    /// When the server started or last forgot an OTLP series (Unix ns): a
+    /// series first seen that started before may have been counted.
+    pub(crate) otlp_forgot: std::sync::atomic::AtomicU64,
 }
 
 impl Default for Caches {
@@ -214,6 +221,8 @@ impl Default for Caches {
             release_builds: Bounded::new(10_000, 60 * MIN),
             release_days_full: Bounded::new(10_000, 10 * MIN),
             board_jobs: crate::board_jobs::BoardJobs::default(),
+            otlp_series: Bounded::new(crate::otlp::SERIES_CAP, crate::otlp::SERIES_TTL),
+            otlp_forgot: std::sync::atomic::AtomicU64::new(crate::otlp::now_ns()),
         }
     }
 }
@@ -246,6 +255,7 @@ impl Caches {
             ("replay_rates", n(self.replay_rates.len())),
             ("release_builds", n(self.release_builds.len())),
             ("board_jobs", n(self.board_jobs.len())),
+            ("otlp_series", n(self.otlp_series.len())),
         ]
     }
 }

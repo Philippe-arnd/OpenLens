@@ -155,6 +155,7 @@ pub(super) const ROUTES: &[(&str, &str, Access)] = &[
     ("POST", "/e", Public),
     ("GET", "/flags", Public),
     ("POST", "/r", Public),
+    ("POST", "/v1/metrics", Public),
     ("GET", "/healthz", Public),
     ("GET", "/readyz", Public),
     ("GET", "/metrics", Api),

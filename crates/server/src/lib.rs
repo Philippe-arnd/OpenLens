@@ -43,6 +43,7 @@ mod manage;
 pub mod metrics;
 mod oidc;
 mod openapi;
+mod otlp;
 mod password;
 mod privacy;
 mod releases;
@@ -155,6 +156,7 @@ pub fn router(state: AppState) -> Router {
         .route("/s.js", get(survey_widget))
         .route("/agents.md", get(agents_guide))
         .merge(capture)
+        .merge(otlp::routes())
         .route("/api/projects/{project}/digest", get(digest::api))
         .route("/api/openapi.json", get(openapi::serve))
         .route("/oidc/start", get(oidc::start))

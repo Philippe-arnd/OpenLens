@@ -125,6 +125,10 @@ Guide: https://<your-domain>/agents.md — admin token: <token>.
 
 The agent creates the project, wires the SDK with roles, writes the feature map and sends you a login link.
 
+## Already on OpenTelemetry
+
+An app that exports OpenTelemetry metrics can send its server route stats straight to OpenLens: `POST /v1/metrics` (OTLP/HTTP, protobuf or JSON) with the project key in `x-openlens-key` (or `Authorization: Bearer`). Point a Collector's `otlp_http` exporter at `https://<your-domain>` (it appends `/v1/metrics`), or set `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=https://<your-domain>/v1/metrics` and `OTEL_EXPORTER_OTLP_METRICS_HEADERS=x-openlens-key=<key>` on an SDK. Recipes and limits: [Server SDKs](../../sdk/SERVER.md#already-on-opentelemetry). Your reverse proxy must pass `/v1/metrics` and bodies up to 4 MB (Nginx's default `client_max_body_size` is 1 MB). gRPC (port 4317) is not served.
+
 ## A status page on its own host name
 
 A project's public status page (Settings → Sharing, #561) is served at `/status/<slug>`. To show it at the root of a host such as `status.example.com`, point that host at OpenLens and rewrite `/` to the page in the reverse proxy, keeping `/status/` and `/assets/` as they are. With Caddy:
