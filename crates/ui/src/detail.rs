@@ -229,6 +229,37 @@ mod tests {
         }
     }
 
+    /// A busy person's page lists their latest events only, links to all
+    /// of them, and still ends on the danger zone (#590).
+    #[test]
+    fn the_person_page_lists_the_latest_events_and_links_to_all() {
+        let rows: Vec<EventRow> = (0..crate::explore::LATEST + 40)
+            .map(|i| EventRow {
+                timestamp: format!("2026-11-26 {:02}:{:02}:00", 23 - i / 60, 59 - i % 60),
+                event: format!("ev-{i}"),
+                distinct_id: "ana".into(),
+                role: None,
+                path: Some("/home".into()),
+                feature: None,
+                release: None,
+                session_id: None,
+            })
+            .collect();
+        let html = person(&P, "ana", None, &[], &[], &rows, "UTC", true, None).into_string();
+        let listed = rows
+            .iter()
+            .filter(|r| html.contains(&format!(">{}<", r.event)))
+            .count();
+        assert!(listed > 0 && listed < rows.len(), "{listed}");
+        assert!(listed <= crate::explore::LATEST);
+        // The newest are the ones listed.
+        assert!(html.contains(">ev-0<"));
+        let all = "href=\"/p/p1/events?person=ana&amp;days=90\"";
+        assert!(html.matches(all).count() >= 2, "header and table head");
+        let last = html.rfind("class=\"card").unwrap();
+        assert!(html[last..].starts_with("class=\"card danger\""));
+    }
+
     #[test]
     fn a_viewer_gets_no_danger_zone_and_no_dialog() {
         let html = person(

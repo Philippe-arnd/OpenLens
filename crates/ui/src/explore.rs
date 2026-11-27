@@ -4,6 +4,10 @@
 
 use super::*;
 
+/// How many of a person's latest events their page lists (#590): the
+/// rest are one link away, on the Events page filtered on them.
+pub(crate) const LATEST: usize = 30;
+
 /// A person's profile (#222): who they are, their role over time, their
 /// recordings, their latest events and errors. Admins get the privacy
 /// danger zone; `confirm` opens the dialog that forgets them (#545).
@@ -78,7 +82,7 @@ pub fn person(
                         h2 { (icon("events")) "Latest events" }
                         a href=(all_events) { "All their events" }
                     },
-                    events,
+                    &events[..events.len().min(LATEST)],
                     tz,
                     crate::tables::EventCols { user: false, role: false, groups: true },
                     html! {},
