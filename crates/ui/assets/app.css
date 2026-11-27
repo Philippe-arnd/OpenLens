@@ -121,8 +121,7 @@
   /* The OpenLens logo: a colour blob that slowly changes shape (also docs/img/logo.svg). */
   .blob { display: inline-block; flex: none;
     background: conic-gradient(from 200deg, var(--violet), var(--sky), var(--mint), var(--sun), var(--coral), var(--violet));
-    border-radius: 42% 58% 61% 39% / 45% 39% 61% 55%; animation: morph 8s ease-in-out infinite; }
-  @keyframes morph { 50% { border-radius: 58% 42% 37% 63% / 61% 52% 48% 39%; transform: rotate(20deg); } }
+    border-radius: 42% 58% 61% 39% / 45% 39% 61% 55%; }
   .brand .blob { width: 22px; height: 22px; }
   .theme { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); }
   .theme a { display: grid; place-items: center; width: 26px; height: 24px; border-radius: 999px; color: var(--muted); }
@@ -189,7 +188,7 @@
 
   /* Charts */
   .spark { width: 100%; height: 76px; display: block; }
-  .spark .bar { fill: color-mix(in oklab, var(--violet) 22%, transparent); transition: fill .15s; }
+  .spark .bar { fill: color-mix(in oklab, var(--violet) 22%, transparent); }
   .spark .bar.now, .spark .bar:hover { fill: var(--violet); }
 
   .bars .meter { width: 46%; }
@@ -218,8 +217,7 @@
   .login form { display: flex; flex-direction: column; gap: 10px; margin-top: 18px; }
   .login label { font-size: 12px; color: var(--muted); }
   .alert { background: color-mix(in oklab, var(--bad) var(--tint), transparent); color: var(--bad); padding: 8px 12px; border-radius: var(--r-s); font-size: 13px; }
-  .wave { display: inline-block; animation: wave 2.6s ease-in-out infinite; transform-origin: 70% 70%; }
-  @keyframes wave { 0%, 60%, 100% { transform: rotate(0); } 10%, 30% { transform: rotate(14deg); } 20% { transform: rotate(-8deg); } }
+  .wave { display: inline-block; transform-origin: 70% 70%; }
   .empty h2 { margin-top: 22px; color: var(--ink); }
   .empty .blob { display: block; width: 56px; height: 56px; margin-bottom: 6px; }
   pre.copy { white-space: pre-wrap; word-break: break-all; background: var(--raised); border: 1px dashed var(--line); padding: 12px; border-radius: var(--r-s); user-select: all; }
@@ -426,11 +424,9 @@
   .board-waiting { display: flex; align-items: flex-start; gap: 12px; margin: 24px 0; padding: 16px; border: 1px solid var(--line); border-radius: 8px; max-width: 28rem; }
   .board-waiting > div { display: flex; flex-direction: column; gap: 4px; flex: 1; }
   .board-waiting:not(:last-child) { display: none; }
-  .board-waiting .spinner { flex: none; margin-top: 2px; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--ink-2, currentColor); animation: ol-spin 0.8s linear infinite; }
+  .board-waiting .spinner { flex: none; margin-top: 2px; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--ink-2, currentColor); }
   .board-waiting .waiting-bar { display: block; height: 3px; margin-top: 6px; border-radius: 2px; background: var(--line); overflow: hidden; }
-  .board-waiting .waiting-bar span { display: block; width: 30%; height: 100%; background: var(--ink-2, currentColor); animation: ol-slide 1.4s ease-in-out infinite; }
-  @keyframes ol-spin { to { transform: rotate(360deg); } }
-  @keyframes ol-slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+  .board-waiting .waiting-bar span { display: block; width: 30%; height: 100%; background: var(--ink-2, currentColor); }
   @media (prefers-reduced-motion: reduce) { .board-waiting .spinner, .board-waiting .waiting-bar span { animation: none; } }
 
   /* AI settings (#406): presets need only the key; Custom shows every field. No script. */
@@ -470,7 +466,7 @@
   a.stretch::after { content: ""; position: absolute; inset: 0; border-radius: inherit; z-index: 0; }
   .card a:not(.stretch), .card button, .card select, .card input, .card summary, .card .kpi-info, .tile .kpi-info { position: relative; z-index: 1; }
   details.why { position: relative; z-index: 1; margin: 2px 0 6px; } details.why summary { cursor: pointer; font-size: 12.5px; color: var(--violet); } details.why ol { margin: 4px 0 8px; padding-left: 20px; }
-  a.stretch .details { margin-left: 8px; font-size: 12px; font-weight: 500; color: var(--violet); opacity: 0; transition: opacity .15s; }
+  a.stretch .details { margin-left: 8px; font-size: 12px; font-weight: 500; color: var(--violet); opacity: 0; }
   .card:hover a.stretch .details, .tile:hover a.stretch .details, a.stretch:focus-visible .details { opacity: 1; }
   @media (pointer: coarse) { a.stretch .details { opacity: 1; } }
   .card:has(a.stretch):hover, .tile:has(a.stretch):hover { border-color: color-mix(in oklab, var(--violet) 35%, var(--line)); }
@@ -524,7 +520,7 @@
   form.settings label.alert-row b { display: block; font-weight: 550; color: var(--ink); }
   form.settings label.alert-row small { display: block; color: var(--muted); font-size: 12.5px; }
   form.settings input.switch { appearance: none; width: 34px; height: 20px; margin: 1px 0 0; border-radius: var(--r-pill); background: var(--line); position: relative; cursor: pointer; border: 0; padding: 0; min-width: 0; }
-  input.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); transition: translate .12s; }
+  input.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); }
   form.settings input.switch:checked { background: var(--good); }
   form.settings input.switch:checked::after { translate: 14px 0; }
   input.switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -679,8 +675,6 @@
   .auth-card p { color: var(--muted); margin: 0; }
   .auth-card p.alert { color: var(--bad); }
   .auth-card .brand { padding: 0; }
-  .auth .brand-mark, .shared-banner .brand-mark { display: inline-block; flex: none; width: 22px; height: 22px; border-radius: 7px;
-    background: conic-gradient(from 200deg, var(--accent), var(--info), var(--good), var(--warn), var(--accent)); }
   .auth-form { display: flex; flex-direction: column; gap: 14px; }
   .auth-card .field input { height: 42px; padding: 0 12px; font-size: 14px; font-weight: 400; }
   .auth-card .field input.mono { font-family: var(--mono); }
@@ -1089,7 +1083,17 @@
     tbody td { transition: background-color 120ms; }
     .chart .b, .spark .bar { transition: fill 120ms; }
     a.stretch .details { transition: opacity 150ms; }
-    .blob { animation: none; }
+    input.switch::after { transition: translate 120ms var(--ease-out); }
+
+    /* The logo morphs slowly; the waving hand and the board's wait indicators move on their own */
+    .blob { animation: morph 8s ease-in-out infinite; }
+    @keyframes morph { 50% { border-radius: 58% 42% 37% 63% / 61% 52% 48% 39%; transform: rotate(20deg); } }
+    .wave { animation: wave 2.6s ease-in-out infinite; }
+    @keyframes wave { 0%, 60%, 100% { transform: rotate(0); } 10%, 30% { transform: rotate(14deg); } 20% { transform: rotate(-8deg); } }
+    .board-waiting .spinner { animation: ol-spin 0.8s linear infinite; }
+    .board-waiting .waiting-bar span { animation: ol-slide 1.4s ease-in-out infinite; }
+    @keyframes ol-spin { to { transform: rotate(360deg); } }
+    @keyframes ol-slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
 
     /* Linked cards lift a little */
     a.card, .card:has(a.stretch) { transition: translate 200ms var(--ease-out), box-shadow 200ms var(--ease-out), border-color 200ms; }
@@ -1434,4 +1438,13 @@
   /* The secondary cards after the release comparison: quieter summaries. */
   .disclose.secondary summary { padding-block: 14px; }
   .disclose.secondary summary h2 { font-size: var(--step-1); }
+}
+
+/* Sign-in, logo and heatmap fidelity (#591, #592) */
+@layer components {
+  /* The agent's login link under the "or", as on the mockup. */
+  .auth-card p.hint { font-size: 13px; line-height: 1.5; }
+  .auth-card p.hint code { color: var(--ink); font-size: 12px; overflow-wrap: anywhere; }
+  /* The logo is the sidebar's blob everywhere the brand shows. */
+  .auth-card .brand .blob { width: 22px; height: 22px; }
 }
