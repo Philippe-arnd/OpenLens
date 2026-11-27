@@ -14,6 +14,8 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Automatic release | A release named `YYYY-MM-DD.N` by the server when a new build fingerprint arrives with no release |
 | Time in staging | On the Releases page: from a build's first event in staging to its first in production |
 | Release verdict | On the Releases page: healthy, regressed or inconclusive, a release against the one before it |
+| Server routes | On the Errors page and in `routes`: requests, 5xx share and response times per server route template, from the server SDK |
+| Key action | A server route a feature of the map declares under `server:`; its regression is named in the verdict and its alert is urgent |
 | Deploy hook | The project's secret URL that platforms post their deploy notifications to |
 | Delivery | On the Releases page: deploy frequency, lead time, change failure rate and time to restore per environment |
 | Map drift | Routes new in the latest release that no feature of the map claims |

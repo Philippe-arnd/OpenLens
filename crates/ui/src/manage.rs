@@ -347,6 +347,7 @@ pub fn errors(
     groups: &[openlens_engine::ErrorGroup],
     original: &[Option<openlens_errors::Original>],
     f: &Filters,
+    routes: Option<&openlens_engine::commands::routes::Routes>,
 ) -> Markup {
     let list = |v: &[(String, i64)]| {
         v.iter()
@@ -405,8 +406,47 @@ pub fn errors(
                 }
                 .render())
             }
+            @if let Some(r) = routes.filter(|r| !r.routes.is_empty()) {
+                (server_routes(r))
+            }
         },
     )
+}
+
+/// The server routes of the Errors page (#594): `routes.list`, worst 5xx
+/// share first among the routes with traffic.
+fn server_routes(r: &openlens_engine::commands::routes::Routes) -> Markup {
+    let mut rows: Vec<&openlens_engine::commands::routes::Route> = r.routes.iter().collect();
+    rows.sort_by(|a, b| {
+        b.error_rate
+            .total_cmp(&a.error_rate)
+            .then(b.stat.requests.cmp(&a.stat.requests))
+    });
+    html! {
+        (crate::tables::TableCard {
+            label: "Server routes",
+            head: html! {},
+            cols: &[
+                Col::Shown("Route"), Col::Num("Requests"), Col::Num("5xx"), Col::Num("p50"),
+                Col::Num("p95"), Col::Num("Slowest"),
+            ],
+            body: html! { @for x in rows.iter().take(50) {
+                tr {
+                    th scope="row" {
+                        span.mono { (x.stat.method) " " (x.stat.route) }
+                        @if let Some(k) = &x.stat.key_of { br; span.small.muted { "Key action of " (k) } }
+                    }
+                    td.num { (compact(x.stat.requests)) }
+                    td.num { @if x.stat.errors > 0 { strong { (format!("{:.1} %", x.error_rate * 100.0)) } } @else { span.muted { "0 %" } } }
+                    td.num { (format!("{:.0} ms", x.p50_ms)) }
+                    td.num { (format!("{:.0} ms", x.p95_ms)) }
+                    td.num.muted { (format!("{} ms", x.stat.max_ms)) }
+                }
+            } },
+            foot: html! { div.pager { span { (r.routes.len()) " routes · " (r.environment) " · last " (r.days) " days · worst 5xx first" } } },
+        }
+        .render())
+    }
 }
 
 /// Recorded sessions, most recent or most active first, optionally only

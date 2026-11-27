@@ -111,6 +111,12 @@ pub struct Feature {
     /// key count for this one, so a rename keeps the history.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub renamed_from: Vec<String>,
+    /// The feature's key actions on the server (#594): `METHOD /route`
+    /// as the server SDK reports it (`POST /api/auth/sign-in`). A
+    /// regression of one is named in the release verdict, and its alert is
+    /// urgent.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub server: Vec<String>,
 }
 
 /// Entry points of a feature.
@@ -332,6 +338,24 @@ pub fn validate(m: &FeatureMap) -> Vec<Issue> {
         }
         if f.entry.routes.is_empty() && f.entry.selectors.is_empty() && f.entry.calls.is_empty() {
             v.push(warn(format!("{p}.entry"), format!("no entry point: add a route, or put data-feature=\"{}\" on the feature's main control", f.key)));
+        }
+        for (j, r) in f.server.iter().enumerate() {
+            let mut parts = r.split_whitespace();
+            let ok = matches!(
+                (parts.next(), parts.next(), parts.next()),
+                (Some(m), Some(path), None)
+                    if (1..=10).contains(&m.len())
+                        && m.chars().all(|c| c.is_ascii_alphabetic())
+                        && path.starts_with('/')
+                        && path.len() <= 300
+                        && !path.chars().any(|c| c == '\'' || c == '\\' || c == '"')
+            );
+            if !ok {
+                v.push(err(
+                    format!("{p}.server[{j}]"),
+                    "a key action is `METHOD /route` as the server SDK reports it: `POST /api/auth/sign-in`",
+                ));
+            }
         }
         for (j, r) in f.entry.routes.iter().enumerate() {
             if !r.starts_with('/')

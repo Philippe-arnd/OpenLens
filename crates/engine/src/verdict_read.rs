@@ -12,6 +12,8 @@
 //!   the Errors page's fingerprint; a group is new in the release of its
 //!   first occurrence in the 90 days.
 //! - **Web Vitals**: a scan of the `$vital` events only, p75 per release.
+//! - **Server routes** (#594): the `$request_stats` of each release,
+//!   summed per route ([`crate::routes`]).
 //!
 //! The team's own users are left out, as on the board.
 
@@ -97,12 +99,13 @@ async fn sides(
     );
     let w = f.clause_at(DAYS, now)?;
     let errors_sql = format!(
-        "WITH e AS (SELECT distinct_id, release, timestamp, error_message AS msg, error_source AS source \
+        "WITH e AS (SELECT distinct_id, release, timestamp, error_message AS msg, error_source AS source, \
+           CASE WHEN strpos(properties, '\"$kind\":\"server\"') > 0 THEN 1 ELSE 0 END AS srv \
            FROM {src} WHERE {w} AND event = '$error'), \
-         g AS (SELECT distinct_id, release, timestamp, msg, {FINGERPRINT} AS fp FROM e), \
+         g AS (SELECT distinct_id, release, timestamp, msg, srv, {FINGERPRINT} AS fp FROM e), \
          fr AS (SELECT fp, first_value(release ORDER BY timestamp) AS rel FROM g GROUP BY fp) \
          SELECT g.release AS release, g.fp AS fp, min(g.msg) AS sample, \
-         count(DISTINCT g.distinct_id) AS users, count(*) AS n \
+         count(DISTINCT g.distinct_id) AS users, count(*) AS n, max(g.srv) AS server \
          FROM g JOIN fr ON g.fp = fr.fp AND g.release = fr.rel \
          GROUP BY g.release, g.fp ORDER BY users DESC, n DESC LIMIT {MAX_ROWS}"
     );
@@ -143,11 +146,15 @@ async fn sides(
             None => None,
         }
     };
-    let (kpis, errors, vitals, features) = futures::join!(
+    let since = (now - chrono::Duration::days(DAYS + 1))
+        .format("%Y-%m-%d")
+        .to_string();
+    let (kpis, errors, vitals, features, routes) = futures::join!(
         q.sql(project, &kpis_sql),
         q.sql(project, &errors_sql),
         q.sql(project, &vitals_sql),
         features_fut,
+        crate::routes::by_release(q, project, environment, &since, map.map(|(m, _)| m)),
     );
     let mut out: HashMap<String, Side> = HashMap::new();
     for r in &kpis?.rows {
@@ -174,6 +181,7 @@ async fn sides(
                 sample: text(r, "sample").unwrap_or_else(|| "(no message)".into()),
                 users: int(r, "users"),
                 count: int(r, "n"),
+                server: int(r, "server") > 0,
             });
         }
     }
@@ -200,6 +208,16 @@ async fn sides(
                 });
             }
         }
+    }
+    // Server routes (#594): a release with no stats keeps the verdict the
+    // rest gives it.
+    for (release, list) in routes? {
+        out.entry(release.clone())
+            .or_insert_with(|| Side {
+                release,
+                ..Side::default()
+            })
+            .routes = list;
     }
     Ok(out)
 }

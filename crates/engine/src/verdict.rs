@@ -24,6 +24,8 @@
 //! - **Goals and guardrails** (production): a guardrail breached by the
 //!   release and not by the one before is a regression; a goal's KPI moving
 //!   toward or away from its target is shown, not judged.
+//! - **Server routes** (#594, D-083): a route's 5xx share and p95, when it
+//!   has enough requests on both releases ([`crate::routes::checks`]).
 
 use serde::Serialize;
 
@@ -104,6 +106,9 @@ pub struct NewError {
     pub users: i64,
     /// Occurrences in the release.
     pub count: i64,
+    /// Raised on the server (`$kind: server`, #593).
+    #[serde(default)]
+    pub server: bool,
 }
 
 /// The numbers of one release in one environment, over the last 90 days.
@@ -131,6 +136,9 @@ pub struct Side {
     pub features: Vec<FeatureUse>,
     /// Error groups first seen in this release.
     pub new_errors: Vec<NewError>,
+    /// Server routes (#594): requests, 5xx and durations per route.
+    #[serde(default)]
+    pub routes: Vec<crate::routes::RouteStat>,
 }
 
 fn share(n: i64, of: i64) -> f64 {
@@ -208,7 +216,7 @@ pub enum Outcome {
 /// One number compared.
 #[derive(Debug, Clone, Serialize)]
 pub struct Check {
-    /// `kpi`, `errors`, `vital`, `feature`, `guardrail` or `goal`.
+    /// `kpi`, `errors`, `vital`, `feature`, `guardrail`, `goal` or `route`.
     pub kind: &'static str,
     /// The KPI key, vital or feature.
     pub key: String,
@@ -426,6 +434,7 @@ pub fn compare(
         for g in goals {
             goal_checks(g, c, p, &mut checks);
         }
+        checks.extend(crate::routes::checks(&c.routes, &p.routes));
     }
     let new_errors: Vec<&NewError> = c
         .new_errors
@@ -442,8 +451,11 @@ pub fn compare(
             outcome: Outcome::Worse,
             judged: true,
             note: format!(
-                "New error: {} ({} users, {} times)",
-                e.sample, e.users, e.count
+                "New {}error: {} ({} users, {} times)",
+                if e.server { "server " } else { "" },
+                e.sample,
+                e.users,
+                e.count
             ),
         });
     }
@@ -626,9 +638,40 @@ mod tests {
             sample: "TypeError: x".into(),
             users: 3,
             count: 5,
+            server: false,
         });
         let r = compare("production", &fresh, Some(&prev), 30, &[]);
         assert_eq!(r.verdict, Some(Verdict::Regressed));
+    }
+
+    #[test]
+    fn a_release_that_breaks_a_key_server_route_is_regressed_and_one_without_stats_is_not_judged_on_them()
+     {
+        let route = |errors: i64| crate::routes::RouteStat {
+            method: "POST".into(),
+            route: "/api/auth/sign-in".into(),
+            requests: 300,
+            errors,
+            buckets: {
+                let mut b = vec![0; crate::routes::BUCKETS];
+                b[3] = 300;
+                b
+            },
+            max_ms: 40,
+            key_of: Some("login".into()),
+            ..crate::routes::RouteStat::default()
+        };
+        let mut prev = side("v1", 120, 400, 8);
+        prev.routes = vec![route(0)];
+        let mut broken = side("v2", 120, 400, 8);
+        broken.routes = vec![route(300)];
+        let r = compare("production", &broken, Some(&prev), 30, &[]);
+        assert_eq!(r.verdict, Some(Verdict::Regressed));
+        assert!(r.reasons.iter().any(|x| x.contains("key action of login")));
+        // The same release with no server stats: the backend says nothing.
+        let quiet = side("v2", 120, 400, 8);
+        let r = compare("production", &quiet, Some(&prev), 30, &[]);
+        assert!(r.checks.iter().all(|c| c.kind != "route"));
     }
 
     #[test]

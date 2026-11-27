@@ -289,7 +289,8 @@ pub async fn releases(
     let mut params = openlens_sqlgen::Params::new();
     let mut w = format!(
         "date >= '{}' AND timestamp >= now() - INTERVAL '{WINDOW_DAYS} days' \
-         AND release IS NOT NULL AND release <> '' AND environment <> 'bot'",
+         AND release IS NOT NULL AND release <> '' AND environment <> 'bot' \
+         AND distinct_id <> '$server'",
         (Utc::now() - chrono::Duration::days(WINDOW_DAYS + 1)).format("%Y-%m-%d")
     );
     if let Some(e) = environment {

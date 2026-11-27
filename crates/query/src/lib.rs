@@ -45,11 +45,14 @@ use serde::Serialize;
 /// read again. Events are flushed every ~10 s, so this stays fresh enough.
 const ALIAS_TTL: Duration = Duration::from_secs(30);
 
+/// `openlens_event::names::REQUEST_STATS` (#593), not user activity.
+const REQUEST_STATS: &str = "$request_stats";
+
 /// The `events` table as callers see it: `raw_events` with every
 /// anonymous id found in `person_aliases` replaced by its user, through
 /// the scalar function `person_of` (a lookup in the cached alias map, not
 /// a join: a join would build its hash table on the events), when `merge`
-/// is set. Derived from the data, so it also fixes what was stored before,
+/// is set, and without server request stats (#593). Derived from the data, so it also fixes what was stored before,
 /// and nothing is rewritten. The typed columns read the text on rows
 /// stored before they existed (#449, see `typed`).
 fn events_view_sql(merge: bool) -> String {
@@ -64,7 +67,14 @@ fn events_view_sql(merge: bool) -> String {
             }
         })
         .collect();
-    format!("SELECT {}, r.date FROM raw_events r", cols.join(", "))
+    // Server request stats (#593) are aggregates, not user activity: the
+    // board, the rollups and every KPI read `events`, so they never see
+    // them. Readers of route stats query `raw_events`.
+    format!(
+        "SELECT {}, r.date FROM raw_events r WHERE r.event <> '{}'",
+        cols.join(", "),
+        REQUEST_STATS
+    )
 }
 
 /// The DataFusion runtime shared by every query.

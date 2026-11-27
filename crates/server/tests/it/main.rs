@@ -29,6 +29,7 @@ mod manage;
 mod pages;
 mod privacy;
 mod releases;
+mod routes;
 mod slo;
 mod status_page;
 mod team;

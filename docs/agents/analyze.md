@@ -13,6 +13,7 @@ Start from the summaries and drill down only where something stands out. Every t
 | Did the release I just shipped break anything? | `release_report { release, env? }`: the verdict (healthy, regressed, inconclusive) with its reasons and every number compared with the release before; `releases` carries each verdict | `errors`, then `user_timeline` of an affected user |
 | How often do we ship, and how often does it break? | `delivery` (optional `env`, `days`): deploy frequency, lead time, change failure rate, time to restore per environment | `releases` |
 | What did this user do (before churning, before an error)? | `user_timeline { distinct_id }`: role history, recordings, latest events | the replay link it returns |
+| Is a server route failing or slower? | `routes` (optional `env`, `days`): requests, 5xx share, p50/p95 per route template and the key actions of the map; `release_report` judges the same routes per release | `errors` (server errors have kind `server`) |
 | What breaks, for whom? | `errors`: groups with users, roles, releases, places and the original source line | `user_timeline` of an affected user |
 | Are pages slow, and what do we fix first? | `vitals`: each Web Vital explained, p75, rating, thresholds, worst pages and ranked actions | `sql` on `$vital` events |
 | Is the wiring complete? | `verify` (`release_layers`: build fingerprint, deploy hook, releases recorded, verdicts) | `feature_map_lint` |

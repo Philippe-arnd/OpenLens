@@ -233,6 +233,12 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "Delivery metrics per environment over `days` (1 to 90, default 90; `env` for one): deploy frequency (succeeded deploys from the deploy hook, else releases reaching live), lead time from first commit to live (unknown until a commit range is recorded), change failure rate (failed or rolled-back deploys and releases, and regressed verdicts) and time to restore, as medians in seconds.",
     ),
     (
+        "GET",
+        "/api/projects/{project}/routes",
+        "read",
+        "Server routes of one environment (`env`, production by default) over `days` (1 to 90, default 7), from the server SDKs' route stats: per method and route template, requests, 5xx count and share, p50 and p95 in ms (upper bounds of the duration histogram), the largest duration, and the feature whose key action the route is (`server:` in the feature map).",
+    ),
+    (
         "POST",
         "/api/projects/{project}/deploy-hook",
         "write",
