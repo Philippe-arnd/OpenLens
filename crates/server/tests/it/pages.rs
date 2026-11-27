@@ -55,7 +55,7 @@ async fn board_renders_numbers_once_data_exists() {
         .await
         .unwrap();
     let html = String::from_utf8_lossy(&body);
-    assert!(html.contains("Daily active users"));
+    assert!(html.contains(r#"id="out-h""#));
     assert!(html.contains("owner"), "the role shows up");
     // The page CSP forbids inline styles, so the markup must not rely on them.
     assert!(
@@ -905,10 +905,7 @@ async fn a_long_range_shows_its_cost_and_runs_once_confirmed() {
         html.contains("/board/jobs"),
         "a form that starts a job: {html}"
     );
-    assert!(
-        !html.contains("Daily active users"),
-        "the board did not run"
-    );
+    assert!(!html.contains(r#"id="out-h""#), "the board did not run");
     // Confirmed, it runs, and says what it read.
     let r = get(&h, &format!("{api}&confirm=1"), None, true).await;
     assert_eq!(r.status(), StatusCode::OK);
@@ -921,7 +918,7 @@ async fn a_long_range_shows_its_cost_and_runs_once_confirmed() {
         false,
     )
     .await;
-    assert!(body_text(page).await.contains("Daily active users"));
+    assert!(body_text(page).await.contains(r#"id="out-h""#));
     // A short range runs at once, and its estimate says it needs nothing.
     let short = format!("from={}", from(5));
     let r = get(

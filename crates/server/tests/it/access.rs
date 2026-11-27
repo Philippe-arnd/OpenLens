@@ -850,7 +850,7 @@ async fn a_cold_board_streams_its_shell_first_and_a_warm_one_does_not() {
     // the board in the same page.
     let cold = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
     let loading = cold.find("board-waiting").unwrap();
-    let kpis = cold.find("Daily active users").unwrap();
+    let kpis = cold.find(r#"id="out-h""#).unwrap();
     assert!(loading < kpis, "the waiting panel comes before the board");
     assert!(cold.contains("Computing the board…") && cold.contains("a few seconds"));
     assert!(cold.contains(r#"aria-live="polite""#));
@@ -858,7 +858,7 @@ async fn a_cold_board_streams_its_shell_first_and_a_warm_one_does_not() {
     assert!(cold.trim_end().ends_with("</html>"));
     // Warm: the cached board, with no waiting panel.
     let warm = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
-    assert!(warm.contains("Daily active users") && !warm.contains("board-waiting"));
+    assert!(warm.contains(r#"id="out-h""#) && !warm.contains("board-waiting"));
     assert!(!warm.contains("Computing the board"));
 }
 
