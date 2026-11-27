@@ -299,6 +299,26 @@ pub(crate) const COLUMNS: &[(&str, &str)] = &[
         "Whether the difference can be trusted yet: a two-sided test at p < 0.05, with at least 30 sessions on each side.",
     ),
     (
+        "Requests",
+        "Server requests to this route in the last 7 days, counted by the server SDK's middleware.",
+    ),
+    (
+        "5xx",
+        "Share of this route's requests answered with a server error (status 500 to 599).",
+    ),
+    (
+        "p50",
+        "Median response time of the route, in ms: the upper bound of the duration bucket that holds it.",
+    ),
+    (
+        "p95",
+        "95 % of the route's requests answered within this time, in ms (upper bound of its duration bucket).",
+    ),
+    (
+        "Slowest",
+        "The longest response time of the route in the period, in ms.",
+    ),
+    (
         "vs baseline",
         "The difference with the baseline variant, and whether it is significant yet (p < 0.05, at least 30 users each).",
     ),

@@ -47,6 +47,7 @@ mod privacy;
 mod releases;
 mod replay;
 mod reword;
+mod routes_api;
 mod s3;
 mod scopes;
 pub mod secrets;
@@ -165,6 +166,7 @@ pub fn router(state: AppState) -> Router {
         .merge(web::routes())
         .merge(releases::routes())
         .merge(delivery::routes())
+        .merge(routes_api::routes())
         .merge(hooks::routes())
         .merge(maintenance::routes())
         .merge(announcements::routes())

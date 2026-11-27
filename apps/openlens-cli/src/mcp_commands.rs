@@ -105,6 +105,11 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
     };
     vec![
         ToolSpec {
+            name: "routes",
+            description: "The app's server routes over the last `days` (1 to 90, default 7) in one environment (production unless env), from the server SDK's middleware: per method and route template, requests, 5xx count and share, p50 and p95 in ms (upper bounds of the duration histogram), the largest duration, and the feature whose key action the route is (`server:` in the feature map). Release verdicts judge the same routes (5xx share up significantly, or p95 1.5 times and 200 ms slower); `release_report` shows them as `route` checks. Empty, with a note, until the server SDK sends stats.",
+            input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"days":{"type":"integer","minimum":1,"maximum":90}}))}),
+        },
+        ToolSpec {
             name: "delete_goal",
             description: "Remove a goal (its id from `goals`). Objectives that used it as a key result keep the others.",
             input_schema: json!({"type":"object","properties":with(json!({"goal":{"type":"string"}})),"required":["goal"]}),
@@ -307,6 +312,14 @@ fn churn(c: &Client, args: &Value) -> Result<Value, String> {
 /// Run the tool `name`, or `None` when it is not one of [`specs`].
 pub(crate) fn call(c: &Client, name: &str, args: &Value) -> Option<Result<Value, String>> {
     Some(match name {
+        "routes" => {
+            let mut path = query(args, "/routes", &["env"]);
+            if let Some(d) = args.get("days").and_then(Value::as_i64) {
+                path.push(if path.contains('?') { '&' } else { '?' });
+                path.push_str(&format!("days={d}"));
+            }
+            get(c, &path)
+        }
         "delete_goal" => required(args, "goal").and_then(|g| {
             let path = at(args, &format!("/goals/{}", enc(&g)));
             send(c, "DELETE", &path, None)

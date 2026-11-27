@@ -673,3 +673,15 @@ The questions "is this component under maintenance at t?" and "how many seconds 
 **Why:** at 25K monthly users one event per request would be 10 to 50 times the product events and break the D-023 sizing; the aggregate is bounded by routes × windows. Reusing `$error` avoids touching every error reader. Cross-origin headers need the API's CORS to allow them, so widening is the app's choice (`traceOrigins` is the one optional override, rule 17). Full traces (spans, OTLP) stay out of scope.
 
 **Consequences:** the per-route p95 is read from merged histograms, so it is an upper bucket bound, not an exact value. A server error with no user counts as one anonymous id in error user counts. Python, Go, Ruby and PHP get the same calls in a follow-up.
+
+## D-083 (2026-11-27, agent for #594, owner-confirmed) Server routes in the verdict and the alerts: fixed rules, key actions in the map, no new setting
+
+**Decision:**
+- **Verdict:** a route judged needs at least 50 requests on both releases. It is worse when its 5xx share rises significantly (the two-proportion test at `stats::ALPHA`) by at least 2 points, or when its p95 is at least 1.5 times the one before **and** 200 ms slower. The p95 comes from the merged histograms (D-082). A release with no stats keeps the verdict the rest gives it.
+- **Key actions:** declared in the feature map, `server: ["METHOD /route"]` on a feature, linted; never guessed from route names.
+- **Alerts:** every 10 minutes, under the existing `failing` setting: a production route with 20 requests or more in the last hour, answering 5xx to at least 10 % of them and three times its share of the 7 days before plus 5 points, opens an incident (`route:` rule); a key action's (`key:` rule) is urgent, so quiet hours never hold it. It closes when the route recovers.
+- **No rollup yet:** the route queries read `raw_events` (`$request_stats` only). The SDK bounds them to one event per route and status class per 10 minutes, so 90 days of a 100-route app is at most about 1.3 M small rows, partition-pruned by day. A `route_q` rollup waits for a measured need.
+
+**Why:** fixed defaults over settings (rule 17); a ratio alone flags noise on fast routes (5 → 10 ms), a fixed delta alone misses slow ones, so both. Key actions in the map keep one place of truth for what matters, and guessing (`auth`, `login`) would be wrong for many apps.
+
+**Consequences:** blocking an automerge on a regressed verdict is out of scope; a deploy step can already wait for the verdict (`openlens-cli release`, #521).

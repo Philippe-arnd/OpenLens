@@ -441,6 +441,8 @@ fn label(rule: &str) -> &'static str {
         "cert" => "has a certificate about to expire",
         "cert_expired" => "has an expired certificate",
         "failing" => "has many failing requests",
+        r if r.starts_with("key:") => "has a key action failing",
+        r if r.starts_with("route:") => "has a failing route",
         "budget_spent" => "has spent its error budget",
         "budget_burn" => "is burning its error budget fast",
         _ => "has a problem",
@@ -457,7 +459,7 @@ fn budget(rule: &str) -> bool {
 /// Urgent rules are never held by quiet hours.
 fn urgent(rule: &str) -> bool {
     let rule = split_incident_rule(rule).map_or(rule, |(_, c)| c);
-    rule == "down" || rule == "cert_expired" || rule == "test"
+    rule == "down" || rule == "cert_expired" || rule == "test" || rule.starts_with("key:")
 }
 
 /// Is an incident of this rule announced? Production's always are; a
@@ -798,6 +800,34 @@ pub async fn regressions<H: Host>(host: &H, p: &Project) {
                 false,
             ))
             .await;
+        }
+    }
+}
+
+/// Every 10 minutes (#594, D-083): each production route failing over the
+/// last hour opens its incident (`key:` for a feature's key action, which
+/// is urgent, `route:` otherwise); a route that recovered closes it.
+pub async fn failing_routes<H: Host>(host: &H, p: &Project) {
+    let map = host.feature_map(&p.id).await;
+    let Ok(now) =
+        crate::routes::failing_routes(host.query(), &p.id, map.as_ref().map(|(m, _)| m)).await
+    else {
+        return;
+    };
+    let rule_of = |f: &crate::routes::Failing| {
+        let kind = if f.key_of.is_some() { "key" } else { "route" };
+        format!("{kind}:{}", f.route)
+    };
+    for f in &now {
+        Box::pin(track(host, &p.id, &p.name, &rule_of(f), true, &f.cause, 0)).await;
+    }
+    let since = chrono::Utc::now().timestamp() - 90 * 86400;
+    for (rule, _, end, cause, _) in host.meta().incidents(&p.id, since).unwrap_or_default() {
+        if end.is_none()
+            && (rule.starts_with("route:") || rule.starts_with("key:"))
+            && !now.iter().any(|f| rule_of(f) == rule)
+        {
+            Box::pin(track(host, &p.id, &p.name, &rule, false, &cause, 0)).await;
         }
     }
 }
