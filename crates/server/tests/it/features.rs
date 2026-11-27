@@ -202,9 +202,11 @@ async fn quiet_hours_hold_non_urgent_alerts_and_down_shows_on_the_board() {
     openlens_server::alert_tick(&h.state, 4).await;
     openlens_server::alert_tick(&h.state, 6).await;
     let board = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
+    // The status strip's App cell says it in words (#614).
+    let strip = &board[board.find(r#"aria-label="Production right now""#).unwrap()..];
     assert!(
-        board.contains("The app is down since"),
-        "banner on the board"
+        strip.contains("<strong class=\"v\">Down</strong>") && strip.contains("Down since"),
+        "the strip on the board: {strip}"
     );
 }
 

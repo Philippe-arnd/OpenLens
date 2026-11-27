@@ -20,6 +20,8 @@ mod board_people;
 mod board_range;
 mod board_sessions;
 mod board_success;
+/// The board's release verdict (#614, #615).
+pub mod board_verdict;
 mod board_window;
 pub mod churn;
 pub mod commands;
@@ -469,18 +471,19 @@ pub struct Board {
     pub role_features: Vec<(String, String, i64)>,
     /// Latest releases, newest first.
     pub releases: Vec<ReleaseRow>,
-    /// Set by the server when the app is down right now (#266): what and
-    /// since when, for a banner at the top of the board.
+    /// Set by the server (#614): the app's state now and its open
+    /// incidents, for the status strip ("Production right now").
     #[serde(skip)]
-    pub app_down: Option<String>,
-    /// Set by the server (#272): open objectives at risk or off track,
-    /// for a strip at the top of the board.
-    #[serde(skip)]
-    pub objectives_at_risk: Vec<String>,
-    /// Required setup steps (done, total), for admins while incomplete
-    /// (#403): a one-line strip at the top of the board.
+    pub alerts: Option<commands::alerts::Status>,
+    /// Set by the server for admins (#403, #614): required setup steps
+    /// (done, total), for the status strip's Setup cell.
     #[serde(skip)]
     pub setup: Option<(usize, usize)>,
+    /// Set by the server with the board (#614): the verdict of the newest
+    /// release of the filtered environment; none when it was not asked
+    /// for (the engine's own [`board`] does not judge releases).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_release: Option<board_verdict::LatestRelease>,
     /// Environments seen.
     pub environments: Vec<String>,
     /// Raw role values no rule of the feature map matches, with user counts.

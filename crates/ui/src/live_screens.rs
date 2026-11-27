@@ -48,7 +48,7 @@ pub(crate) fn app_address_step(pid: &str) -> Markup {
 }
 
 /// What an incident rule is, in words.
-fn incident_kind(rule: &str) -> &'static str {
+pub(crate) fn incident_kind(rule: &str) -> &'static str {
     match rule {
         "traffic" => "traffic stopped",
         "down" => "down",

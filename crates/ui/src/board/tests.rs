@@ -595,3 +595,122 @@ fn the_board_keeps_one_retention_line_and_the_table_moves() {
         "{line}"
     );
 }
+
+/// One release's numbers: `bad` of `sessions` sessions hit an error.
+pub(super) fn side(
+    release: &str,
+    users: i64,
+    sessions: i64,
+    bad: i64,
+) -> openlens_engine::verdict::Side {
+    openlens_engine::verdict::Side {
+        release: release.into(),
+        users,
+        sessions,
+        bounced: sessions / 4,
+        error_sessions: bad,
+        task_sessions: sessions / 2,
+        tasks: sessions,
+        avg_secs: 60.0,
+        ..openlens_engine::verdict::Side::default()
+    }
+}
+
+/// v2 judged against v1 by the engine: `bad` of its 400 sessions hit an
+/// error (v1: 10 of 500).
+pub(super) fn judged(bad: i64) -> openlens_engine::board_verdict::LatestRelease {
+    let r = openlens_engine::verdict::compare(
+        "production",
+        &side("v2", 120, 400, bad),
+        Some(&side("v1", 150, 500, 10)),
+        30,
+        &[],
+    );
+    openlens_engine::board_verdict::LatestRelease::Judged(Box::new(r))
+}
+
+fn status(state: &'static str, open: &[&str]) -> openlens_engine::commands::alerts::Status {
+    openlens_engine::commands::alerts::Status {
+        state,
+        since: (!open.is_empty()).then_some(1_700_000_000),
+        open: open
+            .iter()
+            .map(|r| ((*r).to_owned(), 1_700_000_000, "cause".to_owned()))
+            .collect(),
+        maintenance: Vec::new(),
+    }
+}
+
+/// The strip's cells, as rendered.
+fn cells(html: &str) -> Vec<String> {
+    let strip = between(html, r#"aria-label="Production right now""#, "</section>");
+    strip
+        .split(r#"class="tone-"#)
+        .skip(1)
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn the_status_strip_says_each_state_in_a_word_and_stays_when_all_is_fine() {
+    let fine = Board {
+        alerts: Some(status("up", &[])),
+        latest_release: Some(judged(8)),
+        setup: Some((3, 3)),
+        map_version: Some(1),
+        ..full()
+    };
+    let html = page(&fine);
+    // Before what to focus on, after the page head.
+    assert!(html.find(r#"class="card now""#) < html.find(r#"class="card lead""#));
+    let all = cells(&html);
+    assert_eq!(
+        all.len(),
+        4,
+        "App, Latest release, Incidents, Setup: {html}"
+    );
+    for c in &all {
+        // Fine is shown too: every cell green, with its dot, a word, a
+        // line and a link.
+        assert!(c.starts_with("good"), "{c}");
+        assert!(c.contains(r#"<span class="state-dot" aria-hidden="true">"#));
+        let word = between(c, r#"<strong class="v">"#, "</strong>");
+        assert!(word.len() > r#"<strong class="v">"#.len(), "a word: {c}");
+        assert!(c.contains(r#"<span class="s">"#) && c.contains(r#"href="/p/p1/"#));
+    }
+    assert!(all[1].contains("Release v2") && all[1].contains("Healthy"));
+    // Trouble: each cell says it in words, not only in red.
+    let bad = Board {
+        alerts: Some(status("down", &["traffic", "job:backup:failed"])),
+        latest_release: Some(judged(80)),
+        setup: Some((1, 3)),
+        ..fine.clone()
+    };
+    let all = cells(&page(&bad));
+    let words = ["Traffic stopped", "Regressed", "2 open", "1 of 3 done"];
+    for (c, w) in all.iter().zip(words) {
+        assert!(!c.starts_with("good"), "{c}");
+        assert!(
+            c.contains(&format!(r#"<strong class="v">{w}</strong>"#)),
+            "{w}: {c}"
+        );
+    }
+    assert!(
+        all[1].contains("Sessions with errors"),
+        "the worst reason: {}",
+        all[1]
+    );
+    // A share link keeps the state, not Setup nor the links.
+    let shared = shared_page(&bad);
+    let all = cells(&shared);
+    assert_eq!(all.len(), 3, "{shared}");
+    assert!(
+        all.iter()
+            .all(|c| !c.contains("Setup") && !c.contains("href="))
+    );
+    // The cells stack on a phone: as many columns as 190 px allow.
+    assert!(
+        crate::CSS
+            .contains("grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr))")
+    );
+}

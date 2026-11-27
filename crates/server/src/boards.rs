@@ -429,7 +429,10 @@ async fn compute(
     let kept = closed.and_then(|days| cache.inner.closed.get(&key, days));
     let since = cache.inner.closed.mark();
     let started = Instant::now();
-    let (board, revenue) = tokio::join!(
+    // The newest release's verdict, for the status strip and the lead
+    // (#614, #615): judged with the board, so the page reads it from the
+    // cache too.
+    let (board, revenue, latest) = tokio::join!(
         Box::pin(openlens_engine::board_reusing(
             &state.query,
             project,
@@ -437,7 +440,12 @@ async fn compute(
             map,
             kept.as_deref()
         )),
-        openlens_engine::revenue(&state.query, project, map.map(|(m, _)| m), f)
+        openlens_engine::revenue(&state.query, project, map.map(|(m, _)| m), f),
+        Box::pin(openlens_engine::commands::releases::latest(
+            state,
+            project,
+            &f.environment
+        ))
     );
     let revenue = revenue.map_err(|err| {
         tracing::warn!(project, %err, "revenue not computed");
@@ -471,9 +479,13 @@ async fn compute(
     }
     // A board that failed is not kept: the next page computes it again.
     // Said in the log, since the page alone shows it (D-071).
-    let board = board.inspect_err(|err| {
+    let mut board = board.inspect_err(|err| {
         tracing::warn!(project, %err, "board not computed; not cached");
     })?;
+    if let openlens_engine::board_verdict::LatestRelease::Unavailable { reason } = &latest {
+        tracing::warn!(project, %reason, "latest release not judged");
+    }
+    board.latest_release = Some(latest);
     let entry = Entry {
         generation,
         at: Instant::now(),

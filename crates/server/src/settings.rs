@@ -560,12 +560,12 @@ pub(crate) fn setup_steps(
     ]
 }
 
-/// Required setup steps (done, total), when some are left (#403).
-pub(crate) fn setup_left(state: &AppState, project: &str) -> Option<(usize, usize)> {
+/// Required setup steps (done, total) (#403; the status strip, #614).
+pub(crate) fn setup_count(state: &AppState, project: &str) -> (usize, usize) {
     let steps = setup_steps(state, project, false, false, false);
     let req: Vec<_> = steps.iter().filter(|s| s.required).collect();
     let done = req.iter().filter(|s| s.done).count();
-    (done < req.len()).then_some((done, req.len()))
+    (done, req.len())
 }
 
 #[derive(Deserialize)]

@@ -805,7 +805,14 @@ async fn the_board_tells_admins_what_setup_is_left() {
     openlens_server::flush_now(&h.state).unwrap();
     let owner = login_cookie(&h).await;
     let board = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
-    assert!(board.contains("Finish in Settings"), "no alert channel yet");
+    // The status strip's Setup cell (#614): steps left, linked to Settings.
+    let cell = &board[board.find(r#"aria-label="Production right now""#).unwrap()..];
+    let cell = &cell[cell.find(r#"href="/p/default/settings""#).unwrap()..];
+    let cell = &cell[..cell.find("</a>").unwrap()];
+    assert!(
+        cell.contains("Setup") && cell.contains("Required steps left"),
+        "no alert channel yet: {cell}"
+    );
 }
 
 #[tokio::test]

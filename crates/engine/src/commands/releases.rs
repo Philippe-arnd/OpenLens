@@ -10,6 +10,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{Access, Caller, Command, Error, Host};
+use crate::board_verdict::LatestRelease;
 use crate::releases::{self, Releases};
 use crate::verdict::Report;
 use crate::verdict_read::{self, Scope};
@@ -186,5 +187,33 @@ impl Command for ReleaseReport {
             .into_iter()
             .find(|x| x.release == release)
             .ok_or_else(|| Error::Invalid(format!("No release {release} in {env}.")))
+    }
+}
+
+/// The verdict of the newest release of `environment` with traffic
+/// (#614): what the board's status strip and lead read. The server judges
+/// it next to the board and caches it with it; a failure is said, not
+/// hidden.
+pub async fn latest<H: Host>(host: &H, project: &str, environment: &str) -> LatestRelease {
+    let env = Some(environment.trim())
+        .filter(|e| !e.is_empty())
+        .unwrap_or(releases::PRODUCTION)
+        .to_owned();
+    let input = ListInput {
+        project: project.to_owned(),
+        environment: Some(env.clone()),
+    };
+    let judged = async {
+        let (r, p) = list(host, &Caller::default(), &input).await?;
+        // Oldest first: the last one is the newest.
+        Ok::<_, Error>(judge(host, &p.id, &env, &r).await?.pop())
+    }
+    .await;
+    match judged {
+        Ok(Some(r)) => LatestRelease::Judged(Box::new(r)),
+        Ok(None) => LatestRelease::NoRelease,
+        Err(e) => LatestRelease::Unavailable {
+            reason: e.to_string(),
+        },
     }
 }
