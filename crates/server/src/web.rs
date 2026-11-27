@@ -182,6 +182,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/p/{project}/audience", get(crate::explore::audience))
         .route("/p/{project}/forms", get(crate::explore::forms))
         .route("/p/{project}/acquisition", get(crate::explore::acquisition))
+        .route("/p/{project}/retention", get(crate::explore::retention))
         .route("/p/{project}/churn", get(crate::explore::churn))
         .route(
             "/p/{project}/churn/audience",

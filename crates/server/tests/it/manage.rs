@@ -656,9 +656,12 @@ async fn the_churn_page_and_api() {
     openlens_server::flush_now(&h.state).unwrap();
     let owner = login_cookie(&h).await;
     let page = body_text(get(&h, "/p/default/churn", Some(&owner), false).await).await;
+    assert!(page.contains("Churn rate") && !page.contains(" style="));
+    // How long they stay is on People › Retention (#619), with the cohorts.
+    let page = body_text(get(&h, "/p/default/retention", Some(&owner), false).await).await;
     assert!(
-        page.contains("Churn rate")
-            && page.contains("How long they stay")
+        page.contains("How long they stay")
+            && page.contains("Do they come back?")
             && !page.contains(" style=")
     );
     let api: serde_json::Value = serde_json::from_str(

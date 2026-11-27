@@ -552,6 +552,7 @@ pub async fn board_reusing(
             tasks::resurrected(q, project, &p90, f, churn),
             tasks::retention(q, project, &p90, f, ident),
         )?;
+    b.retention_trend = tasks::retention_trend(&retention);
     b.retention = retention;
     b.task_times = task_times;
     b.users.resurrected = resurrected;

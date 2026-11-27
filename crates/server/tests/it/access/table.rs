@@ -317,6 +317,7 @@ pub(super) const ROUTES: &[(&str, &str, Access)] = &[
     ("GET", "/p/{project}/audience", Read),
     ("GET", "/p/{project}/forms", Read),
     ("GET", "/p/{project}/acquisition", Read),
+    ("GET", "/p/{project}/retention", Read),
     ("GET", "/p/{project}/churn", Read),
     ("POST", "/p/{project}/churn/audience", Write),
     ("GET", "/p/{project}/churn/{file}", Read),

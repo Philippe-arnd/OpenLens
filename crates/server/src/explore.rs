@@ -429,6 +429,45 @@ pub(crate) async fn churn(
     }
 }
 
+/// `GET /p/{id}/retention` (#619): the weekly cohorts the board computed
+/// (`Board::retention`, the same numbers the board showed) and the
+/// survival curve of the churn report.
+pub(crate) async fn retention(
+    _: crate::access::Session,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    axum::extract::RawQuery(raw): axum::extract::RawQuery,
+) -> Response {
+    let Some(p) = project(&state, &id).await else {
+        return not_found("No such project.");
+    };
+    let Ok(q) = serde_urlencoded::from_str::<FilterQuery>(&raw.unwrap_or_default()) else {
+        return not_found("Unreadable filters.");
+    };
+    let f = q.filters(&auth::tz_for(&state, &headers, &p.timezone));
+    let map = crate::load_map(&state, &p.id).await;
+    let input = cmd::ChurnInput {
+        project: p.id.clone(),
+        filters: Some(f.clone()),
+    };
+    let caller = Caller::default();
+    let (b, c) = tokio::join!(
+        crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
+        cmd::Churn::run(&state, &caller, input)
+    );
+    let info = openlens_ui::ProjectInfo {
+        id: &p.id,
+        name: &p.name,
+        key: &p.api_key,
+    };
+    match (b, c) {
+        (Ok(b), Ok(c)) => html_page(StatusCode::OK, openlens_ui::retention(&info, &b, &f, &c)),
+        (Err(e), _) => cant_show(&e.to_string()),
+        (_, Err(e)) => cant_show(&e.to_string()),
+    }
+}
+
 /// Answers of the surveys shown on the map's `churn_event` (an exit
 /// survey, #269).
 async fn exit_answers(

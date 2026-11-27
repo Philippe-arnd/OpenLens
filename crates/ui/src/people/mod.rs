@@ -1,4 +1,5 @@
-//! The People screens (#550): Audience, Acquisition, Churn and Revenue,
+//! The People screens (#550): Audience, Retention (#619), Churn,
+//! Acquisition and Revenue,
 //! built from the board's v2 parts (KPI tiles, bar cells, the lead card,
 //! table cards and disclosures). Moved out of `audience.rs`, which keeps
 //! Feature flow and Uptime.
@@ -8,7 +9,9 @@ use crate::tables::{Col, TableCard};
 use crate::*;
 
 mod churn;
+mod retention;
 pub use churn::*;
+pub use retention::*;
 
 #[cfg(test)]
 mod tests;
