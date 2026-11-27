@@ -104,6 +104,21 @@ pub struct Exemplar {
     /// The OpenLens session it belongs to, when known: its replay at `time`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// A recording of `session_id` is kept (#629): a page opens its replay
+    /// at `time`. Set by the command that returns the exemplar.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub replay: bool,
+}
+
+impl Exemplar {
+    /// Mark [`Exemplar::replay`] when a recording of its session is kept
+    /// under `data_dir` (#629).
+    pub fn mark_replay(&mut self, data_dir: &std::path::Path, project: &str) {
+        self.replay = self
+            .session_id
+            .as_deref()
+            .is_some_and(|s| openlens_replay::exists(data_dir, project, s));
+    }
 }
 
 /// Exemplars read per data point at most.
@@ -172,6 +187,7 @@ pub fn exemplars_of(properties: &str, status: i64) -> Vec<Exemplar> {
                 session_id: attr("session.id")
                     .filter(|s| valid_session(s))
                     .map(str::to_owned),
+                replay: false,
             })
         })
         .collect()

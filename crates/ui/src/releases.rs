@@ -204,7 +204,7 @@ pub fn releases(
                 .render())
             }
             @if let Some(l) = &r.latest {
-                (crate::release_verdict::latest(p.id, l))
+                (crate::release_verdict::latest(p.id, l, &r.timezone))
             }
             details.card.disclose {
                 summary { h2 { "How releases are judged" } (icon("chev")) }

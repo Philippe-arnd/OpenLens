@@ -50,6 +50,7 @@ fn broken() -> Report {
         status: 503,
         trace_id: None,
         session_id: Some("browser-1".into()),
+        replay: false,
     });
     new.routes = vec![
         sign_in,
@@ -121,4 +122,39 @@ fn a_release_without_server_stats_has_no_backend_group_and_keeps_its_verdict() {
     );
     // The browser-only verdict is the same with or without the module.
     assert_eq!(r.verdict, Some(Verdict::Healthy), "{:?}", r.reasons);
+}
+
+/// #629: the table names a slower route's slowest request (the p95
+/// check's exemplar); a route that only fails more names none, even when
+/// it carries one.
+#[test]
+fn a_slower_route_names_its_slowest_request_and_one_only_failing_more_none() {
+    let mut prev = side("v1");
+    prev.routes = vec![route("/api/export", 0, false), route("/api/a", 0, false)];
+    let slowest = Exemplar {
+        ms: 2400.0,
+        time: "2026-11-20T10:00:00.000Z".into(),
+        session_id: Some("browser-2".into()),
+        ..Exemplar::default()
+    };
+    let mut slow = route("/api/export", 0, false);
+    slow.buckets = vec![0; BUCKETS];
+    if let Some(b) = slow.buckets.get_mut(10) {
+        *b = 300;
+    }
+    slow.slowest = Some(slowest.clone());
+    let mut failing = route("/api/a", 300, false);
+    failing.slowest = Some(slowest.clone());
+    let mut new = side("v2");
+    new.routes = vec![slow, failing];
+    let rows = worse_routes(&compare("production", &new, Some(&prev), 30, &[]));
+    let of = |p: &str| rows.iter().find(|w| w.route == p);
+    let (Some(s), Some(f)) = (of("/api/export"), of("/api/a")) else {
+        panic!("both got worse: {rows:?}");
+    };
+    assert!(s.p95_worse && s.slowest.as_ref() == Some(&slowest), "{s:?}");
+    assert!(
+        f.errors_worse && !f.p95_worse && f.slowest.is_none(),
+        "{f:?}"
+    );
 }

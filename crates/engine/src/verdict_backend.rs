@@ -17,7 +17,7 @@ use openlens_query::QueryEngine;
 use serde::Serialize;
 
 use crate::board_verdict::{Layer, Row};
-use crate::routes::RouteStat;
+use crate::routes::{Exemplar, RouteStat};
 use crate::verdict::{Check, Outcome, Report, Verdict};
 use crate::{EngineError, Result, int, text};
 
@@ -233,6 +233,11 @@ pub struct WorseRoute {
     /// Browser sessions that made the request, latest first, at most
     /// [`MAX_SESSIONS`].
     pub sessions: Vec<RouteSession>,
+    /// Its slowest request on the release when its p95 got worse: the
+    /// p95 check's exemplar (#607), its replay marked (#629). Never the
+    /// user.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slowest: Option<Exemplar>,
 }
 
 /// The routes worse than the release before, at most [`MAX_WORSE`],
@@ -276,6 +281,13 @@ pub fn worse_routes(r: &Report) -> Vec<WorseRoute> {
                 p95_worse: worse("p95"),
                 top_error: None,
                 sessions,
+                slowest: r
+                    .checks
+                    .iter()
+                    .find(|c| {
+                        route_of(c) == Some(("p95", name.as_str())) && c.outcome == Outcome::Worse
+                    })
+                    .and_then(|c| c.exemplar.clone()),
             })
         })
         .collect()
@@ -413,6 +425,9 @@ pub async fn latest(
             w.sessions.truncate(MAX_SESSIONS);
             for s in &mut w.sessions {
                 s.replay = openlens_replay::exists(data_dir, project, &s.session);
+            }
+            if let Some(e) = &mut w.slowest {
+                e.mark_replay(data_dir, project);
             }
         }
     }
