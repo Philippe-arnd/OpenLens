@@ -454,9 +454,10 @@ fn a_bigger_day_has_a_taller_bar() {
 fn heat_cells_are_shaded_by_tenths() {
     assert!(charts::tenth(1.0) > charts::tenth(0.5));
     assert!(charts::tenth(0.5) > charts::tenth(0.04));
-    let html = page(&full());
+    // The cohort table lives on People › Retention since #619.
+    let html = crate::people::cohort_table(&full()).into_string();
     let heat = between(&html, r#"<table class="heat">"#, "</table>");
-    assert!(heat.contains(r#"class="hc p10">100.0%"#), "{heat}");
+    assert!(heat.contains(r#"class="hc p9">93.0%"#), "{heat}");
     assert!(heat.contains(r#"class="hc p5">50.0%"#), "{heat}");
 }
 

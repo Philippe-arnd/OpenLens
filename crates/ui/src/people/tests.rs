@@ -294,8 +294,11 @@ fn retention_page() -> (Board, String) {
 #[test]
 fn the_retention_tab_shows_the_cohort_numbers_the_board_had() {
     let (b, html) = retention_page();
-    // The same table, from the same rows, as the board drew it.
-    assert!(html.contains(&cohort_table(&b).into_string()));
+    // The same table, from the same rows, as the board drew it. The body
+    // is compared: the column tooltip's id is numbered per render.
+    let alone = cohort_table(&b).into_string();
+    let body = &alone[alone.find("<tbody>").unwrap()..alone.find("</tbody>").unwrap()];
+    assert!(html.contains(body));
     let table = &html[html.find("<table class=\"heat\"").unwrap()..];
     let table = &table[..table.find("</table>").unwrap()];
     for r in &b.retention {
