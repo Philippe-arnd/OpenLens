@@ -1426,4 +1426,6 @@
   .auth-card p.hint code { color: var(--ink); font-size: 12px; overflow-wrap: anywhere; }
   /* The logo is the sidebar's blob everywhere the brand shows. */
   .auth-card .brand .blob { width: 22px; height: 22px; }
+  /* The Heatmap tab before any page view: one empty card under the picker. */
+  .card.empty.heat-empty { margin-top: 16px; }
 }

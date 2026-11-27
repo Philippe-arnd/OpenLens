@@ -751,6 +751,30 @@ async fn click_heatmap_draws_positions_without_inline_styles() {
     );
     assert!(html.contains("dot rage"));
     assert!(!html.contains(" style="));
+    // The Heatmap tab names no page: it opens the most viewed one (#592).
+    let tab = get(&h, "/p/default/heatmap", Some(&cookie), false).await;
+    assert_eq!(tab.status(), StatusCode::OK);
+    let tab = String::from_utf8(
+        axum::body::to_bytes(tab.into_body(), 1 << 20)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(tab.contains("12 clicks with a position"), "{tab}");
+    // Before any page view, the tab shows its empty state, not an error.
+    let other = harness();
+    let other_cookie = login_cookie(&other).await;
+    let empty = get(&other, "/p/default/heatmap", Some(&other_cookie), false).await;
+    assert_eq!(empty.status(), StatusCode::OK);
+    let empty = String::from_utf8(
+        axum::body::to_bytes(empty.into_body(), 1 << 20)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(empty.contains("heat-empty"), "{empty}");
     let json = get(
         &h,
         "/p/default/heatmap.json?path=%2Fpricing",
