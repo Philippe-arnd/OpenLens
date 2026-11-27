@@ -562,12 +562,17 @@ fn a_success_that_fires_on_entry_shows_no_task_time_but_its_finding() {
 /// table (the columns that vary are the only ones drawn).
 fn column_cell(html: &str, key: &str, header: &str) -> String {
     let head = between(html, "<thead><tr>", "</tr>");
+    // One piece per header cell, the Feature column first.
     let col = head
-        .split("<th")
-        .skip(1)
+        .split("</th>")
         .position(|h| h.contains(header))
         .unwrap_or_else(|| panic!("no {header} column: {head}"));
-    let row = between(html, &format!("/features/{key}\""), "</tr>");
+    // The link carries the board's filters (`?env=…`) or none.
+    let at = [format!("/features/{key}\""), format!("/features/{key}?")]
+        .iter()
+        .find_map(|m| html.find(m.as_str()))
+        .unwrap_or_else(|| panic!("no {key} row: {html}"));
+    let row = between(&html[at..], "/features/", "</tr>");
     // Column 0 is the feature, the row's header; the others are cells.
     let td = row.split("<td").nth(col).unwrap_or_else(|| panic!("{row}"));
     format!("<td{td}")
@@ -610,7 +615,12 @@ fn the_features_table_tags_each_feature_with_its_insights_and_lists_the_unused()
     let home = column_cell(&html, "home", "Signals");
     assert!(!home.contains(r#"class="tag "#), "{home}");
     // Rows with a signal come before the most adopted feature without one.
-    let at = |k: &str| html.find(&format!("/features/{k}\"")).unwrap();
+    let at = |k: &str| {
+        [format!("/features/{k}\""), format!("/features/{k}?")]
+            .iter()
+            .find_map(|m| html.find(m.as_str()))
+            .unwrap()
+    };
     assert!(at("reports") < at("home") && at("export") < at("home"));
     // The old blocks are gone from the board.
     let page = page(&b);
