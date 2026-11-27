@@ -309,6 +309,7 @@ mod tests {
     fn row_of<'a>(html: &'a str, path: &str) -> &'a str {
         html.split("<tr>")
             .find(|r| r.contains(&format!("<code>{path}</code>")))
+            .and_then(|r| r.split("</tr>").next())
             .unwrap_or_default()
     }
 

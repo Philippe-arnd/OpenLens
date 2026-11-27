@@ -441,6 +441,7 @@ mod tests {
         let row = |html: &str, name: &str| {
             html.split("<tr>")
                 .find(|r| r.contains(&format!("<code>{name}</code>")))
+                .and_then(|r| r.split("</tr>").next())
                 .unwrap_or_default()
                 .to_owned()
         };

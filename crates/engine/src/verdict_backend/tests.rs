@@ -142,6 +142,7 @@ fn a_slower_route_names_its_slowest_request_and_one_only_failing_more_none() {
     if let Some(b) = slow.buckets.get_mut(10) {
         *b = 300;
     }
+    slow.max_ms = 2400;
     slow.slowest = Some(slowest.clone());
     let mut failing = route("/api/a", 300, false);
     failing.slowest = Some(slowest.clone());
