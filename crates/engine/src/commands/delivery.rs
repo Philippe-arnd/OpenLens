@@ -91,7 +91,8 @@ pub async fn with_releases<H: Host>(
         .deploys(&p.id, since)
         .map_err(|e| Error::Unavailable(e.to_string()))?;
     // When each release's first commit was made, as its deploy step
-    // recorded it (#633): the start of its lead time.
+    // recorded it (#633), else as the GitHub read found it (#574): the
+    // start of its lead time.
     let first_commit = host
         .meta()
         .first_commits(&p.id, since)
