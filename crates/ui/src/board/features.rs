@@ -187,7 +187,15 @@ pub(super) fn features(pid: &str, f: &Filters, b: &Board) -> Markup {
         section.card.pad.stack aria-labelledby="feat-h" {
             div.section-head {
                 h2 id="feat-h" { (to(&detail_url(pid, "/features", f), "Features")) }
-                @if !shared() { a.small href=(detail_url(pid, "/features", f)) { "Feature map" } }
+                // What left the board (#620): the paths to a first success
+                // on Feature flow; the roles × features matrix on the map.
+                @if !shared() {
+                    span.small {
+                        a href=(detail_url(pid, "/flows?to=success", f)) { "Paths to success" }
+                        " · "
+                        a href=(detail_url(pid, "/features", f)) { "Feature map" }
+                    }
+                }
             }
             @if rows.is_empty() {
                 p.muted { "No feature has been used yet. Features come from " code { "data-feature" } " attributes and the feature map." }

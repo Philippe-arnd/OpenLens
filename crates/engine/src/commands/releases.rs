@@ -138,6 +138,20 @@ impl Command for List {
             .unwrap_or(releases::PRODUCTION)
             .to_owned();
         let reports = judge(host, &p.id, &judged, &r).await?;
+        // The newest judged release by layer, with its routes that got
+        // worse, their top server error and sessions (#623).
+        if let Some(newest) = reports.last() {
+            r.latest = Some(
+                crate::verdict_backend::latest(
+                    host.query(),
+                    host.data_dir(),
+                    &p.id,
+                    &judged,
+                    newest,
+                )
+                .await,
+            );
+        }
         for x in &mut r.releases {
             if x.environment != judged {
                 if x.users > 0 {

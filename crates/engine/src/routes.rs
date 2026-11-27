@@ -344,7 +344,7 @@ fn normalize(r: &str) -> String {
 }
 
 /// The SQL of property `k` (a regex-escaped key) matching `pat`.
-fn attr_sql(k: &str, pat: &str) -> String {
+pub(crate) fn attr_sql(k: &str, pat: &str) -> String {
     format!("regexp_match(properties, '\"{k}\":{pat}')[1]")
 }
 
@@ -367,7 +367,7 @@ fn secs_sql(k: &str) -> String {
 /// The SQL summing the stats per route (and per the `extra` expression,
 /// selected as `part`) where `w` holds, `limit` rows at most; each
 /// histogram bucket is its own column.
-fn stats_sql(w: &str, extra: Option<&str>, limit: usize) -> String {
+pub(crate) fn stats_sql(w: &str, extra: Option<&str>, limit: usize) -> String {
     // One data point of `http.server.request.duration` (#601): OpenTelemetry
     // semantic-convention attributes, durations in seconds.
     let attr = attr_sql;
@@ -401,7 +401,7 @@ fn stats_sql(w: &str, extra: Option<&str>, limit: usize) -> String {
     )
 }
 
-fn row_stat(
+pub(crate) fn row_stat(
     r: &serde_json::Map<String, serde_json::Value>,
     keys: &HashMap<String, String>,
 ) -> Option<RouteStat> {

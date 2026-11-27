@@ -84,6 +84,8 @@ pub(crate) struct Kpi {
     /// A grade instead of a delta (`good`, `needs-improvement`, `poor`)
     /// and its reference ("good ≤ 2.5 s").
     pub(crate) graded: Option<(String, String)>,
+    /// A second line under the first (the Quality tile's server side).
+    pub(crate) more: Option<String>,
 }
 
 /// The ids of a tile's definition button and popover.
@@ -132,6 +134,7 @@ fn kpi_card(
         div.kpi-head { span { @if let Some(q) = question { span.eyebrow { (q) } } (label) } }
         div.kpi-value { (k.value) }
         @if !k.sub.is_empty() { p.kpi-sub { (k.sub) } }
+        @if let Some(m) = &k.more { p.kpi-sub { (m) } }
         @if let Some((d, against)) = &k.moved {
             div.kpi-foot { (delta_mark(d)) span { (against) } }
         } @else if let Some((rating, against)) = &k.graded {
@@ -195,6 +198,17 @@ fn reach_sub(b: &Board, f: &Filters, period: &str) -> String {
     parts.join(" · ")
 }
 
+/// The Quality tile's server side (#623): the share of server requests
+/// answered 5xx over the same window, or that there is none to read;
+/// nothing when the board did not read them.
+fn server_line(b: &Board) -> Option<String> {
+    let s = b.server.as_ref()?;
+    Some(match s.error_rate() {
+        Some(r) => format!("{} of server requests answered 5xx", pct(r)),
+        None => "No server request stats in this window".to_owned(),
+    })
+}
+
 /// The outcomes.
 pub(super) fn outcomes(
     pid: &str,
@@ -219,12 +233,14 @@ pub(super) fn outcomes(
             moved: compared
                 .and_then(|p| moved(w.current.users as f64, p.previous.users as f64, true)),
             graded: None,
+            more: None,
         },
         None => Kpi {
             value: html! { (compact(b.users.mau)) },
             sub: reach_sub(b, f, "last 30 days"),
             moved: None,
             graded: None,
+            more: None,
         },
     };
     // Value: tasks per session against the previous release, else the
@@ -235,6 +251,7 @@ pub(super) fn outcomes(
             sub: format!("no session {}", period("in the last 7 days")),
             moved: None,
             graded: None,
+            more: None,
         }
     } else {
         let vs = match previous_release(b, f) {
@@ -253,6 +270,7 @@ pub(super) fn outcomes(
             sub: format!("completed tasks, {}", period("last 7 days")),
             moved: vs,
             graded: None,
+            more: None,
         }
     };
     // Retention: the Churn page's rate and median lifetime; no comparison.
@@ -272,6 +290,7 @@ pub(super) fn outcomes(
                 sub,
                 moved: None,
                 graded: None,
+                more: None,
             }
         }
         None => Kpi {
@@ -282,6 +301,7 @@ pub(super) fn outcomes(
             ),
             moved: None,
             graded: None,
+            more: None,
         },
     };
     // Quality: sessions with errors against the window before.
@@ -300,6 +320,7 @@ pub(super) fn outcomes(
             ))
         }),
         graded: None,
+        more: server_line(b),
     };
     // Speed: LCP at p75, graded against its public threshold.
     let lcp = b.vitals.iter().find(|v| v.name == "LCP" && v.samples > 0);
@@ -310,6 +331,7 @@ pub(super) fn outcomes(
             sub: format!("{} measurements, last 7 days", compact(v.samples)),
             moved: None,
             graded: Some((v.rating.clone(), format!("good ≤ {} s", good / 1000.0))),
+            more: None,
         },
         None => Kpi {
             value: none_yet(),
@@ -317,6 +339,7 @@ pub(super) fn outcomes(
                 .to_owned(),
             moved: None,
             graded: None,
+            more: None,
         },
     };
     // Revenue: a sixth tile only when there is revenue.
@@ -335,6 +358,7 @@ pub(super) fn outcomes(
             sub,
             moved: None,
             graded: None,
+            more: None,
         })
     });
     html! {

@@ -320,3 +320,54 @@ fn a_message_page_is_one_empty_state_card() {
     assert_eq!(html.matches("class=\"card empty message\"").count(), 1);
     assert!(html.contains("Ask is turned off.") && html.contains("href=\"/\""));
 }
+
+#[test]
+fn the_feature_map_holds_who_uses_what_as_a_table() {
+    // #620: the full roles × features matrix, gone from the board with
+    // #618, is on the Feature map: one row per feature of the map, one
+    // column per role, the share printed in every cell and shaded by a
+    // class (no style), the raw roles no role matches below it.
+    let yaml = "version: 1\nroles:\n  - key: admin\n    match: [\"admin\"]\n  - key: member\n    match: [\"member\"]\nfeatures:\n  - key: reports\n    name: Reports\n    entry:\n      routes: [\"/reports\"]\n  - key: export\n    name: Export\n    entry:\n      routes: [\"/export\"]\n";
+    let m = openlens_featuremap::parse(yaml).map.unwrap();
+    let role = |r: &str, users| openlens_engine::RoleUsers {
+        role: Some(r.into()),
+        users,
+    };
+    let x = openlens_engine::RoleMatrix {
+        roles: vec![role("member", 100), role("admin", 10)],
+        cells: vec![
+            ("member".into(), "reports".into(), 90),
+            ("admin".into(), "reports".into(), 1),
+        ],
+        gaps: vec![("Admin ".into(), 3)],
+    };
+    let html = crate::features::role_matrix("d", &m, &x).into_string();
+    csp_clean(&html);
+    let table = &html[html.find("<table class=\"heat\">").unwrap()..];
+    assert!(table.contains("<caption"), "{table}");
+    let head = &table[..table.find("</thead>").unwrap()];
+    assert!(head.find(">member<") < head.find(">admin<"), "{head}");
+    assert!(
+        head.contains("100 users") && head.contains("10 users"),
+        "{head}"
+    );
+    // Rows in the map's order, each a link to its page.
+    let row = |k: &str| table.find(&format!("href=\"/p/d/features/{k}\"")).unwrap();
+    assert!(row("reports") < row("export"));
+    // More of a role's users, a darker cell; nobody, a dash.
+    let reports = &table[row("reports")..row("export")];
+    let shade = |s: &str| -> u8 {
+        let at = reports.find(&format!(">{s}<")).unwrap();
+        let cls = &reports[..at];
+        let p = &cls[cls.rfind("hc p").unwrap() + 4..];
+        p[..p.find('"').unwrap()].parse().unwrap()
+    };
+    assert!(shade("90.0%") > shade("10.0%"), "{reports}");
+    let export = &table[row("export")..];
+    assert_eq!(export.matches(">—<").count(), 2, "{export}");
+    assert!(html.contains("<code>Admin </code> 3 users"), "{html}");
+    // No role at all: the card says where roles come from.
+    let none = crate::features::role_matrix("d", &m, &openlens_engine::RoleMatrix::default())
+        .into_string();
+    assert!(none.contains("No identified user") && !none.contains("<table"));
+}

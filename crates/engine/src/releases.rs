@@ -139,6 +139,10 @@ pub struct Releases {
     /// releases recorded with a commit range, or why there are none.
     /// Filled by `releases.list`.
     pub notes: crate::release_git::ListedNotes,
+    /// The newest judged release's verdict by layer, with the routes that
+    /// got worse (#623): set by `releases.list`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest: Option<crate::verdict_backend::LatestVerdict>,
 }
 
 /// Users of one release on one day of one environment.
@@ -426,6 +430,7 @@ pub async fn releases(
         deploys: rows,
         deploy_hook: None,
         notes: crate::release_git::ListedNotes::default(),
+        latest: None,
     })
 }
 

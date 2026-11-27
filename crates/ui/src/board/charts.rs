@@ -1,5 +1,5 @@
-//! The board's charts and tables (#543): active users per day, the
-//! retention line and the release comparison.
+//! The board's charts (#543): active users per day and the retention
+//! line (the release comparison left for the Releases page, #620).
 //! Every length is an SVG attribute and every shade a class (the CSP
 //! forbids `style`).
 
@@ -58,16 +58,6 @@ pub(super) fn active_users(pid: &str, f: &Filters, b: &Board, marks: &[Mark]) ->
         .filter(|m| b.dau_series.iter().any(|(d, _)| *d == m.day))
         .take(8)
         .collect();
-    let roles: Vec<(String, i64)> = b
-        .roles
-        .iter()
-        .map(|r| {
-            (
-                r.role.clone().unwrap_or_else(|| "not identified".into()),
-                r.users,
-            )
-        })
-        .collect();
     html! {
         section.card.pad.stack aria-labelledby="au-h" {
             div.section-head {
@@ -89,14 +79,6 @@ pub(super) fn active_users(pid: &str, f: &Filters, b: &Board, marks: &[Mark]) ->
                     None => { "Last 14 days." }
                 }
                 " Hover a bar for the day."
-            }
-            @if !roles.is_empty() {
-                div.who {
-                    span.muted { "Who uses the app, " (super::period(b, "last 30 days")) ":" }
-                    @for (role, n) in &roles {
-                        span { strong.num { (compact(*n)) } " " span.muted { (role) } }
-                    }
-                }
             }
         }
     }
@@ -154,110 +136,6 @@ pub(super) fn retention_line(pid: &str, f: &Filters, b: &Board) -> Markup {
                 None => p.muted {
                     "Not enough complete cohorts yet: the line compares two weekly cohorts once the same week after their first has fully passed for both."
                 },
-            }
-        }
-    }
-}
-
-/// One compared metric: label, new value, old value, whether higher is
-/// better, and how to format it.
-type Compared = (&'static str, f64, f64, bool, fn(f64) -> String);
-
-/// The latest release against the one before, metric by metric, when
-/// both have at least 8 sessions.
-fn compared(rel: &[openlens_engine::ReleaseRow]) -> Option<[Compared; 4]> {
-    let [new, old, ..] = rel else { return None };
-    if new.sessions < 8 || old.sessions < 8 {
-        return None;
-    }
-    let rows: [Compared; 4] = [
-        ("Avg session", new.avg_secs, old.avg_secs, true, duration),
-        (
-            "Tasks / session",
-            new.tasks_per_session,
-            old.tasks_per_session,
-            true,
-            |v| format!("{v:.2}"),
-        ),
-        ("Bounce", new.bounce_rate, old.bounce_rate, false, pct),
-        (
-            "Sessions with errors",
-            new.error_rate,
-            old.error_rate,
-            false,
-            pct,
-        ),
-    ];
-    Some(rows)
-}
-
-/// The releases: a closed disclosure whose summary counts what got worse
-/// and better on the latest release, holding the metric deltas (arrow,
-/// sign and colour, and the earlier value) and the release table.
-pub(super) fn releases(pid: &str, f: &Filters, b: &Board) -> Markup {
-    let rel = &b.releases;
-    let rows = compared(rel);
-    let deltas: Vec<(Compared, Option<super::tiles::Delta>)> = rows
-        .iter()
-        .flatten()
-        .map(|c| (*c, super::tiles::delta(c.1, c.2, c.3, false)))
-        .collect();
-    let count = |tone: &str| {
-        deltas
-            .iter()
-            .filter(|(_, d)| d.as_ref().is_some_and(|d| d.tone == tone))
-            .count()
-    };
-    let (worse, better) = (count("bad"), count("good"));
-    html! {
-        details.card.disclose {
-            summary {
-                @if let [new, old, ..] = rel.as_slice() {
-                    h2 { (new.release) " compared with " (old.release) } // no_detail: a disclosure; its links are in the body
-                } @else {
-                    h2 { "Releases" } // no_detail: a disclosure; its links are in the body
-                }
-                @if worse > 0 { span.tag.tone-bad { (icon("down")) (worse) " worse" } }
-                @if better > 0 { span.tag.tone-good { (icon("up")) (better) " better" } }
-                (icon("chev"))
-            }
-            div.body {
-                @if rel.is_empty() {
-                    p.muted { "No release tagged yet. Pass " code { "release" } " to the SDK to compare releases." }
-                } @else {
-                    @if deltas.is_empty() {
-                        p.muted.small { "Comparison appears once both of the latest releases have at least 8 sessions." }
-                    } @else {
-                        ul.rel-deltas {
-                            @for ((label, n, o, _, fmt), d) in &deltas {
-                                li {
-                                    span.muted { (label) }
-                                    strong { (fmt(*n)) }
-                                    @if let Some(d) = d { (super::tiles::delta_mark(d)) }
-                                    span.muted { "was " (fmt(*o)) }
-                                }
-                            }
-                        }
-                    }
-                    div.scroll {
-                        table {
-                            thead { tr { th scope="col" { "Release" } (th_num("Users")) (th_num("Sessions")) (th_num("Avg session")) (th_num("Bounce")) (th_num("Tasks / session")) (th_num("Sessions with errors")) th scope="col" { "First seen" } } }
-                            tbody { @for (i, r) in rel.iter().enumerate() {
-                                tr {
-                                    th scope="row" { (row_link(&detail_url(pid, "", &Filters { release: Some(r.release.clone()), ..f.clone() }), &r.release)) @if i == 0 { " " span.tag.tone-accent { "Latest" } } }
-                                    td.num { (compact(r.users)) }
-                                    td.num { (compact(r.sessions)) }
-                                    td.num { (duration(r.avg_secs)) }
-                                    td.num { (pct(r.bounce_rate)) }
-                                    td.num { (format!("{:.2}", r.tasks_per_session)) }
-                                    td.num { (pct(r.error_rate)) }
-                                    td.muted { (local_time(&r.first_seen, &f.tz, false)) }
-                                }
-                            } }
-                        }
-                    }
-                }
-                @if !shared() { p.small { a href=(detail_url(pid, "/timeline", f)) { "Releases on the timeline →" } } }
             }
         }
     }

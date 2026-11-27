@@ -239,6 +239,8 @@ async fn a_regressed_release_leads_the_board_as_its_verdict() {
     for action in ["Create ticket", "Errors on v2", "Full verdict"] {
         assert!(lead.contains(action), "{action}: {lead}");
     }
+    // No server stats (#594 A, #623): no Backend group, no empty number.
+    assert!(!lead.contains("Backend") && !lead.contains("5xx"), "{lead}");
     // Its Create ticket drafts a ticket from the verdict.
     let r = get(
         &h,
@@ -249,4 +251,71 @@ async fn a_regressed_release_leads_the_board_as_its_verdict() {
     .await;
     assert_eq!(r.status(), StatusCode::OK);
     assert!(body_text(r).await.contains("Fix the regression of v2"));
+}
+
+/// #594's scenario on the board (#623): release v2 breaks the sign-in
+/// route, a key action (5xx 0% → 100%), while the browser sees nothing
+/// new. The board judges v2 regressed and names the route in its lead's
+/// Backend group; the Releases page shows the route among those that got
+/// worse.
+#[tokio::test]
+async fn a_release_that_breaks_a_key_route_leads_the_board_with_the_route_named() {
+    let h = harness();
+    h.state
+        .meta
+        .save_feature_map(
+            "default",
+            "features:\n  - key: sign-in\n    name: Sign-in\n    entry: { routes: ['/login'] }\n    server: ['POST /api/auth/sign-in']\n",
+        )
+        .unwrap();
+    let ago = |hours: i64| (chrono::Utc::now() - chrono::Duration::hours(hours)).to_rfc3339();
+    let mut events = Vec::new();
+    for i in 0..4 {
+        let u = format!("u{i}");
+        for (rel, at) in [("v1", 72), ("v2", 30)] {
+            let s = format!("{rel}-s{i}");
+            events.push(serde_json::json!({"event": "$pageview", "distinct_id": u, "session_id": s, "timestamp": ago(at), "properties": {"$pathname": "/", "$release": rel}}));
+        }
+    }
+    let mut buckets = [0; 15];
+    buckets[3] = 200;
+    for (n, (rel, at, status)) in [("v1", 71, 200), ("v2", 29, 503)].into_iter().enumerate() {
+        events.push(serde_json::json!({
+            "event": "$request_stats", "distinct_id": "$server", "timestamp": ago(at),
+            "uuid": format!("0191f0c0-0000-7000-8000-{:012}", 900 + n),
+            "properties": {
+                "$lib": "node", "$environment": "production", "$release": rel,
+                "$metric": "http.server.request.duration", "$unit": "s",
+                "http.request.method": "POST", "http.route": "/api/auth/sign-in",
+                "http.response.status_code": status,
+                "count": 200, "sum": 6.0, "min": 0.001, "max": 0.05,
+                "bucket_counts": buckets, "$window_s": 600,
+            },
+        }));
+    }
+    capture(&h, events).await;
+    openlens_server::flush_now(&h.state).unwrap();
+    let owner = login_cookie(&h).await;
+    let board = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
+    let strip = &board[board.find(r#"aria-label="Production right now""#).unwrap()..];
+    let strip = &strip[..strip.find("</section>").unwrap()];
+    assert!(
+        strip.contains("Release v2") && strip.contains(r#"<strong class="v">Regressed</strong>"#),
+        "{strip}"
+    );
+    assert!(strip.contains("Key actions"), "{strip}");
+    let lead = &board[board.find(r#"class="card lead""#).unwrap()..];
+    let lead = &lead[..lead.find("</article>").unwrap()];
+    assert!(lead.contains("Release regressed"), "{lead}");
+    let backend = &lead[lead.find("Backend").expect("a Backend group")..];
+    assert!(backend.contains("POST /api/auth/sign-in"), "{lead}");
+    assert!(backend.contains(">Key<"), "tagged a key action: {lead}");
+
+    let page = body_text(get(&h, "/p/default/releases", Some(&owner), false).await).await;
+    let verdict = &page[page.find("Verdict of").expect("the latest verdict")..];
+    assert!(verdict.contains("Backend"), "{verdict}");
+    let worse = &page[page
+        .find("Routes that got worse")
+        .expect("the routes table")..];
+    assert!(worse.contains("/api/auth/sign-in"), "{worse}");
 }

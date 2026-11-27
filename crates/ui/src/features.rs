@@ -28,6 +28,8 @@ pub struct MapView<'a> {
     pub history: &'a [openlens_meta::MapVersion],
     /// Measured health (30 days), #240.
     pub health: Option<&'a openlens_engine::MapHealth>,
+    /// Users per role and per role × feature (30 days), #620.
+    pub roles: Option<&'a openlens_engine::RoleMatrix>,
     /// Admins edit.
     pub admin: bool,
     /// When checking a draft: the stored YAML to diff against.
@@ -261,6 +263,64 @@ pub(crate) fn relations(pid: &str, rels: &[openlens_engine::Relation]) -> Markup
     }
 }
 
+/// Who uses what (#620; on the board until #618): every feature of the
+/// map against every role, the share of the role's users who used it in
+/// the last 30 days. One hue, darker = more; the share is always printed,
+/// so colour is never the only cue. Then the raw roles no role matches.
+pub(crate) fn role_matrix(
+    pid: &str,
+    m: &openlens_featuremap::FeatureMap,
+    x: &openlens_engine::RoleMatrix,
+) -> Markup {
+    let roles: Vec<(&str, i64)> = x
+        .roles
+        .iter()
+        .filter_map(|r| Some((r.role.as_deref()?, r.users)))
+        .filter(|(_, n)| *n > 0)
+        .collect();
+    let cell = |role: &str, feat: &str| {
+        x.cells
+            .iter()
+            .find(|(r, f, _)| r == role && f == feat)
+            .map_or(0, |c| c.2)
+    };
+    html! {
+        section.card.wide aria-labelledby="who-h" {
+            h2 id="who-h" { (icon("users")) "Who uses what" }
+            @if roles.is_empty() || m.features.is_empty() {
+                p.muted { "No identified user with a role in the last 30 days. Roles come from the role the SDK sends, named by the map's " code { "roles:" } "." }
+            } @else {
+                div.scroll {
+                    table.heat {
+                        caption.sr-only { "Share of each role's users who used each feature, last 30 days" }
+                        thead { tr { th scope="col" { "Feature" } @for (r, n) in &roles { th.c scope="col" { (r) br; span.muted.small { (compact(*n)) " users" } } } } }
+                        tbody { @for f in &m.features {
+                            tr {
+                                th scope="row" { a href={ "/p/" (pid) "/features/" (url_enc(&f.key)) } { (f.name) } }
+                                @for (r, n) in &roles {
+                                    @let share = cell(r, &f.key) as f64 / (*n).max(1) as f64;
+                                    td.c title={ (pct(share)) " of " (r) " users used " (f.name) } {
+                                        span class={ "hc p" (crate::board::tenth(share)) } { @if share > 0.0 { (pct(share)) } @else { "—" } }
+                                    }
+                                }
+                            }
+                        } }
+                    }
+                }
+                p.muted.small { "Share of each role's users who used the feature, last 30 days, in production. A dash: the role never used it." }
+            }
+            @if !x.gaps.is_empty() {
+                p.small { "Raw roles no role matches, last 30 days, counted apart: "
+                    @for (i, (raw, n)) in x.gaps.iter().enumerate() {
+                        @if i > 0 { " · " }
+                        code { (raw) } " " (compact(*n)) (if *n == 1 { " user" } else { " users" })
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// One "vs baseline" cell of the variant readout.
 pub(crate) fn versus(baseline: bool, p: Option<f64>, significant: bool) -> Markup {
     html! {
@@ -356,6 +416,7 @@ pub fn feature_map(v: &MapView<'_>) -> Markup {
                     },
                 ))
             }
+            @if let (Some(m), Some(x)) = (v.map, v.roles) { (role_matrix(p.id, m, x)) }
             @if let Some(h) = v.health { (map_health(p.id, h)) }
             @if let Some(d) = &diff {
                 section.card.wide {

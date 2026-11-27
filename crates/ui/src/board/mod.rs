@@ -2,11 +2,12 @@
 //!
 //! `now`: the status strip, "Production right now" (#614); `focus`: what
 //! to focus on (the lead insight, the ranked list); `tiles`: the
-//! outcomes (#616); `charts`: active users per day, the retention line
-//! and the release comparison; `features`: the Features table (#618);
-//! `sections`: the other cards (Web Vitals, revenue, role gaps, funnels,
-//! flags, paths to value), closed disclosures after the release
-//! comparison (#588).
+//! outcomes (#616); `charts`: active users per day and the retention
+//! line; `features`: the Features table (#618). The other cards left for
+//! the pages that own them (#620): Web Vitals for Pages, the release table
+//! for Releases, paths to value for Feature flow, funnels and journeys for
+//! each feature's page, flag cohorts for Flags, role gaps and the roles ×
+//! features matrix for the Feature map, revenue for its tile's page.
 
 use crate::*;
 
@@ -16,7 +17,6 @@ mod focus;
 mod in_flight;
 mod lead;
 mod now;
-mod sections;
 mod tiles;
 
 pub(crate) use charts::{bar_with, barcell, tenth};
@@ -52,9 +52,8 @@ pub fn board_shell(p: &ProjectInfo<'_>, wait: Option<u64>) -> Markup {
 
 /// The Focus board (#543, #588): the page head, the status strip
 /// (#614), what to focus on, the outcomes (#616), active users and in
-/// flight side by side, the Features table (#618), the retention line
-/// (#619) and the release
-/// comparison (closed), then the other cards as closed disclosures. `plain`: optional plain-language `(title, next step)` per
+/// flight side by side, the Features table (#618) and the retention line
+/// (#619); nothing else (#620). `plain`: optional plain-language `(title, next step)` per
 /// insight (same order), shown instead of the original, which stays as
 /// the tooltip.
 pub fn board(
@@ -106,11 +105,6 @@ pub fn board(
                 }
                 (features::features(p.id, f, b))
                 (charts::retention_line(p.id, f, b))
-                (charts::releases(p.id, f, b))
-                (sections::others(p.id, f, b, revenue))
-                (sections::funnels(p.id, f, b))
-                (sections::flags(p.id, f, b))
-                (sections::journeys(p.id, f, b))
                 p.muted.small.center {
                     @match b.map_version {
                         Some(v) => { "Feature map v" (v) " in use. Cards compare users who stayed with users who churned; each shows the cohort sizes behind it." }
@@ -176,6 +170,8 @@ pub(crate) fn window_users(w: &openlens_engine::BoardWindow) -> String {
     )
 }
 
+#[cfg(test)]
+mod moved_tests;
 #[cfg(test)]
 mod outcomes_tests;
 #[cfg(test)]

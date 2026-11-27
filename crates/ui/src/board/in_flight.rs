@@ -174,7 +174,7 @@ fn flag(r: &Running) -> Markup {
                     Some(c) => {
                         "Sessions with errors " (pct(c.with.error_rate)) " with it, " (pct(c.without.error_rate)) " without; "
                         "tasks per session " (format!("{:.2}", c.with.tasks_per_session)) " vs " (format!("{:.2}", c.without.tasks_per_session)) " · "
-                        (super::sections::confidence(r.p()))
+                        (confidence(r.p()))
                     }
                     None => { span.muted { "No session carried it in the last 30 days yet." } }
                 }
@@ -200,6 +200,21 @@ fn flags(pid: &str, d: &InFlight) -> Markup {
         (more(d.more_flags))
     };
     row("release", &title, body, Some((href, "Flags")))
+}
+
+/// A p-value in words: whether the difference can be trusted yet.
+fn confidence(p: Option<f64>) -> Markup {
+    match p {
+        None => {
+            html! { span.muted title="Fewer than 30 sessions on one side" { "too few sessions" } }
+        }
+        Some(p) if p < openlens_engine::stats::ALPHA => {
+            html! { strong title=(format!("p = {p:.3}")) { "significant" } }
+        }
+        Some(p) => {
+            html! { span.muted title=(format!("p = {p:.3}")) { "not yet (p = " (format!("{p:.2}")) ")" } }
+        }
+    }
 }
 
 #[cfg(test)]

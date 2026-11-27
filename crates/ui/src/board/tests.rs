@@ -146,27 +146,18 @@ fn the_board_reads_in_the_mockup_order() {
         r#"id="au-h""#,
         r#"id="feat-h""#,
         "Do they come back?",
-        "v2 compared with v1",
-        r#"id="wv-h""#,
-        r#"id="gaps-h""#,
     ];
     for w in order.windows(2) {
         assert!(at(w[0]) < at(w[1]), "{} before {}", w[0], w[1]);
     }
-    // The cohorts left for People › Retention (#619): no disclosure is
-    // open; the release comparison and the secondary cards are closed.
-    assert!(!html.contains("<details class=\"card disclose\" open>"));
-    assert_eq!(
-        html.matches(r#"<details class="card disclose secondary">"#)
-            .count(),
-        2,
-        "Web Vitals and role gaps, closed: {html}"
+    // The retention line ends the board (#620): the release comparison
+    // and the secondary cards left for their pages, no disclosure stays.
+    let tail = &html[at("Do they come back?")..];
+    assert!(
+        !tail.contains("<section") && !tail.contains("<details"),
+        "{tail}"
     );
-    // On a share link, the secondary cards keep their content, not the
-    // links to their pages.
-    let shared = shared_page(&b);
-    let gaps = between(&shared, r#"id="gaps-h""#, "</details>");
-    assert!(gaps.contains("Admin ") && !gaps.contains("<a "), "{gaps}");
+    assert!(!html.contains(r#"class="card disclose"#), "{html}");
 }
 
 #[test]
@@ -182,7 +173,9 @@ fn ranked_insights_carry_no_next_step() {
 
 #[test]
 fn the_release_table_prints_first_seen_as_the_other_screens_do() {
-    // #556: the table printed the engine's ISO string (`…T20:49`).
+    // #556: the table printed the engine's ISO string (`…T20:49`). Since
+    // #620 the table is on the Releases page; the board prints no first
+    // seen at all, in either form, and no ISO time anywhere.
     let p = ProjectInfo {
         id: "p1",
         name: "P",
@@ -200,7 +193,10 @@ fn the_release_table_prints_first_seen_as_the_other_screens_do() {
         ..Board::default()
     };
     let html = board(&p, &b, &Filters::default(), "h", &[], None, &[]).into_string();
-    assert!(html.contains("2026-11-16 20:49"), "{html}");
+    assert!(
+        !html.contains("2026-11-16 20:49") && !html.contains("First seen"),
+        "{html}"
+    );
     assert!(!crate::tests::has_iso_time(&html), "{html}");
 }
 
@@ -475,8 +471,19 @@ fn the_board_has_no_inline_style_or_script() {
 #[test]
 fn the_shared_board_hides_what_needs_a_login() {
     let b = full();
-    let own = page(&b);
-    let shared = shared_page(&b);
+    // A release marker on the chart: its Timeline link (the release table
+    // that also linked there left the board, #620).
+    let marks = [Mark {
+        day: "2026-11-16".into(),
+        kind: "release".into(),
+        text: "v2 first seen".into(),
+        id: None,
+        by: None,
+        author_id: None,
+    }];
+    let render = || board(&project(), &b, &Filters::default(), "h", &[], None, &marks);
+    let own = render().into_string();
+    let shared = render_shared(render).into_string();
     assert!(shared.contains(&b.insights[0].title) && shared.contains("Outcomes"));
     for needle in [
         "/tickets/new",
@@ -494,7 +501,7 @@ fn the_shared_board_hides_what_needs_a_login() {
 
 /// A feature used by `users`, `completed_users` of whom reached its
 /// declared success event.
-fn used(key: &str, users: i64, completed_users: i64) -> openlens_engine::FeatureUse {
+pub(super) fn used(key: &str, users: i64, completed_users: i64) -> openlens_engine::FeatureUse {
     openlens_engine::FeatureUse {
         key: key.into(),
         name: None,

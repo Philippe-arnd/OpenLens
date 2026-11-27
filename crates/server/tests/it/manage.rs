@@ -681,8 +681,8 @@ async fn revenue_shows_only_when_success_events_carry_amounts() {
     openlens_server::flush_now(&h.state).unwrap();
     let board = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
     assert!(
-        !board.contains("Revenue, last 30 days"),
-        "nothing changes without amounts"
+        !board.contains("Income</span>Revenue"),
+        "nothing changes without amounts: no Income tile"
     );
 
     h.state
@@ -707,8 +707,8 @@ async fn revenue_shows_only_when_success_events_carry_amounts() {
     openlens_server::flush_now(&h.state).unwrap();
     let board = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
     assert!(
-        board.contains("Revenue, last 30 days") && board.contains("28.45 EUR"),
-        "10 + 20.5 × 0.9, other events ignored"
+        board.contains("Income</span>Revenue") && board.contains("28.45 EUR"),
+        "the Income tile (the card left the board, #620): 10 + 20.5 × 0.9, other events ignored"
     );
     let page = body_text(get(&h, "/p/default/revenue", Some(&owner), false).await).await;
     assert!(page.contains("checkout") && page.contains("Converted") && !page.contains(" style="));

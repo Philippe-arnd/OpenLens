@@ -14,6 +14,8 @@ use serde_json::{Map, Value};
 
 mod acquisition;
 mod board;
+/// The board's server side: key actions and the 5xx share (#623).
+pub mod board_backend;
 pub mod board_cost;
 mod board_kept;
 mod board_people;
@@ -37,6 +39,7 @@ pub mod environments;
 mod errors;
 mod events;
 mod explore;
+mod feature_paths;
 mod feature_signals;
 pub mod flows;
 pub mod forms;
@@ -72,6 +75,8 @@ mod tasks;
 mod unavailable;
 mod variants;
 pub mod verdict;
+/// The backend of a release verdict, ready to show (#623).
+pub mod verdict_backend;
 mod verdict_read;
 pub mod vital_parts;
 pub mod vitals;
@@ -87,6 +92,7 @@ pub use errors::{
 };
 pub use events::*;
 pub use explore::*;
+pub use feature_paths::{FeaturePaths, RoleMatrix, feature_paths, role_matrix};
 pub use feature_signals::{FeatureRow, Signal};
 pub use flows::{Flow, FlowLink, FlowQuery, flows};
 pub use inforce::{History, MapAt};
@@ -501,6 +507,11 @@ pub struct Board {
     /// for (the engine's own [`board`] does not judge releases).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latest_release: Option<board_verdict::LatestRelease>,
+    /// The server side of the window (#623): key actions and the share of
+    /// requests answered 5xx, from the route stats; none when the board
+    /// did not read them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server: Option<board_backend::ServerLine>,
     /// Set by the server (#617): goals, tickets and flags in flight, for
     /// the card next to the usage chart.
     #[serde(skip)]

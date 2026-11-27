@@ -55,7 +55,7 @@ pub(crate) async fn page(
     let parsed = openlens_featuremap::parse(&yaml);
     let live = openlens_engine::reads::map_live(&state.query, &p.id, parsed.map.as_ref()).await;
     let history = state.meta.feature_map_versions(&p.id).unwrap_or_default();
-    let health = match parsed.map.as_ref() {
+    let (health, roles) = match parsed.map.as_ref() {
         Some(m) => {
             let f = openlens_engine::Filters {
                 tz: p.timezone.clone(),
@@ -63,11 +63,14 @@ pub(crate) async fn page(
             };
             // The version shown: its rolled-up days come from the rollups.
             let version = shown.as_ref().map(|(n, _)| *n);
-            openlens_engine::map_health_in(&state.query, &p.id, m, version, &f)
-                .await
-                .ok()
+            // Who uses what (#620): the full roles × features matrix.
+            let (health, roles) = tokio::join!(
+                openlens_engine::map_health_in(&state.query, &p.id, m, version, &f),
+                openlens_engine::role_matrix(&state.query, &p.id, m, version, &f)
+            );
+            (health.ok(), roles.ok())
         }
-        None => None,
+        None => (None, None),
     };
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
@@ -90,6 +93,7 @@ pub(crate) async fn page(
             live: &live,
             history: &history,
             health: health.as_ref(),
+            roles: roles.as_ref(),
             admin: v.admin,
             draft: None,
             notice: notice.as_deref(),
@@ -195,6 +199,7 @@ pub(crate) async fn edit(
             live: &live,
             history: &history,
             health: None,
+            roles: None,
             admin: true,
             draft: Some(&stored),
             notice: None,
@@ -274,22 +279,40 @@ pub(crate) async fn feature_or_download(
     };
     let f = q.filters.filters(&p.timezone);
     let history = crate::map_history(&state, &p.id, &f.environment).await;
-    let ctx =
-        match openlens_engine::feature_context(&state.query, &p.id, &m, &history, &f, &current)
-            .await
-        {
-            Ok(Some(c)) => {
-                crate::record_release_maps(&state, &p.id, &f, &c.releases).await;
-                c
-            }
-            Ok(None) => return gone(),
-            Err(e) => {
-                return html_page(
-                    StatusCode::BAD_REQUEST,
-                    openlens_ui::message("Can't show that", &e.to_string()),
-                );
-            }
-        };
+    let tab = q
+        .tab
+        .as_deref()
+        .and_then(|t| openlens_ui::TABS.iter().find(|x| **x == t))
+        .copied()
+        .unwrap_or("overview");
+    // Its funnel and paths to success (#620), on the Overview tab only,
+    // beside its context.
+    let paths = async {
+        if tab == "overview" {
+            openlens_engine::feature_paths(&state.query, &p.id, &m, &history, &f, &current)
+                .await
+                .ok()
+        } else {
+            None
+        }
+    };
+    let (ctx, paths) = tokio::join!(
+        openlens_engine::feature_context(&state.query, &p.id, &m, &history, &f, &current),
+        paths
+    );
+    let ctx = match ctx {
+        Ok(Some(c)) => {
+            crate::record_release_maps(&state, &p.id, &f, &c.releases).await;
+            c
+        }
+        Ok(None) => return gone(),
+        Err(e) => {
+            return html_page(
+                StatusCode::BAD_REQUEST,
+                openlens_ui::message("Can't show that", &e.to_string()),
+            );
+        }
+    };
     let peers: Vec<&openlens_featuremap::Feature> = m
         .features
         .iter()
@@ -312,12 +335,6 @@ pub(crate) async fn feature_or_download(
         name: &p.name,
         key: &p.api_key,
     };
-    let tab = q
-        .tab
-        .as_deref()
-        .and_then(|t| openlens_ui::TABS.iter().find(|x| **x == t))
-        .copied()
-        .unwrap_or("overview");
     // The latest sessions that used it, kept when they have a recording.
     let recorded: std::collections::HashSet<String> = if tab == "replays" {
         let (root, pid) = (state.data_dir.clone(), p.id.clone());
@@ -350,6 +367,7 @@ pub(crate) async fn feature_or_download(
             versions: &versions,
             prev: near(at.checked_sub(1)),
             next: near(Some(at + 1)),
+            paths: paths.as_ref(),
         }),
     )
 }
