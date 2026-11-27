@@ -182,6 +182,13 @@ pub(crate) async fn tick(state: &AppState, minute: u64) {
                 tracing::warn!(project = %p.id, "release notes not read: {e}");
             }
         }
+        // Write-back (#575): a production release's final verdict to
+        // GitHub, right after the read; a refusal is kept and shown.
+        if minute % 60 == 6 {
+            for e in Box::pin(openlens_engine::release_write::pass(state, &p.id)).await {
+                tracing::warn!(project = %p.id, "release verdict not written back: {e}");
+            }
+        }
         if s.cert
             && minute % 60 == 2
             && let Some(origin) = state.meta.project_setting(&p.id, "app_url").ok().flatten()

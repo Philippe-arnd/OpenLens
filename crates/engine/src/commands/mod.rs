@@ -278,6 +278,12 @@ pub trait Host: Sync {
     fn capacity_inputs(&self) -> crate::capacity::Inputs {
         crate::capacity::Inputs::default()
     }
+    /// This server's fixed public address (`https://analytics.example.com`),
+    /// when one is configured: the links a background pass writes outside
+    /// OpenLens (#575). None by default, and then no link is written.
+    fn public_url(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Something that happened in a project, on the timeline.

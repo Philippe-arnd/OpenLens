@@ -84,6 +84,8 @@ pub mod release_features;
 pub mod release_maps;
 /// What the git host said about each recorded release (#574, D-093).
 pub mod release_reads;
+/// What was written back to the git host for each release (#575).
+pub mod release_writes;
 /// Automatic release names per build fingerprint (#495).
 pub mod releases;
 /// The public status page's settings (#561, D-079).
@@ -644,6 +646,7 @@ impl Meta {
         conn.execute_batch(jobs::SCHEMA)?;
         conn.execute_batch(release_reads::SCHEMA)?;
         conn.execute_batch(release_features::SCHEMA)?;
+        conn.execute_batch(release_writes::SCHEMA)?;
         let readers = (0..READERS)
             .map(|_| {
                 let r = Connection::open_with_flags(
@@ -686,6 +689,7 @@ impl Meta {
         conn.execute_batch(jobs::SCHEMA)?;
         conn.execute_batch(release_reads::SCHEMA)?;
         conn.execute_batch(release_features::SCHEMA)?;
+        conn.execute_batch(release_writes::SCHEMA)?;
         Ok(Self {
             conn: Mutex::new(conn),
             readers: Vec::new(),

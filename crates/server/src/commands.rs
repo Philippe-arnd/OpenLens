@@ -104,6 +104,10 @@ impl Host for AppState {
     fn capacity_inputs(&self) -> openlens_engine::capacity::Inputs {
         crate::capacity::inputs(self)
     }
+
+    fn public_url(&self) -> Option<String> {
+        crate::fixed_public_url()
+    }
 }
 
 /// The caller of a command made from a dashboard request: the viewer's

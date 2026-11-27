@@ -22,6 +22,7 @@ mod maintenance;
 mod map_lookups;
 mod map_shape;
 mod release_git;
+mod release_write;
 mod releases;
 mod server_errors;
 mod slo;

@@ -675,6 +675,17 @@ pub(crate) fn token_matches(given: &str, expected: &str) -> bool {
     given.len() == expected.len() && bool::from(given.as_bytes().ct_eq(expected.as_bytes()))
 }
 
+/// The fixed public base URL of this server (`OPENLENS_PUBLIC_URL`, or
+/// `SERVICE_URL_OPENLENS`), without a trailing slash, when one is set:
+/// what background passes put in the links they write (#575).
+pub(crate) fn fixed_public_url() -> Option<String> {
+    let fixed =
+        std::env::var("OPENLENS_PUBLIC_URL").or_else(|_| std::env::var("SERVICE_URL_OPENLENS"));
+    let fixed = fixed.ok()?;
+    let fixed = fixed.trim().trim_end_matches('/');
+    (!fixed.is_empty()).then(|| fixed.to_owned())
+}
+
 /// Public base URL of this server as the client sees it: the fixed
 /// `OPENLENS_PUBLIC_URL` (or `SERVICE_URL_OPENLENS`) when one is set,
 /// otherwise the request's `Host`, with `X-Forwarded-Host` and
@@ -682,13 +693,8 @@ pub(crate) fn token_matches(given: &str, expected: &str) -> bool {
 /// already stripped both from any connection that is not a trusted proxy
 /// (SEC-06).
 pub(crate) fn public_url(headers: &axum::http::HeaderMap) -> String {
-    if let Ok(fixed) =
-        std::env::var("OPENLENS_PUBLIC_URL").or_else(|_| std::env::var("SERVICE_URL_OPENLENS"))
-    {
-        let fixed = fixed.trim().trim_end_matches('/');
-        if !fixed.is_empty() {
-            return fixed.to_owned();
-        }
+    if let Some(fixed) = fixed_public_url() {
+        return fixed;
     }
     let host = headers
         .get("x-forwarded-host")

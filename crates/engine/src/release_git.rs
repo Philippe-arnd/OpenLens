@@ -142,6 +142,10 @@ pub struct ReleaseNotes {
     /// (#576, [`crate::release_features`]); once the notes are ready.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub touched: Option<crate::release_features::ReleaseTouched>,
+    /// What was written back to GitHub for the release (#575), or why
+    /// nothing was.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub write_back: Option<crate::release_write::WriteBack>,
 }
 
 impl ReleaseNotes {
@@ -164,6 +168,7 @@ impl ReleaseNotes {
             first_commit_at: None,
             fetched_at: None,
             touched: None,
+            write_back: None,
         }
     }
 }
@@ -369,7 +374,7 @@ pub fn groups(prs: &[GitPr]) -> Vec<NoteGroup> {
 }
 
 /// A release name as one path segment of a URL.
-fn segment(s: &str) -> String {
+pub(crate) fn segment(s: &str) -> String {
     s.bytes()
         .map(|b| {
             if b.is_ascii_alphanumeric() || b"-_.".contains(&b) {
@@ -504,8 +509,20 @@ pub async fn pass<H: Host>(host: &H, project: &str) -> Vec<String> {
     failures
 }
 
-/// The notes of one release of `environment`, or why there are none.
+/// The notes of one release of `environment`, or why there are none,
+/// with what was written back to GitHub for it (#575).
 pub fn notes<H: Host>(host: &H, project: &str, environment: &str, release: &str) -> ReleaseNotes {
+    let mut n = read_notes(host, project, environment, release);
+    n.write_back = Some(crate::release_write::shown(
+        host,
+        project,
+        environment,
+        release,
+    ));
+    n
+}
+
+fn read_notes<H: Host>(host: &H, project: &str, environment: &str, release: &str) -> ReleaseNotes {
     let none = |s, r: &str| ReleaseNotes::empty(environment, release, s, r.to_owned());
     if host.github(project).is_none() {
         return none(
@@ -601,6 +618,7 @@ pub fn notes<H: Host>(host: &H, project: &str, environment: &str, release: &str)
             (from.as_str(), to.as_str()),
             (r.files_total - r.files.len() as i64).max(0),
         )),
+        write_back: None,
     }
 }
 
@@ -623,7 +641,7 @@ pub fn listed<H: Host>(host: &H, project: &str) -> ListedNotes {
     if host.github(project).is_none() {
         return ListedNotes {
             unavailable: Some(
-                "Release notes need a GitHub repository and a read token: set them on the Tickets page.".into(),
+                "Release notes need a GitHub repository and a read token: set them on the Tickets page. Without them the verdicts are not written back to GitHub either.".into(),
             ),
             releases: Vec::new(),
         };
