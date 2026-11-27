@@ -46,7 +46,9 @@ pub(crate) const NAV: &[NavGroup] = &[
         icon: "events",
         tabs: &[
             ("/events", "Events", &["Events"]),
-            ("/pages", "Pages", &["Pages", "Heatmap"]),
+            ("/pages", "Pages", &["Pages"]),
+            // The most viewed page's heatmap; Pages links every other one (#592).
+            ("/heatmap", "Heatmap", &["Heatmap"]),
             ("/forms", "Forms", &["Forms"]),
             ("/flows", "Feature flow", &["Feature flow"]),
         ],
@@ -538,7 +540,7 @@ mod tests {
         assert!(c.contains("href=\"/projects\""));
         assert!(c.contains("href=\"/p/d\""));
         assert!(c.contains("href=\"/p/d/events\">Behaviour"));
-        assert!(c.contains("aria-current=\"page\">Pages"));
+        assert!(c.contains("aria-current=\"page\">Heatmap"));
         let i = Crumbs::of("Storage and backups", None)
             .render()
             .into_string();
@@ -629,7 +631,7 @@ mod tests {
         };
         let html = section_tabs("Heatmap", &p).into_string();
         assert!(html.contains("aria-label=\"Behaviour\""));
-        assert!(html.contains("href=\"/p/default/pages\" aria-current=\"page\""));
+        assert!(html.contains("href=\"/p/default/heatmap\" aria-current=\"page\""));
         assert!(html.contains("href=\"/p/default/forms\""));
         assert!(
             section_tabs("Ask", &p).into_string().is_empty(),
