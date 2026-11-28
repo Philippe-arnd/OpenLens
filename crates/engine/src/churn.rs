@@ -412,6 +412,11 @@ fn median_days(lives: &[(i64, bool)]) -> Option<i64> {
 /// The board's [`ChurnLine`] (#616): the users query of [`churn`] and the
 /// cancellations only, on the board's engine `q` (its parameters set),
 /// source `src` and identified-user condition `ident`.
+///
+/// The line is kept for [`LINE_FOR`] per data root, project, filters, churn
+/// window, churn event and identified-user condition (#748): a 90-day read
+/// of every identified user (about 7 s at 4 M events) for two numbers that
+/// move by the day was paid again on every recompute of every board.
 pub(crate) async fn line(
     q: &QueryEngine,
     project: &str,
@@ -420,8 +425,68 @@ pub(crate) async fn line(
     src: &str,
     ident: &str,
 ) -> Result<ChurnLine> {
-    let w = f.clause(90)?;
     let c = map.map_or(14, |m| i64::from(m.churn_days()));
+    let key = format!(
+        "{}\u{0}{project}\u{0}{f:?}\u{0}{c}\u{0}{:?}\u{0}{src}\u{0}{ident}",
+        q.root().display(),
+        map.and_then(|m| m.churn_event.as_deref()),
+    );
+    if let Some(kept) = kept_line(&key) {
+        return Ok(kept);
+    }
+    let out = line_now(q, project, map, f, src, ident, c).await?;
+    keep_line(key, &out);
+    Ok(out)
+}
+
+/// How long a computed churn line is reused.
+const LINE_FOR: std::time::Duration = std::time::Duration::from_secs(3600);
+/// Lines kept at most (one per board key; the oldest goes first).
+const LINES_KEPT: usize = 256;
+
+type LineCache =
+    std::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, ChurnLine)>>;
+
+fn line_cache() -> &'static LineCache {
+    static CACHE: std::sync::OnceLock<LineCache> = std::sync::OnceLock::new();
+    CACHE.get_or_init(LineCache::default)
+}
+
+/// The line kept for `key`, when recent enough. A poisoned lock reads as
+/// nothing kept: the line is computed again.
+fn kept_line(key: &str) -> Option<ChurnLine> {
+    let cache = line_cache().lock().ok()?;
+    let (at, l) = cache.get(key)?;
+    (at.elapsed() < LINE_FOR).then(|| l.clone())
+}
+
+fn keep_line(key: String, l: &ChurnLine) {
+    let Ok(mut cache) = line_cache().lock() else {
+        return;
+    };
+    cache.retain(|_, (at, _)| at.elapsed() < LINE_FOR);
+    if cache.len() >= LINES_KEPT
+        && let Some(oldest) = cache
+            .iter()
+            .min_by_key(|(_, (at, _))| *at)
+            .map(|(k, _)| k.clone())
+    {
+        cache.remove(&oldest);
+    }
+    cache.insert(key, (std::time::Instant::now(), l.clone()));
+}
+
+/// [`line`], computed.
+async fn line_now(
+    q: &QueryEngine,
+    project: &str,
+    map: Option<&FeatureMap>,
+    f: &Filters,
+    src: &str,
+    ident: &str,
+    c: i64,
+) -> Result<ChurnLine> {
+    let w = f.clause(90)?;
     let users = users_sql(src, &w, ident, c);
     let (u, cancelled) =
         futures::join!(q.sql(project, &users), cancelled(q, project, src, &w, map));
