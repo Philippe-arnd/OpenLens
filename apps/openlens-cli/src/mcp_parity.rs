@@ -2,13 +2,24 @@
 //! listed below as not one yet. A new command without a tool, a new tool
 //! without a command, or a stale entry in these lists fails the test, so
 //! "anything you can do in the UI, an agent can do through MCP" (rule 10)
-//! is checked rather than hoped for.
+//! is checked rather than hoped for. It also checks the profiles (#716,
+//! D-105): every tool is in exactly one of the product and operations
+//! profiles, and `all` serves their union.
 
 use openlens_engine::commands::REGISTRY;
 use openlens_mcp::Tools;
+use serde_json::json;
 
 use crate::Client;
 use crate::mcp::OpenLensTools;
+use crate::mcp_profile::{OPS_TOOLS, PRODUCT_TOOLS, Profile};
+
+fn served(profile: Profile) -> Vec<&'static str> {
+    let dir = tempfile::tempdir().unwrap();
+    let client = Client::new(Some("http://localhost:1".into()), Some("t".into())).unwrap();
+    let tools = OpenLensTools::new(client, dir.path(), dir.path(), profile).unwrap();
+    tools.list().iter().map(|t| t.name).collect()
+}
 
 /// The tool that runs each command (names differ: commands are
 /// `area.verb`, tools are what an agent asks for). One tool may run
@@ -148,10 +159,7 @@ const NOT_COMMANDS: &[&str] = &[
 #[test]
 fn every_command_is_a_tool_or_pending_and_every_tool_is_accounted_for() {
     let commands: Vec<&str> = REGISTRY.iter().map(|s| s.name).collect();
-    let dir = tempfile::tempdir().unwrap();
-    let client = Client::new(Some("http://localhost:1".into()), Some("t".into())).unwrap();
-    let tools = OpenLensTools::new(client, dir.path(), dir.path()).unwrap();
-    let tools: Vec<&str> = tools.list().iter().map(|t| t.name).collect();
+    let tools = served(Profile::All);
     for c in &commands {
         let mapped = TOOL_OF.iter().any(|(m, _)| m == c);
         let pending = PENDING.contains(c);
@@ -190,4 +198,71 @@ fn every_command_is_a_tool_or_pending_and_every_tool_is_accounted_for() {
             "NOT_COMMANDS names `{t}`, which is not a tool"
         );
     }
+}
+
+#[test]
+fn every_tool_is_in_exactly_one_profile_and_all_serves_both() {
+    let all = served(Profile::All);
+    let product = served(Profile::Product);
+    let ops = served(Profile::Ops);
+    for t in &all {
+        let in_product = PRODUCT_TOOLS.contains(t);
+        let in_ops = OPS_TOOLS.contains(t);
+        assert!(
+            in_product != in_ops,
+            "tool `{t}`: list it in exactly one of PRODUCT_TOOLS and OPS_TOOLS (mcp_profile.rs)"
+        );
+        assert!(
+            product.contains(t) != ops.contains(t),
+            "tool `{t}` must be served by exactly one of the product and ops profiles"
+        );
+    }
+    for t in PRODUCT_TOOLS.iter().chain(OPS_TOOLS) {
+        assert!(
+            all.contains(t),
+            "the profiles name `{t}`, which is not a tool"
+        );
+    }
+    assert!(
+        product.len() + ops.len() == all.len(),
+        "`all` serves the union of the two profiles and nothing else"
+    );
+    // The commands an agent reaches over MCP are each in one profile.
+    for (c, t) in TOOL_OF {
+        assert!(
+            product.contains(t) || ops.contains(t),
+            "command `{c}` runs through `{t}`, which no profile serves"
+        );
+    }
+}
+
+#[test]
+fn a_tool_of_another_profile_is_refused_with_the_profile_that_has_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = Client::new(Some("http://localhost:1".into()), Some("t".into())).unwrap();
+    let product = OpenLensTools::new(client, dir.path(), dir.path(), Profile::Product).unwrap();
+    let (Some(ops_tool), Some(product_tool)) = (OPS_TOOLS.first(), PRODUCT_TOOLS.first()) else {
+        panic!("both profiles hold tools");
+    };
+    let req = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": {"name": ops_tool, "arguments": {}}});
+    let reply = openlens_mcp::handle(&product, "openlens", "0", &req).unwrap();
+    let message = reply["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("--profile ops"),
+        "the refusal names the ops profile: {message}"
+    );
+    // The same tool called directly is refused too, before any request.
+    let err = product.call(ops_tool, &json!({})).unwrap_err();
+    assert!(err.contains("--profile ops"), "{err}");
+    // An unknown tool stays unknown.
+    let req = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {"name": "no_such_tool", "arguments": {}}});
+    let reply = openlens_mcp::handle(&product, "openlens", "0", &req).unwrap();
+    let message = reply["error"]["message"].as_str().unwrap_or_default();
+    assert!(message.contains("unknown tool"), "{message}");
+    assert!(
+        !served(Profile::Ops).contains(product_tool),
+        "the ops profile does not serve product tools"
+    );
 }

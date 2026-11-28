@@ -18,6 +18,7 @@ mod mcp_commands;
 mod mcp_maintenance;
 #[cfg(test)]
 mod mcp_parity;
+mod mcp_profile;
 mod mcp_status_page;
 
 use std::path::PathBuf;
@@ -874,9 +875,14 @@ fn run(cli: Cli) -> Result<bool, String> {
         Command::Mcp {
             automation_read_root,
             automation_write_root,
+            profile,
         } => {
-            let tools =
-                mcp::OpenLensTools::new(client()?, automation_read_root, automation_write_root)?;
+            let tools = mcp::OpenLensTools::new(
+                client()?,
+                automation_read_root,
+                automation_write_root,
+                *profile,
+            )?;
             openlens_mcp::serve(&tools, "openlens", env!("CARGO_PKG_VERSION"))
                 .map_err(|e| e.to_string())?;
             Ok(true)

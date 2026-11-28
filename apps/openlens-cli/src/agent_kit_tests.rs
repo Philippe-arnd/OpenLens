@@ -264,7 +264,13 @@ fn the_rules_name_only_commands_and_tools_that_exist() {
     }
     let dir = tempfile::tempdir().unwrap();
     let client = Client::new(Some("http://localhost:1".into()), Some("t".into())).unwrap();
-    let tools = OpenLensTools::new(client, dir.path(), dir.path()).unwrap();
+    let tools = OpenLensTools::new(
+        client,
+        dir.path(),
+        dir.path(),
+        crate::mcp_profile::Profile::All,
+    )
+    .unwrap();
     let listed: Vec<&str> = tools.list().iter().map(|t| t.name).collect();
     for t in [
         "suggested_features",
