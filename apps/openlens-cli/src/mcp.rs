@@ -50,6 +50,32 @@ impl OpenLensTools {
     }
 }
 
+/// Rows the `sql` tool returns when the agent gives no `limit`, and the
+/// most it may ask for: one call must not flood the agent's context (#687).
+const SQL_DEFAULT_ROWS: u64 = 200;
+const SQL_MAX_ROWS: u64 = 1000;
+
+/// The `sql` tool's result: at most the agent's `limit` rows (default
+/// [`SQL_DEFAULT_ROWS`], at most [`SQL_MAX_ROWS`]), saying when it cut.
+fn capped_rows(mut rows: Vec<Value>, args: &Value) -> Value {
+    let limit = args
+        .get("limit")
+        .and_then(Value::as_u64)
+        .map_or(SQL_DEFAULT_ROWS, |l| l.clamp(1, SQL_MAX_ROWS));
+    let total = rows.len();
+    rows.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
+    if rows.len() < total {
+        return json!({
+            "truncated": true,
+            "shown": rows.len(),
+            "total": total,
+            "hint": "add LIMIT or narrow the period / filters, or pass a larger `limit`",
+            "rows": rows,
+        });
+    }
+    json!({ "rows": rows })
+}
+
 fn s(args: &Value, k: &str) -> Option<String> {
     args.get(k).and_then(Value::as_str).map(str::to_owned)
 }
@@ -286,8 +312,8 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "sql",
-                description: "Read-only SQL (DataFusion) on table `events`: uuid, event, distinct_id, session_id, timestamp, url, path, feature, role, account, plan, environment, release, properties (JSON text), date. Prune with `date >= 'YYYY-MM-DD'`. Max 10k rows.",
-                input_schema: json!({"type":"object","properties":with(json!({"query":{"type":"string"}})),"required":["query"]}),
+                description: "Read-only SQL (DataFusion) on table `events`: uuid, event, distinct_id, session_id, timestamp, url, path, feature, role, account, plan, environment, release, properties (JSON text), date. Prune with `date >= 'YYYY-MM-DD'`. Returns at most `limit` rows (default 200, max 1000) and 50 KB; a cut result says `truncated: true` with `shown` and `total`: add LIMIT or narrow the period.",
+                input_schema: json!({"type":"object","properties":with(json!({"query":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":SQL_MAX_ROWS}})),"required":["query"]}),
             },
             ToolSpec {
                 name: "flags",
@@ -797,7 +823,7 @@ impl Tools for OpenLensTools {
             }
             "sql" => {
                 let query = s(args, "query").ok_or("query is required")?;
-                Ok(json!({ "rows": c.sql(&project(args), &query)? }))
+                Ok(capped_rows(c.sql(&project(args), &query)?, args))
             }
             "flags" => {
                 let (st, v) = c.call(
@@ -914,6 +940,32 @@ mod tests {
             }
         }
         assert!(checked >= 12, "parsed only {checked} dispatch names");
+    }
+
+    #[test]
+    fn sql_returns_at_most_the_row_cap_and_says_it_cut() {
+        let rows = |n: usize| (0..n).map(|i| json!({ "n": i })).collect::<Vec<_>>();
+        let cut = capped_rows(rows(10_000), &json!({}));
+        assert_eq!(cut["truncated"], true);
+        let shown = cut["rows"].as_array().unwrap().len();
+        assert!(shown < 10_000);
+        assert_eq!(cut["shown"], shown);
+        assert_eq!(cut["total"], 10_000);
+        let asked = capped_rows(rows(10_000), &json!({ "limit": 1_000_000 }));
+        assert!(
+            asked["rows"].as_array().unwrap().len() < 10_000,
+            "the maximum holds"
+        );
+        assert!(
+            asked["rows"].as_array().unwrap().len() > shown,
+            "a larger limit gives more"
+        );
+        let small = capped_rows(rows(3), &json!({}));
+        assert_eq!(
+            small,
+            json!({ "rows": rows(3) }),
+            "a small result is unchanged"
+        );
     }
 
     #[test]

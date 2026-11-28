@@ -15,6 +15,12 @@ pub const PROTOCOL_VERSION: &str = "2025-06-18";
 /// Largest accepted request line, in bytes.
 pub const MAX_LINE: usize = 4 * 1024 * 1024;
 
+/// Largest tool result text, in bytes: one call must not flood the
+/// agent's context (#687). Fixed, not a setting (D-014).
+pub const MAX_RESULT_BYTES: usize = 50 * 1024;
+
+const TRUNCATED_HINT: &str = "add LIMIT or narrow the period / filters";
+
 /// A tool description for `tools/list`.
 pub struct ToolSpec {
     /// Tool name.
@@ -80,7 +86,7 @@ pub fn handle(tools: &dyn Tools, name: &str, version: &str, req: &Value) -> Opti
                 .cloned()
                 .unwrap_or_else(|| json!({}));
             let (text, is_error) = match tools.call(tool, &args) {
-                Ok(v) => (serde_json::to_string_pretty(&v).unwrap_or_default(), false),
+                Ok(v) => (bounded_text(v), false),
                 Err(e) => (e, true),
             };
             response(
@@ -90,6 +96,80 @@ pub fn handle(tools: &dyn Tools, name: &str, version: &str, req: &Value) -> Opti
         }
         _ => error(&id, -32601, &format!("method `{method}` not found")),
     })
+}
+
+/// A tool result as compact JSON of at most [`MAX_RESULT_BYTES`]. A
+/// larger result keeps the leading items of its largest top-level array
+/// (or of the result itself, when it is an array, under `rows`) that fit,
+/// and says so with `truncated`, `shown`, `total` and a `hint`. Any other
+/// shape that is too large is replaced by a note. The text is always
+/// valid JSON.
+fn bounded_text(v: Value) -> String {
+    let text = serde_json::to_string(&v).unwrap_or_default();
+    if text.len() <= MAX_RESULT_BYTES {
+        return text;
+    }
+    let size = text.len();
+    let mut obj = match v {
+        Value::Array(items) => {
+            let mut obj = serde_json::Map::new();
+            obj.insert("rows".into(), Value::Array(items));
+            obj
+        }
+        Value::Object(obj) => obj,
+        _ => return too_large(size),
+    };
+    let Some(key) = obj
+        .iter()
+        .filter_map(|(k, v)| v.as_array().map(|a| (k, a.len())))
+        .max_by_key(|(_, n)| *n)
+        .map(|(k, _)| k.clone())
+    else {
+        return too_large(size);
+    };
+    let Some(Value::Array(mut items)) = obj.insert(key.clone(), json!([])) else {
+        return too_large(size);
+    };
+    // A tool that already cut its rows knows the larger total.
+    let total = obj
+        .get("total")
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+        .max(u64::try_from(items.len()).unwrap_or(u64::MAX));
+    obj.insert("truncated".into(), Value::Bool(true));
+    obj.insert("shown".into(), json!(items.len()));
+    obj.insert("total".into(), json!(total));
+    obj.insert("hint".into(), json!(TRUNCATED_HINT));
+    // The frame already counts `shown` at its widest, so it only shrinks.
+    let mut used = serde_json::to_string(&obj).map_or(usize::MAX, |t| t.len());
+    let mut shown = 0;
+    for item in &items {
+        let len = serde_json::to_string(item).map_or(usize::MAX, |t| t.len());
+        let next = used.saturating_add(len).saturating_add(1);
+        if next > MAX_RESULT_BYTES {
+            break;
+        }
+        used = next;
+        shown += 1;
+    }
+    items.truncate(shown);
+    obj.insert("shown".into(), json!(shown));
+    obj.insert(key, Value::Array(items));
+    let text = serde_json::to_string(&obj).unwrap_or_default();
+    if text.len() <= MAX_RESULT_BYTES {
+        text
+    } else {
+        too_large(size)
+    }
+}
+
+fn too_large(bytes: usize) -> String {
+    json!({
+        "truncated": true,
+        "error": format!("result too large ({bytes} bytes, limit {MAX_RESULT_BYTES})"),
+        "hint": TRUNCATED_HINT,
+    })
+    .to_string()
 }
 
 /// Serve until stdin closes. One JSON-RPC message per line.
@@ -200,5 +280,46 @@ mod tests {
         )
         .unwrap();
         assert_eq!(missing["error"]["code"], -32601);
+    }
+
+    fn call_text(args: Value) -> String {
+        let reply = handle(&Echo, "t", "0", &json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":args}})).unwrap();
+        reply["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    #[test]
+    fn a_huge_result_is_cut_to_valid_json_that_says_so() {
+        let rows: Vec<Value> = (0..10_000)
+            .map(|i| json!({"event": "page_view", "path": format!("/p/{i}"), "n": i}))
+            .collect();
+        let args = json!({ "rows": rows });
+        assert!(args.to_string().len() > MAX_RESULT_BYTES);
+        let text = call_text(args);
+        assert!(text.len() <= MAX_RESULT_BYTES);
+        let v: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["truncated"], true);
+        let shown = v["rows"].as_array().unwrap().len();
+        assert!(shown > 0 && shown < 10_000);
+        assert_eq!(v["shown"], shown);
+        assert_eq!(v["total"], 10_000);
+        assert_eq!(v["rows"][0]["n"], 0, "the leading rows are kept");
+        assert!(v["hint"].as_str().unwrap().contains("LIMIT"));
+
+        // Too large without any array to cut: still valid JSON that says so.
+        let text = call_text(json!({ "blob": "x".repeat(MAX_RESULT_BYTES * 2) }));
+        assert!(text.len() <= MAX_RESULT_BYTES);
+        let v: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["truncated"], true);
+    }
+
+    #[test]
+    fn a_small_result_is_unchanged_but_compact() {
+        let args = json!({ "rows": [{"a": 1}, {"b": [1, 2]}], "note": "x" });
+        let text = call_text(args.clone());
+        assert!(!text.contains('\n'), "compact, not pretty-printed");
+        assert_eq!(serde_json::from_str::<Value>(&text).unwrap(), args);
     }
 }
