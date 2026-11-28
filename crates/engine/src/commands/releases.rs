@@ -84,6 +84,17 @@ async fn judge<H: Host>(
     environment: &str,
     r: &Releases,
 ) -> Result<Vec<Report>, Error> {
+    judge_some(host, project, environment, r, false).await
+}
+
+/// [`judge`], or only the newest release when `latest_only` (#748).
+async fn judge_some<H: Host>(
+    host: &H,
+    project: &str,
+    environment: &str,
+    r: &Releases,
+    latest_only: bool,
+) -> Result<Vec<Report>, Error> {
     let map = host.feature_map(project).await;
     let goals = super::goals::load(host.meta(), project);
     // Keys as the current map names them (a feature renamed since keeps
@@ -109,15 +120,16 @@ async fn judge<H: Host>(
         goals: &goals,
         touched: &touched,
     };
-    verdict_read::judge(
-        host.query(),
-        project,
-        scope,
-        &r.releases,
-        chrono::Utc::now(),
-    )
-    .await
-    .map_err(engine_err)
+    let now = chrono::Utc::now();
+    if latest_only {
+        return verdict_read::judge_latest(host.query(), project, scope, &r.releases, now)
+            .await
+            .map(|r| r.into_iter().collect())
+            .map_err(engine_err);
+    }
+    verdict_read::judge(host.query(), project, scope, &r.releases, now)
+        .await
+        .map_err(engine_err)
 }
 
 impl Command for List {
@@ -267,7 +279,9 @@ pub async fn latest<H: Host>(host: &H, project: &str, environment: &str) -> Late
     let judged = async {
         let (r, p) = list(host, &Caller::default(), &input).await?;
         // Oldest first: the last one is the newest.
-        Ok::<_, Error>(judge(host, &p.id, &env, &r).await?.pop())
+        // The board shows the newest release only: judge it alone, on the
+        // days since the release before it started (#748).
+        Ok::<_, Error>(judge_some(host, &p.id, &env, &r, true).await?.pop())
     }
     .await;
     match judged {
