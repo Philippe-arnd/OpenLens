@@ -390,3 +390,49 @@ async fn a_day_with_neither_its_events_nor_a_matching_rollup_is_named() {
         .unwrap();
     assert_eq!(h.unavailable_days, want);
 }
+
+/// The release lifecycle of every environment, in a stable order.
+async fn lifecycle(root: &std::path::Path, tz: &str) -> String {
+    let q = QueryEngine::new(root, Limits::default());
+    let r = openlens_engine::releases::releases(&q, "p", tz, None, &[], &[])
+        .await
+        .unwrap();
+    let mut rows: Vec<String> = r
+        .releases
+        .iter()
+        .map(|x| {
+            format!(
+                "{} {} {:?} {:.6} {} {} {} {}",
+                x.environment,
+                x.release,
+                x.state,
+                x.share,
+                x.users,
+                x.events,
+                x.first_seen,
+                x.last_seen
+            )
+        })
+        .collect();
+    rows.sort();
+    rows.join("\n")
+}
+
+#[tokio::test]
+#[ignore = "heavy: rolls up every closed day; run by `cargo xtask ci --heavy` (nightly, release tags)"]
+async fn the_release_lifecycle_reads_closed_days_from_person_day_with_the_same_numbers() {
+    let dir = seed();
+    let root = dir.path();
+    let (utc, paris) = (
+        lifecycle(root, "UTC").await,
+        lifecycle(root, "Europe/Paris").await,
+    );
+    assert!(utc.contains("production v1"), "{utc}");
+    let rolled = roll_up(root, 1).await;
+    assert_eq!(lifecycle(root, "UTC").await, utc);
+    assert_eq!(lifecycle(root, "Europe/Paris").await, paris);
+    // A rolled day whose events are gone still counts: the totals read the
+    // rollup (#729), and so does the UTC daily share.
+    drop_events(root, rolled[rolled.len() - 5]);
+    assert_eq!(lifecycle(root, "UTC").await, utc);
+}
