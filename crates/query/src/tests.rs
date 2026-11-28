@@ -35,6 +35,29 @@ async fn engines_take_cold_turns_on_their_own() {
     );
 }
 
+/// #748: hot queries wait for a slot when the query threads are all
+/// taken, and run once one is free; cold ones keep their own turn.
+#[tokio::test]
+async fn hot_queries_wait_for_a_free_slot() {
+    let dir = tempfile::tempdir().unwrap();
+    let q = QueryEngine::new(dir.path(), Limits::default());
+    let all = u32::try_from(host::query_threads()).unwrap();
+    let held = q.slots.clone().acquire_many_owned(all).await.unwrap();
+    let waiting = {
+        let q = q.clone();
+        tokio::spawn(async move { q.sql("a", "SELECT 1 AS n").await })
+    };
+    assert_eq!(
+        q.cold().sql("a", "SELECT 1 AS n").await.unwrap().rows[0]["n"],
+        1,
+        "a cold query does not take a slot"
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert!(!waiting.is_finished(), "no slot free, the hot query waits");
+    drop(held);
+    assert_eq!(waiting.await.unwrap().unwrap().rows[0]["n"], 1);
+}
+
 #[test]
 fn running_out_of_memory_is_said_plainly() {
     let e = friendly(QueryError::Rejected(

@@ -202,6 +202,13 @@ pub struct QueryEngine {
     /// of the engine: one per process in the server. Not a process-wide
     /// static, so engines in the same test binary do not take turns (#458).
     cold_turn: Arc<tokio::sync::Semaphore>,
+    /// Hot queries running at once, at most the query threads (#748): a
+    /// board starts some thirty, and beyond the threads more of them at
+    /// once only split the memory pool thinner and add their memory
+    /// outside it (Parquet decoding, results), which took the process over
+    /// 1 GiB at 4 M events. Shared by every copy of the engine, not by
+    /// engines (#458).
+    slots: Arc<tokio::sync::Semaphore>,
     /// Queries stopped at the time limit, shared by every copy (#346).
     timeouts: Arc<std::sync::atomic::AtomicU64>,
     /// Values for the `$name` placeholders of this copy's queries (#310).
@@ -226,6 +233,7 @@ impl QueryEngine {
             identity_scans: Arc::default(),
             identity_gen: Arc::default(),
             cold_turn: Arc::new(tokio::sync::Semaphore::new(1)),
+            slots: Arc::new(tokio::sync::Semaphore::new(host::query_threads())),
             timeouts: Arc::default(),
             params: Arc::default(),
             cold: false,
@@ -592,6 +600,14 @@ impl QueryEngine {
             Some(self.cold_turn.try_acquire().map_err(|_| QueryError::Busy)?)
         } else {
             None
+        };
+        // A hot query waits for a slot before its time limit starts. Each
+        // attempt takes its own, so one run again after the others (D-071)
+        // does not hold one while it waits.
+        let _slot = if self.cold {
+            None
+        } else {
+            self.slots.acquire().await.ok()
         };
         let limit = self.limits.timeout;
         let started = Instant::now();
