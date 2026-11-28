@@ -78,6 +78,8 @@ mod tasks;
 mod unavailable;
 mod variants;
 pub mod verdict;
+/// The board's Visitors block (#709, D-101).
+pub mod visitors;
 /// The backend of a release verdict, ready to show (#623).
 pub mod verdict_backend;
 mod verdict_read;
@@ -549,6 +551,10 @@ pub struct Board {
     /// account created and no anonymous visitor.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lifecycle: Option<lifecycle::Lifecycle>,
+    /// The anonymous traffic of the window (#709, D-101): entry pages and
+    /// channels with their signup rate; none without anonymous sessions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visitors: Option<visitors::Visitors>,
     /// Closed UTC days the board reads that it cannot count (#489, D-070):
     /// their events are gone (cold tier, retention) and their rollups were
     /// not made with the map in force, so they count nobody. Oldest first.

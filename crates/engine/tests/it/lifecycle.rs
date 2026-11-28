@@ -1,5 +1,5 @@
-//! The signup date (#707) and the lifecycle (#708), on small datasets
-//! counted by hand (D-101).
+//! The signup date (#707), the lifecycle (#708) and the Visitors block
+//! (#709), on small datasets counted by hand (D-101).
 
 use chrono::{Duration, Utc};
 use openlens_engine::lifecycle::{By, Lifecycle, lifecycle};
@@ -48,7 +48,7 @@ fn stage(l: &Lifecycle, key: &str) -> Option<i64> {
 /// #707: a customer created a year ago and seen for the first time today
 /// signed up a year ago; a user without `created_at` signed up on their
 /// first `identify`. An internal tool (everyone logged in, no revenue)
-/// has no visitor and no paid stage.
+/// has no visitor and no paid stage, and the board no Visitors block.
 #[tokio::test]
 async fn a_backfilled_user_is_not_a_signup_today_and_an_internal_tool_has_no_visitor_stage() {
     let year_ago = (Utc::now() - Duration::days(365)).to_rfc3339();
@@ -74,6 +74,7 @@ async fn a_backfilled_user_is_not_a_signup_today_and_an_internal_tool_has_no_vis
     assert!(stage(&l, "paid").is_none(), "no revenue: {l:?}");
     assert!(l.total.visitor_rate.is_none());
     let b = board(&q, "p", &f, None).await.unwrap();
+    assert!(b.visitors.is_none(), "no anonymous traffic, no Visitors block");
     assert_eq!(
         b.lifecycle.as_ref().map(|x| &x.total),
         Some(&l.total),
@@ -81,7 +82,7 @@ async fn a_backfilled_user_is_not_a_signup_today_and_an_internal_tool_has_no_vis
     );
 }
 
-/// #708: a landing page and signups. Five anonymous visitors land
+/// #708, #709: a landing page and signups. Five anonymous visitors land
 /// on `/` from search; two of them sign up (their anonymous id is linked
 /// by `identify`), three never do; a third account signs up with no
 /// visit on record. By hand: 3 never-linked visitors, 2 linked accounts,
@@ -125,5 +126,10 @@ async fn a_landing_page_gives_a_visitor_to_account_rate_between_its_bounds() {
     assert!(linked > 0, "the linked accounts landed from search: {by:?}");
 
     let b = board(&q, "p", &f, None).await.unwrap();
+    let v = b.visitors.expect("a landing page shows the Visitors block");
+    let home = v.pages.iter().find(|p| p.value == "/").expect("{v:?}");
+    assert!(home.signed_up > 0 && home.signed_up < home.visitors, "{home:?}");
+    assert!(v.bounces > 0 && v.bounces < v.sessions, "{v:?}");
+    assert!(v.channels.iter().any(|c| c.value == "search" && c.signup_rate() > 0.0));
     assert_eq!(b.lifecycle.map(|x| x.total), Some(l.total));
 }

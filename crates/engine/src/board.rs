@@ -108,7 +108,8 @@ pub async fn board_reusing(
     // and their typed columns (#449), success events a 30-day scan of the
     // declared success events.
     let src = source(map.map(|(m, _)| m));
-    let ident = identified(any_person(q, project).await?);
+    let anyone = any_person(q, project).await?;
+    let ident = identified(anyone);
     // The people blocks read `person_day` for the closed days rolled up
     // with the map in force, the events for the rest (#492, D-040).
     // The sessions block and the releases table do the same with
@@ -296,8 +297,8 @@ pub async fn board_reusing(
          WHERE role IS NOT NULL AND feature IS NOT NULL GROUP BY role, feature"
     );
     let releases_sql = sessions.releases_sql(f)?;
-    // The lifecycle of the window (#708): the same reads as the
-    // `lifecycle` command, so both agree.
+    // The lifecycle and the anonymous traffic of the window (#708, #709):
+    // the same reads as the `lifecycle` command, so both agree.
     let life_reads = crate::lifecycle::Reads {
         src: &src,
         ident,
@@ -314,7 +315,13 @@ pub async fn board_reusing(
         &life_reads,
         crate::lifecycle::By::None,
     );
-
+    let anonymous_traffic = async {
+        if anyone {
+            crate::visitors::visitors(q, project, f, span(30), now, &src).await
+        } else {
+            Ok(None)
+        }
+    };
     // The environments and the stored row count do not depend on who did
     // what: they come from the segments, which are read once (#447), not
     // from a query.
@@ -374,6 +381,7 @@ pub async fn board_reusing(
         known,
         compared,
         life,
+        anonymous_traffic,
     ) = futures::join!(
         q.sql(project, &users_sql),
         board_kept::unless_kept(q, project, &sessions_sql, reuse),
@@ -389,12 +397,14 @@ pub async fn board_reusing(
         q.sql(project, &known_sql),
         compared,
         life,
+        anonymous_traffic,
     );
 
     let mut b = Board {
         filters: Some(f.clone()),
         unavailable_days: unavailable,
         lifecycle: Some(life?).filter(|l| l.note.is_none()),
+        visitors: anonymous_traffic?,
         ..Board::default()
     };
     if let Some(r) = users?.rows.first() {

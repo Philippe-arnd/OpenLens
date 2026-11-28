@@ -107,6 +107,8 @@ Where people are on the way from a first visit to a customer who stays (#708, D-
 
 `lifecycle` (MCP and `openlens-cli lifecycle`, `GET /api/projects/{id}/lifecycle`) returns the same numbers as the board for the same filters, optionally per first-touch channel, role, plan or release (`by`).
 
+**Visitors** (the board's block, shown only when the window has anonymous traffic, #709): per entry page (the first page view of each anonymous session) and per channel (that page view's landing channel), the top 10 by visitors, with sessions, bounce rate and **signup rate** = visitors linked to an account created in the window ÷ visitors (a lower bound). A session is anonymous when it was sent before login: it still counts after its id was linked.
+
 ## Features
 
 A **feature** is declared in the feature map. A **task** is one use of a feature, from its entry (route, `data-feature` element, or an `openlens.feature()` call) to its `success` event. A task with no success within 30 minutes is *abandoned*.
