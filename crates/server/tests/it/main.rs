@@ -29,6 +29,7 @@ mod ingest;
 mod manage;
 mod otlp;
 mod pages;
+mod portfolio;
 mod privacy;
 mod releases;
 mod routes;

@@ -87,7 +87,9 @@ pub use board_cost::{Estimate, estimate};
 pub use board_kept::PeriodBlocks;
 pub use board_window::{BoardWindow, Period};
 pub use churn::{AtRisk, ChurnLine, ChurnReport, churn};
-pub use digest::{Delta, Digest, digest, digest_markdown, release_lines};
+pub use digest::{
+    Delta, Digest, DigestSection, digest, digest_markdown, digests_markdown, release_lines,
+};
 pub use errors::{
     ErrorGroup, LINKED_MAX, LinkedSession, Origin, error_groups, error_groups_of, mark_replays,
 };

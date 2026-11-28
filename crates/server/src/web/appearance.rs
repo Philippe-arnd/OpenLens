@@ -61,6 +61,17 @@ pub(crate) fn current_admin() -> bool {
     ADMIN.try_with(|a| *a).unwrap_or(false)
 }
 
+tokio::task_local! {
+    /// Whether the reader of this request may see two projects or more
+    /// (#717): the sidebar links the portfolio.
+    static PORTFOLIO: bool;
+}
+
+/// For `openlens_ui`: the current request's [`PORTFOLIO`].
+pub(crate) fn current_portfolio() -> bool {
+    PORTFOLIO.try_with(|a| *a).unwrap_or(false)
+}
+
 /// Knows who reads (for the sidebar), and when a response starts a
 /// session, adds the account's display cookies to it.
 pub(crate) async fn display_layer(
@@ -68,8 +79,22 @@ pub(crate) async fn display_layer(
     req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> Response {
-    let admin = auth::viewer(&state, req.headers()).is_some_and(|v| v.admin);
-    let mut r = ADMIN.scope(admin, next.run(req)).await;
+    let viewer = auth::viewer(&state, req.headers());
+    let admin = viewer.as_ref().is_some_and(|v| v.admin);
+    // Pages only (one read of the projects list): the sidebar's portfolio
+    // link, for a reader who may see two projects or more (#717).
+    let page = *req.method() == axum::http::Method::GET && !req.uri().path().starts_with("/api/");
+    let portfolio = page
+        && viewer.as_ref().is_some_and(|v| {
+            state
+                .meta
+                .projects()
+                .map(|ps| ps.iter().filter(|p| v.can_see(&p.id)).count() >= 2)
+                .unwrap_or(false)
+        });
+    let mut r = ADMIN
+        .scope(admin, PORTFOLIO.scope(portfolio, next.run(req)))
+        .await;
     if let Some(user) = session_started(&r).filter(|u| u != auth::OWNER) {
         let meta = state.meta.clone();
         let look = tokio::task::spawn_blocking(move || meta.user_display(&user))

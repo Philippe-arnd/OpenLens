@@ -194,6 +194,18 @@ pub(crate) fn viewer_is_admin() -> bool {
     ADMIN.get().is_some_and(|f| f())
 }
 
+static PORTFOLIO: std::sync::OnceLock<fn() -> bool> = std::sync::OnceLock::new();
+
+/// Where pages learn whether the reader may see two projects or more (the
+/// sidebar then links the portfolio, #717). Set once.
+pub fn set_portfolio_source(source: fn() -> bool) {
+    let _ = PORTFOLIO.set(source);
+}
+
+fn viewer_has_portfolio() -> bool {
+    PORTFOLIO.get().is_some_and(|f| f())
+}
+
 /// The project whose menu the instance pages keep (#403), decided by the
 /// server per request: the last one visited, if the viewer still sees it,
 /// else their only project.
@@ -461,6 +473,13 @@ fn page(
                                     a href={ "/p/" (p.id) (g.tabs[0].0) } title=(g.label) accesskey=(i + 1) aria-current=[(current == Some(g.label)).then_some("page")] {
                                         (icon(g.icon)) span.label { (g.label) } kbd aria-hidden="true" { (i + 1) }
                                     }
+                                }
+                            }
+                        }
+                        @if viewer_has_portfolio() {
+                            nav.side-nav.side-portfolio aria-label="All projects" {
+                                a href="/portfolio" title="Portfolio" aria-current=[(title == "Portfolio").then_some("page")] {
+                                    (icon("layers")) span.label { "Portfolio" }
                                 }
                             }
                         }

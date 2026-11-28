@@ -4,6 +4,11 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **Portfolio** (#717, D-118): for a PM who runs several apps on one OpenLens, `/portfolio` (linked in the sidebar when a person can open two projects or more) shows one row per project they may see: the board's Outcomes in compact form (reach, value, retention, quality, speed), the latest production release and its verdict, goals at risk or off track (count and the worst one), open incidents and the top insight card, linking to that project's board. Projects needing attention come first (a regressed release, goals off track, open incidents), then the busiest. The numbers are each board as last computed: the page never computes a board, and a project whose board is not ready yet says *computing* with how long it took last time. The engine command `portfolio.get`, `GET /api/portfolio` and the MCP tool `portfolio` return the same rows, for the projects the token may see.
+- **One weekly digest across projects** (#717): when two projects or more had users in the last two weeks, the Monday email (with SMTP set) is one email with a section per project, in the portfolio's order, instead of one email per project. `GET /api/digest` and the MCP tool `digest` without `project` return the digest of every project the token may see (one project's digest when it sees one). A project's own digest (`/api/projects/{id}/digest`, the digest page) is unchanged.
+
 ### Changed
 
 - **The npm packages are `@openlens-obs/web` and `@openlens-obs/node`** (the `@openlens` scope was taken on npm). Both are published on release tags from v0.8.0 on, with the release's version; `npm.yml` failed before on every tag, since the package versions stayed at 0.1.0.

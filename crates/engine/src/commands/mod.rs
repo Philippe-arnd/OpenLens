@@ -32,6 +32,7 @@ pub mod goto;
 pub mod in_flight;
 pub mod jobs;
 pub mod maintenance;
+pub mod portfolio;
 pub mod release_notes;
 pub mod releases;
 pub mod routes;
@@ -50,6 +51,9 @@ pub enum Access {
     Public,
     /// Anyone signed in who may see the project (any role).
     Read,
+    /// Anyone signed in, about no one project: the command reads only the
+    /// projects the caller may see ([`Caller::projects`], #717).
+    Signed,
     /// An admin who may see the project, or the bearer token
     /// (`ProjectWrite`).
     Write,
@@ -183,6 +187,8 @@ pub const REGISTRY: &[Spec] = &[
     spec::<jobs::SetAvailability>(),
     // Capacity follows the host (#606).
     spec::<capacity::Get>(),
+    // The portfolio across projects (#717).
+    spec::<portfolio::Get>(),
 ];
 
 /// A 12-character id from `s` (the first bytes of its SHA-256, in hex).
@@ -198,6 +204,20 @@ pub struct Caller {
     /// The viewer's own time zone, when valid; `None` counts in the
     /// project's (D-017).
     pub tz: Option<String>,
+    /// The projects the caller may see; `None`: every project (an admin
+    /// of every project, the admin token). Read by commands about no one
+    /// project ([`Access::Signed`], #717).
+    pub projects: Option<Vec<String>>,
+}
+
+impl Caller {
+    /// May the caller see `project`?
+    #[must_use]
+    pub fn may_see(&self, project: &str) -> bool {
+        self.projects
+            .as_ref()
+            .is_none_or(|p| p.iter().any(|x| x == project))
+    }
 }
 
 /// Why a command did not run.
@@ -283,6 +303,18 @@ pub trait Host: Sync {
     /// OpenLens (#575). None by default, and then no link is written.
     fn public_url(&self) -> Option<String> {
         None
+    }
+    /// The default board of `project` (production, the release window, no
+    /// role or release, in `tz` or else the project's zone) when the host
+    /// keeps it already, and how long it took last time (#717, D-118).
+    /// Never computes it. Nothing is kept by default.
+    fn cached_board(
+        &self,
+        project: &Project,
+        tz: Option<&str>,
+    ) -> impl Future<Output = portfolio::CachedBoard> + Send {
+        let _ = (project, tz);
+        async { portfolio::CachedBoard::default() }
     }
 }
 

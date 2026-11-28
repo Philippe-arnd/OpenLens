@@ -50,6 +50,7 @@ async fn new_job(
     let f: Filters = q.filters(tz).map_err(|e| e.to_string())?;
     let caller = Caller {
         tz: Some(f.tz.clone()),
+        ..Caller::default()
     };
     let estimate = match GetEstimate::run(state, &caller, q.estimate_input(&p.id)).await {
         Ok(e) => e,

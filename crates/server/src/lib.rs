@@ -46,6 +46,7 @@ mod oidc;
 mod openapi;
 mod otlp;
 mod password;
+mod portfolio;
 mod privacy;
 mod releases;
 mod replay;
@@ -135,6 +136,7 @@ pub fn router(state: AppState) -> Router {
     openlens_ui::set_prefs_source(web::current_prefs);
     openlens_ui::set_nav_project_source(web::current_nav_project);
     openlens_ui::set_admin_source(web::current_admin);
+    openlens_ui::set_portfolio_source(web::current_portfolio);
     openlens_ui::set_icon_source(icon::current_has_icon);
     let capture = Router::new()
         .route("/capture", post(capture::capture))
@@ -159,6 +161,7 @@ pub fn router(state: AppState) -> Router {
         .merge(capture)
         .merge(otlp::routes())
         .route("/api/projects/{project}/digest", get(digest::api))
+        .route("/api/digest", get(digest::api_all))
         .route("/api/openapi.json", get(openapi::serve))
         .route("/oidc/start", get(oidc::start))
         .route("/oidc/callback", get(oidc::callback))
@@ -178,6 +181,7 @@ pub fn router(state: AppState) -> Router {
         .merge(status_page::routes())
         .merge(check_ins::routes())
         .merge(capacity::routes())
+        .merge(portfolio::routes())
         .layer(axum::middleware::from_fn(csrf::layer))
         .layer(axum::middleware::from_fn(trusted_headers_layer))
         // Pages, the API and Ask (a few model rounds) get two minutes.

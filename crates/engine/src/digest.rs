@@ -224,3 +224,41 @@ pub fn digest_markdown(project_name: &str, board_url: &str, d: &Digest) -> Strin
     s.push_str(&format!("\nOpen the board: {board_url}\n"));
     s
 }
+
+/// One project's section of the digest across projects (#717): its name,
+/// its board's address, and its digest or why it could not be computed.
+pub struct DigestSection<'a> {
+    /// Project name.
+    pub name: &'a str,
+    /// Its board.
+    pub board_url: &'a str,
+    /// Its digest, or what failed.
+    pub digest: std::result::Result<&'a Digest, String>,
+}
+
+/// The digest across projects as Markdown (#717, D-118): one section per
+/// project, in the order given (the portfolio's: what needs attention
+/// first), each the project's own digest one heading level down.
+pub fn digests_markdown(portfolio_url: &str, sections: &[DigestSection<'_>]) -> String {
+    let mut s = format!("# Your week across {} projects\n", sections.len());
+    for sec in sections {
+        s.push('\n');
+        match &sec.digest {
+            Ok(d) => {
+                for line in digest_markdown(sec.name, sec.board_url, d).lines() {
+                    if line.starts_with('#') {
+                        s.push('#');
+                    }
+                    s.push_str(line);
+                    s.push('\n');
+                }
+            }
+            Err(why) => s.push_str(&format!(
+                "## {}: your week\n\nNot available now: {why}\n\nOpen the board: {}\n",
+                sec.name, sec.board_url
+            )),
+        }
+    }
+    s.push_str(&format!("\nAll projects at once: {portfolio_url}\n"));
+    s
+}

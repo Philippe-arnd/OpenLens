@@ -25,6 +25,8 @@ const TOOL_OF: &[(&str, &str)] = &[
     ("dependencies.list", "routes"),
     ("runtime.list", "runtime"),
     ("capacity.get", "capacity"),
+    // The portfolio across projects (#717).
+    ("portfolio.get", "portfolio"),
     ("tickets.list", "tickets"),
     ("tickets.draft", "create_ticket"),
     ("tickets.file", "create_ticket"),

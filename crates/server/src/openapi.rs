@@ -535,6 +535,18 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
     ),
     (
         "GET",
+        "/api/digest",
+        "read",
+        "The weekly digest of every project the token may see (#717): that project's (`project`, `digest`, `markdown`) when it sees one; with two or more, `projects` (each `project`, `name`, `digest`, `available`) in the portfolio's order and one `markdown` with a section per project.",
+    ),
+    (
+        "GET",
+        "/api/portfolio",
+        "read",
+        "`portfolio.get` (#717): one row per project the token may see, the ones needing attention first (a regressed release, goals off track, open incidents, then activity), with the board's Outcomes, the latest production release and verdict, goals at risk or off track, open incidents and the top insight. Read from each board as last computed: a project whose board is not kept yet has `computing: true` and no numbers.",
+    ),
+    (
+        "GET",
         "/api/projects/{project}/replays",
         "read",
         "Recordings.",

@@ -167,6 +167,10 @@ pub(super) const ROUTES: &[(&str, &str, Access)] = &[
     ("GET", "/s.js", Public),
     ("GET", "/agents.md", Public),
     ("GET", "/api/projects/{project}/digest", Api),
+    // The portfolio and the digest across projects (#717).
+    ("GET", "/api/digest", Api),
+    ("GET", "/api/portfolio", Api),
+    ("GET", "/portfolio", Signed),
     ("GET", "/oidc/start", Public),
     ("GET", "/oidc/callback", Public),
     ("GET", "/api/projects/{project}/replays", Api),

@@ -5,6 +5,8 @@ Start from the summaries and drill down only where something stands out. Every t
 | PM question | Tool | Drill down with |
 | --- | --- | --- |
 | What should we focus on? | `insights`: ranked cards with evidence and next steps, plus paths to value | `sql` |
+| Several apps: where do I act this week? | `portfolio`: one row per project the token may see, the ones needing attention first (a regressed latest production release, goals off track, open incidents, then activity), each with its board's Outcomes, release verdict, goals at risk or off track, open incidents and top insight. Read from each board as last computed: `computing: true` means the board is not ready yet, so no numbers (read it with `board { project }`) | `insights { project }` |
+| The week, for the PM's inbox | `digest { project }`: this week against last week and the top cards; without `project`, every project the token may see, one section each in the `portfolio` order | `kpi_report` |
 | Headline KPIs by role, environment or release | `kpi_report` (optional `role`, `env`, `release`) | `board` (everything) |
 | Split by account, plan, page or feature | `kpi_report` with `by` (`role`, `account`, `plan`, `page`, `feature`) | `sql` |
 | Did the last release move the numbers? | `kpi_report`: `releases` holds the latest two | `kpi_report --release <name>` |

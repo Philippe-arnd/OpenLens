@@ -4,8 +4,14 @@
 //! Email is sent only when `OPENLENS_SMTP_URL` and `OPENLENS_DIGEST_TO` are
 //! set, e.g. `smtps://user:pass@smtp.example.com:465` (or `smtp://…:587`,
 //! STARTTLS) and `pm@example.com,ceo@example.com`. `OPENLENS_DIGEST_FROM`
-//! defaults to the first recipient. One email per project with events, on
-//! Mondays from 07:00 UTC, at most once a week.
+//! defaults to the first recipient. On Mondays from 07:00 UTC, at most
+//! once a week: one email when one project had users in the last two
+//! weeks, and one email with a section per project, in the portfolio's
+//! order, when several did (#717, D-118).
+//!
+//! `GET /api/digest` is the digest of every project the caller may see:
+//! one project's digest when they see one, a section per project when
+//! they see several.
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -46,6 +52,101 @@ pub(crate) async fn compute(
     let md =
         openlens_engine::digest_markdown(&project.name, &format!("{base}/p/{}", project.id), &d);
     Ok((d, md))
+}
+
+/// The caller's projects in the portfolio's order (#717): what needs
+/// attention first, then activity.
+pub(crate) async fn ordered(
+    state: &AppState,
+    caller: &Caller,
+) -> Result<Vec<openlens_meta::Project>, String> {
+    use openlens_engine::commands::portfolio::{Get, GetInput};
+    let rows = Get::run(state, caller, GetInput::default())
+        .await
+        .map_err(|e| e.to_string())?;
+    let meta = state.meta.clone();
+    let all = tokio::task::spawn_blocking(move || meta.projects())
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+    Ok(rows
+        .projects
+        .iter()
+        .filter_map(|r| all.iter().find(|p| p.id == r.project).cloned())
+        .collect())
+}
+
+/// The digest of several projects (#717), one section each in the order
+/// given; a project whose digest fails says why in its section.
+pub(crate) async fn compute_many(
+    state: &AppState,
+    projects: &[openlens_meta::Project],
+    base: &str,
+) -> (Vec<(String, openlens_engine::Digest)>, String) {
+    let mut done = Vec::new();
+    for p in projects {
+        let d = compute(state, p, base).await.map(|(d, _)| d);
+        done.push((p, d));
+    }
+    let urls: Vec<String> = done
+        .iter()
+        .map(|(p, _)| format!("{base}/p/{}", p.id))
+        .collect();
+    let sections: Vec<openlens_engine::DigestSection<'_>> = done
+        .iter()
+        .zip(&urls)
+        .map(|((p, d), url)| openlens_engine::DigestSection {
+            name: &p.name,
+            board_url: url,
+            digest: d.as_ref().map_err(ToString::to_string),
+        })
+        .collect();
+    let md = openlens_engine::digests_markdown(&format!("{base}/portfolio"), &sections);
+    let digests = done
+        .into_iter()
+        .filter_map(|(p, d)| Some((p.id.clone(), d.ok()?)))
+        .collect();
+    (digests, md)
+}
+
+/// `GET /api/digest` (#717): the digest of every project the caller may
+/// see, one section per project in the portfolio's order; the project's
+/// own digest when they see only one.
+pub(crate) async fn api_all(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if !auth::has_bearer(&state, &headers) {
+        return crate::apierr::json(StatusCode::UNAUTHORIZED, "admin bearer token required");
+    }
+    let caller = crate::commands::caller(&state, &headers);
+    let projects = match ordered(&state, &caller).await {
+        Ok(p) => p,
+        Err(e) => return crate::apierr::json(StatusCode::SERVICE_UNAVAILABLE, e),
+    };
+    let base = crate::public_url(&headers);
+    match projects.as_slice() {
+        [] => crate::apierr::json(StatusCode::NOT_FOUND, "no project"),
+        [p] => match compute(&state, p, &base).await {
+            Ok((d, md)) => {
+                Json(json!({ "project": p.id, "digest": d, "markdown": md })).into_response()
+            }
+            Err(e) => crate::apierr::json(StatusCode::BAD_REQUEST, e.to_string()),
+        },
+        many => {
+            let (digests, md) = compute_many(&state, many, &base).await;
+            let sections: Vec<serde_json::Value> = many
+                .iter()
+                .map(|p| {
+                    let d = digests.iter().find(|(id, _)| *id == p.id).map(|(_, d)| d);
+                    json!({
+                        "project": p.id,
+                        "name": p.name,
+                        "digest": d,
+                        "available": d.is_some(),
+                    })
+                })
+                .collect();
+            Json(json!({ "projects": sections, "markdown": md })).into_response()
+        }
+    }
 }
 
 /// `GET /api/projects/{id}/digest`.
@@ -116,19 +217,58 @@ pub(crate) async fn maybe_send(state: &AppState) {
     let base = std::env::var("OPENLENS_PUBLIC_URL")
         .or_else(|_| std::env::var("SERVICE_URL_OPENLENS"))
         .unwrap_or_else(|_| "http://localhost:8686".into());
-    let mut sent = 0;
+    let base = base.trim_end_matches('/');
+    // The recipients are the install's (`OPENLENS_DIGEST_TO`), who got
+    // every project's digest before: the portfolio of every project.
+    let projects = ordered(state, &Caller::default()).await.unwrap_or(projects);
+    let mut active = Vec::new();
     for p in projects {
-        let Ok((d, md)) = compute(state, &p, base.trim_end_matches('/')).await else {
+        let Ok((d, md)) = compute(state, &p, base).await else {
             continue;
         };
         if d.users.now == 0 && d.users.before == 0 {
             continue;
         }
-        let subject = format!("{}: your week ({} active users)", p.name, d.users.now);
-        if let Err(err) = send(&mail, &subject, &md).await {
-            tracing::warn!(project = %p.id, %err, "digest email failed");
-        } else {
-            sent += 1;
+        active.push((p, d, md));
+    }
+    let mut sent = 0;
+    match active.as_slice() {
+        [] => {}
+        [(p, d, md)] => {
+            let subject = format!("{}: your week ({} active users)", p.name, d.users.now);
+            if let Err(err) = send(&mail, &subject, md).await {
+                tracing::warn!(project = %p.id, %err, "digest email failed");
+            } else {
+                sent += 1;
+            }
+        }
+        many => {
+            // One email, a section per project, in the portfolio's order
+            // (#717, D-118).
+            let urls: Vec<String> = many
+                .iter()
+                .map(|(p, _, _)| format!("{base}/p/{}", p.id))
+                .collect();
+            let sections: Vec<openlens_engine::DigestSection<'_>> = many
+                .iter()
+                .zip(&urls)
+                .map(|((p, d, _), url)| openlens_engine::DigestSection {
+                    name: &p.name,
+                    board_url: url,
+                    digest: Ok(d),
+                })
+                .collect();
+            let md = openlens_engine::digests_markdown(&format!("{base}/portfolio"), &sections);
+            let users: i64 = many.iter().map(|(_, d, _)| d.users.now).sum();
+            let subject = format!(
+                "Your week across {} projects ({users} active users)",
+                many.len()
+            );
+            if let Err(err) = send(&mail, &subject, &md).await {
+                tracing::warn!(%err, "digest email failed");
+            } else {
+                sent += 1;
+            }
         }
     }
     let meta = state.meta.clone();

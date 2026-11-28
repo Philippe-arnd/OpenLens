@@ -120,6 +120,11 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
             input_schema: json!({"type":"object","properties":{}}),
         },
         ToolSpec {
+            name: "portfolio",
+            description: "Every project the token may see on one page (#717), the ones that need attention first: a regressed latest production release, then goals off track, then open incidents, then activity (reach). Per project: `outcomes` (the board's Outcomes tiles: `reach` users, `value` tasks per session, `retention` churn rate, `quality` share of sessions with an error, `speed_ms` LCP p75), `latest_release` (release, verdict, first reason), `goals_at_risk`, `goals_off_track` and `worst_goal` (last hourly snapshot), `open_incidents`, `top_insight` (the board's top card title) and `board_url`. Read from each project's board as last computed, never computed for this call: a project whose board is not kept yet has `computing: true`, no numbers, and `last_compute_secs` (how long it took last time) when known; `board_age_secs` says how old the numbers are.",
+            input_schema: json!({"type":"object","properties":{}}),
+        },
+        ToolSpec {
             name: "delete_goal",
             description: "Remove a goal (its id from `goals`). Objectives that used it as a key result keep the others.",
             input_schema: json!({"type":"object","properties":with(json!({"goal":{"type":"string"}})),"required":["goal"]}),
@@ -405,6 +410,7 @@ pub(crate) fn call(c: &Client, name: &str, args: &Value) -> Option<Result<Value,
         "routes" => routes(c, args),
         "runtime" => get(c, &query(args, "/runtime", &["env"])),
         "capacity" => get(c, "/api/capacity"),
+        "portfolio" => get(c, "/api/portfolio"),
         "delete_goal" => required(args, "goal").and_then(|g| {
             let path = at(args, &format!("/goals/{}", enc(&g)));
             send(c, "DELETE", &path, None)

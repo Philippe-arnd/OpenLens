@@ -28,7 +28,13 @@ pub(crate) const PROJECTS: &str = "x-openlens-scope-projects";
 /// projects may still make; every other install-wide call needs a token
 /// for every project (review of v0.3.0).
 fn open_to_limited(method: &Method, path: &str) -> bool {
-    (*method == Method::GET && (path == "/api/projects" || path == "/api/openapi.json"))
+    // The portfolio and the digest across projects (#717) read only the
+    // token's projects.
+    (*method == Method::GET
+        && matches!(
+            path,
+            "/api/projects" | "/api/openapi.json" | "/api/portfolio" | "/api/digest"
+        ))
         || (*method == Method::POST && path == "/api/feature-map/validate")
 }
 
