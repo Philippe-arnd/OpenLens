@@ -76,7 +76,13 @@ pub fn two_means(m1: f64, s1: f64, n1: i64, m2: f64, s2: f64, n2: i64) -> Option
 pub fn fdr_cutoff(ps: &[f64], q: f64) -> Option<f64> {
     let mut sorted: Vec<f64> = ps
         .iter()
-        .map(|p| if p.is_finite() { p.clamp(0.0, 1.0) } else { 1.0 })
+        .map(|p| {
+            if p.is_finite() {
+                p.clamp(0.0, 1.0)
+            } else {
+                1.0
+            }
+        })
         .collect();
     sorted.sort_by(f64::total_cmp);
     let m = sorted.len() as f64;
