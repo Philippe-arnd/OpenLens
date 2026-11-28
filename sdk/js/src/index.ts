@@ -285,6 +285,13 @@ export function feature(key: string, props?: Props): void {
   track("$feature", { ...props, $feature: key });
 }
 
+/** What the user says (#718): a free text (1,000 characters kept), optionally about a feature
+ * key of the map and with a rating from 1 to 5. Never sampled; sent at once. */
+export function feedback(text: string, opts: { feature?: string; rating?: number } = {}): void {
+  track("$feedback", { $text: String(text).slice(0, 1000), $about: opts.feature, $rating: opts.rating });
+  flush();
+}
+
 /** Fetch the flags that are on for the current user. */
 function loadFlags(): void {
   if (!cfg || !origFetch) return;
@@ -809,4 +816,4 @@ export function shutdown(): void {
   flush(true);
 }
 
-export default { init, identify, track, feature, isEnabled, variant, reset, flush, setConsent, shutdown };
+export default { init, identify, track, feature, feedback, isEnabled, variant, reset, flush, setConsent, shutdown };

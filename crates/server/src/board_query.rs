@@ -124,6 +124,7 @@ pub(crate) async fn unconfirmed(
     }
     let caller = Caller {
         tz: Some(f.tz.clone()),
+        ..Caller::default()
     };
     match GetEstimate::run(state, &caller, q.estimate_input(project)).await {
         Ok(e) => Ok(e.filter(|e| e.confirm)),
@@ -177,7 +178,10 @@ pub(crate) async fn api_estimate(
     if matches!(f.window, Window::Fixed) {
         return axum::Json(serde_json::Value::Null).into_response();
     }
-    let caller = Caller { tz: Some(f.tz) };
+    let caller = Caller {
+        tz: Some(f.tz),
+        ..Caller::default()
+    };
     match GetEstimate::run(&state, &caller, q.estimate_input(&p.id)).await {
         Ok(e) => axum::Json(e).into_response(),
         Err(openlens_engine::commands::Error::Invalid(m)) => {

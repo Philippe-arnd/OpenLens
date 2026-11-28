@@ -103,6 +103,22 @@ A **feature** is declared in the feature map. A **task** is one use of a feature
 | **Task completion rate** | Completed tasks divided by started tasks. For abandoned tasks, the last step reached is recorded. |
 | **Frequency** | Completed tasks per adopting user per week. |
 
+## Accounts
+
+Shown only when the app sends `account` (`identify(id, { account })`): People › Audience (section *Accounts*), `GET /api/projects/{id}/accounts`, `openlens-cli accounts` and the MCP `accounts` tool (D-117). For an internal tool an account is usually a team or a department; the definitions are the same. Production by default; the team's own users (`internal: true`) are left out.
+
+| KPI | Definition |
+| --- | --- |
+| **Known users** | People identified with the account (its last `account` sent), or people seen with it in the last 60 days when that is more. |
+| **Active users** | Known users with an interaction (a page view, click, form, feature use, survey answer or app event) in the last 30 days; **active share** = active ÷ known users. The **previous share** is the same over the 30 days before. |
+| **Weekly retention** | Of the account's users active 8 to 14 days ago, the share active again in the last 7 days (none when nobody was). Rolling windows: no time zone. |
+| **Churned users** | Users active in the 30 days before and not in the last 30; their share is over known users. |
+| **Plan** | The plan most of the account's known users have now (ties: the first by name). |
+| **State** | **inactive**: no active user for 14 days. Otherwise **at risk** when the active share fell by a third or more against the 30 days before, or churned users are 25 % or more of its users. Otherwise **healthy**. |
+| **Small accounts** | Accounts with fewer than 3 known users are not listed by name: they are counted together (accounts, users, active users), for privacy and because a share of 1 or 2 people is noise. |
+
+Ranking: at risk first (the largest drop of the active share first), then inactive (the most users first), then healthy (the lowest active share first).
+
 ## Delivery
 
 How a project ships, per environment, over a period (the last 90 days by default, 1 to 90 on request; D-068). Shown on the *Releases* page, and returned by `GET /api/projects/{id}/delivery` and the MCP `delivery` tool. A **change** is a succeeded or failed deploy from the deploy hook (D-053) when the environment has one in the period; otherwise a release that reached live (95 % of a day's users, D-049) or was rolled back, shipped on its first day with the majority of the users.

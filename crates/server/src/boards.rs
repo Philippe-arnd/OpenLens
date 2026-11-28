@@ -336,6 +336,40 @@ pub(crate) fn ready(
     }
 }
 
+/// The default board of `p` (as `GET /p/{id}` asks for it) when the
+/// cache keeps it, whatever its age, with that age and the last compute
+/// time (#717, D-118): read in the reader's zone first (the board page's
+/// key), else the project's (the board computed ahead). Never computes,
+/// and does not count as asking for the board ([`WATCHED`]): the
+/// portfolio reads boards, it does not keep them warm.
+pub(crate) async fn kept_default(
+    state: &AppState,
+    p: &openlens_meta::Project,
+    tz: Option<&str>,
+) -> openlens_engine::commands::portfolio::CachedBoard {
+    let map = crate::load_map(state, &p.id).await;
+    let m = map.as_ref().map(|(m, v)| (m, *v));
+    let zones = tz
+        .filter(|t| *t != p.timezone && t.parse::<chrono_tz::Tz>().is_ok())
+        .into_iter()
+        .chain([p.timezone.as_str()]);
+    let mut took = None;
+    for zone in zones {
+        let Ok(f) = crate::board_query::BoardQuery::default().filters(zone) else {
+            continue;
+        };
+        let key = key_of(&p.id, &f, m);
+        if let Some(e) = state.boards.get(&key) {
+            return openlens_engine::commands::portfolio::CachedBoard {
+                board: Some((e.board.clone(), e.at.elapsed())),
+                took: state.boards.took(&key),
+            };
+        }
+        took = took.or_else(|| state.boards.took(&key));
+    }
+    openlens_engine::commands::portfolio::CachedBoard { board: None, took }
+}
+
 /// Whether the board for these filters can be served from the cache now,
 /// without computing.
 pub(crate) fn warm(

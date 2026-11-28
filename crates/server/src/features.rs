@@ -229,6 +229,7 @@ pub(crate) struct FeatureQuery {
 pub(crate) async fn feature_or_download(
     _: crate::access::Session,
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path((id, key)): Path<(String, String)>,
     Query(q): Query<FeatureQuery>,
 ) -> Response {
@@ -296,9 +297,18 @@ pub(crate) async fn feature_or_download(
             None
         }
     };
-    let (ctx, paths) = tokio::join!(
+    // What its users said (#718), on the Overview tab: texts for admins.
+    let said = async {
+        if tab == "overview" {
+            crate::feedback::of_feature(&state, &headers, &p.id, &current, &f.environment).await
+        } else {
+            None
+        }
+    };
+    let (ctx, paths, said) = tokio::join!(
         openlens_engine::feature_context(&state.query, &p.id, &m, &history, &f, &current),
-        paths
+        paths,
+        said
     );
     let ctx = match ctx {
         Ok(Some(c)) => {
@@ -368,6 +378,7 @@ pub(crate) async fn feature_or_download(
             prev: near(at.checked_sub(1)),
             next: near(Some(at + 1)),
             paths: paths.as_ref(),
+            feedback: said.as_ref(),
         }),
     )
 }

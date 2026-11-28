@@ -250,6 +250,22 @@ impl Meta {
         })
     }
 
+    /// Known users per account and plan (#719): `(account, plan, users)`,
+    /// people with no account and the team's own (`internal`) left out.
+    pub fn account_plans(&self, project: &str) -> Result<Vec<(String, Option<String>, i64)>> {
+        self.read(|c| {
+            let mut st = c.prepare(
+                "SELECT p.account, p.plan, count(*) FROM persons p
+                 LEFT JOIN person_ids i ON i.project = p.project AND i.person = p.distinct_id
+                 WHERE p.project = ?1 AND p.account IS NOT NULL AND p.account <> ''
+                   AND coalesce(i.internal, 0) = 0
+                 GROUP BY p.account, p.plan",
+            )?;
+            let rows = st.query_map(params![project], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+            Ok(rows.collect::<rusqlite::Result<_>>()?)
+        })
+    }
+
     /// Role history of a person, oldest first: `(role, since)`.
     pub fn role_history(&self, project: &str, distinct_id: &str) -> Result<Vec<(String, String)>> {
         self.read(|c| {

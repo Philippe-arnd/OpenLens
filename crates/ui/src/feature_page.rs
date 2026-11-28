@@ -28,6 +28,9 @@ pub struct FeaturePage<'a> {
     /// Its funnel and paths to success, on the Overview tab (#620); `None`
     /// on the other tabs, or when they could not be computed.
     pub paths: Option<&'a openlens_engine::FeaturePaths>,
+    /// What its users said, last 30 days (#718): counts for everyone, the
+    /// texts for admins; `None` on the other tabs or when unreadable.
+    pub feedback: Option<&'a openlens_engine::feedback::FeedbackReport>,
 }
 
 fn trend(now: i64, before: i64) -> String {
@@ -258,6 +261,7 @@ pub fn feature_page(v: &FeaturePage<'_>) -> Markup {
                     }
                 }
                 (paths(f, v.paths))
+                @if let Some(x) = v.feedback.filter(|x| x.total > 0) { (feedback(v.p.id, &v.filters.tz, x)) }
                 @if !v.ctx.relations.is_empty() {
                     (relations(v.p.id, &v.ctx.relations))
                 }
@@ -274,6 +278,43 @@ pub fn feature_page(v: &FeaturePage<'_>) -> Markup {
             }
         },
     )
+}
+
+/// What its users said (#718): the feedbacks per rating, then the latest
+/// texts with their rating and date for admins (and who sent them); a
+/// viewer sees the counts only.
+fn feedback(pid: &str, tz: &str, x: &openlens_engine::feedback::FeedbackReport) -> Markup {
+    let most = x.by_rating.iter().map(|r| r.1).max().unwrap_or(0).max(1) as f64;
+    html! {
+        section.card.wide aria-labelledby="said-h" {
+            h2 id="said-h" { (icon("idea")) "What users say" " " span.count { (compact(x.total)) } }
+            p.muted.small {
+                (compact(x.total)) " feedback in the last " (x.days) " days"
+                @if let Some(m) = x.mean_rating { ", rated " (format!("{m:.1}")) " out of 5 on average" }
+                @if x.unrated > 0 { ", " (compact(x.unrated)) " without a rating" }
+                "."
+            }
+            table.share-bars aria-label="Feedback per rating" { tbody { @for (r, n) in x.by_rating.iter().rev() {
+                tr { th scope="row" { (r) " / 5" } td.bar { (crate::board::barcell(*n as f64 / most)) } td.num.muted { (compact(*n)) } }
+            } } }
+            @if x.texts {
+                @if !x.latest.is_empty() {
+                    table.plain {
+                        thead { tr { th { "Sent" } th { "Rating" } th { "What they wrote" } th { "User" } } }
+                        tbody { @for i in &x.latest {
+                            tr { td.mono { (local_time(&i.at, tz, false)) }
+                                 td.num { @match i.rating { Some(r) => { (r) " / 5" }, None => span.muted { "—" } } }
+                                 td { @if i.text.is_empty() { span.muted { "No text" } } @else { (i.text) } }
+                                 td.mono { a href={ "/p/" (pid) "/people/" (url_enc(&i.distinct_id)) } { (i.distinct_id) } } }
+                        } }
+                    }
+                    p.muted.small { "The latest " (x.latest.len()) ". Texts are removed after 90 days; the rating stays." }
+                }
+            } @else {
+                p.muted.small { "Only admins read what users wrote." }
+            }
+        }
+    }
 }
 
 /// Its funnel and the paths to its success (#620, on the board until
@@ -368,6 +409,7 @@ mod tests {
             prev: None,
             next: None,
             paths: None,
+            feedback: None,
         })
         .into_string();
         assert!(!crate::tests::has_iso_time(&html), "{html}");
@@ -430,6 +472,7 @@ mod tests {
                 prev: None,
                 next: None,
                 paths,
+                feedback: None,
             })
             .into_string()
         };

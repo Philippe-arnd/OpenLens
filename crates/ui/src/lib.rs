@@ -36,6 +36,7 @@ mod live_screens;
 mod maintenance;
 mod manage;
 mod people;
+mod portfolio;
 mod profile;
 mod project_settings;
 mod release_notes;
@@ -77,13 +78,16 @@ pub use maintenance::{MaintenanceRow, MaintenanceView, maintenance_card};
 pub use manage::*;
 use openlens_engine::{Board, EventRow, Filters};
 pub use people::*;
+pub use portfolio::portfolio;
 pub use profile::*;
 pub use project_settings::*;
 pub use releases::*;
 pub use routes_page::routes_page;
 pub use settings::*;
 pub(crate) use shell::{Crumbs, NAV, layout, layout_in, layout_with};
-pub use shell::{NavProject, set_admin_source, set_icon_source, set_nav_project_source};
+pub use shell::{
+    NavProject, set_admin_source, set_icon_source, set_nav_project_source, set_portfolio_source,
+};
 pub use slo::{AvailabilityView, availability_card};
 pub use status_page::{
     StatusComponentRow, StatusPageCard, state_words, status_page, status_page_card,

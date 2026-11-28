@@ -108,14 +108,32 @@ impl Host for AppState {
     fn public_url(&self) -> Option<String> {
         crate::fixed_public_url()
     }
+
+    async fn cached_board(
+        &self,
+        project: &Project,
+        tz: Option<&str>,
+    ) -> openlens_engine::commands::portfolio::CachedBoard {
+        crate::boards::kept_default(self, project, tz).await
+    }
 }
 
 /// The caller of a command made from a dashboard request: the viewer's
-/// own time zone when it is valid.
+/// own time zone when it is valid, whether they may read personal text
+/// (admins, #718), and the projects they may see (a
+/// signed-in viewer's, else a project-limited API token's; `None` for
+/// the admin token and admins of every project).
 pub(crate) fn caller(state: &AppState, headers: &axum::http::HeaderMap) -> Caller {
+    let viewer = crate::auth::viewer(state, headers);
+    let projects = match &viewer {
+        Some(v) => v.projects.clone(),
+        None => crate::scopes::limited_to(state, headers),
+    };
     Caller {
-        tz: crate::auth::viewer(state, headers)
+        detail: viewer.as_ref().is_some_and(|v| v.admin),
+        tz: viewer
             .and_then(|v| v.tz)
             .filter(|t| t.parse::<chrono_tz::Tz>().is_ok()),
+        projects,
     }
 }

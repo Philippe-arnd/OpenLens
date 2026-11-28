@@ -27,6 +27,7 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Counted with | On a feature's releases: the map version in force when the release came out |
 | Production right now | The status strip at the top of the board: the app, the latest release's verdict, open incidents and the setup left, each in a word |
 | Outcomes | On the board: one tile per question (Reach, Value, Retention, Quality, Speed, and Income when there is revenue), each with what it compares with |
+| Portfolio | `/portfolio` (linked in the sidebar for a person who can open two projects or more) and `portfolio`: one row per project with its Outcomes, latest release verdict, goals at risk, open incidents and top insight, the ones needing attention first; the weekly digest across projects follows its order |
 | Period picker | On the board: the form that picks a past release or a date range for the period blocks |
 | Board job | A long period of the board computed in the background after *Run it*: its own page, progress and Cancel, kept an hour for whoever started it |
 | Features (board) | One row per feature: adoption, users, completion, uses per user, a mini bar per role and its signals; the unused features too (#618) |
@@ -44,3 +45,5 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Status page | The public, read-only page of a project at `/status/<slug>`: its state, components, 90 daily bars, announcements and planned maintenance |
 | Component | A line of the status page: production or a monitored environment, under a public name |
 | Job check-ins | On Uptime: cron and background jobs that report each run; OpenLens learns how often they run and alerts when one is missed, fails or gets slower |
+| What users say | On a feature's page and in `feedback`: the `$feedback` users send (a text, the feature it is about, a rating 1 to 5), counted per rating, the texts for admins; "N feedback this week" on the feature's insight cards |
+| Accounts | On People › Audience and in `accounts`, when the app sends `account`: each account's known and active users, weekly return, churned users, plan and state (healthy, at risk, inactive), at risk first; accounts under 3 users counted together as small accounts. For an internal tool, an account reads as a team |

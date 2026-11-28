@@ -41,6 +41,32 @@ pub(super) fn ticket(pid: &str, c: &Insight) -> String {
 
 /// The pages an insight points at, besides its ticket: (href, label).
 fn links(pid: &str, f: &Filters, b: &Board, c: &Insight) -> Vec<(String, String)> {
+    let mut out = kind_links(pid, f, b, c);
+    // What its users said this week (#718), when a feature card has any.
+    let key = c
+        .subject
+        .split_once(':')
+        .map_or(c.subject.as_str(), |(k, _)| k);
+    let about_feature = !matches!(
+        c.kind,
+        "role_blind_spot" | "release_regression" | "flag_regression" | "flag_win" | "slow_pages"
+    );
+    if let Some((_, n)) = b
+        .feedback_week
+        .iter()
+        .find(|(k, n)| about_feature && k == key && *n > 0)
+    {
+        let page = detail_url(pid, &format!("/features/{}", url_enc(key)), f);
+        out.push((
+            format!("{page}#said-h"),
+            format!("{} feedback this week", compact(*n)),
+        ));
+    }
+    out
+}
+
+/// The links of an insight's kind.
+fn kind_links(pid: &str, f: &Filters, b: &Board, c: &Insight) -> Vec<(String, String)> {
     let s = &c.subject;
     match c.kind {
         "release_regression" => {

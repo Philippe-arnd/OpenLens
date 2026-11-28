@@ -251,6 +251,18 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "Outgoing dependencies of one environment (`env`, production by default) over `days` (1 to 90, default 7), from `http.client.request.duration` (the Node SDK's `captureOutgoing()` or OTLP): per external host (`server.address`, never a path), calls, failed calls (5xx or no response) and their share, calls without a response, p95 in ms (upper bound of the duration histogram), the largest duration, and how the host moved from the release before to the latest one (fails more, slower). Shown, never judged: a dependency never changes a release verdict. The hosts that fail more come first, then those that got slower, each by the largest change, then the most called.",
     ),
     (
+        "GET",
+        "/api/projects/{project}/accounts",
+        "read",
+        "Account health when the app sends `account`, over the last 30 days in one environment (`env`, production by default): per account its known users, active users and their share (and the share over the 30 days before), the weekly return of its users, churned users, its plan (the one most of its users have) and its state (`healthy`, `at_risk`: the active share fell by a third or more or 25% of its users churned, `inactive`: no active user for 14 days). At risk first, then inactive, then healthy; `state` keeps one state, `limit` (1 to 500, default 50) caps the list. Accounts with fewer than 3 known users are only counted, together, under `small`.",
+    ),
+    (
+        "GET",
+        "/api/projects/{project}/feedback",
+        "read",
+        "What users said (`$feedback`) over `days` (1 to 90, default 30) in one environment (`env`, production by default), for one `feature` key or all: the count, feedbacks per rating 1 to 5, without a rating, the mean rating, per feature, and the latest texts (newest first, `limit` 1 to 200, default 20) with their rating, date, feature and who sent them. Texts are removed after 90 days; the ratings stay.",
+    ),
+    (
         "POST",
         "/api/projects/{project}/deploy-hook",
         "write",
@@ -532,6 +544,18 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "/api/projects/{project}/digest",
         "read",
         "The weekly digest.",
+    ),
+    (
+        "GET",
+        "/api/digest",
+        "read",
+        "The weekly digest of every project the token may see (#717): that project's (`project`, `digest`, `markdown`) when it sees one; with two or more, `projects` (each `project`, `name`, `digest`, `available`) in the portfolio's order and one `markdown` with a section per project.",
+    ),
+    (
+        "GET",
+        "/api/portfolio",
+        "read",
+        "`portfolio.get` (#717): one row per project the token may see, the ones needing attention first (a regressed release, goals off track, open incidents, then activity), with the board's Outcomes, the latest production release and verdict, goals at risk or off track, open incidents and the top insight. Read from each board as last computed: a project whose board is not kept yet has `computing: true` and no numbers.",
     ),
     (
         "GET",

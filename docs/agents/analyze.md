@@ -5,6 +5,8 @@ Start from the summaries and drill down only where something stands out. Every t
 | PM question | Tool | Drill down with |
 | --- | --- | --- |
 | What should we focus on? | `insights`: ranked cards with evidence and next steps, plus paths to value | `sql` |
+| Several apps: where do I act this week? | `portfolio`: one row per project the token may see, the ones needing attention first (a regressed latest production release, goals off track, open incidents, then activity), each with its board's Outcomes, release verdict, goals at risk or off track, open incidents and top insight. Read from each board as last computed: `computing: true` means the board is not ready yet, so no numbers (read it with `board { project }`) | `insights { project }` |
+| The week, for the PM's inbox | `digest { project }`: this week against last week and the top cards; without `project`, every project the token may see, one section each in the `portfolio` order | `kpi_report` |
 | Headline KPIs by role, environment or release | `kpi_report` (optional `role`, `env`, `release`) | `board` (everything) |
 | Split by account, plan, page or feature | `kpi_report` with `by` (`role`, `account`, `plan`, `page`, `feature`) | `sql` |
 | Did the last release move the numbers? | `kpi_report`: `releases` holds the latest two | `kpi_report --release <name>` |
@@ -31,6 +33,8 @@ Start from the summaries and drill down only where something stands out. Every t
 | Everything about one feature | `feature_context { key }`: definition, findings, users and success by role, top pages, ladder, area peers, features used with it, use per release with the map version in force | `sql` |
 | Which features go together? | `feature_relations { feature? }`: lift, which comes first, leads to value (30 days of sessions, no cap) | `feature_context { key }` |
 | Who leaves, and who is about to? | `churn`: churn rate, survival, where leavers were last, who is at risk now, and the win-back flags already made | `winback_flag { holdout? }`, then `flag_update { key, enabled: true }` |
+| What do users say about a feature? | `feedback { feature?, days? }`: feedbacks per rating and per feature, the mean rating and the latest texts with rating, date and who sent them (90 days at most: texts are removed after that, the ratings stay) | `feature_context { key }`, `user_timeline` of the sender |
+| Which customer accounts are slipping away? | `accounts { state?, limit? }` (when the app sends `account`): per account its users, active share now and over the 30 days before, weekly return, churned users, plan and state (`at_risk`, `inactive`, `healthy`), at risk first; accounts under 3 users are only counted, under `small`. For an internal tool, accounts are teams | `kpi_report` with `by: account`, `user_timeline` of one of its users |
 | Where do users come from? | `acquisition { by?, touch? }`: users, value reached, returning and churned per channel, source, campaign or referrer | `user_timeline` of a user |
 | Where do people give up on a form? | `forms`: starts, submits, the field they stop at | the abandoned session's replay |
 | How do sessions move between features? | `flows { from?, to? }` | `feature_context { key }` |

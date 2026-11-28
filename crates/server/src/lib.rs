@@ -4,6 +4,7 @@
 //! Layer: L5 (see `docs/architecture.md`).
 
 mod access;
+mod accounts;
 mod alerts;
 mod allowlist;
 mod announcements;
@@ -32,6 +33,7 @@ mod digest;
 mod environments;
 mod explore;
 mod features;
+mod feedback;
 mod flags;
 mod goals;
 mod hooks;
@@ -46,6 +48,7 @@ mod oidc;
 mod openapi;
 mod otlp;
 mod password;
+mod portfolio;
 mod privacy;
 mod releases;
 mod replay;
@@ -60,6 +63,7 @@ mod share;
 mod slo;
 mod status_page;
 mod storage;
+mod stored_urls;
 mod surveys;
 mod tickets;
 mod timeline;
@@ -135,6 +139,7 @@ pub fn router(state: AppState) -> Router {
     openlens_ui::set_prefs_source(web::current_prefs);
     openlens_ui::set_nav_project_source(web::current_nav_project);
     openlens_ui::set_admin_source(web::current_admin);
+    openlens_ui::set_portfolio_source(web::current_portfolio);
     openlens_ui::set_icon_source(icon::current_has_icon);
     let capture = Router::new()
         .route("/capture", post(capture::capture))
@@ -159,6 +164,7 @@ pub fn router(state: AppState) -> Router {
         .merge(capture)
         .merge(otlp::routes())
         .route("/api/projects/{project}/digest", get(digest::api))
+        .route("/api/digest", get(digest::api_all))
         .route("/api/openapi.json", get(openapi::serve))
         .route("/oidc/start", get(oidc::start))
         .route("/oidc/callback", get(oidc::callback))
@@ -178,6 +184,9 @@ pub fn router(state: AppState) -> Router {
         .merge(status_page::routes())
         .merge(check_ins::routes())
         .merge(capacity::routes())
+        .merge(portfolio::routes())
+        .merge(feedback::routes())
+        .merge(accounts::routes())
         .layer(axum::middleware::from_fn(csrf::layer))
         .layer(axum::middleware::from_fn(trusted_headers_layer))
         // Pages, the API and Ask (a few model rounds) get two minutes.
@@ -510,7 +519,7 @@ fn compact(state: &AppState) -> Result<(), String> {
     capacity::refresh(state);
     for p in state.meta.projects().map_err(|e| e.to_string())? {
         let now = chrono::Utc::now();
-        clean_stored_urls(state, &p.id);
+        stored_urls::clean(state, &p.id);
         // Compaction, erasure and retention below rewrite files.
         state.boards.bump(&p.id);
         match openlens_storage::compact_days(&state.data_dir, &p.id, now) {
@@ -548,6 +557,7 @@ fn compact(state: &AppState) -> Result<(), String> {
             }
             Err(err) => tracing::warn!(project = %p.id, %err, "click trimming failed"),
         }
+        feedback::trim(state, &p.id, now); // Texts go after 90 days (#718).
         match openlens_replay::prune(&state.data_dir, &p.id, now) {
             Ok(0) => {}
             Ok(n) => tracing::info!(project = %p.id, recordings = n, "expired old recordings"),
@@ -617,35 +627,6 @@ async fn roll_up(state: &AppState, now: chrono::DateTime<chrono::Utc>) -> usize 
         }
     }
     written
-}
-
-/// One-off rewrite of the URLs stored before capture cleaned them (#290),
-/// recorded per project so it runs once. The caller holds the maintenance
-/// lock.
-fn clean_stored_urls(state: &AppState, project: &str) {
-    const DONE: &str = "urls_cleaned";
-    if state
-        .meta
-        .project_setting(project, DONE)
-        .ok()
-        .flatten()
-        .is_some()
-    {
-        return;
-    }
-    let run = flush_now(state).and_then(|_| {
-        openlens_storage::clean_urls(&state.data_dir, project).map_err(|e| e.to_string())
-    });
-    match run {
-        Ok(n) => {
-            state.boards.closed().project_changed(project);
-            tracing::info!(project, n, "query strings removed from stored URLs");
-            if let Err(err) = state.meta.set_project_setting(project, DONE, "1") {
-                tracing::warn!(project, %err, "URL cleaning not recorded");
-            }
-        }
-        Err(err) => tracing::warn!(project, %err, "URL cleaning failed"),
-    }
 }
 
 /// Flush everything still buffered (used on shutdown).

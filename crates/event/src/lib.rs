@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 pub mod facts;
+pub mod feedback;
 pub mod vital;
 pub use facts::{Facts, facts};
 pub use vital::{Vital, vital};
@@ -77,6 +78,9 @@ pub mod names {
     /// `bucket_counts`. Not user activity: the `events` view leaves them
     /// out.
     pub const CLIENT_STATS: &str = "$client_stats";
+    /// What a user says (#718, D-116): `$text`, and optionally `$about`
+    /// (a feature key) and `$rating` (1 to 5). See [`crate::feedback`].
+    pub const FEEDBACK: &str = "$feedback";
     /// Distinct id of server events tied to no user (#593): left out of
     /// release shares.
     pub const SERVER_ID: &str = "$server";
@@ -273,6 +277,9 @@ pub enum EventError {
     /// Properties nest deeper than [`limits::MAX_DEPTH`].
     #[error("properties nest too deeply")]
     TooDeep,
+    /// A `$feedback` with neither a text nor a rating (#718).
+    #[error("feedback has no text and no rating")]
+    EmptyFeedback,
 }
 
 /// Outcome of normalizing a batch: accepted events plus per-event rejections
@@ -352,6 +359,11 @@ fn normalize_event(
         if depth(v, 1) > limits::MAX_DEPTH {
             return Err(EventError::TooDeep);
         }
+    }
+    // Before `$feature` is promoted: a feedback names its feature as a
+    // property, it is no use of it (#718).
+    if name == names::FEEDBACK && !feedback::clean(&mut props) {
+        return Err(EventError::EmptyFeedback);
     }
     let url = take_dim(&mut props, "$current_url")?.map(|u| clean_url(&u));
     let path = take_dim(&mut props, "$pathname")?;

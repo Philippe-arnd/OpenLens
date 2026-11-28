@@ -493,6 +493,10 @@ function maybeSurvey(event) {
 function feature(key, props) {
   track("$feature", { ...props, $feature: key });
 }
+function feedback(text, opts = {}) {
+  track("$feedback", { $text: String(text).slice(0, 1e3), $about: opts.feature, $rating: opts.rating });
+  flush();
+}
 function loadFlags() {
   var _a, _b;
   if (!cfg || !origFetch) return;
@@ -932,10 +936,11 @@ function shutdown() {
   if (timer) clearInterval(timer);
   flush(true);
 }
-var index_default = { init, identify, track, feature, isEnabled, variant, reset, flush, setConsent, shutdown };
+var index_default = { init, identify, track, feature, feedback, isEnabled, variant, reset, flush, setConsent, shutdown };
 export {
   index_default as default,
   feature,
+  feedback,
   flush,
   identify,
   init,

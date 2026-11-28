@@ -17,6 +17,8 @@
 
 mod compaction;
 mod disk;
+mod feedback;
+pub use feedback::trim_feedback;
 mod pending;
 pub mod relabel;
 mod segments;

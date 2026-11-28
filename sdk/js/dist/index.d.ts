@@ -60,6 +60,12 @@ export interface SurveyDef {
 export declare function track(event: string, props?: Props): void;
 /** Mark a use of a feature (a task start), for features without a data-feature control. */
 export declare function feature(key: string, props?: Props): void;
+/** What the user says (#718): a free text (1,000 characters kept), optionally about a feature
+ * key of the map and with a rating from 1 to 5. Never sampled; sent at once. */
+export declare function feedback(text: string, opts?: {
+    feature?: string;
+    rating?: number;
+}): void;
 /** Is a feature flag on for this user? Uses the last known answer (cached across page loads). */
 export declare function isEnabled(key: string): boolean;
 /** The variant of an experiment flag this user gets (null when the flag is
@@ -83,6 +89,7 @@ declare const _default: {
     identify: typeof identify;
     track: typeof track;
     feature: typeof feature;
+    feedback: typeof feedback;
     isEnabled: typeof isEnabled;
     variant: typeof variant;
     reset: typeof reset;

@@ -29,6 +29,7 @@ mod ingest;
 mod manage;
 mod otlp;
 mod pages;
+mod portfolio;
 mod privacy;
 mod releases;
 mod routes;
@@ -36,6 +37,7 @@ mod slo;
 mod status_page;
 mod team;
 mod totp;
+mod voice;
 
 struct Harness {
     _dir: tempfile::TempDir,

@@ -60,6 +60,7 @@ Framework recipes (Next.js, Nuxt, SvelteKit, Astro, Remix), strict CSP and ad-bl
 | `identify(id, { role, account, plan, internal })` | Name the user and the dimensions the board slices by. Links the anonymous visit before login. `internal: true` marks the team's own accounts, which the board leaves out by default. |
 | `track(event, props?)` | A custom event, such as a feature's success moment |
 | `feature(key, props?)` | Mark the use of a feature without a DOM element |
+| `feedback(text, { feature?, rating? })` | What the user says: a free text (1,000 characters kept), optionally about a feature key and with a rating from 1 to 5. Shown on the feature's page; the text is removed after 90 days. |
 | `isEnabled(flagKey)` | Feature flag. Synchronous: the last answer is cached. |
 | `reset()` | Forget the user (logout) |
 | `setConsent(granted)` | Grant or withdraw consent at runtime |

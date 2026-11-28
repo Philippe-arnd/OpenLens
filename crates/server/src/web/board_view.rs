@@ -136,7 +136,23 @@ pub(super) async fn board_page(
             Ok((b, r)) => (Ok(b), r.ok().flatten()),
             Err(e) => (Err(e), None),
         };
+    let board = with_feedback(&state, &p.id, &f, board).await;
     render_board(&state, &p, &f, &host, admin, board, revenue.as_ref())
+}
+
+/// The board with the week's feedback per feature (#718), read only when
+/// it has insight cards to carry it.
+pub(crate) async fn with_feedback(
+    state: &AppState,
+    project: &str,
+    f: &openlens_engine::Filters,
+    board: openlens_engine::Result<openlens_engine::Board>,
+) -> openlens_engine::Result<openlens_engine::Board> {
+    let mut board = board?;
+    if !board.insights.is_empty() {
+        board.feedback_week = crate::feedback::week(state, project, f).await;
+    }
+    Ok(board)
 }
 
 /// The board page of a board already computed: by [`board_page`], or by

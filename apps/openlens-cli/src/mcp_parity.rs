@@ -25,6 +25,8 @@ const TOOL_OF: &[(&str, &str)] = &[
     ("dependencies.list", "routes"),
     ("runtime.list", "runtime"),
     ("capacity.get", "capacity"),
+    // The portfolio across projects (#717).
+    ("portfolio.get", "portfolio"),
     ("tickets.list", "tickets"),
     ("tickets.draft", "create_ticket"),
     ("tickets.file", "create_ticket"),
@@ -86,6 +88,10 @@ const TOOL_OF: &[(&str, &str)] = &[
     ("jobs.check_in", "check_in"),
     ("jobs.remove", "job_set"),
     ("jobs.set_availability", "job_set"),
+    // What users say (#718).
+    ("feedback.list", "feedback"),
+    // Account health (#719).
+    ("accounts.list", "accounts"),
 ];
 
 /// Commands deliberately without an MCP tool, each with its reason.

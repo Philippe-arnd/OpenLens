@@ -8,6 +8,7 @@ use crate::board::{Kpi, barcell, kpi_tile};
 use crate::tables::{Col, TableCard};
 use crate::*;
 
+mod accounts;
 mod churn;
 mod retention;
 pub use churn::*;
@@ -75,13 +76,15 @@ fn card(id: &str, title: &str, aside: Markup, body: Markup) -> Markup {
 }
 
 /// Who the users are (#225): the key numbers and a world map of users
-/// per country, then devices, browsers, systems, languages and screens.
+/// per country, then devices, browsers, systems, languages and screens,
+/// and the accounts' health when the app sends `account` (#719).
 pub fn audience(
     p: &ProjectInfo<'_>,
     b: &Board,
     f: &Filters,
     a: &openlens_engine::Audience,
     geo: bool,
+    accounts: Option<&openlens_engine::accounts::Accounts>,
 ) -> Markup {
     let max = a.countries.iter().map(|c| c.1).max().unwrap_or(1).max(1) as f64;
     let name = |iso: &str| -> String {
@@ -162,6 +165,7 @@ pub fn audience(
                     (list("aud-lang", "Languages", &a.languages, None))
                     (list("aud-screens", "Screens", &a.screens, None))
                 }
+                @if let Some(x) = accounts { (accounts::section(x)) }
             }
         },
     )

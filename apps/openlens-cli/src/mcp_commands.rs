@@ -120,6 +120,11 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
             input_schema: json!({"type":"object","properties":{}}),
         },
         ToolSpec {
+            name: "portfolio",
+            description: "Every project the token may see on one page (#717), the ones that need attention first: a regressed latest production release, then goals off track, then open incidents, then activity (reach). Per project: `outcomes` (the board's Outcomes tiles: `reach` users, `value` tasks per session, `retention` churn rate, `quality` share of sessions with an error, `speed_ms` LCP p75), `latest_release` (release, verdict, first reason), `goals_at_risk`, `goals_off_track` and `worst_goal` (last hourly snapshot), `open_incidents`, `top_insight` (the board's top card title) and `board_url`. Read from each project's board as last computed, never computed for this call: a project whose board is not kept yet has `computing: true`, no numbers, and `last_compute_secs` (how long it took last time) when known; `board_age_secs` says how old the numbers are.",
+            input_schema: json!({"type":"object","properties":{}}),
+        },
+        ToolSpec {
             name: "delete_goal",
             description: "Remove a goal (its id from `goals`). Objectives that used it as a key result keep the others.",
             input_schema: json!({"type":"object","properties":with(json!({"goal":{"type":"string"}})),"required":["goal"]}),
@@ -269,6 +274,23 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
             input_schema: json!({"type":"object","properties":filtered(json!({}))}),
         },
         ToolSpec {
+            name: "feedback",
+            description: "What users said ($feedback events, from openlens.feedback(text, { feature, rating }), a server SDK or a support tool) over `days` (1 to 90, default 30), for one `feature` key or all: the count, feedbacks per rating 1 to 5, without a rating, the mean rating, per feature, and the latest texts (newest first, `limit` 1 to 200, default 20) with rating, date, feature and who sent it. Texts are personal data: quote them only as needed, never in a public place; they are removed after 90 days (the rating stays). Read it next to the feature's numbers (feature_context) to see why users struggle.",
+            input_schema: json!({"type":"object","properties":with(json!({
+                "feature":{"type":"string"},
+                "days":{"type":"integer","minimum":1,"maximum":90},
+                "limit":{"type":"integer","minimum":1,"maximum":200}
+            }))}),
+        },
+        ToolSpec {
+            name: "accounts",
+            description: "Account health, when the app sends `account` (identify(id, { account })): per account over the last 30 days its known users, active users and their share (and the share over the 30 days before), the weekly return of its users, churned users, its plan (the one most of its users have) and its state: `at_risk` (active share fell by a third or more, or 25% of its users churned), `inactive` (no active user for 14 days) or `healthy`. At risk first; `state` keeps one state, `limit` 1 to 500 (default 50). Accounts with fewer than 3 users are only counted, under `small`. For an internal tool, read accounts as teams. Drill into an account with kpi_report by account.",
+            input_schema: json!({"type":"object","properties":with(json!({
+                "state":{"type":"string","enum":["healthy","at_risk","inactive"]},
+                "limit":{"type":"integer","minimum":1,"maximum":500}
+            }))}),
+        },
+        ToolSpec {
             name: "flows",
             description: "How sessions move between features, step by step: the nodes of each step and the links between them with their sessions, and how many sessions reached a success event. `from` (a feature key) starts at its first use; `to: success` keeps the sessions that reached one.",
             input_schema: json!({"type":"object","properties":filtered(json!({
@@ -405,6 +427,7 @@ pub(crate) fn call(c: &Client, name: &str, args: &Value) -> Option<Result<Value,
         "routes" => routes(c, args),
         "runtime" => get(c, &query(args, "/runtime", &["env"])),
         "capacity" => get(c, "/api/capacity"),
+        "portfolio" => get(c, "/api/portfolio"),
         "delete_goal" => required(args, "goal").and_then(|g| {
             let path = at(args, &format!("/goals/{}", enc(&g)));
             send(c, "DELETE", &path, None)
@@ -462,6 +485,24 @@ pub(crate) fn call(c: &Client, name: &str, args: &Value) -> Option<Result<Value,
         "forms" => get(c, &query(args, "/forms", FILTERS)),
         "audience" => get(c, &query(args, "/audience", FILTERS)),
         "live" => get(c, &query(args, "/live", FILTERS)),
+        "accounts" => {
+            let mut path = query(args, "/accounts", &["state", "env"]);
+            if let Some(n) = args.get("limit").and_then(Value::as_i64) {
+                path.push(if path.contains('?') { '&' } else { '?' });
+                path.push_str(&format!("limit={n}"));
+            }
+            get(c, &path)
+        }
+        "feedback" => {
+            let mut path = query(args, "/feedback", &["feature", "env"]);
+            for k in ["days", "limit"] {
+                if let Some(n) = args.get(k).and_then(Value::as_i64) {
+                    path.push(if path.contains('?') { '&' } else { '?' });
+                    path.push_str(&format!("{k}={n}"));
+                }
+            }
+            get(c, &path)
+        }
         "flows" => {
             let keys = ["env", "role", "release", "from", "to"];
             get(c, &query(args, "/flows", &keys))

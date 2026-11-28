@@ -251,7 +251,7 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "digest",
-                description: "This week vs last week (active users, sessions, errors, completed tasks per feature) plus the top 3 insight cards, as JSON and ready-to-send Markdown.",
+                description: "This week vs last week (active users, sessions, errors, completed tasks per feature) plus the top 3 insight cards, as JSON and ready-to-send Markdown. With `project`, that project's digest. Without it, every project the token may see (#717): one project's digest when it sees one; with two or more, `projects` (one entry each, in the `portfolio` order: what needs attention first) and one Markdown with a section per project.",
                 input_schema: json!({"type":"object","properties":proj}),
             },
             ToolSpec {
@@ -761,11 +761,12 @@ impl Tools for OpenLensTools {
                 ok_or(st, v)
             }
             "digest" => {
-                let (st, v) = c.call(
-                    "GET",
-                    &format!("/api/projects/{}/digest", project(args)),
-                    None,
-                )?;
+                // No project: the digest across the token's projects (#717).
+                let path = match s(args, "project") {
+                    Some(p) => format!("/api/projects/{p}/digest"),
+                    None => "/api/digest".to_owned(),
+                };
+                let (st, v) = c.call("GET", &path, None)?;
                 ok_or(st, v)
             }
             "user_timeline" => {

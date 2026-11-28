@@ -477,3 +477,43 @@ fn compacted_days_are_sorted_by_event_then_time() {
     assert_eq!(names, ["a", "a", "b", "c"]);
     assert!(ts.value(0) < ts.value(1), "the two a's in time order");
 }
+
+/// A feedback older than 90 days loses its text, keeps its row, feature
+/// and rating; a recent one keeps its text, and a day is read again only
+/// when its files change (#718).
+#[test]
+fn old_feedback_loses_its_text_but_keeps_its_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let now = Utc::now();
+    let (mut w, _) = Writer::open(root, FlushPolicy::default()).unwrap();
+    let said = |at| {
+        let mut e = ev("p", at);
+        e.event = "$feedback".into();
+        e.properties = r#"{"$text":"The export is slow","$about":"export","$rating":2}"#.into();
+        e
+    };
+    w.append(&[
+        said(now - Duration::days(100)),
+        said(now - Duration::days(10)),
+    ])
+    .unwrap();
+    w.flush().unwrap();
+    let before = count_rows(root, "p").unwrap();
+    assert_eq!(openlens_storage::trim_feedback(root, "p", now).unwrap(), 1);
+    assert_eq!(openlens_storage::trim_feedback(root, "p", now).unwrap(), 0);
+    let props = all_properties(root);
+    assert!(
+        props.contains(&r#"{"$about":"export","$rating":2}"#.to_owned()),
+        "{props:?}"
+    );
+    assert_eq!(
+        props
+            .iter()
+            .filter(|p| p.contains("The export is slow"))
+            .count(),
+        1,
+        "{props:?}"
+    );
+    assert_eq!(count_rows(root, "p").unwrap(), before);
+}

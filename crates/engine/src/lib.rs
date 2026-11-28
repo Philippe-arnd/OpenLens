@@ -12,6 +12,8 @@ use openlens_query::{QueryEngine, QueryError};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
+/// Account health, when the app sends `account` (#719, D-117).
+pub mod accounts;
 mod acquisition;
 mod board;
 /// The board's server side: key actions and the 5xx share (#623).
@@ -41,6 +43,8 @@ mod events;
 mod explore;
 mod feature_paths;
 mod feature_signals;
+/// What users say: `$feedback` per rating and feature (#718, D-116).
+pub mod feedback;
 pub mod flows;
 pub mod forms;
 pub mod goals;
@@ -87,7 +91,9 @@ pub use board_cost::{Estimate, estimate};
 pub use board_kept::PeriodBlocks;
 pub use board_window::{BoardWindow, Period};
 pub use churn::{AtRisk, ChurnLine, ChurnReport, churn};
-pub use digest::{Delta, Digest, digest, digest_markdown, release_lines};
+pub use digest::{
+    Delta, Digest, DigestSection, digest, digest_markdown, digests_markdown, release_lines,
+};
 pub use errors::{
     ErrorGroup, LINKED_MAX, LinkedSession, Origin, error_groups, error_groups_of, mark_replays,
 };
@@ -523,6 +529,10 @@ pub struct Board {
     /// the card next to the usage chart.
     #[serde(skip)]
     pub in_flight: commands::in_flight::InFlight,
+    /// Set by the server (#718): feedbacks of the last 7 days per feature
+    /// key, for "N feedback this week" on the insight cards. Counts only.
+    #[serde(skip)]
+    pub feedback_week: Vec<(String, i64)>,
     /// Environments seen.
     pub environments: Vec<String>,
     /// Raw role values no rule of the feature map matches, with user counts.
