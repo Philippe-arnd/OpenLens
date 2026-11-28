@@ -187,7 +187,7 @@ impl Persona {
                     // The first visit of a signup was anonymous, on the
                     // landing page, a quarter of an hour before.
                     let anon = format!("anon-{user}");
-                    let props = if seen || index % 3 != 0 {
+                    let props = if seen || !index.is_multiple_of(3) {
                         "{}".to_owned()
                     } else {
                         let visit = format!("{anon}-s");
