@@ -139,3 +139,65 @@ async fn journeys_are_reused_until_they_are_an_hour_old() {
     let other = board(&q, "p", &with_team, Some((&map, 1))).await.unwrap();
     assert!(total(&other) > total(&first));
 }
+
+/// Two success events, read in one query (#748): each keeps its own
+/// paths and its own count of people who reached it.
+#[tokio::test]
+async fn each_success_event_keeps_its_own_paths_in_one_query() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    let mut evs = Vec::new();
+    for u in 0..6 {
+        let user = format!("k{u}");
+        let steps: &[(&str, Option<&str>, &str)] = &[
+            ("$click", Some("search"), "/search"),
+            ("found", None, "/search"),
+            ("$pageview", None, "/entries/new"),
+            ("entry_saved", None, "/entries/new"),
+        ];
+        for (i, (name, feat, path)) in steps.iter().enumerate() {
+            let e = E {
+                user: &user,
+                role: "member",
+                session: "s",
+                event: name,
+                mins_ago: 50 - i as i64,
+                feature: *feat,
+                release: "v1",
+                props: "{}",
+            };
+            let mut ev = mk(&e, u * 10 + i);
+            ev.path = Some((*path).into());
+            evs.push(ev);
+        }
+    }
+    w.append(&evs).unwrap();
+    w.flush().unwrap();
+    let q = QueryEngine::new(dir.path(), Limits::default());
+    let map = parse(
+        "features:\n  - key: search\n    name: Search\n    success: found\n    entry: { routes: ['/search'] }\n\
+         \x20 - key: write\n    name: Write\n    success: entry_saved\n    entry: { routes: ['/entries/new'] }\n",
+    )
+    .map
+    .unwrap();
+    let b = board(&q, "p", &Filters::default(), Some((&map, 1)))
+        .await
+        .unwrap();
+    let of = |ev: &str| {
+        b.journeys
+            .iter()
+            .find(|j| j.success == ev)
+            .unwrap_or_else(|| panic!("a path into {ev}: {:?}", b.journeys))
+    };
+    let (found, saved) = (of("found"), of("entry_saved"));
+    assert_eq!(found.feature, "search");
+    assert_eq!(saved.feature, "write");
+    assert!(
+        saved.path.len() > found.path.len(),
+        "writing comes after searching: {:?} {:?}",
+        found.path,
+        saved.path
+    );
+    assert!(saved.path.contains(&"search".to_owned()));
+    assert!((found.share - 1.0).abs() < 1e-9 && (saved.share - 1.0).abs() < 1e-9);
+}

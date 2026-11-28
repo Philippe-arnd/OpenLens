@@ -565,7 +565,6 @@ async fn journeys_now(
 ) -> Result<Vec<Journey>> {
     let q = &q.with_params(&f.params()?);
     let mut out = Vec::new();
-    let mut runs = Vec::new();
     // The paths depend on the success event alone, so features that share
     // one get a single set of rows, labelled with all of them (#555).
     let mut by_event: Vec<(String, String)> = Vec::new();
@@ -578,36 +577,54 @@ async fn journeys_now(
             None => by_event.push((feature.clone(), ev.clone())),
         }
     }
-    for (feature, ev) in by_event.into_iter().take(4) {
-        let ev_lit = openlens_sqlgen::quote(&ev);
-        let rows = firsts.rows_in(f, crate::Span::days(30), &ev_lit)?;
-        let sql = format!(
-            "WITH firsts AS (SELECT distinct_id, min(first_ts) AS t FROM {rows} GROUP BY distinct_id), \
-             before AS (SELECT sf.distinct_id, sf.first_ts AS timestamp, sf.feature AS place FROM {sf} \
-                        JOIN firsts f ON sf.distinct_id = f.distinct_id \
-                        WHERE sf.first_ts < f.t AND sf.first_ts >= f.t - INTERVAL '1 day'), \
-             dedup AS (SELECT distinct_id, timestamp, place, \
-                       lag(place) OVER (PARTITION BY distinct_id ORDER BY timestamp, place) AS prev FROM before), \
-             ranked AS (SELECT distinct_id, place, \
-                        row_number() OVER (PARTITION BY distinct_id ORDER BY timestamp DESC, place DESC) AS rn \
-                        FROM dedup WHERE prev IS NULL OR prev <> place) \
-             SELECT p3.place AS a, p2.place AS b, p1.place AS c, count(*) AS users, \
-                    (SELECT count(*) FROM firsts) AS reached \
-             FROM ranked p1 \
-             LEFT JOIN ranked p2 ON p1.distinct_id = p2.distinct_id AND p2.rn = 2 \
-             LEFT JOIN ranked p3 ON p1.distinct_id = p3.distinct_id AND p3.rn = 3 \
-             WHERE p1.rn = 1 GROUP BY p3.place, p2.place, p1.place ORDER BY users DESC, c, b, a LIMIT 3"
-        );
-        runs.push(async move { (feature, ev, q.sql(project, &sql).await) });
+    by_event.truncate(4);
+    if by_event.is_empty() {
+        return Ok(out);
     }
-    for (feature, ev, res) in futures::future::join_all(runs).await {
-        for r in res?.rows {
-            let users = int(&r, "users");
-            let reached = int(&r, "reached").max(1);
+    // One query for every success event (#748), partitioned by event,
+    // instead of one each: the feature rows are read once, and only for
+    // the people who reached a success (`sf` reads `firsts`).
+    let events = by_event
+        .iter()
+        .map(|(_, e)| openlens_sqlgen::quote(e))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let rows = firsts.rows_in(f, crate::Span::days(30), &events)?;
+    let sql = format!(
+        "WITH firsts AS (SELECT distinct_id, event, min(first_ts) AS t FROM {rows} GROUP BY distinct_id, event), \
+         sf AS (SELECT session_id, distinct_id, feature, first_ts FROM {sf}), \
+         before AS (SELECT f.event AS ev, sf.distinct_id, sf.first_ts AS timestamp, sf.feature AS place FROM sf \
+                    JOIN firsts f ON sf.distinct_id = f.distinct_id \
+                    WHERE sf.first_ts < f.t AND sf.first_ts >= f.t - INTERVAL '1 day'), \
+         dedup AS (SELECT ev, distinct_id, timestamp, place, \
+                   lag(place) OVER (PARTITION BY ev, distinct_id ORDER BY timestamp, place) AS prev FROM before), \
+         ranked AS (SELECT ev, distinct_id, place, \
+                    row_number() OVER (PARTITION BY ev, distinct_id ORDER BY timestamp DESC, place DESC) AS rn \
+                    FROM dedup WHERE prev IS NULL OR prev <> place), \
+         paths AS (SELECT p1.ev AS ev, p3.place AS a, p2.place AS b, p1.place AS c, count(*) AS users \
+                   FROM ranked p1 \
+                   LEFT JOIN ranked p2 ON p1.ev = p2.ev AND p1.distinct_id = p2.distinct_id AND p2.rn = 2 \
+                   LEFT JOIN ranked p3 ON p1.ev = p3.ev AND p1.distinct_id = p3.distinct_id AND p3.rn = 3 \
+                   WHERE p1.rn = 1 GROUP BY p1.ev, p3.place, p2.place, p1.place), \
+         top AS (SELECT ev, a, b, c, users, \
+                 row_number() OVER (PARTITION BY ev ORDER BY users DESC, c, b, a) AS k FROM paths), \
+         reached AS (SELECT event AS ev, count(*) AS reached FROM firsts GROUP BY event) \
+         SELECT t.ev AS ev, t.a AS a, t.b AS b, t.c AS c, t.users AS users, r.reached AS reached \
+         FROM top t JOIN reached r ON t.ev = r.ev WHERE t.k <= 3 ORDER BY t.ev, t.k"
+    );
+    let res = q.sql(project, &sql).await?;
+    for (feature, ev) in &by_event {
+        for r in res
+            .rows
+            .iter()
+            .filter(|r| text(r, "ev").as_deref() == Some(ev.as_str()))
+        {
+            let users = int(r, "users");
+            let reached = int(r, "reached").max(1);
             if users < 3 {
                 continue;
             }
-            let path: Vec<String> = ["a", "b", "c"].iter().filter_map(|k| text(&r, k)).collect();
+            let path: Vec<String> = ["a", "b", "c"].iter().filter_map(|k| text(r, k)).collect();
             out.push(Journey {
                 success: ev.clone(),
                 feature: feature.clone(),
