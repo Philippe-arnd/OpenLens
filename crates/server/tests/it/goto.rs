@@ -1,4 +1,5 @@
-//! Go to… (#541): `GET /p/{project}/go?q=…`.
+//! Go to… (#541): `GET /p/{project}/go?q=…`, and an address that leads
+//! nowhere (#679).
 
 use super::*;
 
@@ -89,4 +90,32 @@ async fn a_name_longer_than_the_bound_is_refused() {
     .await;
     assert_eq!(over.status(), StatusCode::BAD_REQUEST);
     assert!(over.headers().get("location").is_none());
+}
+
+#[tokio::test]
+async fn an_unknown_address_shows_a_not_found_page_in_the_shell() {
+    let h = harness();
+    let cookie = login_cookie(&h).await;
+    for uri in ["/no-such-page", "/p/default/no-such-section"] {
+        let r = get(&h, uri, Some(&cookie), false).await;
+        assert_eq!(r.status(), StatusCode::NOT_FOUND, "{uri}");
+        let ty = r.headers()["content-type"].to_str().unwrap().to_owned();
+        assert!(ty.starts_with("text/html"), "{uri}: {ty}");
+        let body = body_text(r).await;
+        assert!(
+            body.contains("<h1") && body.contains("div class=\"shell\""),
+            "{uri}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_unknown_api_address_answers_json() {
+    let h = harness();
+    for uri in ["/api/no-such-endpoint", "/api/v1/no-such-endpoint"] {
+        let r = get(&h, uri, None, true).await;
+        assert_eq!(r.status(), StatusCode::NOT_FOUND, "{uri}");
+        let v: serde_json::Value = serde_json::from_str(&body_text(r).await).unwrap();
+        assert_eq!(v["code"], "not_found", "{uri}");
+    }
 }
