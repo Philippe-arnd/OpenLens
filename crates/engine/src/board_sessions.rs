@@ -121,17 +121,40 @@ pub(crate) fn feature_rows(
     f: &Filters,
     days: i64,
 ) -> Result<String> {
+    feature_rows_of(src, role, rolled, now, f, days, None)
+}
+
+/// [`feature_rows`] for the people `who` only (a `SELECT distinct_id …`),
+/// filtered before grouping, on the events and the rollup alike (#748).
+pub(crate) fn feature_rows_of(
+    src: &str,
+    role: &str,
+    rolled: &[NaiveDate],
+    now: DateTime<Utc>,
+    f: &Filters,
+    days: i64,
+    who: Option<&str>,
+) -> Result<String> {
     let (skip, rolled) = board_people::split(rolled, now, days, f, role);
+    let (only, only_person) = who.map_or_else(
+        || (String::new(), String::new()),
+        |w| {
+            (
+                format!(" AND distinct_id IN ({w})"),
+                format!(" AND person IN ({w})"),
+            )
+        },
+    );
     let mut rows = format!(
         "SELECT session_id, distinct_id, feature, min(timestamp) AS first_ts \
-         FROM {src} WHERE {w}{skip} AND session_id IS NOT NULL AND feature IS NOT NULL \
+         FROM {src} WHERE {w}{skip}{only} AND session_id IS NOT NULL AND feature IS NOT NULL \
          GROUP BY session_id, distinct_id, feature, date",
         w = f.clause_at(days, now)?,
     );
     if let Some(w) = rolled {
         rows.push_str(&format!(
             " UNION ALL SELECT session_id, person AS distinct_id, feature, first_ts \
-             FROM session_feature_day WHERE {w}"
+             FROM session_feature_day WHERE {w}{only_person}"
         ));
     }
     Ok(format!(

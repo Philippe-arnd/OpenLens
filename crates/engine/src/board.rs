@@ -196,7 +196,17 @@ pub async fn board_reusing(
         rolled: rolled_people,
         now,
     };
-    let journey_rows = board_sessions::feature_rows(&src, &role, &rolled_features, now, f, 30)?;
+    // Only the people who reached a success: `firsts` is the journeys
+    // query's own table (#748).
+    let journey_rows = board_sessions::feature_rows_of(
+        &src,
+        &role,
+        &rolled_features,
+        now,
+        f,
+        30,
+        Some("SELECT distinct_id FROM firsts"),
+    )?;
     let success_reads = board_success::SuccessRows {
         src: &src,
         role: role.clone(),
