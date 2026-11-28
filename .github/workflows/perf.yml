@@ -20,8 +20,13 @@ on:
         description: "Memory caps for the scale server, comma-separated, e.g. 1G,2G (empty: no cap) (#460)"
         default: ""
       scale_profile:
-        description: "bench-gen profile: realistic (#443) or empty for the default"
-        default: ""
+        description: "bench-gen profile: realistic (#443), persona (#706: 68000000 events is its full size, fewer scale its users) or uniform"
+        type: choice
+        default: realistic
+        options:
+          - realistic
+          - persona
+          - uniform
 
 permissions:
   contents: read
@@ -200,7 +205,9 @@ jobs:
           rm -rf "$GEN"; mkdir -p "$GEN"
           gen_start=$(date +%s)
           args=(--events "$EVENTS" --map-out "$GEN/map.yaml")
-          [ "$PROFILE" = realistic ] && args+=(--profile realistic)
+          case "$PROFILE" in
+            realistic|persona) args+=(--profile "$PROFILE") ;;
+          esac
           "$BIN/xtask" bench-gen "$GEN/data" "${args[@]}" > "$GEN/gen.json"
           echo "GEN_SECONDS=$(( $(date +%s) - gen_start ))" >> "$GITHUB_ENV"
       # Saved before any server runs on it: each cap works on a copy.
