@@ -6,7 +6,7 @@
 //! of the CLI.
 
 use openlens_featuremap::{Feature, FeatureMap, valid_key};
-use openlens_mcp::ToolSpec;
+use openlens_mcp::{Effect, ToolSpec};
 use serde_json::{Value, json};
 
 use crate::{Api, Body, api_error, query_value};
@@ -149,16 +149,19 @@ pub(crate) fn specs(proj: &Value) -> Vec<ToolSpec> {
     vec![
         ToolSpec {
             name: "suggested_features",
+            effect: Effect::ReadOnly,
             description: "Pages and data-feature values used in production that no feature claims (30 days, from map_health's coverage, drift and undeclared findings), each as a proposed feature map entry ready for set_feature, with its evidence. Check each against the code and add its success event first. Nothing is applied.",
-            input_schema: json!({"type":"object","properties":with(json!({"limit":{"type":"integer","minimum":1,"maximum":50}}))}),
+            input_schema: json!({"type":"object","properties":with(json!({"limit":{"description":"How many proposals at most, 1 to 50 (default: 10)","type":"integer","minimum":1,"maximum":50}}))}),
         },
         ToolSpec {
             name: "set_feature",
+            effect: Effect::Destructive,
             description: "Add or update one feature map entry (matched by key) and push the map as a new version. `feature` is the entry as in openlens.features.yaml: key, name, and optionally purpose, owner, entry {routes, selectors, calls}, steps, success, area, requires, renamed_from, server, paths. `paths` are the feature's code paths, globs from the repository root (`src/export/**`; `*`, `**`, `?`, at most 20 of 200 characters): keep them current, since a release's changed files are matched against them to say which features it touched. Returns the whole map as YAML: write it to openlens.features.yaml and commit it, since the file stays the source of truth (comments are not kept).",
-            input_schema: json!({"type":"object","properties":with(json!({"feature":{"type":"object","properties":{"key":{"type":"string"},"name":{"type":"string"},"paths":{"type":"array","maxItems":20,"items":{"type":"string","maxLength":200},"description":"Code path globs from the repository root: src/export/**"}},"required":["key","name"]},"message":{"type":"string","description":"Why (shown in the map's history)"}})),"required":["feature"]}),
+            input_schema: json!({"type":"object","properties":with(json!({"feature":{"description":"The entry as in openlens.features.yaml: key and name, optionally the other fields","type":"object","properties":{"key":{"type":"string"},"name":{"type":"string"},"paths":{"type":"array","maxItems":20,"items":{"type":"string","maxLength":200},"description":"Code path globs from the repository root: src/export/**"}},"required":["key","name"]},"message":{"type":"string","description":"Why (shown in the map's history)"}})),"required":["feature"]}),
         },
         ToolSpec {
             name: "stale_flags",
+            effect: Effect::ReadOnly,
             description: "Flags ready to remove from the code and from OpenLens: off, and seen on production page views in the last 90 days but none in the last 14 (remove the flag and its code); or on for everyone with no targeting, carried by 95% or more of at least 100 production page views of the last 14 days (remove the flag and keep its code path). Flags never seen in 90 days and flags not yet settled are listed apart.",
             input_schema: json!({"type":"object","properties":proj}),
         },

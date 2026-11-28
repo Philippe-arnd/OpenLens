@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use openlens_mcp::{ToolSpec, Tools};
+use openlens_mcp::{Effect, ToolSpec, Tools};
 use serde_json::{Value, json};
 
 use crate::{Body, Client};
@@ -116,220 +116,293 @@ fn ok_or(status: u16, v: Value) -> Result<Value, String> {
     }
 }
 
+/// The parameters many tools share, each described once (#688): its
+/// format and what an omitted one means. A tool whose parameter of the
+/// same name means something else describes it itself.
+const SHARED: &[(&str, &str)] = &[
+    (
+        "project",
+        "Project id, as `projects` lists them (default: default)",
+    ),
+    (
+        "env",
+        "Environment name, as `environments` lists them (default: production)",
+    ),
+    (
+        "role",
+        "A role as the app sends it with identify(), counted at event time (default: every role)",
+    ),
+    (
+        "release",
+        "A release name as the SDK sends it, as `releases` lists them (default: every release)",
+    ),
+    (
+        "since",
+        "A release name: the period starts when it came out and runs to now",
+    ),
+];
+
+/// The `properties` of a tool's input schema: `project`, then `extra`,
+/// with each shared parameter that `extra` leaves undescribed given its
+/// description from [`SHARED`].
+pub(crate) fn with(extra: Value) -> Value {
+    let mut p = json!({ "project": { "type": "string" } });
+    if let (Some(a), Some(b)) = (p.as_object_mut(), extra.as_object()) {
+        a.extend(b.clone());
+    }
+    if let Some(props) = p.as_object_mut() {
+        for (key, text) in SHARED {
+            if let Some(param) = props.get_mut(*key).and_then(Value::as_object_mut) {
+                param.entry("description").or_insert_with(|| json!(text));
+            }
+        }
+    }
+    p
+}
+
 impl Tools for OpenLensTools {
     fn list(&self) -> Vec<ToolSpec> {
-        let proj = json!({ "project": { "type": "string", "description": "Project id (default: default)" } });
-        let with = |extra: Value| {
-            let mut p = proj.clone();
-            if let (Some(a), Some(b)) = (p.as_object_mut(), extra.as_object()) {
-                a.extend(b.clone());
-            }
-            p
-        };
+        let proj = with(json!({}));
         let mut tools = vec![
             ToolSpec {
                 name: "guide",
+                effect: Effect::ReadOnly,
                 description: "The wiring guide: how to connect an app to OpenLens so the PM's first login shows a populated board. Read this first.",
                 input_schema: json!({"type":"object","properties":{}}),
             },
             ToolSpec {
                 name: "projects",
+                effect: Effect::ReadOnly,
                 description: "List projects with their capture keys.",
                 input_schema: json!({"type":"object","properties":{}}),
             },
             ToolSpec {
                 name: "init",
+                effect: Effect::Additive,
                 description: "Create a project; returns the capture key and the snippet to add to the app. Pass the team's IANA time zone (e.g. Europe/Paris): days and weeks of every KPI are counted in it.",
-                input_schema: json!({"type":"object","properties":{"name":{"type":"string"},"timezone":{"type":"string"}},"required":["name"]}),
+                input_schema: json!({"type":"object","properties":{"name":{"description":"The project's name, shown in the dashboard","type":"string"},"timezone":{"description":"IANA time zone where the team's days and weeks start, e.g. Europe/Paris (default: UTC)","type":"string"}},"required":["name"]}),
             },
             ToolSpec {
                 name: "set_timezone",
+                effect: Effect::Destructive,
                 description: "Set a project's time zone (IANA name, e.g. Europe/Paris): where its days and weeks start.",
-                input_schema: json!({"type":"object","properties":{"project":{"type":"string"},"timezone":{"type":"string"}},"required":["project","timezone"]}),
+                input_schema: json!({"type":"object","properties":{"project":{"description":"Project id, as `projects` lists them","type":"string"},"timezone":{"description":"IANA time zone name, e.g. Europe/Paris","type":"string"}},"required":["project","timezone"]}),
             },
             ToolSpec {
                 name: "feature_map_lint",
+                effect: Effect::ReadOnly,
                 description: "Validate an openlens.features.yaml (path relative to the read root) and check it against the app code under `src` (default: the read root).",
-                input_schema: json!({"type":"object","properties":{"file":{"type":"string"},"src":{"type":"string"}},"required":["file"]}),
+                input_schema: json!({"type":"object","properties":{"file":{"description":"Path of openlens.features.yaml, relative to the read root","type":"string"},"src":{"description":"Directory of the app code to check against, relative to the read root (default: the read root)","type":"string"}},"required":["file"]}),
             },
             ToolSpec {
                 name: "feature_map_push",
+                effect: Effect::Destructive,
                 description: "Upload openlens.features.yaml (path relative to the read root) as the project's new feature map. Returns issues with fixes when invalid.",
-                input_schema: json!({"type":"object","properties":with(json!({"file":{"type":"string"}})),"required":["file"]}),
+                input_schema: json!({"type":"object","properties":with(json!({"file":{"description":"Path of openlens.features.yaml, relative to the read root","type":"string"}})),"required":["file"]}),
             },
             ToolSpec {
                 name: "map_health",
+                effect: Effect::ReadOnly,
                 description: "How good the pushed feature map is, measured on 30 days of usage: a score out of 100, findings ranked by impact (pages no feature claims, overlapping routes, dead features, success events that never fire or fire on every use, data-feature values not declared, requires contradicted by usage, a feature whose users split into separate paths (split it), two features almost always used together (merge them), steps done in another order than declared, routes new in the latest release that no feature claims), each with evidence and a YAML fix, plus the relations inferred between features (lift, which comes first, leads to value). Nothing is applied: edit the file, then feature_map_push.",
                 input_schema: json!({"type":"object","properties":proj}),
             },
             ToolSpec {
                 name: "map_overview",
+                effect: Effect::ReadOnly,
                 description: "Every feature with its area, status and numbers (uses, users, users who reached success; 30 days vs the 30 before), the roll-up by area and the adoption ladder. Start here, then feature_context for one feature.",
                 input_schema: json!({"type":"object","properties":proj}),
             },
             ToolSpec {
                 name: "feature_context",
+                effect: Effect::ReadOnly,
                 description: "One feature in depth: its definition (area, requires, renamed_from), health and findings, users and success by role, top pages, the ladder rungs it is on, features that require it and its area peers, the features used with it (lift, which comes first, whether it leads to value) and its use per release, each counted with the map version in force when the release came out; `touched_by`: the releases whose changed files are in its code paths, with how many files.",
-                input_schema: json!({"type":"object","properties":with(json!({"key":{"type":"string"}})),"required":["key"]}),
+                input_schema: json!({"type":"object","properties":with(json!({"key":{"description":"The feature's key in the feature map","type":"string"}})),"required":["key"]}),
             },
             ToolSpec {
                 name: "feature_relations",
+                effect: Effect::ReadOnly,
                 description: "Which features are used together, from every session of the last 30 days: per pair, the sessions using both, the lift (how many times more often than chance), which one usually comes first, and whether using the first raises the success of the second (leads to value, significant at p < 0.05). Pass `feature` to keep the pairs it is part of.",
                 input_schema: json!({"type":"object","properties":with(json!({"feature":{"type":"string","description":"A feature key (optional)"}}))}),
             },
             ToolSpec {
                 name: "suggest_map_changes",
+                effect: Effect::ReadOnly,
                 description: "Changes to make to openlens.features.yaml, ranked by impact, each with its evidence and a YAML patch. Nothing is applied: edit the file, then feature_map_push.",
-                input_schema: json!({"type":"object","properties":with(json!({"limit":{"type":"integer","minimum":1,"maximum":50}}))}),
+                input_schema: json!({"type":"object","properties":with(json!({"limit":{"description":"How many changes at most, 1 to 50 (default: 10)","type":"integer","minimum":1,"maximum":50}}))}),
             },
             ToolSpec {
                 name: "goals",
+                effect: Effect::ReadOnly,
                 description: "Goals on KPIs and objectives: value now, target, deadline, status (reached, on track, at risk, off track), guardrails and whether they are breached, what moved each goal (releases with their effect, flag/survey/map changes and notes since it was set), and suggested targets per KPI.",
                 input_schema: json!({"type":"object","properties":proj}),
             },
             ToolSpec {
                 name: "set_goal",
+                effect: Effect::Additive,
                 description: "Set a goal: a KPI key from `goals` suggestions (or success:<feature>), a target in KPI units (a share as 0-1), and a deadline (YYYY-MM-DD) or a number of releases. Optional guardrails: KPIs that must not get worse, with a limit (default 5% worse than now).",
                 input_schema: json!({"type":"object","properties":with(json!({
-                    "kpi":{"type":"string"},
-                    "target":{"type":"number"},
-                    "deadline":{"type":"string"},
-                    "releases":{"type":"integer","minimum":1,"maximum":50},
-                    "owner":{"type":"string"},
-                    "guardrails":{"type":"array","items":{"type":"object","properties":{"kpi":{"type":"string"},"limit":{"type":"number"}},"required":["kpi"]}}
+                    "kpi":{"description":"The KPI key, from the suggestions of `goals`, or success:<feature>","type":"string"},
+                    "target":{"description":"The value to reach, in the KPI's units (a share as 0 to 1)","type":"number"},
+                    "deadline":{"description":"The day to reach it by, YYYY-MM-DD (or give releases)","type":"string"},
+                    "releases":{"description":"Reach it within this many releases instead of by a day, 1 to 50","type":"integer","minimum":1,"maximum":50},
+                    "owner":{"description":"Who answers for the goal (free text)","type":"string"},
+                    "guardrails":{"description":"KPIs that must not get worse meanwhile, each with its limit (default: 5% worse than now)","type":"array","items":{"type":"object","properties":{"kpi":{"type":"string"},"limit":{"type":"number"}},"required":["kpi"]}}
                 })),"required":["kpi","target"]}),
             },
             ToolSpec {
                 name: "releases",
+                effect: Effect::ReadOnly,
                 description: "The app's releases per environment over 90 days: state (rolling out, live at 95 % or more of the latest day's users, superseded by a newer release, rolled back when an older release took the majority back), share of the latest day, first and last seen, users, events, and for production the time in staging (from the same name or build fingerprint first seen in staging). With the deploy hook: each release's deploy time and last deploy status, the deploys recorded, and releases with no traffic whose deploy failed ('failed'), was rolled back, or is under way ('deploying'). Each release of production (or of env when given) also has its verdict against the release before it: healthy, regressed or inconclusive (null until 30 sessions and 8 users or 24 h), with its reasons; `release_report` gives the whole comparison. `notes`: release notes of the newest releases recorded with a commit range (merged pull requests read from GitHub hourly, grouped Added/Fixed/Changed, with counts, and `touched`: the features their changed files touched), or `unavailable` saying why there are none. Optional env for one environment.",
-                input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"}}))}),
+                input_schema: json!({"type":"object","properties":with(json!({"env":{"description":"One environment's releases (default: every environment)","type":"string"}}))}),
             },
             ToolSpec {
                 name: "release_report",
+                effect: Effect::ReadOnly,
                 description: "One release compared with the release before it in its environment (production unless env): the verdict (healthy, regressed or inconclusive; null until 30 sessions and 8 users or 24 h) and its reasons, both releases' numbers, and every check with its outcome (worse, better, same, too_few, info): sessions with errors, bounce rate, sessions with a completed task, sessions per user, error groups first seen in the release (2 users or more), LCP/INP/CLS p75 ratings, success rate of each feature with a success event (the features the release's code change touched come first, before every other check, and one that cannot be compared says so; `current.touched` lists them), goal guardrails (breached by this release and not the one before) and goals (shown, not judged). `notes`: the release's notes from GitHub (state `ready`: its merged pull requests grouped Added/Fixed/Changed with number, title and URL, the range's commit, PR and file counts with `_more` for those not kept, the tag; any other state, with `reason`: no GitHub link, no commit range, not read yet, or the reads failed). `notes.touched`: the features whose map `paths` the release's changed files are in (state `ready`, with files per feature and `note` saying how many changed files match no feature), or `reason` why not (`no_paths`: the map in force for the release declares no code paths, see `openlens-cli rules`; `no_map`; `pending`); `notes.write_back`: what was written back to GitHub for a production release once its verdict is healthy or regressed (commit status `openlens/release`, a note in the GitHub release, one comment per pull request, an issue when regressed), with `state` (off, waiting, writing, written, denied when the token lacks a permission, failed) and `reason`. Read it after each deploy and act on a regressed verdict.",
-                input_schema: json!({"type":"object","properties":with(json!({"release":{"type":"string"},"env":{"type":"string"}})),"required":["release"]}),
+                input_schema: json!({"type":"object","properties":with(json!({"release":{"description":"The release to judge, by the name the SDK sends","type":"string"},"env":{"type":"string"}})),"required":["release"]}),
             },
             ToolSpec {
                 name: "delivery",
+                effect: Effect::ReadOnly,
                 description: "The app's delivery metrics per environment over the last `days` (1 to 90, default 90): deploy frequency (succeeded deploys from the deploy hook, else releases reaching live), lead time from first commit to live (median; 'unknown' with why until a commit range is recorded), change failure rate (failed deploys, rollbacks seen by the hook or in traffic, regressed verdicts) and time to restore (median from a failure to the rollback or the next good change, with failures not restored yet). Optional env for one environment.",
-                input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"days":{"type":"integer","minimum":1,"maximum":90}}))}),
+                input_schema: json!({"type":"object","properties":with(json!({"env":{"description":"One environment (default: every environment)","type":"string"},"days":{"description":"How many days back to measure, 1 to 90 (default: 90)","type":"integer","minimum":1,"maximum":90}}))}),
             },
             ToolSpec {
                 name: "deploy_hook",
+                effect: Effect::Destructive,
                 description: "Make or rotate the app's deploy hook URL (/hooks/deploy/SECRET), shown in this result only: the previous URL stops working at once. Paste it in the platform's deploy notifications (Coolify, Vercel, Netlify, Render, GitHub deployment_status, Argo CD, Flux), or post {status: started|succeeded|failed|rolled_back, release?, commit?, environment?, at?} to it from a deploy step; add ?env=NAME when the platform does not say the environment. Deploys then show in `releases`.",
                 input_schema: json!({"type":"object","properties":proj}),
             },
             ToolSpec {
                 name: "record_release",
+                effect: Effect::Additive,
                 description: "Record a release from the deploy step, after the deploy: its name (the one the SDK sends), the commit deployed and the commit its range starts after (default: the environment's previous deployed commit), and optionally when the range's first commit was made (first_commit_at, from `git log`), which gives the release's lead time in `delivery`. It shows in `releases` as a succeeded deploy. In CI prefer `openlens-cli release` or the openlens-release GitHub Action, which also upload the source maps.",
-                input_schema: json!({"type":"object","properties":with(json!({"release":{"type":"string"},"commit":{"type":"string","description":"7 to 64 hex digits"},"from":{"type":"string","description":"7 to 64 hex digits"},"first_commit_at":{"type":"integer","description":"Author time (Unix seconds) of the oldest commit of the range, for the lead time"},"environment":{"type":"string","default":"production"}})),"required":["release"]}),
+                input_schema: json!({"type":"object","properties":with(json!({"release":{"description":"The release name, as the SDK sends it","type":"string"},"commit":{"type":"string","description":"7 to 64 hex digits"},"from":{"type":"string","description":"7 to 64 hex digits"},"first_commit_at":{"type":"integer","description":"Author time (Unix seconds) of the oldest commit of the range, for the lead time"},"environment":{"description":"The environment deployed to (default: production)","type":"string","default":"production"}})),"required":["release"]}),
             },
             ToolSpec {
                 name: "create_ticket",
+                effect: Effect::Additive,
                 description: "Turn a finding into a ticket for the app's backlog: kind insight (subject '<card kind>:<card subject>'), error (subject = the error group fingerprint), goal (subject = goal id) or map (subject '<finding kind>:<feature>'). Returns the prefilled Markdown (problem, evidence, hypothesis, success metric, acceptance criteria); with to='github', opens the GitHub issue, or updates the one already open for that finding. OpenLens then measures the metric 14 days after the release that ships it and comments on the issue.",
-                input_schema: json!({"type":"object","properties":with(json!({"kind":{"type":"string","enum":["insight","error","goal","map"]},"subject":{"type":"string"},"to":{"type":"string","enum":["markdown","github"]}})),"required":["kind","subject"]}),
+                input_schema: json!({"type":"object","properties":with(json!({"kind":{"description":"What the finding is: an insight card, an error group, a goal or a map finding","type":"string","enum":["insight","error","goal","map"]},"subject":{"description":"Which one: '<card kind>:<card subject>', the error fingerprint, the goal id or '<finding kind>:<feature>'","type":"string"},"to":{"description":"markdown returns the text only; github opens or updates the GitHub issue (default: markdown)","type":"string","enum":["markdown","github"]}})),"required":["kind","subject"]}),
             },
             ToolSpec {
                 name: "tickets",
+                effect: Effect::ReadOnly,
                 description: "Tickets made from findings, the release that shipped each, and the measured effect (improved / no effect / worse): the learning log.",
                 input_schema: json!({"type":"object","properties":proj}),
             },
             ToolSpec {
                 name: "environments",
+                effect: Effect::Destructive,
                 description: "The app's environments: hosts per environment over 30 days (events, last seen, the rule that applies), the host rules, hosts no rule classifies yet (stored as 'unknown', counted in no production number), aliases, hidden environments and per-environment checks. Optional changes, applied first: host+env sets the rule for a host (exact or *.suffix; env is a name or 'ignore' to drop its events), remove removes it; alias+to stores an environment the app sends under another name ('ignore' drops it), unalias removes it; hide / show takes an environment out of the selector or back (its events stay readable by name); monitor+url (+level 'log' or 'notify', default log) checks a non-production environment at its own address every minute, unmonitor stops it. Rules and aliases apply to the next events, with no change to the app; relabel (a host or *.suffix, +days 1-90, default 30) then moves that host's past events to the environment the rules give now, as a dry run that only counts the moves unless dry_run is false. allow (a list of hosts or *.suffix, at most 50; [] turns it off) previews a host allow-list: the hosts outside it and their events over the last 24 h; with confirm true it is saved, and events of other hosts are then dropped at ingestion, but only while a listed host has sent events in the last 7 days (otherwise it is 'pending' and drops nothing); events without a page address always pass. The result's 'allow' shows the list, its status and the events it dropped per host.",
-                input_schema: json!({"type":"object","properties":with(json!({"allow":{"type":"array","items":{"type":"string"},"maxItems":50},"confirm":{"type":"boolean","default":false},"relabel":{"type":"string"},"days":{"type":"integer","minimum":1,"maximum":90},"dry_run":{"type":"boolean","default":true},"host":{"type":"string"},"env":{"type":"string"},"remove":{"type":"string"},"alias":{"type":"string"},"to":{"type":"string"},"unalias":{"type":"string"},"hide":{"type":"string"},"show":{"type":"string"},"monitor":{"type":"string"},"url":{"type":"string"},"level":{"type":"string","enum":["log","notify"]},"unmonitor":{"type":"string"}}))}),
+                input_schema: json!({"type":"object","properties":with(json!({"allow":{"description":"Hosts or *.suffix to allow (at most 50; [] turns the allow-list off): previewed unless confirm is true","type":"array","items":{"type":"string"},"maxItems":50},"confirm":{"description":"Save the allow-list instead of previewing it (default: false)","type":"boolean","default":false},"relabel":{"description":"A host or *.suffix whose past events move to the environment the rules give now","type":"string"},"days":{"description":"How many days of past events relabel moves, 1 to 90 (default: 30)","type":"integer","minimum":1,"maximum":90},"dry_run":{"description":"Only count the events relabel would move (default: true)","type":"boolean","default":true},"host":{"description":"A host (exact or *.suffix) to classify, with env","type":"string"},"env":{"description":"With host: the environment its events go to, or ignore to drop them","type":"string"},"remove":{"description":"A host rule to remove","type":"string"},"alias":{"description":"An environment name the app sends, stored under `to`","type":"string"},"to":{"description":"With alias: the environment to store it as, or ignore to drop its events","type":"string"},"unalias":{"description":"An alias to remove","type":"string"},"hide":{"description":"An environment to take out of the selector","type":"string"},"show":{"description":"A hidden environment to put back in the selector","type":"string"},"monitor":{"description":"A non-production environment to check every minute, with url","type":"string"},"url":{"description":"With monitor: the address to check","type":"string"},"level":{"description":"With monitor: log only records failures, notify also alerts (default: log)","type":"string","enum":["log","notify"]},"unmonitor":{"description":"An environment to stop checking","type":"string"}}))}),
             },
             ToolSpec {
                 name: "verify",
+                effect: Effect::ReadOnly,
                 description: "Wiring checklist: events arrive, users identified with a role, release tagged, map pushed, events per feature. Each failing check carries its fix. Also `release_layers`: which release layers are active (build fingerprint seen, deploy hook configured, releases recorded, verdicts present), each with how to turn it on.",
                 input_schema: json!({"type":"object","properties":proj}),
             },
             ToolSpec {
                 name: "insights",
+                effect: Effect::ReadOnly,
                 description: "What to focus on: the ranked insight cards (evidence, cohort size, next step), paths to value, readiness and role gaps.",
                 input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"}}))}),
             },
             ToolSpec {
                 name: "digest",
+                effect: Effect::ReadOnly,
                 description: "This week vs last week (active users, sessions, errors, completed tasks per feature) plus the top 3 insight cards, as JSON and ready-to-send Markdown.",
                 input_schema: json!({"type":"object","properties":proj}),
             },
             ToolSpec {
                 name: "kpi_report",
+                effect: Effect::ReadOnly,
                 description: "Headline KPIs in one compact payload: users (DAU/WAU/MAU, stickiness), sessions, vitals, top features and roles, latest two releases. With `by` (role|account|plan|page|feature), also users, sessions, events, tasks and errors per value (30 days). Roles are 'role at event time'.",
-                input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"},"by":{"type":"string","enum":["role","account","plan","page","feature"]}}))}),
+                input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"},"by":{"description":"Also break the KPIs down per value of this dimension (30 days)","type":"string","enum":["role","account","plan","page","feature"]}}))}),
             },
             ToolSpec {
                 name: "user_timeline",
+                effect: Effect::ReadOnly,
                 description: "One user's story: role, account, plan, role changes, recorded sessions (with dashboard links) and their latest 100 events (90 days). Use it to see what a churned or frustrated user did.",
-                input_schema: json!({"type":"object","properties":with(json!({"distinct_id":{"type":"string"}})),"required":["distinct_id"]}),
+                input_schema: json!({"type":"object","properties":with(json!({"distinct_id":{"description":"The user's id, as the app sends it with identify()","type":"string"}})),"required":["distinct_id"]}),
             },
             ToolSpec {
                 name: "board",
+                effect: Effect::ReadOnly,
                 description: "The Focus board numbers (KPIs by role/environment/release, features, roles, role gaps, releases, vitals). Period blocks read since the current release by default; `since` (a release) or `from`/`to` (YYYY-MM-DD, project days, at most 400 days, none in the future) pick another period, compared in `window` with the same length before. A period reading more than 30 days of events fails with its estimate (days, bytes, rough time) until called again with `confirm: \"1\"`.",
-                input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"},"since":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"},"confirm":{"type":"string"}}))}),
+                input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"},"since":{"type":"string"},"from":{"description":"First day of the period, YYYY-MM-DD in the project's zone (with to)","type":"string"},"to":{"description":"Last day of the period, YYYY-MM-DD in the project's zone (with from)","type":"string"},"confirm":{"description":"1 to read a period longer than 30 days of events after seeing its estimate","type":"string"}}))}),
             },
             ToolSpec {
                 name: "board_job",
+                effect: Effect::Destructive,
                 description: "A long board period (a date range or past release that reads more than 30 days of events) computed in the background instead of in one call. `action: start` with the `board` tool's parameters returns the job's `id` (refused while you already have one queued or running; the error names it); `action: status` with `job` returns `state` (queued, running, done, failed, cancelled), `progress` (0 to 1, time against the estimate) and, once done, the `board`; `action: cancel` with `job` stops it. Jobs are kept an hour, for whoever started them.",
-                input_schema: json!({"type":"object","properties":with(json!({"action":{"type":"string","enum":["start","status","cancel"]},"job":{"type":"string"},"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"},"since":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"}})),"required":["action"]}),
+                input_schema: json!({"type":"object","properties":with(json!({"action":{"description":"start a job, read its status, or cancel it","type":"string","enum":["start","status","cancel"]},"job":{"description":"The job id that start returned (for status and cancel)","type":"string"},"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"},"since":{"type":"string"},"from":{"description":"First day of the period, YYYY-MM-DD in the project's zone (with to)","type":"string"},"to":{"description":"Last day of the period, YYYY-MM-DD in the project's zone (with from)","type":"string"}})),"required":["action"]}),
             },
             ToolSpec {
                 name: "vitals",
+                effect: Effect::ReadOnly,
                 description: "Web Vitals explained (LCP, INP, CLS, FCP, TTFB), last 7 days: what each means for a visitor, p75, rating, good/poor thresholds, the worst pages at p75, the p75 per device class and the elements most often behind slow measurements (LCP, INP, CLS), the dominant cause with the part of the vital that weighs most (likely_cause), and what to do, most likely cause first.",
                 input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"}}))}),
             },
             ToolSpec {
                 name: "errors",
+                effect: Effect::ReadOnly,
                 description: "Top error groups (normalised message + source), with users, sessions, roles, releases and places hit. Last 30 days.",
                 input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"}}))}),
             },
             ToolSpec {
                 name: "sql",
+                effect: Effect::ReadOnly,
                 description: "Read-only SQL (DataFusion) on table `events`: uuid, event, distinct_id, session_id, timestamp, url, path, feature, role, account, plan, environment, release, properties (JSON text), date. Prune with `date >= 'YYYY-MM-DD'`. Max 10k rows.",
-                input_schema: json!({"type":"object","properties":with(json!({"query":{"type":"string"}})),"required":["query"]}),
+                input_schema: json!({"type":"object","properties":with(json!({"query":{"description":"One read-only SQL statement on the table `events`","type":"string"}})),"required":["query"]}),
             },
             ToolSpec {
                 name: "flags",
+                effect: Effect::ReadOnly,
                 description: "The project's feature flags (key, enabled, rollout %, target roles and accounts, property rules, variants).",
                 input_schema: json!({"type":"object","properties":proj}),
             },
             ToolSpec {
                 name: "flag_set",
+                effect: Effect::Destructive,
                 description: "Create or update a flag: put a risky change behind openlens.isEnabled(key), start with a small rollout or one role, then widen it once the board shows its cohort is fine.",
                 input_schema: json!({"type":"object","properties":with(json!({
-                    "key":{"type":"string"},
-                    "enabled":{"type":"boolean"},
-                    "rollout":{"type":"integer","minimum":0,"maximum":100},
-                    "roles":{"type":"array","items":{"type":"string"}},
-                    "accounts":{"type":"array","items":{"type":"string"}},
-                    "description":{"type":"string"},
+                    "key":{"description":"The flag's key, as the app checks it with openlens.isEnabled(key)","type":"string"},
+                    "enabled":{"description":"Whether the flag is on (default: true)","type":"boolean"},
+                    "rollout":{"description":"Share of matching users who get it, 0 to 100 % (default: 0)","type":"integer","minimum":0,"maximum":100},
+                    "roles":{"description":"Only users with one of these roles (default: every role)","type":"array","items":{"type":"string"}},
+                    "accounts":{"description":"Only users of these accounts (default: every account)","type":"array","items":{"type":"string"}},
+                    "description":{"description":"What the flag guards, for the team","type":"string"},
                     "rules":{"type":"array","items":{"type":"string"},"description":"Property rules, all must match: 'plan in pro, team', 'country not in FR' (any identify() property; a user without it is out)"}
                 })),"required":["key"]}),
             },
             ToolSpec {
                 name: "surveys",
+                effect: Effect::ReadOnly,
                 description: "The project's micro-surveys and their results (answers, mean rating, by role, latest text answers, dismissals), last 30 days.",
                 input_schema: json!({"type":"object","properties":proj}),
             },
             ToolSpec {
                 name: "survey_set",
+                effect: Effect::Destructive,
                 description: "Create or update a micro-survey: one question shown right after `trigger` (a success event like entry_saved) to `sample`% of users (optionally some roles), once each. kind: rating (1-5), yes_no, choice (2-6 choices) or text. Ask about the moment that just happened, in plain words.",
                 input_schema: json!({"type":"object","properties":with(json!({
-                    "key":{"type":"string"},
-                    "question":{"type":"string"},
-                    "kind":{"type":"string","enum":["rating","yes_no","choice","text"]},
-                    "choices":{"type":"array","items":{"type":"string"}},
-                    "trigger":{"type":"string"},
-                    "sample":{"type":"integer","minimum":0,"maximum":100},
-                    "roles":{"type":"array","items":{"type":"string"}},
-                    "enabled":{"type":"boolean"}
+                    "key":{"description":"The survey's key","type":"string"},
+                    "question":{"description":"The question, in plain words","type":"string"},
+                    "kind":{"description":"The answer asked for: rating 1-5, yes_no, choice or text","type":"string","enum":["rating","yes_no","choice","text"]},
+                    "choices":{"description":"With kind choice: the 2 to 6 choices","type":"array","items":{"type":"string"}},
+                    "trigger":{"description":"The event right after which the survey shows, such as a success event","type":"string"},
+                    "sample":{"description":"Share of users asked, 0 to 100 % (default: 10)","type":"integer","minimum":0,"maximum":100},
+                    "roles":{"description":"Only users with one of these roles (default: every role)","type":"array","items":{"type":"string"}},
+                    "enabled":{"description":"Whether the survey shows (default: true)","type":"boolean"}
                 })),"required":["key","question","kind","trigger"]}),
             },
             ToolSpec {
                 name: "login_link",
+                effect: Effect::Additive,
                 description: "A one-time login link. Without email: an owner link for the PM (valid 24 hours). With email (+ role viewer|admin, optional projects): invites that person with that access (valid 7 days).",
-                input_schema: json!({"type":"object","properties":{"email":{"type":"string"},"role":{"type":"string","enum":["viewer","admin"]},"projects":{"type":"array","items":{"type":"string"}}}}),
+                input_schema: json!({"type":"object","properties":{"email":{"description":"The person to invite (none: an owner link for the PM)","type":"string"},"role":{"description":"With email: their access (default: viewer)","type":"string","enum":["viewer","admin"]},"projects":{"description":"With email: the project ids they may see (default: every project)","type":"array","items":{"type":"string"}}}}),
             },
         ];
         // Tools over the commands only a page ran before (#525).

@@ -3,7 +3,7 @@
 //! calls the REST route of an `announcements.*` command (D-020). Listed
 //! after the other tools; [`call`] answers the names it knows.
 
-use openlens_mcp::ToolSpec;
+use openlens_mcp::{Effect, ToolSpec};
 use serde_json::{Map, Value, json};
 
 use crate::{Body, Client};
@@ -67,69 +67,73 @@ const FIELDS: &[&str] = &[
 
 /// The tools of this module.
 pub(crate) fn specs() -> Vec<ToolSpec> {
-    let with = |extra: Value| {
-        let mut p = json!({ "project": { "type": "string", "description": "Project id (default: default)" } });
-        if let (Some(a), Some(b)) = (p.as_object_mut(), extra.as_object()) {
-            a.extend(b.clone());
-        }
-        p
-    };
+    let with = crate::mcp::with;
     let fields = || {
         json!({
-            "title": {"type": "string", "maxLength": 200},
+            "title": {"type": "string", "maxLength": 200, "description": "A short headline"},
             "body": {"type": "string", "maxLength": 4000, "description": "Plain text; markup is shown as text"},
-            "level": {"type": "string", "enum": ["information", "degraded", "outage", "resolved"]},
+            "level": {"type": "string", "enum": ["information", "degraded", "outage", "resolved"], "description": "How bad it is (default: information)"},
             "components": {"type": "array", "items": {"type": "string"}, "description": "production or environment names"},
             "start": {"type": "string", "description": "RFC 3339, Unix seconds or YYYY-MM-DD HH:MM in the project's zone"},
-            "end": {"type": "string"},
+            "end": {"type": "string", "description": "When it ends, in the same forms as start (none: open-ended)"},
             "pinned": {"type": "boolean", "description": "Pin at the top (information only; unpins the others)"},
             "incident": {"type": "integer", "description": "The incident it follows (id from `announcements` offers)"}
         })
     };
-    let states = json!({"type": "string", "enum": ["investigating", "identified", "monitoring", "resolved"]});
+    let states = json!({"type": "string", "enum": ["investigating", "identified", "monitoring", "resolved"], "description": "Where the incident stands; resolved also ends the announcement"});
     let mut create = fields();
     if let Some(o) = create.as_object_mut() {
         o.insert("state".into(), states.clone());
     }
     let mut edit = fields();
     if let Some(o) = edit.as_object_mut() {
-        o.insert("id".into(), json!({"type": "integer"}));
+        o.insert(
+            "id".into(),
+            json!({"type": "integer", "description": "The announcement id, from `announcements`"}),
+        );
     }
     vec![
         ToolSpec {
             name: "announcements",
+            effect: Effect::ReadOnly,
             description: "Status announcements of the last `days` (default 90): title, plain-text body, level, components, start and end, pinned, the incident followed, and dated updates oldest first; the pinned notice; offers on recent incidents (write_update: an open incident without words; mark_resolved: its incident closed, the announcement is not resolved yet); whether they go to the alert channels.",
-            input_schema: json!({"type":"object","properties":with(json!({"days":{"type":"integer","minimum":1,"maximum":400}}))}),
+            input_schema: json!({"type":"object","properties":with(json!({"days":{"description":"How many days back to read, 1 to 400 (default: 90)","type":"integer","minimum":1,"maximum":400}}))}),
         },
         ToolSpec {
             name: "announce",
+            effect: Effect::Additive,
             description: "Post a status announcement (\"Deploying v2.3\", \"Slower exports this afternoon\"). With `incident` and `state`, it follows that incident with a first update. Returns it with its id.",
             input_schema: json!({"type":"object","properties":with(create),"required":["title"]}),
         },
         ToolSpec {
             name: "announcement_update",
+            effect: Effect::Additive,
             description: "Post a dated update on an announcement: state investigating, identified, monitoring or resolved, and what is happening. A resolved update also resolves and ends it.",
-            input_schema: json!({"type":"object","properties":with(json!({"id":{"type":"integer"},"state":states,"body":{"type":"string","maxLength":4000}})),"required":["id","state","body"]}),
+            input_schema: json!({"type":"object","properties":with(json!({"id":{"description":"The announcement id, from `announcements`","type":"integer"},"state":states,"body":{"description":"What is happening, in plain text","type":"string","maxLength":4000}})),"required":["id","state","body"]}),
         },
         ToolSpec {
             name: "announcement_edit",
+            effect: Effect::Destructive,
             description: "Change an announcement: only the fields given change (end \"\" removes the end).",
             input_schema: json!({"type":"object","properties":with(edit),"required":["id"]}),
         },
         ToolSpec {
             name: "announcement_close",
+            effect: Effect::Destructive,
             description: "End an announcement now (Mark resolved), with an optional closing body posted as a resolved update.",
-            input_schema: json!({"type":"object","properties":with(json!({"id":{"type":"integer"},"body":{"type":"string"}})),"required":["id"]}),
+            input_schema: json!({"type":"object","properties":with(json!({"id":{"description":"The announcement id, from `announcements`","type":"integer"},"body":{"description":"An optional closing word, posted as a resolved update","type":"string"}})),"required":["id"]}),
         },
         ToolSpec {
             name: "announcement_delete",
+            effect: Effect::Destructive,
             description: "Delete an announcement and its updates.",
-            input_schema: json!({"type":"object","properties":with(json!({"id":{"type":"integer"}})),"required":["id"]}),
+            input_schema: json!({"type":"object","properties":with(json!({"id":{"description":"The announcement id, from `announcements`","type":"integer"}})),"required":["id"]}),
         },
         ToolSpec {
             name: "announcement_send",
+            effect: Effect::Destructive,
             description: "Also send announcements, their updates and their end to the project's alert channels (email, webhook, ntfy): send true or false (off by default).",
-            input_schema: json!({"type":"object","properties":with(json!({"send":{"type":"boolean"}})),"required":["send"]}),
+            input_schema: json!({"type":"object","properties":with(json!({"send":{"description":"Send announcements to the alert channels (true) or not (false)","type":"boolean"}})),"required":["send"]}),
         },
     ]
 }

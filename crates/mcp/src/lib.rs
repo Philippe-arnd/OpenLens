@@ -15,10 +15,37 @@ pub const PROTOCOL_VERSION: &str = "2025-06-18";
 /// Largest accepted request line, in bytes.
 pub const MAX_LINE: usize = 4 * 1024 * 1024;
 
+/// What a tool does to the server's data, sent as the tool's
+/// `annotations` in `tools/list` (`readOnlyHint`, `destructiveHint`) so a
+/// client can ask before running one that changes or removes something.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Effect {
+    /// Only reads.
+    ReadOnly,
+    /// Adds something (a project, a goal, an update) without changing or
+    /// removing what exists.
+    Additive,
+    /// May overwrite, switch, end or delete what exists.
+    Destructive,
+}
+
+impl Effect {
+    /// The MCP tool annotations of this effect.
+    #[must_use]
+    pub fn annotations(self) -> Value {
+        json!({
+            "readOnlyHint": self == Self::ReadOnly,
+            "destructiveHint": self == Self::Destructive,
+        })
+    }
+}
+
 /// A tool description for `tools/list`.
 pub struct ToolSpec {
     /// Tool name.
     pub name: &'static str,
+    /// Whether it reads, adds or may destroy (its `annotations`).
+    pub effect: Effect,
     /// What it does, for the agent.
     pub description: &'static str,
     /// JSON Schema of the arguments.
@@ -63,7 +90,8 @@ pub fn handle(tools: &dyn Tools, name: &str, version: &str, req: &Value) -> Opti
         "tools/list" => response(
             &id,
             json!({ "tools": tools.list().iter().map(|t| json!({
-                "name": t.name, "description": t.description, "inputSchema": t.input_schema
+                "name": t.name, "description": t.description, "inputSchema": t.input_schema,
+                "annotations": t.effect.annotations(),
             })).collect::<Vec<_>>() }),
         ),
         "tools/call" => {
@@ -137,6 +165,7 @@ mod tests {
         fn list(&self) -> Vec<ToolSpec> {
             vec![ToolSpec {
                 name: "echo",
+                effect: Effect::ReadOnly,
                 description: "echo",
                 input_schema: json!({"type": "object"}),
             }]
@@ -177,6 +206,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(list["result"]["tools"][0]["name"], "echo");
+        assert_eq!(
+            list["result"]["tools"][0]["annotations"]["readOnlyHint"], true,
+            "clients read a tool's effect from its annotations"
+        );
         let ok = handle(&Echo, "t", "0", &json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"echo","arguments":{"a":1}}})).unwrap();
         assert_eq!(ok["result"]["isError"], false);
         let failed = handle(&Echo, "t", "0", &json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"echo","arguments":{"fail":1}}})).unwrap();

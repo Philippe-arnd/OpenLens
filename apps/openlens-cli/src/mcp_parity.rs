@@ -191,3 +191,72 @@ fn every_command_is_a_tool_or_pending_and_every_tool_is_accounted_for() {
         );
     }
 }
+
+/// `tools/list` as an agent reads it.
+fn listed_tools() -> Vec<serde_json::Value> {
+    let dir = tempfile::tempdir().unwrap();
+    let client = Client::new(Some("http://localhost:1".into()), Some("t".into())).unwrap();
+    let tools = OpenLensTools::new(client, dir.path(), dir.path()).unwrap();
+    let req = serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
+    let reply = openlens_mcp::handle(&tools, "t", "0", &req).unwrap();
+    reply["result"]["tools"].as_array().cloned().unwrap()
+}
+
+/// #688: a client can ask before a tool that changes or removes something,
+/// and an agent knows what each parameter takes.
+#[test]
+fn every_tool_says_what_it_changes_and_describes_every_parameter() {
+    let tools = listed_tools();
+    assert!(!tools.is_empty());
+    for t in &tools {
+        let name = t["name"].as_str().unwrap_or("?");
+        let hints = &t["annotations"];
+        assert!(
+            hints["readOnlyHint"].is_boolean() && hints["destructiveHint"].is_boolean(),
+            "tool `{name}`: give it an effect, sent as readOnlyHint and destructiveHint"
+        );
+        let props = t["inputSchema"]["properties"].as_object().unwrap();
+        for (param, schema) in props {
+            let text = schema["description"].as_str().unwrap_or("");
+            assert!(
+                !text.trim().is_empty(),
+                "tool `{name}`: describe its parameter `{param}` (shared ones in `mcp::with`)"
+            );
+        }
+    }
+}
+
+/// A tool that runs a command needing write access is not read-only, and
+/// one whose commands all only read (or are public) is read-only. Admin
+/// commands (instance-wide reads and writes alike) prove nothing.
+#[test]
+fn a_tool_is_read_only_exactly_when_the_commands_it_runs_only_read() {
+    use openlens_engine::commands::Access;
+    for t in listed_tools() {
+        let name = t["name"].as_str().unwrap_or("?");
+        let access: Vec<Access> = TOOL_OF
+            .iter()
+            .filter(|(_, tool)| *tool == name)
+            .filter_map(|(c, _)| REGISTRY.iter().find(|s| s.name == *c).map(|s| s.access))
+            .collect();
+        if access.is_empty() {
+            continue;
+        }
+        let read_only = t["annotations"]["readOnlyHint"] == true;
+        if access.contains(&Access::Write) {
+            assert!(
+                !read_only,
+                "tool `{name}` runs a write command: it is not read-only"
+            );
+        }
+        if access
+            .iter()
+            .all(|a| matches!(a, Access::Read | Access::Public))
+        {
+            assert!(
+                read_only,
+                "tool `{name}` only runs reads: mark it read-only"
+            );
+        }
+    }
+}
