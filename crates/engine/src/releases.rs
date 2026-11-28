@@ -279,7 +279,7 @@ fn env_rank(e: &str) -> (u8, &str) {
 /// The closed days inside the window that have `person_day` rows, oldest
 /// first (#729). A day with no rollup, or the day the window starts in
 /// (only part of it is inside), is read from its events.
-async fn rolled_days(
+pub(crate) async fn rolled_days(
     q: &QueryEngine,
     project: &str,
     now: DateTime<Utc>,

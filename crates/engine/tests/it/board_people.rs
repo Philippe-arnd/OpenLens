@@ -436,3 +436,41 @@ async fn the_release_lifecycle_reads_closed_days_from_person_day_with_the_same_n
     drop_events(root, rolled[rolled.len() - 5]);
     assert_eq!(lifecycle(root, "UTC").await, utc);
 }
+
+/// The filter bar's latest releases (Errors, Pages, Events), in a stable
+/// form.
+async fn filter_releases(root: &std::path::Path, f: &Filters) -> String {
+    let q = QueryEngine::new(root, Limits::default());
+    let b = openlens_engine::filter_options(&q, "p", f, None)
+        .await
+        .unwrap();
+    let mut rows: Vec<String> = b
+        .releases
+        .iter()
+        .map(|r| format!("{} {} {}", r.release, r.first_seen, r.users))
+        .collect();
+    rows.sort();
+    rows.join("\n")
+}
+
+#[tokio::test]
+#[ignore = "heavy: rolls up every closed day; run by `cargo xtask ci --heavy` (nightly, release tags)"]
+async fn the_filter_bar_releases_read_closed_days_from_person_day_with_the_same_numbers() {
+    let dir = seed();
+    let root = dir.path();
+    let staging = Filters {
+        environment: "staging".into(),
+        ..Filters::default()
+    };
+    let (all, stage) = (
+        filter_releases(root, &Filters::default()).await,
+        filter_releases(root, &staging).await,
+    );
+    assert!(all.contains('v'), "{all}");
+    let rolled = roll_up(root, 1).await;
+    // A rolled day without its events still counts: it is read from the
+    // rollup (#748).
+    drop_events(root, rolled[rolled.len() - 5]);
+    assert_eq!(filter_releases(root, &Filters::default()).await, all);
+    assert_eq!(filter_releases(root, &staging).await, stage);
+}

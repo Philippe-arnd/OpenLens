@@ -37,16 +37,39 @@ pub async fn filter_options(
         }
         .clause(30)?
     );
-    let releases_sql = format!(
-        "SELECT release, CAST(min(timestamp) AS VARCHAR) AS first_seen, \
-         count(DISTINCT distinct_id) AS users FROM {src} WHERE {} AND release IS NOT NULL \
-         GROUP BY release ORDER BY min(timestamp) DESC LIMIT 5",
-        Filters {
-            release: None,
-            ..f.clone()
-        }
-        .clause(90)?
-    );
+    // The latest releases over 90 days: closed days with `person_day`
+    // rows come from the rollup (#748), the rest from the events. With a
+    // role filter, the rollup's raw roles would need the map in force, so
+    // the events are read.
+    let any_release = Filters {
+        release: None,
+        ..f.clone()
+    };
+    let now = chrono::Utc::now();
+    let rolled = if any_release.role.is_none() {
+        crate::releases::rolled_days(q, project, now).await?
+    } else {
+        Vec::new()
+    };
+    let (skip, from_rollup) =
+        board_people::split_span(&rolled, now, Span::days(90), &any_release, "role");
+    let w = any_release.clause_at(90, now)?;
+    let releases_sql = match from_rollup {
+        None => format!(
+            "SELECT release, CAST(min(timestamp) AS VARCHAR) AS first_seen, \
+             count(DISTINCT distinct_id) AS users FROM {src} WHERE {w} AND release IS NOT NULL \
+             GROUP BY release ORDER BY min(timestamp) DESC LIMIT 5"
+        ),
+        Some(r) => format!(
+            "SELECT release, CAST(min(first) AS VARCHAR) AS first_seen, \
+             count(DISTINCT distinct_id) AS users FROM \
+             (SELECT release, distinct_id, min(timestamp) AS first FROM {src} \
+              WHERE {w}{skip} AND release IS NOT NULL GROUP BY release, distinct_id \
+              UNION ALL SELECT release, person AS distinct_id, first_ts AS first FROM person_day \
+              WHERE {r} AND release IS NOT NULL) AS r \
+             GROUP BY release ORDER BY min(first) DESC LIMIT 5"
+        ),
+    };
     let (roles, releases, stored) = futures::join!(
         q.sql(project, &roles_sql),
         q.sql(project, &releases_sql),
