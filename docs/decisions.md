@@ -233,6 +233,8 @@ Append-only. Each entry: id, date, decision, why, consequences.
 
 **Consequences:** no new variable; if the detection is wrong, the detection is fixed. Under the Helm chart's default 1 GiB limit, the pool is 768 MiB as before. The [architecture challenge](https://github.com/Philippe-arnd/OpenLens/issues/442) measures the effect with the realistic profile of `xtask bench-gen` (#443).
 
+*Amended by D-097 (2026-11-28):* the pool stops at 768 MiB whatever the limit; it still follows a smaller one.
+
 ## D-034 (2026-11-25, agent for #410) Environments: host rules on the server, and an unknown host is not production
 
 **Decision:** amends D-012. A project holds **host rules** (an exact host or `*.suffix`, mapped to an environment or to `ignore`, at most 200), stored as a project setting and applied at ingestion to the host of the event's page address. The precedence order:
@@ -862,3 +864,22 @@ Supersedes the trace-header and naming parts of D-082 (nothing of it was release
 **Why:** #237 asks for the verdict where the app's agents look, with nobody doing anything, and #575 for idempotent, bounded writes with a security review of their own. Reusing the ticket link and the ticket machinery adds no credential and no setting (rule 17). Writing only final verdicts of recent production releases keeps the comments few and true.
 
 **Consequences:** a release recorded without a range (the project's first) is not written back, since it has no read. A crash between GitHub's answer and the save can, rarely, leave one duplicate comment. `openlens-cli verify` does not check the token's write permissions yet: the Releases page and `release_report` say when GitHub refused.
+
+## D-097 (2026-11-28, Phil) OpenLens stays under 1 GiB: the query pool stops at 768 MiB, and the footprint has measured targets
+
+**Decision:** the query memory pool is the process's memory limit minus 256 MiB, **from 256 MiB to 768 MiB**: it follows a smaller container (D-033), but no longer grows with a larger one, nor with physical memory when there is no container. The default windows stay: the board opens on the current release (at most 90 days, 14 without a release), the other pages on 30 days. The supported size of one small server is **4 M events in 90 days** (D-023), with these targets, measured every night by `perf.yml`:
+
+| Target | Limit | Measured (2026-11-26, run 45855092155, 1 GiB cap) |
+| --- | --- | --- |
+| Peak memory at 4 M events | ≤ 900 MB | 650–790 MB |
+| Board opened (computed ahead, D-072) | ≤ 1 s | ~1 ms |
+| Board computed, 4 M | ≤ 4 s | 3–7 s (to bring down: #729, #730) |
+| One filtered board, 4 M | ≤ 3 s | 3.0 s |
+| Capture p99 while boards are read | ≤ 50 ms | 17 ms |
+| Capacity, one run on a 4-vCPU runner | ≥ 20,000 events/s | 100,000 events/s |
+| New data readable, then on the board | measured by `xtask bench --rate` | to be measured |
+
+**Why:** OpenLens is meant to be light (D-001, a 1 GB target), and on a host with no container the pool took nearly all of its memory (7.7 GB on an 8 GB machine). Since D-051 and D-074 the board keeps no copy of events or rollup rows, and 4 M events under a 1 GiB cap answered every board with a peak under 800 MB, so the ceiling costs little: at 4 M a 2 GiB limit computed the board in 2.2 s instead of 2.9 s. The nightly failed on every run since D-074 against a frozen average (#578); fixed targets say what we promise instead of what the last green nights did.
+
+**Consequences:** no new setting. A larger memory limit no longer speeds the board up; a query that needs more than the pool spills to disk or answers *narrow the dates* (D-071, D-074). The sizing docs say 1 GiB up to 4 M events. Above that size, the answer is fewer low-value events (budgets, dedup), not more memory. The `scale` job runs 4 M under 1 GiB every night, and a missed target in the nightly fails it; the board-compute target is above what is measured today, and the work that brings it under is tracked in the issues the table links.
+

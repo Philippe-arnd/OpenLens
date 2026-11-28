@@ -32,10 +32,9 @@ TimeoutStopSec=60
 LimitNOFILE=65536
 UMask=0077
 
-# Memory: 1 GiB covers about 2 M events in 90 days; give 2G up to about 4 M
+# Memory: 1 GiB covers about 4 M events in 90 days
 # (docs/deploy/README.md#requirements). OpenLens reads this limit and sizes
-# its query memory to it. Raise it with a drop-in:
-#   systemctl edit openlens  ->  [Service] MemoryMax=2G
+# its query memory to it, up to 768 MiB on any host (D-097).
 MemoryMax=1G
 
 # Sandbox. /proc stays readable: OpenLens reads /proc/meminfo and its cgroup

@@ -8,7 +8,7 @@ OpenLens keeps its data on one local volume and is its only writer, so the stack
 
 ```sh
 curl -fsSLO https://raw.githubusercontent.com/Philippe-arnd/OpenLens/main/deploy/swarm/openlens.yaml
-# Edit OPENLENS_PUBLIC_URL, and the memory limit if you have more than about 2 M events in 90 days.
+# Edit OPENLENS_PUBLIC_URL. The 1 GiB memory limit covers about 4 M events in 90 days.
 docker node update --label-add openlens=data <node>
 docker stack deploy -c openlens.yaml openlens
 docker service logs openlens_openlens | grep -i owner   # first start: a single-use owner link, valid 1 hour
@@ -21,7 +21,7 @@ What the stack sets:
 - **One task at a time:** an update stops the old task before it starts the new one (`order: stop-first`), since two processes must never write the same data.
 - **Rolled back by Swarm:** if the new task fails during an update, Swarm goes back to the previous image (`failure_action: rollback`).
 - **A long first start:** the healthcheck has a 15-minute start period, because a new version first copies the data to `backups/upgrade/` before it listens. Failed checks before the first success do not count.
-- **Memory:** a 1 GiB limit, which covers about 2 M events in 90 days; 2G up to about 4 M ([requirements](README.md#requirements)).
+- **Memory:** a 1 GiB limit, which covers about 4 M events in 90 days ([requirements](README.md#requirements)).
 
 ## Updates
 

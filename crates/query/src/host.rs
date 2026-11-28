@@ -3,8 +3,10 @@
 //! The query memory pool was a fixed 768 MiB and every query used two
 //! partitions, whatever the host: memory beyond 1 GiB was never used, and
 //! under 768 MiB the kernel killed the process before DataFusion spilled.
-//! Both now follow the container (D-033). There is no setting: when the
-//! detection is wrong, the detection is fixed.
+//! Both now follow the container (D-033), and the pool stops at 768 MiB
+//! (D-097): OpenLens stays under about 1 GiB on any host, container or
+//! not. There is no setting: when the detection is wrong, the detection is
+//! fixed.
 
 use std::path::Path;
 
@@ -16,6 +18,10 @@ const MIB: u64 = 1024 * 1024;
 const RESERVED: u64 = 256 * MIB;
 /// Smallest pool, even on a tiny host: below it no board can run.
 const FLOOR: u64 = 256 * MIB;
+/// Largest pool, whatever the host (D-097): with [`RESERVED`], the process
+/// stays near 1 GiB. A query that needs more spills to disk or answers
+/// *narrow the dates* (D-071, D-074) instead of growing with the machine.
+const CEILING: u64 = 768 * MIB;
 
 /// The memory this process may use, in bytes: the cgroup limit (v2, then
 /// v1), capped by physical memory, or physical memory alone. `None` when
@@ -65,12 +71,13 @@ fn ancestors(path: &str) -> impl Iterator<Item = &str> {
     })
 }
 
-/// The query pool for a process allowed `limit` bytes.
+/// The query pool for a process allowed `limit` bytes: the limit minus
+/// [`RESERVED`], between [`FLOOR`] and [`CEILING`].
 pub(crate) fn pool_for(limit: Option<u64>) -> u64 {
     match limit {
-        Some(l) => l.saturating_sub(RESERVED).max(FLOOR),
-        // Unknown host: what the pool always was.
-        None => 768 * MIB,
+        Some(l) => l.saturating_sub(RESERVED).clamp(FLOOR, CEILING),
+        // Unknown host: the ceiling.
+        None => CEILING,
     }
 }
 
@@ -122,8 +129,8 @@ pub(crate) fn mib(bytes: u64) -> u64 {
 impl Limits {
     /// The defaults, with the memory pool sized to this host (#444, D-033):
     /// the container's memory limit (cgroup v2 or v1, else physical
-    /// memory) minus 256 MiB, at least 256 MiB. 768 MiB under a 1 GiB
-    /// limit, as before. Logs what it chose.
+    /// memory) minus 256 MiB, from 256 MiB to 768 MiB (D-097). Logs what it
+    /// chose.
     pub fn from_host() -> Self {
         let limit = memory_limit();
         let pool = pool_for(limit);
@@ -168,10 +175,14 @@ mod tests {
     }
 
     #[test]
-    fn the_pool_follows_the_container() {
+    fn the_pool_follows_a_small_container_and_stops_at_the_ceiling() {
         // Under the default Helm limit, the pool is what it always was.
         assert_eq!(pool_for(Some(1024 * MIB)), 768 * MIB);
-        assert!(pool_for(Some(2048 * MIB)) > pool_for(Some(1024 * MIB)));
+        // A large host, container or not, keeps the process near 1 GiB
+        // (D-097): the pool does not grow with the machine.
+        assert!(pool_for(Some(8 * 1024 * MIB)) <= pool_for(Some(1024 * MIB)));
+        assert!(pool_for(None) <= pool_for(Some(1024 * MIB)));
+        assert!(pool_for(Some(768 * MIB)) < pool_for(Some(1024 * MIB)));
         // A tiny container still gets a usable pool, and never one larger
         // than the container itself when it is above the floor.
         assert_eq!(pool_for(Some(128 * MIB)), FLOOR);
