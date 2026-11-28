@@ -394,6 +394,9 @@ pub fn fold_revenue(
     out
 }
 
+/// Weekly adoption shares per feature: (Monday, share) points.
+pub type AdoptionSeries = BTreeMap<String, Vec<(String, f64)>>;
+
 /// Fold feature use into adoption (pure, #714): `pairs` are the (user,
 /// day) pairs of the active users, `weekly` the (Monday, feature, users)
 /// rows and `last30` the (feature, users) of the last 30 days. Each
@@ -405,7 +408,7 @@ pub fn fold_adoption(
     last30: &[(String, i64)],
     features: &[String],
     today: NaiveDate,
-) -> (BTreeMap<String, Vec<(String, f64)>>, BTreeMap<String, f64>) {
+) -> (AdoptionSeries, BTreeMap<String, f64>) {
     let mut per_week: BTreeMap<NaiveDate, BTreeSet<&str>> = BTreeMap::new();
     let mut month: BTreeSet<&str> = BTreeSet::new();
     let since = today - chrono::Duration::days(29);
