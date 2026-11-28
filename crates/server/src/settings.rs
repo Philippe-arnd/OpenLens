@@ -678,7 +678,7 @@ pub(crate) async fn delete(
     let st = state.clone();
     let pid = id.clone();
     match tokio::task::spawn_blocking(move || {
-        let r = crate::api::purge_project(&st, &pid);
+        let r = crate::purge::purge_project(&st, &pid);
         crate::icon::forget(&st, &pid);
         r
     })

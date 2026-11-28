@@ -328,7 +328,7 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "login_link",
-                description: "A one-time login link. Without email: an owner link for the PM (valid 24 hours). With email (+ role viewer|admin, optional projects): invites that person with that access (valid 7 days).",
+                description: "A one-time login link. Without email: an owner link for the PM (valid 24 hours). With email (+ role viewer|admin, optional projects): invites that person with that access (valid 7 days); for someone who already has an account, a role or projects left out keep their current access.",
                 input_schema: json!({"type":"object","properties":{"email":{"type":"string"},"role":{"type":"string","enum":["viewer","admin"]},"projects":{"type":"array","items":{"type":"string"}}}}),
             },
         ];
@@ -863,12 +863,18 @@ impl Tools for OpenLensTools {
                 ok_or(st, v)
             }
             "login_link" => {
+                // Role and projects only when given: a new link for an
+                // existing user keeps their access.
                 let body = s(args, "email").map(|e| {
-                    Body::Json(json!({
-                        "email": e,
-                        "role": s(args, "role").unwrap_or_else(|| "viewer".into()),
-                        "projects": args.get("projects").cloned(),
-                    }))
+                    let mut b = serde_json::Map::new();
+                    b.insert("email".into(), json!(e));
+                    if let Some(r) = s(args, "role") {
+                        b.insert("role".into(), json!(r));
+                    }
+                    if let Some(p) = args.get("projects").filter(|p| !p.is_null()) {
+                        b.insert("projects".into(), p.clone());
+                    }
+                    Body::Json(Value::Object(b))
                 });
                 let (st, v) = c.call("POST", "/api/login-links", body)?;
                 ok_or(st, v)

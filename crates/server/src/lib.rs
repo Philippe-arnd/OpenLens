@@ -47,6 +47,8 @@ mod openapi;
 mod otlp;
 mod password;
 mod privacy;
+mod purge;
+pub use purge::sweep_deleted_projects;
 mod releases;
 mod replay;
 mod reword;
@@ -554,6 +556,8 @@ fn compact(state: &AppState) -> Result<(), String> {
             Err(err) => tracing::warn!(project = %p.id, %err, "replay retention failed"),
         }
     }
+    // Files a late flush wrote for a project deleted meanwhile.
+    purge::sweep_deleted_projects(state);
     Ok(())
 }
 
