@@ -29,7 +29,7 @@ pub(crate) const KPI: &[(&str, &str)] = &[
     ),
     (
         "Changes that moved their metric",
-        "Releases and changes whose target metric moved the expected way, measured 14 days after they shipped.",
+        "Changes judged improved: their metric moved the expected way beyond chance, against the flag's other sessions when they shipped behind one, else beyond the normal weekly range of the 8 weeks before (mean ± 3σ), measured 14 days after they shipped. The others are worse or inconclusive.",
     ),
     (
         "Deploy frequency",

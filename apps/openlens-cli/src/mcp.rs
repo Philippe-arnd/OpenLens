@@ -226,12 +226,12 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "create_ticket",
-                description: "Turn a finding into a ticket for the app's backlog: kind insight (subject '<card kind>:<card subject>'), error (subject = the error group fingerprint), goal (subject = goal id) or map (subject '<finding kind>:<feature>'). Returns the prefilled Markdown (problem, evidence, hypothesis, success metric, acceptance criteria); with to='github', opens the GitHub issue, or updates the one already open for that finding. OpenLens then measures the metric 14 days after the release that ships it and comments on the issue.",
-                input_schema: json!({"type":"object","properties":with(json!({"kind":{"type":"string","enum":["insight","error","goal","map"]},"subject":{"type":"string"},"to":{"type":"string","enum":["markdown","github"]}})),"required":["kind","subject"]}),
+                description: "Turn a finding into a ticket for the app's backlog: kind insight (subject '<card kind>:<card subject>'), error (subject = the error group fingerprint), goal (subject = goal id) or map (subject '<finding kind>:<feature>'). Returns the prefilled Markdown (problem, evidence, hypothesis, success metric, acceptance criteria); with to='github', opens the GitHub issue, or updates the one already open for that finding. OpenLens then measures the metric 14 days after the release that ships it and comments on the issue: improved, worse or inconclusive. With flag (a flag key; a flag card fills it), the change is judged on the sessions with that flag against the others; otherwise on the metric's normal weekly range (mean ± 3σ of the 8 weeks before), else a before/after test for shares.",
+                input_schema: json!({"type":"object","properties":with(json!({"kind":{"type":"string","enum":["insight","error","goal","map"]},"subject":{"type":"string"},"flag":{"type":"string","description":"The flag the change ships behind"},"to":{"type":"string","enum":["markdown","github"]}})),"required":["kind","subject"]}),
             },
             ToolSpec {
                 name: "tickets",
-                description: "Tickets made from findings, the release that shipped each, and the measured effect (improved / no effect / worse): the learning log.",
+                description: "Tickets made from findings, the release that shipped each, and the measured effect (improved / worse / inconclusive) with how it was judged (method: flag, control_chart, before_after or none): the learning log and its counts.",
                 input_schema: json!({"type":"object","properties":proj}),
             },
             ToolSpec {

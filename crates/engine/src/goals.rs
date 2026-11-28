@@ -331,7 +331,15 @@ pub fn kpi_values_with(b: &Board, w: &Weekly, kpi: &str) -> (Option<f64>, Vec<(S
     if !series.is_empty() {
         return (current, series);
     }
-    let weekly = match kpi {
+    let weekly = weekly_series(w, kpi);
+    (current.or_else(|| weekly.last().map(|x| x.1)), weekly)
+}
+
+/// The weekly series of a KPI (Monday, value), oldest first; empty for
+/// the KPIs [`Weekly`] does not measure (the per-release ones).
+#[must_use]
+pub fn weekly_series(w: &Weekly, kpi: &str) -> Vec<(String, f64)> {
+    match kpi {
         "dau" => w.dau.clone(),
         "mau" => w.mau.clone(),
         "stickiness" => w.stickiness.clone(),
@@ -342,8 +350,7 @@ pub fn kpi_values_with(b: &Board, w: &Weekly, kpi: &str) -> (Option<f64>, Vec<(S
             .strip_prefix("success:")
             .and_then(|f| w.success.get(f).cloned())
             .unwrap_or_default(),
-    };
-    (current.or_else(|| weekly.last().map(|x| x.1)), weekly)
+    }
 }
 
 /// A goal, as stored (`project:<id>:goals`).

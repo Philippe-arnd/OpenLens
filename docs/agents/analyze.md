@@ -24,7 +24,7 @@ Start from the summaries and drill down only where something stands out. Every t
 | Did the last deploy break something? | `release_report` after each deploy: act on a `regressed` verdict | `releases`, `errors` with `release` |
 | What does production use that the map misses? | `suggested_features`: proposed entries with evidence | `set_feature { feature }`, then commit the YAML it returns |
 | Which flags can go? | `stale_flags`: `ready_to_remove` (off for 14 days, or on for everyone on 95% of page views) | `flags` |
-| Turn a finding into a ticket | `create_ticket { kind, subject, to: markdown \| github }`: prefilled problem, evidence, hypothesis, success metric | `tickets` (learning log: what moved its metric) |
+| Turn a finding into a ticket | `create_ticket { kind, subject, flag?, to: markdown \| github }`: prefilled problem, evidence, hypothesis, success metric; name the `flag` the change ships behind (a flag card fills it) so it is judged on that flag's sessions against the others | `tickets` (learning log: each verdict is `improved`, `worse` or `inconclusive` with its `method`: `flag`, `control_chart` (outside mean ± 3σ of the 8 weeks before the release), `before_after` (shares without enough history) or `none`; learn only from `improved` and `worse`) |
 | Where do our goals stand? | `goals`: status, guardrails, what moved each goal (releases and changes), objectives | `set_goal { kpi, target, deadline \| releases, guardrails }` |
 | Is the feature map any good? | `map_health`: score, findings with evidence and a YAML fix | `suggest_map_changes` (patches only) |
 | Every feature at a glance | `map_overview`: status, uses, users, success (30 days vs the 30 before), areas, adoption ladder | `feature_context { key }` |

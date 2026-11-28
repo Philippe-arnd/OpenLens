@@ -116,6 +116,8 @@ pub struct TicketDraft<'a> {
     pub kind: &'a str,
     /// Finding subject.
     pub subject: &'a str,
+    /// The flag the change ships behind (#704), carried to the issue.
+    pub flag: Option<&'a str>,
     /// GitHub repository, when set.
     pub repo: Option<String>,
     /// The issue already open for this finding.
@@ -154,6 +156,7 @@ pub fn ticket_draft(v: &TicketDraft<'_>) -> Markup {
                     (Some(repo), true) => form.form-foot method="post" action={ "/p/" (p.id) "/tickets" } {
                         input type="hidden" name="kind" value=(v.kind);
                         input type="hidden" name="subject" value=(v.subject);
+                        @if let Some(f) = v.flag { input type="hidden" name="flag" value=(f); }
                         button.btn.primary type="submit" { @if v.existing.is_some() { "Update the issue with these numbers" } @else { "Open an issue in " (repo) } }
                         @if let Some(u) = &v.existing { a.btn href=(u) { "Open issue" } }
                         p { "OpenLens posts only when you click." }
@@ -217,7 +220,7 @@ pub fn tickets(
         html! {
             div.heading { div {
                 h1 { "Tickets" }
-                p.muted { "From a finding to a ticket, a release, and the measured effect: OpenLens follows each issue to the release that ships it, measures its metric 14 days later and comments on the issue." }
+                p.muted { "From a finding to a ticket, a release, and the measured effect: OpenLens follows each issue to the release that ships it, measures its metric 14 days later (against the flag's other sessions, or the metric's normal weekly range) and comments on the issue: improved, worse or inconclusive." }
             } }
             @if !measured.is_empty() {
                 // no_detail (#409): the measured tickets are listed below.

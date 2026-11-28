@@ -375,6 +375,8 @@ fn issue_draft(project: &str, j: &Judged, prs: &[&GitPr], base: Option<&str>) ->
             closed: None,
             shipped_in: None,
             outcome: None,
+            flag: None,
+            method: None,
         },
         markdown: md,
     }

@@ -5,7 +5,8 @@
 //! with its check date, acceptance criteria). Copy it as Markdown, or open
 //! a GitHub issue (one per finding: a second click updates it). Once the
 //! issue is closed and a release has shipped it, the hourly pass measures
-//! the metric before and after and comments on the issue; every outcome
+//! the metric (against the flag it shipped behind, else its normal weekly
+//! range, D-098) and comments on the issue; every outcome
 //! goes into the learning log.
 //!
 //! Nothing is posted without a click (or an admin API call): the hourly
@@ -16,16 +17,38 @@
 //! ([`Host::github`], [`Host::github_call`], [`Host::set_github_token`]).
 //! It also keeps the schedule: its hourly job calls [`hourly`].
 
+use chrono::{Datelike, NaiveDate};
 use openlens_meta::{Meta, Project};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::{Access, Caller, Command, Error, Host, short_hash};
-use crate::Filters;
 use crate::goals;
+use crate::{Filters, FlagCohort};
 
 /// Days after the release before the effect is measured.
 pub(crate) const CHECK_DAYS: i64 = 14;
+
+/// Full weeks before the shipping release that set the normal range of a
+/// weekly series (D-098).
+const BEFORE_WEEKS: usize = 8;
+/// Fewest full weeks before shipping for a control chart.
+const MIN_BEFORE: usize = 4;
+/// Fewest full weeks after shipping for a control chart.
+const MIN_AFTER: usize = 2;
+/// Width of the normal range, in standard deviations of the weekly values.
+const SIGMAS: f64 = 3.0;
+/// The range when the weeks before were flat (σ = 0): ± 5% of their mean.
+const FLAT_BAND: f64 = 0.05;
+
+/// The metric moved the right way beyond chance or normal variation
+/// (D-098). Outcomes stored before it as `no effect` read as
+/// [`INCONCLUSIVE`].
+pub const IMPROVED: &str = "improved";
+/// The metric moved the wrong way, beyond chance.
+pub const WORSE: &str = "worse";
+/// No change beyond normal variation or chance, or nothing to judge on.
+pub const INCONCLUSIVE: &str = "inconclusive";
 
 /// A ticket made from a finding.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -64,9 +87,18 @@ pub struct Ticket {
     /// The first release seen after it was closed.
     #[serde(default)]
     pub shipped_in: Option<String>,
-    /// `improved`, `no effect` or `worse`, with the evidence.
+    /// `improved`, `worse` or `inconclusive` (or `no metric`), with the
+    /// evidence: the method, the band or the p-value, the sample sizes.
     #[serde(default)]
     pub outcome: Option<(String, String)>,
+    /// The flag the change shipped behind (#704): the verdict then
+    /// compares the sessions with it against the others.
+    #[serde(default)]
+    pub flag: Option<String>,
+    /// How the outcome was judged (#704): `flag`, `control_chart`,
+    /// `before_after` or `none`.
+    #[serde(default)]
+    pub method: Option<String>,
 }
 
 /// A drafted ticket.
@@ -91,11 +123,26 @@ pub struct GitHub {
 }
 
 pub(crate) fn load(meta: &Meta, project: &str) -> Vec<Ticket> {
-    meta.project_setting(project, "tickets")
+    let mut all: Vec<Ticket> = meta
+        .project_setting(project, "tickets")
         .ok()
         .flatten()
         .and_then(|j| serde_json::from_str(&j).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    read_old(&mut all);
+    all
+}
+
+/// Outcomes stored before D-098 said `no effect`: they read as
+/// [`INCONCLUSIVE`].
+fn read_old(all: &mut [Ticket]) {
+    for t in all {
+        if let Some(o) = t.outcome.as_mut()
+            && o.0 == "no effect"
+        {
+            o.0 = INCONCLUSIVE.to_owned();
+        }
+    }
 }
 
 fn save(meta: &Meta, project: &str, t: &[Ticket]) {
@@ -120,7 +167,8 @@ fn filters(p: &Project) -> Filters {
 }
 
 /// The ticket for a finding, from what the board shows now. `host_url`
-/// is the app's public address, for the links.
+/// is the app's public address, for the links. `flag` names the flag the
+/// change will ship behind; a flag card names its own.
 ///
 /// # Errors
 /// Why it cannot be drafted, for the person.
@@ -130,7 +178,21 @@ pub async fn draft<H: Host>(
     kind: &str,
     subject: &str,
     host_url: &str,
+    flag: Option<&str>,
 ) -> Result<Draft, String> {
+    let flag = match flag.map(str::trim).filter(|f| !f.is_empty()) {
+        Some(f) if crate::insights::valid_flag(f) => Some(f.to_owned()),
+        Some(_) => return Err("A flag key is lowercase letters, digits, - and _.".into()),
+        // A flag card (#704): the change ships behind that flag.
+        None => match (kind, subject.split_once(':')) {
+            ("insight", Some(("flag_regression" | "flag_win", key)))
+                if crate::insights::valid_flag(key) =>
+            {
+                Some(key.to_owned())
+            }
+            _ => None,
+        },
+    };
     let f = filters(p);
     let map = host.feature_map(&p.id).await;
     let b = host
@@ -351,6 +413,12 @@ pub async fn draft<H: Host>(
             fmt(t, share),
             if up { "higher" } else { "lower" }
         ));
+        md.push_str(&match &flag {
+            Some(f) => format!(
+                "- Judged on the flag `{f}`: sessions with it against the others since the release, with a significance test.\n"
+            ),
+            None => "- Judged against the metric's normal weekly range before the release (mean ± 3σ of 8 weeks) when it has a weekly series, else before against after with a significance test for shares. A change within normal variation is inconclusive.\n".to_owned(),
+        });
     }
     md.push_str("\n## Acceptance criteria\n\n- [ ] The cause is found (replay or error trace) and fixed.\n- [ ] The release that ships it is tagged (`release` in the SDK), so OpenLens can measure it.\n- [ ] No guardrail KPI gets worse.\n\n<sub>Opened from OpenLens. Fingerprint `");
     let fp = short_hash(&format!("{}|{kind}|{subject}", p.id));
@@ -372,6 +440,8 @@ pub async fn draft<H: Host>(
             closed: None,
             shipped_in: None,
             outcome: None,
+            flag,
+            method: None,
         },
         markdown: md,
     })
@@ -400,7 +470,14 @@ pub async fn file<H: Host>(host: &H, project: &str, d: Draft) -> Result<Ticket, 
             );
             host.github_call("POST", &url, &token, Some(json!({ "body": c })))
                 .await?;
-            found
+            // A flag named on a later click is kept for the verdict.
+            match (existing.and_then(|i| all.get_mut(i)), d.ticket.flag) {
+                (Some(t), Some(fl)) => {
+                    t.flag = Some(fl);
+                    t.clone()
+                }
+                _ => found,
+            }
         }
         None => {
             let url = format!("{api}/repos/{repo}/issues");
@@ -426,47 +503,307 @@ pub async fn file<H: Host>(host: &H, project: &str, d: Draft) -> Result<Ticket, 
     Ok(t)
 }
 
-/// The verdict on a change: before vs after, with a significance test for
-/// shares when both sides are large enough (pure).
+/// A flag's sessions against the others on a ticket's metric (#704).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Cohort {
+    /// Flag key.
+    pub flag: String,
+    /// The metric over the sessions with the flag on.
+    pub with: f64,
+    /// Those sessions.
+    pub with_n: i64,
+    /// The metric over the other sessions.
+    pub without: f64,
+    /// Those sessions.
+    pub without_n: i64,
+    /// p-value of the difference (`None`: under 30 sessions on a side).
+    pub p: Option<f64>,
+}
+
+/// The cohorts of a flag on `metric`, for the metrics they measure with a
+/// test: sessions with errors and tasks per session (pure).
 #[must_use]
-pub fn verdict(t: &Ticket, after: f64, after_n: i64, share: bool) -> (String, String) {
-    let Some(before) = t.baseline else {
-        return ("no effect".into(), "no baseline".into());
+pub fn cohort_for(c: &FlagCohort, metric: &str) -> Option<Cohort> {
+    let (w, o) = (&c.with, &c.without);
+    let (with, without, p) = match metric {
+        "error_rate" => (w.error_rate, o.error_rate, c.p_errors),
+        "tasks_per_session" => (w.tasks_per_session, o.tasks_per_session, c.p_tasks),
+        _ => return None,
     };
-    let delta = after - before;
-    let p = if share {
-        crate::stats::two_proportions(after, after_n, before, t.baseline_n)
+    Some(Cohort {
+        flag: c.flag.clone(),
+        with,
+        with_n: w.sessions,
+        without,
+        without_n: o.sessions,
+        p,
+    })
+}
+
+/// What a ticket's metric is judged on, once its check date has come.
+#[derive(Debug, Clone)]
+pub struct Measures<'a> {
+    /// The metric now.
+    pub after: f64,
+    /// Sessions behind it.
+    pub after_n: i64,
+    /// The metric is a share (0–1).
+    pub share: bool,
+    /// The metric's weekly series (Monday, value), oldest first; empty
+    /// when it has none.
+    pub weekly: &'a [(String, f64)],
+    /// The day the release that shipped the change was first seen.
+    pub shipped: Option<NaiveDate>,
+    /// Today.
+    pub today: NaiveDate,
+    /// The ticket's flag on the metric, when it has one and it measures it.
+    pub cohort: Option<Cohort>,
+}
+
+/// A verdict on a change (D-098).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Verdict {
+    /// [`IMPROVED`], [`WORSE`] or [`INCONCLUSIVE`].
+    pub word: String,
+    /// `flag`, `control_chart`, `before_after` or `none`.
+    pub method: String,
+    /// The method, the band or the p-value, and the sample sizes.
+    pub evidence: String,
+}
+
+impl Verdict {
+    fn new(word: &str, method: &str, evidence: String) -> Self {
+        Self {
+            word: word.to_owned(),
+            method: method.to_owned(),
+            evidence,
+        }
+    }
+}
+
+/// The word for a change `delta` that is clear (or not) (pure).
+fn word(clear: bool, delta: f64, up: bool) -> &'static str {
+    if !clear || delta.abs() < 1e-12 {
+        INCONCLUSIVE
+    } else if (delta > 0.0) == up {
+        IMPROVED
     } else {
-        None
+        WORSE
+    }
+}
+
+fn day(s: &str) -> Option<NaiveDate> {
+    NaiveDate::parse_from_str(s.get(..10).unwrap_or(s), "%Y-%m-%d").ok()
+}
+
+/// The values of the full weeks before shipping (the last
+/// [`BEFORE_WEEKS`]) and of the full weeks after it, ended by `today`
+/// (pure).
+fn split_weeks(
+    weekly: &[(String, f64)],
+    shipped: NaiveDate,
+    today: NaiveDate,
+) -> (Vec<f64>, Vec<f64>) {
+    let mut weeks: Vec<(NaiveDate, f64)> = weekly
+        .iter()
+        .filter(|(_, v)| v.is_finite())
+        .filter_map(|(d, v)| Some((day(d)?, *v)))
+        .collect();
+    weeks.sort_by_key(|w| w.0);
+    let week = chrono::Duration::days(7);
+    let before: Vec<f64> = weeks
+        .iter()
+        .filter(|(m, _)| *m + week <= shipped)
+        .map(|w| w.1)
+        .collect();
+    let skip = before.len().saturating_sub(BEFORE_WEEKS);
+    let before = before.into_iter().skip(skip).collect();
+    let after = weeks
+        .iter()
+        .filter(|(m, _)| *m >= shipped && *m + week <= today)
+        .map(|w| w.1)
+        .collect();
+    (before, after)
+}
+
+/// Full weeks (Monday to Sunday) between `shipped` and `today` (pure).
+fn full_weeks_after(shipped: NaiveDate, today: NaiveDate) -> usize {
+    let to_monday = (7 - i64::from(shipped.weekday().num_days_from_monday())) % 7;
+    let first = shipped + chrono::Duration::days(to_monday);
+    usize::try_from((today - first).num_days().div_euclid(7)).unwrap_or(0)
+}
+
+/// A control chart can be drawn but its second full week after shipping
+/// has not ended yet: the check waits for it (pure).
+#[must_use]
+pub fn waiting(weekly: &[(String, f64)], shipped: NaiveDate, today: NaiveDate) -> bool {
+    split_weeks(weekly, shipped, today).0.len() >= MIN_BEFORE
+        && full_weeks_after(shipped, today) < MIN_AFTER
+}
+
+fn mean(v: &[f64]) -> f64 {
+    v.iter().sum::<f64>() / v.len().max(1) as f64
+}
+
+/// Sample standard deviation.
+fn sd(v: &[f64]) -> f64 {
+    if v.len() < 2 {
+        return 0.0;
+    }
+    let m = mean(v);
+    (v.iter().map(|x| (x - m).powi(2)).sum::<f64>() / (v.len() - 1) as f64).sqrt()
+}
+
+fn flag_verdict(t: &Ticket, c: &Cohort, share: bool) -> Verdict {
+    let delta = c.with - c.without;
+    let clear = c.p.is_some_and(|p| p < crate::stats::ALPHA);
+    let ev = format!(
+        "Flag cohorts: {} with `{}` ({} sessions) vs {} without it ({} sessions) since the release · {}",
+        fmt(c.with, share),
+        c.flag,
+        c.with_n,
+        fmt(c.without, share),
+        c.without_n,
+        c.p.map_or_else(
+            || format!(
+                "under {} sessions on a side, no test",
+                crate::stats::MIN_SESSIONS
+            ),
+            |p| format!("p = {p:.3}")
+        )
+    );
+    Verdict::new(word(clear, delta, t.up), "flag", ev)
+}
+
+fn chart_verdict(t: &Ticket, before: &[f64], after: &[f64], share: bool, note: &str) -> Verdict {
+    let (m, s) = (mean(before), sd(before));
+    let flat = s <= 1e-12;
+    let band = if flat {
+        m.abs() * FLAT_BAND
+    } else {
+        SIGMAS * s
     };
-    let rel = if before.abs() > 1e-12 {
-        delta / before.abs()
+    let a = mean(after);
+    let delta = a - m;
+    let ev = format!(
+        "{note}Control chart: {} a week over the {} full weeks after the release vs {} over the {} weeks before; normal range {} to {} ({})",
+        fmt(a, share),
+        after.len(),
+        fmt(m, share),
+        before.len(),
+        fmt(m - band, share),
+        fmt(m + band, share),
+        if flat {
+            "± 5%: the weeks before were flat".to_owned()
+        } else {
+            format!("mean ± 3σ, σ = {}", fmt(s, share))
+        }
+    );
+    Verdict::new(word(delta.abs() > band, delta, t.up), "control_chart", ev)
+}
+
+/// The verdict on a change (pure, D-098): the flag's cohorts when it
+/// shipped behind one, else a control chart of the metric's weekly
+/// series, else (not enough history) a before/after significance test
+/// for shares; anything else is inconclusive.
+#[must_use]
+pub fn verdict(t: &Ticket, m: &Measures<'_>) -> Verdict {
+    let mut note = String::new();
+    match (&m.cohort, &t.flag) {
+        (Some(c), _) if c.with_n > 0 && c.without_n > 0 => {
+            return flag_verdict(t, c, m.share);
+        }
+        (Some(c), _) => {
+            note = format!("Flag `{}` not seen on sessions since the release. ", c.flag);
+        }
+        (None, Some(f)) => {
+            note = format!("Flag `{f}` has no cohort reading of this metric. ");
+        }
+        (None, None) => {}
+    }
+    let before = match m.shipped {
+        Some(d) => {
+            let (before, after) = split_weeks(m.weekly, d, m.today);
+            if before.len() >= MIN_BEFORE && after.len() >= MIN_AFTER {
+                return chart_verdict(t, &before, &after, m.share, &note);
+            }
+            before.len()
+        }
+        None => 0,
+    };
+    let history = if m.weekly.is_empty() {
+        "no weekly series for this metric".to_owned()
+    } else {
+        format!("{before} full weeks before the release ({MIN_BEFORE} needed)")
+    };
+    let Some(b) = t.baseline else {
+        return Verdict::new(
+            INCONCLUSIVE,
+            "none",
+            format!("{note}No test: no baseline, and {history}"),
+        );
+    };
+    let delta = m.after - b;
+    let rel = if b.abs() > 1e-12 {
+        delta / b.abs()
     } else {
         0.0
     };
-    let better = (delta > 0.0) == t.up;
-    let clear = match p {
-        Some(p) => p < crate::stats::ALPHA,
-        None => rel.abs() >= 0.05,
-    };
-    let word = if !clear || delta.abs() < 1e-12 {
-        "no effect"
-    } else if better {
-        "improved"
-    } else {
-        "worse"
-    };
+    let moved = format!(
+        "{} before ({} sessions) → {} after ({} sessions) ({:+.1}%)",
+        fmt(b, m.share),
+        t.baseline_n,
+        fmt(m.after, m.share),
+        m.after_n,
+        rel * 100.0
+    );
+    if !m.share {
+        return Verdict::new(
+            INCONCLUSIVE,
+            "none",
+            format!("{note}No test: {moved}; {history}, and only shares get a before/after test"),
+        );
+    }
+    let p = crate::stats::two_proportions(m.after, m.after_n, b, t.baseline_n);
     let ev = format!(
-        "{} before → {} after ({:+.1}%){}",
-        fmt(before, share),
-        fmt(after, share),
-        rel * 100.0,
+        "{note}Before/after test ({history}): {moved} · {}",
         p.map_or_else(
-            || " · sample too small for a significance test, judged on a 5% change".to_owned(),
-            |p| format!(" · p = {p:.3}")
+            || format!(
+                "under {} sessions on a side, no test",
+                crate::stats::MIN_SESSIONS
+            ),
+            |p| format!("p = {p:.3}")
         )
     );
-    (word.into(), ev)
+    let clear = p.is_some_and(|p| p < crate::stats::ALPHA);
+    Verdict::new(word(clear, delta, t.up), "before_after", ev)
+}
+
+/// How a method reads in the GitHub comment.
+fn method_label(method: &str) -> &'static str {
+    match method {
+        "flag" => "flag cohorts",
+        "control_chart" => "control chart of the weekly series",
+        "before_after" => "before/after test",
+        _ => "no test",
+    }
+}
+
+/// The flag's cohorts on `metric` since the release, `days` ago.
+async fn cohort_on<H: Host>(
+    host: &H,
+    p: &Project,
+    map: Option<&openlens_featuremap::FeatureMap>,
+    f: &Filters,
+    flag: &str,
+    metric: &str,
+    days: i64,
+) -> Option<Cohort> {
+    let c = crate::insights::flag_cohort(host.query(), &p.id, &crate::source(map), f, flag, days)
+        .await
+        .ok()
+        .flatten()?;
+    cohort_for(&c, metric)
 }
 
 /// Hourly: follow open issues to their release, then measure and report
@@ -530,11 +867,11 @@ pub async fn hourly<H: Host>(host: &H, p: &Project) {
         let Some(shipped) = t.shipped_in.clone() else {
             continue;
         };
-        let (rel, day) = shipped.split_once('|').unwrap_or((&shipped, ""));
-        let due = chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d")
-            .map(|d| d + chrono::Duration::days(CHECK_DAYS) <= today)
-            .unwrap_or(false);
-        if !due {
+        let (rel, shipped_on) = shipped.split_once('|').unwrap_or((&shipped, ""));
+        let Ok(shipped_on) = NaiveDate::parse_from_str(shipped_on, "%Y-%m-%d") else {
+            continue;
+        };
+        if shipped_on + chrono::Duration::days(CHECK_DAYS) > today {
             continue;
         }
         let Some(metric) = t.metric.clone() else {
@@ -546,11 +883,44 @@ pub async fn hourly<H: Host>(host: &H, p: &Project) {
         let Some(after) = goals::kpi_values_with(&b, &w, &metric).0 else {
             continue;
         };
-        let (word, ev) = verdict(t, after, b.sessions.count, share);
+        let series = goals::weekly_series(&w, &metric);
+        if waiting(&series, shipped_on, today) {
+            continue;
+        }
+        let cohort = match &t.flag {
+            Some(fl) => {
+                cohort_on(
+                    host,
+                    p,
+                    map.as_ref().map(|(m, _)| m),
+                    &f,
+                    fl,
+                    &metric,
+                    (today - shipped_on).num_days(),
+                )
+                .await
+            }
+            None => None,
+        };
+        let v = verdict(
+            t,
+            &Measures {
+                after,
+                after_n: b.sessions.count,
+                share,
+                weekly: &series,
+                shipped: Some(shipped_on),
+                today,
+                cohort,
+            },
+        );
         let url = format!("{api}/repos/{repo}/issues/{n}/comments");
         let body = format!(
-            "**OpenLens: {word}.** Shipped in `{rel}`; {ev}.{}",
-            if word == "improved" {
+            "**OpenLens: {}.** Shipped in `{rel}`; judged by {}. {}.{}",
+            v.word,
+            method_label(&v.method),
+            v.evidence,
+            if v.word == IMPROVED {
                 ""
             } else {
                 "\n\nNext: look at the replays of the sessions still affected, and try the next hypothesis."
@@ -561,7 +931,8 @@ pub async fn hourly<H: Host>(host: &H, p: &Project) {
             .await
             .is_ok()
         {
-            t.outcome = Some((word, ev));
+            t.outcome = Some((v.word, v.evidence));
+            t.method = Some(v.method);
             changed = true;
         }
     }
@@ -584,10 +955,34 @@ pub struct ProjectInput {
 /// How many measured tickets moved their metric the right way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Learning {
-    /// Tickets with an outcome.
+    /// Tickets with a verdict (`no metric` is not one).
     pub measured: usize,
     /// Of those, the ones that `improved`.
     pub improved: usize,
+    /// The ones that got `worse`.
+    pub worse: usize,
+    /// The ones judged `inconclusive` (D-098).
+    pub inconclusive: usize,
+}
+
+impl Learning {
+    /// Count the verdicts of `tickets` (pure).
+    #[must_use]
+    pub fn of(tickets: &[Ticket]) -> Self {
+        let count = |w: &str| {
+            tickets
+                .iter()
+                .filter(|t| t.outcome.as_ref().is_some_and(|o| o.0 == w))
+                .count()
+        };
+        let (improved, worse, inconclusive) = (count(IMPROVED), count(WORSE), count(INCONCLUSIVE));
+        Self {
+            measured: improved + worse + inconclusive,
+            improved,
+            worse,
+            inconclusive,
+        }
+    }
 }
 
 /// A project's tickets and its learning log.
@@ -615,15 +1010,7 @@ impl Command for List {
     async fn run<H: Host>(host: &H, _: &Caller, input: ProjectInput) -> Result<Tickets, Error> {
         let meta = host.meta();
         let tickets = load(meta, &input.project);
-        let measured: Vec<&Ticket> = tickets.iter().filter(|t| t.outcome.is_some()).collect();
-        let improved = measured
-            .iter()
-            .filter(|t| t.outcome.as_ref().is_some_and(|o| o.0 == "improved"))
-            .count();
-        let learning = Learning {
-            measured: measured.len(),
-            improved,
-        };
+        let learning = Learning::of(&tickets);
         let repo = meta
             .project_setting(&input.project, "tickets_repo")
             .ok()
@@ -651,6 +1038,10 @@ pub struct FindingInput {
     pub subject: String,
     /// The app's public address, for the links in the ticket.
     pub host: String,
+    /// The flag the change will ship behind (#704): the verdict then
+    /// compares its sessions with the others. A flag card names its own.
+    #[serde(default)]
+    pub flag: Option<String>,
 }
 
 /// What `tickets.draft` gives.
@@ -677,9 +1068,16 @@ impl Command for DraftTicket {
 
     async fn run<H: Host>(host: &H, _: &Caller, input: FindingInput) -> Result<Drafted, Error> {
         let p = project(host, &input.project).await?;
-        let d = draft(host, &p, &input.kind, &input.subject, &input.host)
-            .await
-            .map_err(Error::Invalid)?;
+        let d = draft(
+            host,
+            &p,
+            &input.kind,
+            &input.subject,
+            &input.host,
+            input.flag.as_deref(),
+        )
+        .await
+        .map_err(Error::Invalid)?;
         let existing = load(host.meta(), &p.id)
             .into_iter()
             .find(|t| t.fp == d.ticket.fp && t.closed.is_none())
@@ -707,9 +1105,16 @@ impl Command for File {
 
     async fn run<H: Host>(host: &H, _: &Caller, input: FindingInput) -> Result<Ticket, Error> {
         let p = project(host, &input.project).await?;
-        let d = draft(host, &p, &input.kind, &input.subject, &input.host)
-            .await
-            .map_err(Error::Invalid)?;
+        let d = draft(
+            host,
+            &p,
+            &input.kind,
+            &input.subject,
+            &input.host,
+            input.flag.as_deref(),
+        )
+        .await
+        .map_err(Error::Invalid)?;
         file(host, &p.id, d).await.map_err(Error::Unavailable)
     }
 }
@@ -785,20 +1190,196 @@ mod tests {
             closed: None,
             shipped_in: None,
             outcome: None,
+            flag: None,
+            method: None,
         }
     }
 
+    fn d(s: &str) -> NaiveDate {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    /// Shipped on Monday 2026-11-02: `before` are the weeks just before
+    /// it (oldest first), `after` the weeks from it.
+    fn series(before: &[f64], after: &[f64]) -> Vec<(String, f64)> {
+        let ship = d("2026-11-02");
+        let n = before.len() as i64;
+        before
+            .iter()
+            .enumerate()
+            .map(|(i, v)| (ship - chrono::Duration::weeks(n - i as i64), *v))
+            .chain(
+                after
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| (ship + chrono::Duration::weeks(i as i64), *v)),
+            )
+            .map(|(m, v)| (m.format("%Y-%m-%d").to_string(), v))
+            .collect()
+    }
+
+    fn on(weekly: &[(String, f64)], after: f64, n: i64, share: bool) -> Measures<'_> {
+        Measures {
+            after,
+            after_n: n,
+            share,
+            weekly,
+            shipped: Some(d("2026-11-02")),
+            today: d("2026-11-16"),
+            cohort: None,
+        }
+    }
+
+    fn cohort(with: f64, with_n: i64, without: f64, without_n: i64) -> Cohort {
+        Cohort {
+            flag: "new-checkout".into(),
+            with,
+            with_n,
+            without,
+            without_n,
+            p: crate::stats::two_proportions(with, with_n, without, without_n),
+        }
+    }
+
+    const NORMAL: [f64; 8] = [100.0, 110.0, 90.0, 105.0, 95.0, 100.0, 108.0, 92.0];
+
     #[test]
-    fn verdicts_need_a_clear_change_in_the_right_direction() {
+    fn a_change_within_normal_weekly_variation_is_inconclusive() {
+        let w = series(&NORMAL, &[104.0, 106.0]);
+        let v = verdict(&t(100.0, 500, true), &on(&w, 105.0, 500, false));
+        assert_eq!(
+            (v.word.as_str(), v.method.as_str()),
+            (INCONCLUSIVE, "control_chart")
+        );
+        assert!(
+            v.evidence.contains("3σ") && v.evidence.contains("8 weeks before"),
+            "{}",
+            v.evidence
+        );
+    }
+
+    #[test]
+    fn a_step_outside_the_band_is_judged_in_the_metrics_direction() {
+        let up = series(&NORMAL, &[160.0, 165.0]);
+        let down = series(&NORMAL, &[40.0, 45.0]);
+        let judge = |w: &[(String, f64)], better_up: bool| {
+            verdict(&t(100.0, 500, better_up), &on(w, 0.0, 500, false)).word
+        };
+        assert_eq!(judge(&up, true), IMPROVED);
+        assert_eq!(judge(&up, false), WORSE);
+        assert_eq!(judge(&down, true), WORSE);
+        assert_eq!(judge(&down, false), IMPROVED);
+        // Flat weeks before: a 5% band around their mean.
+        let flat = [100.0; 6];
+        assert_eq!(judge(&series(&flat, &[103.0, 104.0]), true), INCONCLUSIVE);
+        assert_eq!(judge(&series(&flat, &[110.0, 112.0]), true), IMPROVED);
+    }
+
+    #[test]
+    fn the_chart_needs_four_weeks_before_and_waits_for_two_after() {
+        // Three weeks of history: not a chart.
+        let short = series(&[100.0, 110.0, 90.0], &[160.0, 165.0]);
+        let v = verdict(&t(100.0, 500, true), &on(&short, 160.0, 500, false));
+        assert_ne!(v.method, "control_chart");
+        // Shipped on a Wednesday, checked 14 days later: one full week
+        // after, so the check waits; a few days on, it can run.
+        let w = series(&NORMAL, &[]);
+        assert!(waiting(&w, d("2026-11-04"), d("2026-11-18")));
+        assert!(!waiting(&w, d("2026-11-04"), d("2026-11-23")));
+        assert!(
+            !waiting(&[], d("2026-11-04"), d("2026-11-18")),
+            "no series: no wait"
+        );
+    }
+
+    #[test]
+    fn a_flagged_ticket_is_judged_on_its_cohorts() {
+        let mut tk = t(0.2, 500, false);
+        tk.flag = Some("new-checkout".into());
+        // The weekly series shows nothing, the cohorts a clear drop in errors.
+        let w = series(&NORMAL, &[100.0, 101.0]);
+        let mut m = on(&w, 0.2, 500, true);
+        m.cohort = Some(cohort(0.05, 2000, 0.10, 2000));
+        let v = verdict(&tk, &m);
+        assert_eq!((v.word.as_str(), v.method.as_str()), (IMPROVED, "flag"));
+        assert!(v.evidence.contains("2000 sessions") && v.evidence.contains("p = "));
+        // More errors with the flag: worse.
+        m.cohort = Some(cohort(0.10, 2000, 0.05, 2000));
+        assert_eq!(verdict(&tk, &m).word, WORSE);
+        // The same gap on a handful of sessions: no test, inconclusive.
+        m.cohort = Some(cohort(0.05, 10, 0.10, 2000));
+        assert_eq!(verdict(&tk, &m).word, INCONCLUSIVE);
+        // Not seen on any session: judged without the flag.
+        m.cohort = Some(cohort(0.0, 0, 0.10, 2000));
+        assert_ne!(verdict(&tk, &m).method, "flag");
+    }
+
+    #[test]
+    fn cohorts_measure_errors_and_tasks_only() {
+        let c = FlagCohort {
+            flag: "f".into(),
+            with: crate::CohortStats {
+                sessions: 40,
+                error_rate: 0.1,
+                ..Default::default()
+            },
+            without: crate::CohortStats::default(),
+            p_errors: Some(0.5),
+            p_tasks: None,
+        };
+        assert!(cohort_for(&c, "error_rate").is_some_and(|x| x.with_n == 40 && x.p == c.p_errors));
+        assert!(cohort_for(&c, "avg_secs").is_none());
+    }
+
+    #[test]
+    fn without_history_shares_keep_the_test_and_other_metrics_are_inconclusive() {
         // Errors 20% → 10% on 500 sessions each: improved, significant.
-        assert_eq!(verdict(&t(0.2, 500, false), 0.1, 500, true).0, "improved");
-        // 20% → 19% on 500: not significant.
-        assert_eq!(verdict(&t(0.2, 500, false), 0.19, 500, true).0, "no effect");
+        let v = verdict(&t(0.2, 500, false), &on(&[], 0.1, 500, true));
+        assert_eq!(
+            (v.word.as_str(), v.method.as_str()),
+            (IMPROVED, "before_after")
+        );
+        assert!(v.evidence.contains("500 sessions") && v.evidence.contains("p = "));
+        // 20% → 19%: within chance.
+        assert_eq!(
+            verdict(&t(0.2, 500, false), &on(&[], 0.19, 500, true)).word,
+            INCONCLUSIVE
+        );
         // Errors up: worse.
-        assert_eq!(verdict(&t(0.1, 500, false), 0.2, 500, true).0, "worse");
-        // Not a share, small: judged on 5%.
-        let (w, ev) = verdict(&t(100.0, 0, true), 110.0, 0, false);
-        assert_eq!(w, "improved");
-        assert!(ev.contains("judged on a 5% change"));
+        assert_eq!(
+            verdict(&t(0.1, 500, false), &on(&[], 0.2, 500, true)).word,
+            WORSE
+        );
+        // Too few sessions for a test: no 5% rule any more.
+        assert_eq!(
+            verdict(&t(0.2, 10, false), &on(&[], 0.1, 10, true)).word,
+            INCONCLUSIVE
+        );
+        // Not a share, no weekly series: inconclusive, even on a large move.
+        let v = verdict(&t(100.0, 0, true), &on(&[], 150.0, 0, false));
+        assert_eq!((v.word.as_str(), v.method.as_str()), (INCONCLUSIVE, "none"));
+    }
+
+    #[test]
+    fn the_learning_log_counts_the_new_words_and_reads_the_old_one() {
+        let with = |w: &str| Ticket {
+            outcome: Some((w.into(), String::new())),
+            ..t(0.1, 1, false)
+        };
+        let mut all = vec![
+            with(IMPROVED),
+            with(WORSE),
+            with("no effect"),
+            with("no metric"),
+            t(0.1, 1, false),
+        ];
+        read_old(&mut all);
+        let l = Learning::of(&all);
+        assert_eq!(l.inconclusive, 1, "no effect reads as inconclusive");
+        assert_eq!(l.measured, l.improved + l.worse + l.inconclusive);
+        assert!(
+            l.measured < all.len(),
+            "no metric and waiting are not measured"
+        );
     }
 }
