@@ -305,6 +305,7 @@ pub async fn board_reusing(
         people: &people,
         success_list: &success_list,
         churn_days: map.map_or(14, |(m, _)| i64::from(m.churn_days())),
+        plan_paid: map.and_then(|(m, _)| m.plan_paying_sql()),
     };
     let life = crate::lifecycle::compute(
         q,

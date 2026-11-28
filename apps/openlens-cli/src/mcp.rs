@@ -184,12 +184,12 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "goals",
-                description: "Goals on KPIs and objectives: value now, target, deadline, status (reached, on track, at risk, off track), guardrails and whether they are breached, what moved each goal (releases with their effect, flag/survey/map changes and notes since it was set), and suggested targets per KPI.",
+                description: "Goals on KPIs and objectives: value now, target, deadline, status (reached, on track, at risk, off track), guardrails and whether they are breached, what moved each goal (releases with their effect, flag/survey/map changes and notes since it was set), suggested targets per KPI, and `not_available`: the business KPIs this project cannot set a goal on yet, with why.",
                 input_schema: json!({"type":"object","properties":proj}),
             },
             ToolSpec {
                 name: "set_goal",
-                description: "Set a goal: a KPI key from `goals` suggestions (or success:<feature>), a target in KPI units (a share as 0-1), and a deadline (YYYY-MM-DD) or a number of releases. Optional guardrails: KPIs that must not get worse, with a limit (default 5% worse than now).",
+                description: "Set a goal: a KPI key from `goals` suggestions (or success:<feature>), a target in KPI units (a share as 0-1). Business KPIs, offered only when their data exists: revenue (last 30 days, one currency), paid_conversion (needs plans: with a free and a paid plan), signup_rate (needs anonymous traffic, not cookieless), weekly_retention (week-1 retention of weekly cohorts), feature_adoption:<feature key of the map>; a refused one says why. Also a deadline (YYYY-MM-DD) or a number of releases. Optional guardrails: KPIs that must not get worse, with a limit (default 5% worse than now).",
                 input_schema: json!({"type":"object","properties":with(json!({
                     "kpi":{"type":"string"},
                     "target":{"type":"number"},

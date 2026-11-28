@@ -25,7 +25,7 @@ Start from the summaries and drill down only where something stands out. Every t
 | What does production use that the map misses? | `suggested_features`: proposed entries with evidence | `set_feature { feature }`, then commit the YAML it returns |
 | Which flags can go? | `stale_flags`: `ready_to_remove` (off for 14 days, or on for everyone on 95% of page views) | `flags` |
 | Turn a finding into a ticket | `create_ticket { kind, subject, to: markdown \| github }`: prefilled problem, evidence, hypothesis, success metric | `tickets` (learning log: what moved its metric) |
-| Where do our goals stand? | `goals`: status, guardrails, what moved each goal (releases and changes), objectives | `set_goal { kpi, target, deadline \| releases, guardrails }` |
+| Where do our goals stand? | `goals`: status, guardrails, what moved each goal (releases and changes), objectives; `not_available` lists the business KPIs the project cannot target yet, with why | `set_goal { kpi, target, deadline \| releases, guardrails }`; besides the engagement KPIs, `kpi` can be `revenue`, `paid_conversion`, `signup_rate`, `weekly_retention` or `feature_adoption:<feature>` when their data exists (docs/kpis.md, Goals) |
 | Is the feature map any good? | `map_health`: score, findings with evidence and a YAML fix | `suggest_map_changes` (patches only) |
 | Every feature at a glance | `map_overview`: status, uses, users, success (30 days vs the 30 before), areas, adoption ladder | `feature_context { key }` |
 | Everything about one feature | `feature_context { key }`: definition, findings, users and success by role, top pages, ladder, area peers, features used with it, use per release with the map version in force | `sql` |

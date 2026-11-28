@@ -54,6 +54,36 @@ pub struct PlanMoves {
     /// 30 days): plan gaps, kept as `unmatched:<value>` and never counted
     /// as a move.
     pub gaps: Vec<(String, i64)>,
+    /// Free → paid conversion (#713, #714): none unless the map tells free
+    /// from paid plans and a free user is old enough to judge.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conversion: Option<Conversion>,
+}
+
+/// Free → paid conversion (docs/kpis.md): of the free users first seen 30
+/// to 89 days ago whose first plan was free, those who moved to a paid
+/// plan within 30 days of their first visit.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct Conversion {
+    /// Free users judged.
+    pub free_users: i64,
+    /// Of them, on a paid plan within 30 days.
+    pub converted: i64,
+    /// Per week of first visit (Monday, YYYY-MM-DD; oldest first): the
+    /// share of that week's free users who converted (the goals' trend).
+    pub weekly: Vec<(String, f64)>,
+}
+
+impl Conversion {
+    /// The share converted (0–1).
+    #[must_use]
+    pub fn rate(&self) -> f64 {
+        if self.free_users > 0 {
+            self.converted as f64 / self.free_users as f64
+        } else {
+            0.0
+        }
+    }
 }
 
 /// The board's plan blocks: the moves and the conversion drivers cards,
@@ -69,10 +99,11 @@ pub(crate) async fn read(
     let Some(m) = map.filter(|m| !m.plans.is_empty()) else {
         return Ok((None, Vec::new()));
     };
-    let (moved, cards) = futures::try_join!(
+    let (mut moved, (conversion, cards)) = futures::try_join!(
         moves(q, project, f, m),
         conversion_drivers(q, project, f, m, people90, ident)
     )?;
+    moved.conversion = conversion;
     Ok((Some(moved), cards))
 }
 
@@ -168,7 +199,8 @@ pub(crate) async fn moves(
 /// users that lift the share who move to a paid plan within 30 days of
 /// their first visit. The stick drivers' cohort and minimums (8 users per
 /// group), with a two-proportion test; shown only when the map tells free
-/// from paid plans and at least 8 free users converted.
+/// from paid plans and at least 8 free users converted. Also returns the
+/// conversion itself, per week of first visit (#714).
 pub(crate) async fn conversion_drivers(
     q: &QueryEngine,
     project: &str,
@@ -176,10 +208,11 @@ pub(crate) async fn conversion_drivers(
     m: &FeatureMap,
     people90: &str,
     ident: &str,
-) -> Result<Vec<Insight>> {
+) -> Result<(Option<Conversion>, Vec<Insight>)> {
     let Some(paid) = m.plan_paid_sql() else {
-        return Ok(Vec::new());
+        return Ok((None, Vec::new()));
     };
+    let first_week = f.local("c.first_seen")?;
     let q = &q.with_params(&f.params()?);
     let w = Filters {
         role: None,
@@ -196,6 +229,7 @@ pub(crate) async fn conversion_drivers(
                         min(CASE WHEN paid = 1 THEN timestamp END) AS paid_at \
                         FROM plan_marks GROUP BY distinct_id), \
          free_users AS (SELECT c.distinct_id, \
+                        substr(CAST(date_trunc('week', {first_week}) AS VARCHAR), 1, 10) AS wk, \
                         CASE WHEN p.paid_at IS NOT NULL \
                              AND p.paid_at <= c.first_seen + INTERVAL '{CONVERSION_DAYS} days' \
                              THEN 1 ELSE 0 END AS converted \
@@ -203,7 +237,9 @@ pub(crate) async fn conversion_drivers(
                         WHERE p.free_at IS NOT NULL AND p.free_at <= c.first_seen + INTERVAL '7 days' \
                         AND (p.paid_at IS NULL OR p.paid_at > p.free_at))"
     );
-    let totals = format!("{free} SELECT count(*) AS n, sum(converted) AS conv FROM free_users");
+    let totals = format!(
+        "{free} SELECT wk, count(*) AS n, sum(converted) AS conv FROM free_users GROUP BY wk ORDER BY wk"
+    );
     let early = format!(
         "{free}, early AS (SELECT e.distinct_id, e.feature FROM ev e JOIN cohort c ON e.distinct_id = c.distinct_id \
            WHERE e.feature IS NOT NULL AND e.first_ts <= c.first_seen + INTERVAL '7 days' \
@@ -213,9 +249,17 @@ pub(crate) async fn conversion_drivers(
     );
     let (totals, early) = futures::join!(q.sql(project, &totals), q.sql(project, &early));
     let t = totals?.rows;
-    let n_all = t.first().map_or(0, |r| int(r, "n"));
-    let conv_all = t.first().map_or(0, |r| int(r, "conv"));
-    Ok(conversion_cards(
+    let mut conversion = Conversion::default();
+    for r in &t {
+        let (n, conv) = (int(r, "n"), int(r, "conv"));
+        conversion.free_users += n;
+        conversion.converted += conv;
+        if let Some(wk) = text(r, "wk").filter(|_| n > 0) {
+            conversion.weekly.push((wk, conv as f64 / n as f64));
+        }
+    }
+    let (n_all, conv_all) = (conversion.free_users, conversion.converted);
+    let cards = conversion_cards(
         n_all,
         conv_all,
         &early?
@@ -223,7 +267,8 @@ pub(crate) async fn conversion_drivers(
             .iter()
             .filter_map(|r| Some((text(r, "feature")?, int(r, "users"), int(r, "conv"))))
             .collect::<Vec<_>>(),
-    ))
+    );
+    Ok(((n_all > 0).then_some(conversion), cards))
 }
 
 fn pct(r: f64) -> String {

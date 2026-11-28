@@ -58,7 +58,7 @@ fn goal_progress_bars_grow_with_progress_and_stay_inside_their_track() {
         .into_iter()
         .map(goal_row)
         .collect();
-    let html = render(goals(&project(), &rows, &[], &[], false, "2027-01-01"));
+    let html = render(goals(&project(), &rows, &[], &[], &[], false, "2027-01-01"));
     let track = html.matches("<rect class=\"track\" width=\"100\"").count();
     let widths = bar_widths(&html);
     assert_eq!(widths.len(), rows.len(), "one bar per goal: {html}");
@@ -238,7 +238,7 @@ fn people_pages_carry_no_style_attribute_and_no_script() {
         render(acquisition(&p, &b, &f, &[], "channel", false)),
         churn_page(vec![("billing".into(), 12, 0.4, 0.1)]),
         render(revenue(&p, &b, &f, Some(&rev))),
-        render(goals(&p, &rows, &[], &[], true, "2027-01-01")),
+        render(goals(&p, &rows, &[], &[], &[], true, "2027-01-01")),
     ];
     for html in &pages {
         assert!(

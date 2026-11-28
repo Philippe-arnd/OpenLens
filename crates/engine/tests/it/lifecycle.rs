@@ -178,3 +178,35 @@ async fn a_landing_page_gives_a_visitor_to_account_rate_between_its_bounds() {
     );
     assert_eq!(b.lifecycle.map(|x| x.total), Some(l.total));
 }
+
+/// #714: with `plans:` in the map, a person whose plan resolves to a paid
+/// plan is paid, with no revenue on any event, and one on the free plan
+/// is not; without `plans:`, a plan alone makes nobody paid.
+#[tokio::test]
+async fn a_pro_plan_user_is_paid_when_the_map_declares_plans() {
+    let mut evs = Vec::new();
+    for (who, plan) in [("payer", "pro"), ("trial", "free")] {
+        let s = format!("s-{who}");
+        for (event, mins, path) in [("$identify", 60, "/"), ("$pageview", 59, "/home")] {
+            let mut e = ev(who, event, &s, mins, path, "{}");
+            e.plan = Some(plan.into());
+            evs.push(e);
+        }
+    }
+    let (_dir, q) = store(&evs);
+    let map = openlens_featuremap::parse(&openlens_testkit::plans_feature_map())
+        .map
+        .unwrap();
+    let f = Filters::default();
+    let l = lifecycle(&q, "p", Some((&map, 1)), &f, By::None)
+        .await
+        .unwrap();
+    let paid = stage(&l, "paid").unwrap_or_else(|| panic!("a pro user pays: {l:?}"));
+    let accounts = stage(&l, "account").unwrap();
+    assert!(paid > 0 && paid < accounts, "{l:?}");
+    let without = lifecycle(&q, "p", None, &f, By::None).await.unwrap();
+    assert!(
+        stage(&without, "paid").is_none(),
+        "without plans:, a plan alone is not paid: {without:?}"
+    );
+}

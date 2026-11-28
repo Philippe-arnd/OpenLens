@@ -681,6 +681,17 @@ impl FeatureMap {
         if !self.knows_paid() {
             return None;
         }
+        self.plan_paying_sql()
+    }
+
+    /// [`FeatureMap::plan_paid_sql`] for a map that declares at least one
+    /// paid plan, with or without a free one (#714): the lifecycle's paid
+    /// stage counts the people whose plan resolves to a paid plan. None
+    /// when no plan is paid.
+    pub fn plan_paying_sql(&self) -> Option<String> {
+        if !self.plans.iter().any(|p| p.paid) {
+            return None;
+        }
         let mut s = String::from("CASE WHEN plan IS NULL THEN NULL");
         for p in &self.plans {
             let paid = u8::from(p.paid);
