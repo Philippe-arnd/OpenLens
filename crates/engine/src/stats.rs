@@ -8,13 +8,13 @@
 //! A card family that tests many candidates at once (every feature, every
 //! role, every flag) holds its p-values to a Benjamini–Hochberg cutoff at
 //! a [`FDR`] false discovery rate rather than to [`ALPHA`] each
-//! ([`fdr_cutoff`], D-099), so a big app does not get cards by chance.
+//! ([`fdr_cutoff`], D-109), so a big app does not get cards by chance.
 
 /// Fewest sessions per side before a test is run.
 pub const MIN_SESSIONS: i64 = 30;
 /// Threshold under which a difference is called significant.
 pub const ALPHA: f64 = 0.05;
-/// False discovery rate a card family is held to (Benjamini–Hochberg, D-099).
+/// False discovery rate a card family is held to (Benjamini–Hochberg, D-109).
 pub const FDR: f64 = 0.05;
 
 /// Complementary error function (Abramowitz & Stegun 7.1.26, |error| < 1.5e-7).
@@ -41,7 +41,7 @@ pub fn two_proportions(p1: f64, n1: i64, p2: f64, n2: i64) -> Option<f64> {
 
 /// The same test with `min` per side instead of [`MIN_SESSIONS`]: the
 /// board's user cohorts, which already need
-/// [`crate::insights::MIN_GROUP`] users on each side (D-099).
+/// [`crate::insights::MIN_GROUP`] users on each side (D-109).
 pub fn two_proportions_from(min: i64, p1: f64, n1: i64, p2: f64, n2: i64) -> Option<f64> {
     if n1 < min.max(1) || n2 < min.max(1) {
         return None;
@@ -68,7 +68,7 @@ pub fn two_means(m1: f64, s1: f64, n1: i64, m2: f64, s2: f64, n2: i64) -> Option
 }
 
 /// The Benjamini–Hochberg cutoff of a family of p-values at false
-/// discovery rate `q` (D-099): the largest `p(k)` (k-th smallest) under
+/// discovery rate `q` (D-109): the largest `p(k)` (k-th smallest) under
 /// `k·q/m`. Every p-value at or under it is a discovery; `None` when there
 /// is none. A p-value that is not a number counts as a test that found
 /// nothing.

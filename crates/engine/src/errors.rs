@@ -17,7 +17,7 @@ pub struct ErrorGroup {
     /// One real message of the group.
     pub sample: String,
     /// Occurrences: the rows, plus the repeats the SDK counted instead of
-    /// sending (#703, D-097).
+    /// sending (#703, D-107).
     pub count: i64,
     /// Distinct users hit.
     pub users: i64,

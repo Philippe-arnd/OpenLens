@@ -8,7 +8,7 @@
 //! A family that tests every feature, role or flag at once (stick drivers,
 //! role blind spots, flag regressions, flag wins) shows a card only when
 //! its p-value passes the family's Benjamini–Hochberg cutoff at a 5% false
-//! discovery rate ([`crate::stats::fdr_cutoff`], D-099), on top of its
+//! discovery rate ([`crate::stats::fdr_cutoff`], D-109), on top of its
 //! size and lift thresholds: the more candidates, the stricter the test.
 
 use serde::Serialize;
@@ -199,7 +199,7 @@ pub(crate) async fn compute(
 
     // Stick drivers and the value moment. Every feature with both groups
     // large enough is tested; the drivers are those of the features
-    // passing the family's false discovery cutoff (D-099).
+    // passing the family's false discovery cutoff (D-109).
     if n_all >= 2 * MIN_GROUP {
         let mut tested: Vec<f64> = Vec::new();
         let mut found: Vec<(f64, Vec<Insight>)> = Vec::new();
@@ -343,7 +343,7 @@ pub(crate) async fn compute(
     feats.sort();
     feats.dedup();
     // Every role and feature pair is tested; the blind spots are those
-    // passing the family's false discovery cutoff (D-099).
+    // passing the family's false discovery cutoff (D-109).
     let mut tested: Vec<f64> = Vec::new();
     let mut found: Vec<(f64, Insight)> = Vec::new();
     for feat in &feats {
@@ -805,7 +805,7 @@ async fn cohort_of(
 
 /// Cards for flags whose cohort clearly differs from everyone else. The
 /// error p-values of the flags shown are one family and their task
-/// p-values another, each held to its false discovery cutoff (D-099).
+/// p-values another, each held to its false discovery cutoff (D-109).
 pub(crate) fn flag_cards(cohorts: &[FlagCohort]) -> Vec<Insight> {
     let mut cards = Vec::new();
     let judged: Vec<&FlagCohort> = cohorts

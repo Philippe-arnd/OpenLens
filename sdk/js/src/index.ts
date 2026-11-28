@@ -93,7 +93,7 @@ let activeVariants: Record<string, string> = {};
 /** Share of sessions recorded from their start, from `/flags` (#327). */
 let replayRate: number | undefined;
 /** Share of sessions sending the distribution-only events, from `/flags`
- * (#702, D-097). Unknown: every session. */
+ * (#702, D-107). Unknown: every session. */
 let sampleRate: number | undefined;
 /** Errors and failed requests already sent in the session (#703). */
 const repeats = new Repeats();
@@ -378,7 +378,7 @@ export function variant(key: string): string | null {
 /** Identify the logged-in user and the dimensions OpenLens slices by.
  * `$identify` is sent when it links an anonymous visitor, when the id or a
  * trait changed since the last one of this browser, and at most once a day
- * otherwise (#702, D-097): apps call this on every page load. */
+ * otherwise (#702, D-107): apps call this on every page load. */
 export function identify(id: string, dims: Dimensions = {}): void {
   if (!cfg || !id) return;
   refresh();

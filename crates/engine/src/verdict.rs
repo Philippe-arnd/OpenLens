@@ -21,7 +21,7 @@
 //! - **Features**: the success rate of each feature with a success
 //!   event, worse when it drops by [`MIN_FEATURE_DROP`] or more,
 //!   significantly: under the Benjamini–Hochberg cutoff of all the
-//!   features compared, at a 5% false discovery rate (D-099). The features the release's code change touched
+//!   features compared, at a 5% false discovery rate (D-109). The features the release's code change touched
 //!   ([`Side::touched`], #576, D-095) are judged and listed first, before
 //!   every other check, with the same thresholds; one that cannot be
 //!   compared says so.
@@ -318,7 +318,7 @@ fn pct(r: f64) -> String {
 /// A share compared with a two-proportion test: worse when it moved the
 /// wrong way by at least `min` and significantly, `sig` saying which
 /// p-values are (under [`ALPHA`] for a KPI, under the family's false
-/// discovery cutoff for a feature, D-099).
+/// discovery cutoff for a feature, D-109).
 fn share_check(
     key: &str,
     label: &str,
@@ -539,7 +539,7 @@ fn feature_checks(c: &Side, p: &Side) -> (Vec<Check>, Vec<Check>) {
         ))
     };
     // Every feature compared is one test of the family, touched or not
-    // (D-099): the more features, the stricter each test.
+    // (D-109): the more features, the stricter each test.
     let ps: Vec<f64> = c
         .features
         .iter()

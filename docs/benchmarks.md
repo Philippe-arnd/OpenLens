@@ -96,8 +96,8 @@ What the stored events are made of, on the two apps that send their production e
 Server telemetry was about **99%** of the events stored on 2026-11-28 (2,598 server events against 28 browser events for Journal, 1,940 against 36 for Kanban).
 
 **Targets** (what the lot A changes aim at):
-- **Browser:** at most about **25 stored events per active user-day** on an app of the persona's size (tens of thousands of users), with the distribution-only events (`$vital`, `$scroll`, `$field`) capped by a daily budget (#702, D-097) and `$identify` sent only when something changed (#703).
-- **Server:** an idle instance sends **a few hundred events a day** (runtime health every 10 minutes), then grows with the routes really used, never with health checks (#726, D-100).
+- **Browser:** at most about **25 stored events per active user-day** on an app of the persona's size (tens of thousands of users), with the distribution-only events (`$vital`, `$scroll`, `$field`) capped by a daily budget (#702, D-107) and `$identify` sent only when something changed (#703).
+- **Server:** an idle instance sends **a few hundred events a day** (runtime health every 10 minutes), then grows with the routes really used, never with health checks (#726, D-110).
 
 To measure it again (MCP `sql` or `openlens-cli sql`):
 
@@ -110,7 +110,7 @@ GROUP BY event ORDER BY n DESC
 ```
 ### Persona size (#706)
 
-The target persona is a product manager whose app has tens of thousands of active users. `cargo xtask bench-gen <data-dir> --profile persona --map-out map.yaml` writes that app as it is stored **after** the event budget (D-097), over 90 days:
+The target persona is a product manager whose app has tens of thousands of active users. `cargo xtask bench-gen <data-dir> --profile persona --map-out map.yaml` writes that app as it is stored **after** the event budget (D-107), over 90 days:
 
 - **People:** 120,000 known users, each active on a share of days drawn from a Pareto law (α = 1.6) with a mean of about 25 %, so about **30,000 daily active users**. Six raw roles (as the realistic profile), plans free (80 %) and pro (20 %).
 - **Browser events:** about **25 stored per active user-day**: one or two sessions a day, each opened by a page view, then clicks (about 25 % of the stored events), page views (12 %), success and custom events (15 %), `$submit` and `$request_failed` (5 %), feature uses and a few errors for the rest, and one `$identify` per active user-day (the SDK sends at most one a UTC day when nothing changed).

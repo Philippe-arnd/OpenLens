@@ -1,4 +1,4 @@
-//! The event budget (#702, #703, D-097): above about 2,000 active users a
+//! The event budget (#702, #703, D-107): above about 2,000 active users a
 //! day the SDK sends `$vital`, `$scroll` and `$field` from a sample of
 //! sessions and strips the click position outside it, and it counts the
 //! repeats of an error instead of sending them. The numbers that count

@@ -10,7 +10,7 @@
 //! it when an error or a rage click happens (see `sdk/js/src/replay.ts`).
 //!
 //! The same count gives the share of sessions that send the events which
-//! only feed distributions (`$vital`, `$scroll`, `$field`; #702, D-097):
+//! only feed distributions (`$vital`, `$scroll`, `$field`; #702, D-107):
 //! `min(1, EVENT_BUDGET / yesterday's active users)`, handed out with the
 //! flags as `sample_rate`.
 
@@ -25,7 +25,7 @@ use openlens_query::QueryEngine;
 pub const DAILY_BUDGET: i64 = 300;
 
 /// Sessions a day, about, that send the distribution-only events
-/// (`$vital`, `$scroll`, `$field`; #702, D-097). Fixed: the distributions
+/// (`$vital`, `$scroll`, `$field`; #702, D-107). Fixed: the distributions
 /// they feed (p75, scroll depth, form drop-off) are stable long before.
 pub const EVENT_BUDGET: i64 = 2000;
 
@@ -41,7 +41,7 @@ pub struct ReplayRate {
     /// Recordings a day the rate aims for (D-088).
     pub budget: i64,
     /// Share of sessions that send the distribution-only events, 0 to 1
-    /// ([`EVENT_BUDGET`], #702, D-097). Every one of their events carries
+    /// ([`EVENT_BUDGET`], #702, D-107). Every one of their events carries
     /// it as `$sample`.
     pub sample_rate: f64,
 }

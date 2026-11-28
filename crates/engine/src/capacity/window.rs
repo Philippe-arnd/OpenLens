@@ -4,7 +4,7 @@
 //!
 //! The window is the length of one `$request_stats` and `$client_stats`
 //! data point (`$runtime_stats` come every 10 minutes whatever it is,
-//! #726, D-100). A finer window stores more points for the
+//! #726, D-110). A finer window stores more points for the
 //! same requests, so it is chosen like extra recordings are: the bytes the
 //! stat events would take over the fixed 400 days, beyond what 10-minute
 //! windows take, must fit in the room the budget leaves after the floor.

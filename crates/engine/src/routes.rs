@@ -23,7 +23,7 @@
 //!   session when known, so a page can open the replay at that time; a
 //!   slower route's p95 check carries its slowest.
 //!
-//! - **Health checks** ([`health`], #726, D-100): the route stats of
+//! - **Health checks** ([`health`], #726, D-110): the route stats of
 //!   health probes are dropped at ingestion, so none of these reads sees
 //!   them.
 //!
@@ -749,7 +749,7 @@ fn label(s: &RouteStat) -> String {
 /// The verdict's backend checks: each route with enough requests on both
 /// releases, its 5xx share and its p95. The 5xx tests of all the routes
 /// compared are one family, held to its Benjamini–Hochberg cutoff at a 5%
-/// false discovery rate (D-099).
+/// false discovery rate (D-109).
 #[must_use]
 pub fn checks(current: &[RouteStat], previous: &[RouteStat]) -> Vec<Check> {
     let pairs: Vec<(&RouteStat, &RouteStat)> = current

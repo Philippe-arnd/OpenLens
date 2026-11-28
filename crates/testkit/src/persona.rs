@@ -1,6 +1,6 @@
 //! The persona profile (#706): the app of the target persona, a product
 //! with about 30,000 daily active users, as it is stored **after** the
-//! event budget (D-097), over the 90 days before `now`.
+//! event budget (D-107), over the 90 days before `now`.
 //!
 //! - 120,000 known users, activity drawn from a Pareto law (α = 1.6) so
 //!   that a user is active on about a quarter of the days: about 30,000
@@ -40,7 +40,7 @@ pub const PERSONA_KNOWN_USERS: u64 = 120_000;
 /// what a run reports): what `bench-gen --events` scales the population
 /// against.
 pub const PERSONA_NOMINAL_EVENTS: u64 = 68_000_000;
-/// Sessions a day the event budget measures in full (D-097).
+/// Sessions a day the event budget measures in full (D-107).
 pub const PERSONA_SAMPLED_PER_DAY: f64 = 2_000.0;
 
 const DAYS: i64 = 90;
@@ -202,7 +202,7 @@ impl Persona {
                         format!(r#"{{"$anon_distinct_id":"{anon}"}}"#)
                     };
                     seen = true;
-                    // At most one `$identify` a user-day (D-097).
+                    // At most one `$identify` a user-day (D-107).
                     let path = Some("/".to_owned());
                     out.push(&who, at, "$identify".into(), None, path, props);
                 }
@@ -460,7 +460,7 @@ fn request_stats(method: &str, route: &str, status: u16, count: u64, median: usi
 }
 
 /// UTC midnight 90 days before `now`'s day: a day of the profile is a
-/// UTC day, as the SDK's once-a-day `$identify` is (D-097), and the last
+/// UTC day, as the SDK's once-a-day `$identify` is (D-107), and the last
 /// one is yesterday.
 fn first_day(now: DateTime<Utc>) -> DateTime<Utc> {
     (now - Duration::days(DAYS))

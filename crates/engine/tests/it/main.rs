@@ -409,7 +409,7 @@ async fn insights_find_every_planted_pattern() {
     assert!(b.readiness.judged_users > 100);
 }
 
-/// The card kinds decided by a p-value (D-099).
+/// The card kinds decided by a p-value (D-109).
 const TESTED_KINDS: [&str; 4] = [
     "stick_driver",
     "role_blind_spot",

@@ -6,7 +6,7 @@
 //! a GitHub issue (one per finding: a second click updates it). Once the
 //! issue is closed and a release has shipped it, the hourly pass measures
 //! the metric (against the flag it shipped behind, else its normal weekly
-//! range, D-098) and comments on the issue; every outcome
+//! range, D-108) and comments on the issue; every outcome
 //! goes into the learning log.
 //!
 //! Nothing is posted without a click (or an admin API call): the hourly
@@ -30,7 +30,7 @@ use crate::{Filters, FlagCohort};
 pub(crate) const CHECK_DAYS: i64 = 14;
 
 /// Full weeks before the shipping release that set the normal range of a
-/// weekly series (D-098).
+/// weekly series (D-108).
 const BEFORE_WEEKS: usize = 8;
 /// Fewest full weeks before shipping for a control chart.
 const MIN_BEFORE: usize = 4;
@@ -42,7 +42,7 @@ const SIGMAS: f64 = 3.0;
 const FLAT_BAND: f64 = 0.05;
 
 /// The metric moved the right way beyond chance or normal variation
-/// (D-098). Outcomes stored before it as `no effect` read as
+/// (D-108). Outcomes stored before it as `no effect` read as
 /// [`INCONCLUSIVE`].
 pub const IMPROVED: &str = "improved";
 /// The metric moved the wrong way, beyond chance.
@@ -133,7 +133,7 @@ pub(crate) fn load(meta: &Meta, project: &str) -> Vec<Ticket> {
     all
 }
 
-/// Outcomes stored before D-098 said `no effect`: they read as
+/// Outcomes stored before D-108 said `no effect`: they read as
 /// [`INCONCLUSIVE`].
 fn read_old(all: &mut [Ticket]) {
     for t in all {
@@ -560,7 +560,7 @@ pub struct Measures<'a> {
     pub cohort: Option<Cohort>,
 }
 
-/// A verdict on a change (D-098).
+/// A verdict on a change (D-108).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Verdict {
     /// [`IMPROVED`], [`WORSE`] or [`INCONCLUSIVE`].
@@ -702,7 +702,7 @@ fn chart_verdict(t: &Ticket, before: &[f64], after: &[f64], share: bool, note: &
     Verdict::new(word(delta.abs() > band, delta, t.up), "control_chart", ev)
 }
 
-/// The verdict on a change (pure, D-098): the flag's cohorts when it
+/// The verdict on a change (pure, D-108): the flag's cohorts when it
 /// shipped behind one, else a control chart of the metric's weekly
 /// series, else (not enough history) a before/after significance test
 /// for shares; anything else is inconclusive.
@@ -961,7 +961,7 @@ pub struct Learning {
     pub improved: usize,
     /// The ones that got `worse`.
     pub worse: usize,
-    /// The ones judged `inconclusive` (D-098).
+    /// The ones judged `inconclusive` (D-108).
     pub inconclusive: usize,
 }
 

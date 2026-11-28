@@ -1,4 +1,4 @@
-//! Health checks are not route stats (#726, D-100). The probes of a
+//! Health checks are not route stats (#726, D-110). The probes of a
 //! container healthcheck, a load balancer or OpenLens's own uptime check
 //! hit the app every few seconds whatever its traffic: kept as route stats
 //! they would be most of a small app's stored events and the top of its

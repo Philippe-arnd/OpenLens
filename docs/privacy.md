@@ -17,7 +17,7 @@ What OpenLens stores, for how long, where, and what it never stores. Everything 
 
 ## On the visitor's device
 
-- **By default**, the SDK keeps in the browser's `localStorage` (no cookie): an anonymous id, the session id and its last activity (and whether that session is recorded, and whether it sends the sampled events of D-097), what `identify` was given (user id, role, account, plan, and the properties flag rules target) with a hash of it and the day it was last sent, the active flags and variants, and which surveys were answered. When the page closes with more to send than the browser allows, the unsent requests (events and replay chunks) are kept there too, for at most 24 hours and 256 KB, and sent on the next visit (#433); withdrawing consent deletes them. Some regulators treat `localStorage` like a cookie: ask for consent where that applies, and the SDK respects it.
+- **By default**, the SDK keeps in the browser's `localStorage` (no cookie): an anonymous id, the session id and its last activity (and whether that session is recorded, and whether it sends the sampled events of D-107), what `identify` was given (user id, role, account, plan, and the properties flag rules target) with a hash of it and the day it was last sent, the active flags and variants, and which surveys were answered. When the page closes with more to send than the browser allows, the unsent requests (events and replay chunks) are kept there too, for at most 24 hours and 256 KB, and sent on the next visit (#433); withdrawing consent deletes them. Some regulators treat `localStorage` like a cookie: ask for consent where that applies, and the SDK respects it.
 - **With `data-cookieless`**, it stores nothing on the device (see *Cookieless mode* below).
 
 ## Never stored

@@ -6,7 +6,7 @@
 //!   It also carries `replay_rate`, the share of sessions the SDK records
 //!   from their start (#327), and `sample_rate`, the share of sessions
 //!   that send the distribution-only events (`$vital`, `$scroll`,
-//!   `$field`; #702, D-097).
+//!   `$field`; #702, D-107).
 //! - Admin (bearer): `GET /api/projects/{id}/flags`,
 //!   `PUT|DELETE /api/projects/{id}/flags/{key}`, and `PATCH` to switch a
 //!   flag on or off or change its rollout (`flags.update`).
@@ -162,7 +162,7 @@ pub(crate) async fn public(
         .map(|s| s.public())
         .collect();
     // The share of sessions to record from their start (#327, D-035), and
-    // of those that send the distribution-only events (#702, D-097): one
+    // of those that send the distribution-only events (#702, D-107): one
     // daily count for both.
     let replay = crate::replay::rate(&state, &project.id, &project.timezone).await;
     (

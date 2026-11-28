@@ -1,6 +1,6 @@
 /**
  * Replay sampling (#327, D-035), and the daily budget of the events that
- * only feed distributions (#702, D-097).
+ * only feed distributions (#702, D-107).
  *
  * The server hands the SDK a rate with the flags (`replay_rate`: about 300
  * recordings a day). Once per session the SDK draws whether the session is
@@ -22,7 +22,7 @@ export interface Decision {
  * else a new draw at `rate`, or none while the rate is not known yet. */
 export declare function decide(prev: Decision | undefined, sid: string, rate: number | undefined, rand: () => number): Decision | undefined;
 /** The draw of one session for the distribution-only events (#702,
- * D-097), with the rate `r` it was drawn at. */
+ * D-107), with the rate `r` it was drawn at. */
 export interface Draw extends Decision {
     r: number;
 }

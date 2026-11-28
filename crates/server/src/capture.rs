@@ -285,7 +285,7 @@ pub(crate) fn is_bot(ua: &str) -> bool {
         .any(|k| ua.contains(k))
 }
 
-/// Health checks are not route stats (#726, D-100): drop the
+/// Health checks are not route stats (#726, D-110): drop the
 /// `$request_stats` of the fixed health routes and of the project's uptime
 /// health path, from `/capture` and `/v1/metrics` alike. The project's
 /// settings are read only for a batch that holds route stats.

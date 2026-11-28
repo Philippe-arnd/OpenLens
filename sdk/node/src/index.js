@@ -23,10 +23,10 @@ export const BOUNDS_S = [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 
 /** The header that carries the OpenLens session id: ours, so no tracing
  * instrumentation forwards it to other services (#601). */
 export const SESSION_HEADER = "x-openlens-session";
-/** Length of one runtime-health window (#726, D-100): `$runtime_stats` every
+/** Length of one runtime-health window (#726, D-110): `$runtime_stats` every
  * 10 minutes whatever the stats window, so an idle app sends 144 a day. */
 export const RUNTIME_WINDOW_MS = 10 * 60 * 1000;
-/** Health-check route templates never counted as route stats (#726, D-100):
+/** Health-check route templates never counted as route stats (#726, D-110):
  * compared without case and without a trailing slash; `/health/*` is any
  * route under `/health/`. The server also drops the project's own uptime
  * health path. */
@@ -236,7 +236,7 @@ export class OpenLens {
   recordRequest(r) {
     try {
       if (!r || !r.route) return;
-      // Health checks are not route stats (#726, D-100).
+      // Health checks are not route stats (#726, D-110).
       if (isHealthRoute(r.route)) return;
       const now = Date.now();
       const len = this.statsWindowMs;
@@ -471,7 +471,7 @@ export class OpenLens {
    * Runtime health (#610): event-loop delay, memory and process starts.
    * At once, one `$runtime_stats` with `process.start: true` (sent by the
    * next flush, so a process that crash-loops is still counted); then, every
-   * 10 minutes whatever the stats window (#726, D-100), one `$runtime_stats`
+   * 10 minutes whatever the stats window (#726, D-110), one `$runtime_stats`
    * with the event-loop delay p50 and p99 (seconds) and the largest RSS and
    * heap used (bytes) of those 10 minutes, sampled on each flush. On with `express()`; call it for other
    * frameworks. Calling it again does nothing.
@@ -761,7 +761,7 @@ function errorType(err) {
   return pick(err.code) || pick(err.cause && err.cause.code) || pick(err.name) || "_OTHER";
 }
 
-/** Is `route` a health check (#726, D-100): one of HEALTH_ROUTES, without
+/** Is `route` a health check (#726, D-110): one of HEALTH_ROUTES, without
  * case, query or trailing slash? */
 export function isHealthRoute(route) {
   const r = String(route).trim().split(/[?#]/)[0].replace(/\/+$/, "").toLowerCase();

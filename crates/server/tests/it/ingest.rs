@@ -158,7 +158,7 @@ async fn the_replay_rate_follows_yesterdays_active_users() {
     let (rate, sample) = rates(&h).await;
     assert!(rate < everything, "{rate} < {everything}");
     // The same count gives the share of sessions sending distribution-only
-    // events (#702, D-097), from a larger budget.
+    // events (#702, D-107), from a larger budget.
     assert!(sample > rate, "{sample} > {rate}");
     assert_eq!(
         sample,

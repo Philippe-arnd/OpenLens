@@ -13,7 +13,7 @@
 //! (version 1): pushing the same file later keeps that version (D-046).
 //!
 //! `--profile persona` (#706) writes the app of the target persona after
-//! the event budget (D-097): 120,000 known users, about 30,000 active a
+//! the event budget (D-107): 120,000 known users, about 30,000 active a
 //! day, about 25 stored browser events per active user-day, anonymous
 //! landing visits, and one server's route and runtime stats (see
 //! `openlens_testkit::Persona`). Its size is derived from those numbers

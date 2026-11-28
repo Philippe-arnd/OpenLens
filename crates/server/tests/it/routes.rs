@@ -337,7 +337,7 @@ async fn runtime_stats_are_read_per_release_and_never_count_as_users_or_events()
     assert!(v["releases"].as_array().unwrap().is_empty() && v["note"].is_string());
 }
 
-/// #726, D-100: health checks are not route stats. The fixed health routes
+/// #726, D-110: health checks are not route stats. The fixed health routes
 /// and the project's own uptime health path are dropped at ingestion; a
 /// real route is kept, and a server error on a health route too.
 #[tokio::test]

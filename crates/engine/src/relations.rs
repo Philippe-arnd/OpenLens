@@ -47,7 +47,7 @@ pub struct Relation {
     pub success_without: Option<f64>,
     /// Using `first` raises the success of `then`, and the difference is
     /// significant (two-proportion test, 30 sessions on each side at least),
-    /// under the false discovery cutoff of all the relations tested (D-099).
+    /// under the false discovery cutoff of all the relations tested (D-109).
     pub leads_to_value: bool,
 }
 
@@ -193,7 +193,7 @@ pub fn from_counts(m: &FeatureMap, c: &Counts) -> Vec<Relation> {
             (r, p)
         })
         .collect();
-    // Every relation with a p-value is one test of the family (D-099).
+    // Every relation with a p-value is one test of the family (D-109).
     let ps: Vec<f64> = tested.iter().filter_map(|(_, p)| *p).collect();
     let cut = crate::stats::fdr_cutoff(&ps, crate::stats::FDR);
     let mut out: Vec<Relation> = tested

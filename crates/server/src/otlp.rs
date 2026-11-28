@@ -17,7 +17,7 @@
 //!   `$client_stats` for the client metric) with the fields the Node SDK
 //!   sends (D-084, D-090), so the routes, the dependencies, the verdict
 //!   and the alerts read it unchanged, except health checks (#726,
-//!   D-100), accepted and not stored. Durations become seconds; other bucket
+//!   D-110), accepted and not stored. Durations become seconds; other bucket
 //!   bounds are re-bucketed into OpenLens's by upper bound, so p95 stays
 //!   an upper bound.
 //! - **Temporality:** delta points are stored as they are. For cumulative
@@ -897,7 +897,7 @@ pub(crate) async fn ingest(
     };
     // Host rules and aliases of the project (D-034), as on `/capture`.
     crate::environments::apply(&state, &project.id, &mut events);
-    // Health checks are not route stats (#726, D-100): read, then dropped.
+    // Health checks are not route stats (#726, D-110): read, then dropped.
     capture::drop_health_checks(&state, &project.id, &mut events);
     let stored_n = events.len();
     let st = state.clone();

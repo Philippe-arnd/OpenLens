@@ -108,7 +108,7 @@ macro_rules! occurrences {
     };
 }
 
-/// The occurrences one `$error` row stands for (#703, D-097): 1, or for
+/// The occurrences one `$error` row stands for (#703, D-107): 1, or for
 /// the row the SDK sends with the repeats of an error it already sent in
 /// the session (`"$repeat":true`), its `$repeats` (at most 7 digits; a row
 /// without a readable count stands for none). Reads `properties` only on
@@ -124,7 +124,7 @@ pub const ERROR_COUNT: &str = concat!(
 );
 
 /// What one distribution-only event (`$vital`, `$scroll`, `$field`)
-/// stands for (#702, D-097): `1 / $sample` when the SDK sent it from a
+/// stands for (#702, D-107): `1 / $sample` when the SDK sent it from a
 /// sample of sessions, else 1. Bounded to 1 – 100 000 so a hostile value
 /// cannot blow a count up. Sum it wherever such events, or the sessions
 /// they show, are counted as an absolute number; shares and percentiles

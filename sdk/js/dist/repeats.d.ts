@@ -1,6 +1,6 @@
 /**
  * One error and one failed request per session and fingerprint (#703,
- * D-097). The first is sent at once; the same one again in the session is
+ * D-107). The first is sent at once; the same one again in the session is
  * only counted, and the count goes out as one more event marked
  * `$repeat: true` with `$repeats` at the next flush or on unload (only when
  * there are repeats, at most once per fingerprint and flush).

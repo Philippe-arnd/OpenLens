@@ -1,6 +1,6 @@
 //! Runtime health per release (#610, D-087): the `$runtime_stats` the
 //! Node SDK sends, one per process start (`process.start`, sent at once)
-//! and one every 10 minutes per process (#726, D-100; one per stats window
+//! and one every 10 minutes per process (#726, D-110; one per stats window
 //! of 1, 5 or 10 minutes before, #628): event-loop delay p50 and p99, the
 //! largest RSS and heap used, read per release. Each point says its own
 //! window in `$window_s`, and no read assumes a number of points per

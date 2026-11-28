@@ -4,7 +4,7 @@
 //! fill, the last field before giving up, and fields people come back to.
 //!
 //! Above the daily budget the SDK sends `$field` from a sample of sessions
-//! only (#702, D-097), each with the rate as `$sample`: a session counts
+//! only (#702, D-107), each with the rate as `$sample`: a session counts
 //! for `1 / $sample` sessions, so starts, submits and the per-field counts
 //! stay absolute numbers. A session without `$field` (not drawn) is not a
 //! start, so its `$submit` is not counted either and shares stay unbiased.
