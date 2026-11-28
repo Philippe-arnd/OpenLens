@@ -84,10 +84,10 @@ pub(super) async fn board(
     // What the shell's `<main>` has before the panel (breadcrumbs, tabs):
     // the board page repeats it, so it is left out of the board sent after.
     let before = match (
-        shell.find("<main>"),
+        main_content_start(&shell),
         shell.find("<div class=\"board-waiting\""),
     ) {
-        (Some(a), Some(b)) if a + 6 <= b => shell[a + 6..b].to_owned(),
+        (Some(a), Some(b)) if a <= b => shell[a..b].to_owned(),
         _ => String::new(),
     };
     let rest = async move {
@@ -96,9 +96,9 @@ pub(super) async fn board(
             .await
             .unwrap_or_default();
         let full = String::from_utf8_lossy(&bytes);
-        let inner = match (full.find("<main>"), full.rfind("</main>")) {
-            (Some(a), Some(b)) if a + 6 <= b => {
-                let inner = &full[a + 6..b];
+        let inner = match (main_content_start(&full), full.rfind("</main>")) {
+            (Some(a), Some(b)) if a <= b => {
+                let inner = &full[a..b];
                 inner
                     .strip_prefix(before.as_str())
                     .unwrap_or(inner)
@@ -118,6 +118,14 @@ pub(super) async fn board(
     r.headers_mut().remove(header::CONTENT_LENGTH);
     *r.body_mut() = axum::body::Body::from_stream(stream);
     r
+}
+
+/// Where the content of the page's `<main>` starts: just past its opening
+/// tag, whatever attributes it carries (`id="main"`, the skip link's target, #680).
+fn main_content_start(page: &str) -> Option<usize> {
+    let open = page.find("<main")?;
+    let end = page[open..].find('>')?;
+    Some(open + end + 1)
 }
 
 /// The whole board page, computed now (or read from the cache).
