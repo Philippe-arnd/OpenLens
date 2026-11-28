@@ -63,6 +63,7 @@ mod share;
 mod slo;
 mod status_page;
 mod storage;
+mod stored_urls;
 mod surveys;
 mod tickets;
 mod timeline;
@@ -518,7 +519,7 @@ fn compact(state: &AppState) -> Result<(), String> {
     capacity::refresh(state);
     for p in state.meta.projects().map_err(|e| e.to_string())? {
         let now = chrono::Utc::now();
-        clean_stored_urls(state, &p.id);
+        stored_urls::clean(state, &p.id);
         // Compaction, erasure and retention below rewrite files.
         state.boards.bump(&p.id);
         match openlens_storage::compact_days(&state.data_dir, &p.id, now) {
@@ -626,35 +627,6 @@ async fn roll_up(state: &AppState, now: chrono::DateTime<chrono::Utc>) -> usize 
         }
     }
     written
-}
-
-/// One-off rewrite of the URLs stored before capture cleaned them (#290),
-/// recorded per project so it runs once. The caller holds the maintenance
-/// lock.
-fn clean_stored_urls(state: &AppState, project: &str) {
-    const DONE: &str = "urls_cleaned";
-    if state
-        .meta
-        .project_setting(project, DONE)
-        .ok()
-        .flatten()
-        .is_some()
-    {
-        return;
-    }
-    let run = flush_now(state).and_then(|_| {
-        openlens_storage::clean_urls(&state.data_dir, project).map_err(|e| e.to_string())
-    });
-    match run {
-        Ok(n) => {
-            state.boards.closed().project_changed(project);
-            tracing::info!(project, n, "query strings removed from stored URLs");
-            if let Err(err) = state.meta.set_project_setting(project, DONE, "1") {
-                tracing::warn!(project, %err, "URL cleaning not recorded");
-            }
-        }
-        Err(err) => tracing::warn!(project, %err, "URL cleaning failed"),
-    }
 }
 
 /// Flush everything still buffered (used on shutdown).

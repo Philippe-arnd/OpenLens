@@ -84,7 +84,7 @@ async fn viewers_get_feedback_counts_without_the_texts() {
     );
     let viewer = invite(
         &h,
-        serde_json::json!({"email": "[EMAIL_REDACTED]", "role": "viewer", "projects": ["default"]}),
+        serde_json::json!({"email": "viewer@example.com", "role": "viewer", "projects": ["default"]}),
     )
     .await;
     let page = body_text(get(&h, "/p/default/features/export", Some(&viewer), false).await).await;
