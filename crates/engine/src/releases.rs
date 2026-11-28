@@ -276,6 +276,33 @@ fn env_rank(e: &str) -> (u8, &str) {
     }
 }
 
+/// The closed days inside the window that have `person_day` rows, oldest
+/// first (#729). A day with no rollup, or the day the window starts in
+/// (only part of it is inside), is read from its events.
+async fn rolled_days(
+    q: &QueryEngine,
+    project: &str,
+    now: DateTime<Utc>,
+) -> Result<Vec<chrono::NaiveDate>> {
+    let since = (now - chrono::Duration::days(WINDOW_DAYS)).date_naive();
+    let last = openlens_query::last_closed(now);
+    if last <= since {
+        return Ok(Vec::new());
+    }
+    let sql =
+        format!("SELECT DISTINCT date FROM person_day WHERE date > '{since}' AND date <= '{last}'");
+    let mut days: Vec<chrono::NaiveDate> = q
+        .sql(project, &sql)
+        .await?
+        .rows
+        .iter()
+        .filter_map(|r| chrono::NaiveDate::parse_from_str(&text(r, "date")?, "%Y-%m-%d").ok())
+        .filter(|d| *d > since && *d <= last)
+        .collect();
+    days.sort_unstable();
+    Ok(days)
+}
+
 /// The releases of `project` over the last [`WINDOW_DAYS`] days, days
 /// counted in `tz`, in every environment or in `environment` only
 /// (engine command `releases.list`). `builds` are the project's build
@@ -298,29 +325,77 @@ pub async fn releases(
         ..Filters::default()
     };
     let day = f.day()?;
+    let now = Utc::now();
     let mut params = openlens_sqlgen::Params::new();
     let mut w = format!(
         "date >= '{}' AND timestamp >= now() - INTERVAL '{WINDOW_DAYS} days' \
          AND release IS NOT NULL AND release <> '' AND environment <> 'bot' \
          AND distinct_id <> '$server'",
-        (Utc::now() - chrono::Duration::days(WINDOW_DAYS + 1)).format("%Y-%m-%d")
+        (now - chrono::Duration::days(WINDOW_DAYS + 1)).format("%Y-%m-%d")
     );
+    let mut env = String::new();
     if let Some(e) = environment {
         let p = params
             .set("env", e)
             .map_err(|_| EngineError::InvalidFilter("environment"))?;
-        w.push_str(&format!(" AND environment = {p}"));
+        env = format!(" AND environment = {p}");
+        w.push_str(&env);
     }
     let q = q.with_params(&params);
+    // Closed days with `person_day` rows come from the rollup (#729): a
+    // release's users, events and first and last events per person and
+    // UTC day are in it, whatever the feature map, so any rolled day
+    // counts. Today, open days and days not rolled up read their events.
+    let rolled = rolled_days(&q, project, now).await?;
+    let (skip, from_rollup) = if rolled.is_empty() {
+        (String::new(), None)
+    } else {
+        let list = rolled
+            .iter()
+            .map(|d| format!("'{}'", d.format("%Y-%m-%d")))
+            .collect::<Vec<_>>()
+            .join(", ");
+        (
+            format!(" AND date NOT IN ({list})"),
+            Some(format!(
+                "date IN ({list}) AND release IS NOT NULL AND release <> '' \
+                 AND environment <> 'bot' AND person <> '$server'{env}"
+            )),
+        )
+    };
+    let rows = match &from_rollup {
+        Some(r) => format!(
+            "(SELECT environment, release, distinct_id, count(*) AS events, \
+             min(timestamp) AS first_ts, max(timestamp) AS last_ts \
+             FROM events WHERE {w}{skip} GROUP BY 1, 2, 3 \
+             UNION ALL SELECT environment, release, person AS distinct_id, events, first_ts, last_ts \
+             FROM person_day WHERE {r}) AS r"
+        ),
+        None => format!(
+            "(SELECT environment, release, distinct_id, count(*) AS events, \
+             min(timestamp) AS first_ts, max(timestamp) AS last_ts \
+             FROM events WHERE {w} GROUP BY 1, 2, 3) AS r"
+        ),
+    };
     let totals = format!(
-        "SELECT environment, release, count(DISTINCT distinct_id) AS users, count(*) AS events, \
-         date_part('epoch', min(timestamp)) AS first, date_part('epoch', max(timestamp)) AS last \
-         FROM events WHERE {w} GROUP BY 1, 2 ORDER BY last DESC LIMIT {MAX_RELEASES}"
+        "SELECT environment, release, count(DISTINCT distinct_id) AS users, sum(events) AS events, \
+         date_part('epoch', min(first_ts)) AS first, date_part('epoch', max(last_ts)) AS last \
+         FROM {rows} GROUP BY 1, 2 ORDER BY last DESC LIMIT {MAX_RELEASES}"
     );
-    let daily = format!(
-        "SELECT environment, release, {day} AS day, count(DISTINCT distinct_id) AS users \
-         FROM events WHERE {w} GROUP BY 1, 2, 3 ORDER BY day DESC LIMIT {MAX_DAILY}"
-    );
+    // The rollup's days are UTC days: another zone's days read the events.
+    let daily = match &from_rollup {
+        Some(r) if day == "date" => format!(
+            "SELECT environment, release, day, count(DISTINCT distinct_id) AS users FROM \
+             (SELECT environment, release, date AS day, distinct_id FROM events WHERE {w}{skip} \
+              UNION ALL SELECT environment, release, date AS day, person AS distinct_id \
+              FROM person_day WHERE {r}) AS d \
+             GROUP BY 1, 2, 3 ORDER BY day DESC LIMIT {MAX_DAILY}"
+        ),
+        _ => format!(
+            "SELECT environment, release, {day} AS day, count(DISTINCT distinct_id) AS users \
+             FROM events WHERE {w} GROUP BY 1, 2, 3 ORDER BY day DESC LIMIT {MAX_DAILY}"
+        ),
+    };
     let (totals, daily) = futures::join!(q.sql(project, &totals), q.sql(project, &daily));
     let (totals, daily) = (totals?, daily?);
 
