@@ -14,7 +14,7 @@ async fn a_viewer_of_one_project_of_three_sees_only_that_one() {
     h.state.meta.create_project("Docs", None).unwrap();
     let viewer = invite(
         &h,
-        serde_json::json!({"email": "[EMAIL_REDACTED]", "role": "viewer", "projects": ["default"]}),
+        serde_json::json!({"email": "viewer@example.com", "role": "viewer", "projects": ["default"]}),
     )
     .await;
     let owner = login_cookie(&h).await;
