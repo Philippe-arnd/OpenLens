@@ -19,10 +19,33 @@ use crate::web::html_page;
 /// never race on the same day.
 pub(crate) static MAINTENANCE: Mutex<()> = Mutex::new(());
 
-/// Who did it, for the audit log: `owner`, the user's email, or `api`.
+/// Who did it, for the audit log: `owner`, the user's email, the admin
+/// token, or a scoped API token by label and id (#668).
 pub(crate) fn actor(state: &AppState, headers: &HeaderMap) -> String {
-    if auth::has_bearer(state, headers) {
+    let admin = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .is_some_and(|t| crate::admin_token_matches(state, t.trim()));
+    if admin {
         return "api (admin token)".into();
+    }
+    // Only an id the scopes layer set and signed for this request, never
+    // one the client sent: the layer strips the header from every request.
+    if let Some(id) = crate::scopes::token_id(state, headers) {
+        let label = state
+            .meta
+            .api_tokens()
+            .ok()
+            .and_then(|all| all.into_iter().find(|t| t.id == id))
+            .map(|t| t.label);
+        return match label {
+            Some(label) => format!("api token \"{label}\" ({id})"),
+            None => format!("api token ({id})"),
+        };
+    }
+    if auth::has_bearer(state, headers) {
+        return "api (scoped token)".into();
     }
     match auth::session_id(state, headers) {
         Some(id) if id == auth::OWNER => "owner".into(),

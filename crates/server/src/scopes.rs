@@ -24,6 +24,21 @@ pub(crate) const MARK: &str = "x-openlens-scope-checked";
 /// set only next to [`MARK`], for handlers that list projects.
 pub(crate) const PROJECTS: &str = "x-openlens-scope-projects";
 
+/// The internal header carrying a checked token's id, set only next to
+/// [`MARK`], so the audit log can name the token that acted (#668).
+pub(crate) const TOKEN: &str = "x-openlens-scope-token";
+
+/// The id of the scoped token [`layer`] checked for this request; `None`
+/// for any other request (the admin token, a session, no valid marker).
+pub(crate) fn token_id(state: &AppState, headers: &axum::http::HeaderMap) -> Option<String> {
+    let marked = headers
+        .get(MARK)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| crate::token_matches(v, &mark(state)));
+    let id = headers.get(TOKEN)?.to_str().ok()?;
+    marked.then(|| id.to_owned())
+}
+
 /// Calls with no project in their path that a token limited to some
 /// projects may still make; every other install-wide call needs a token
 /// for every project (review of v0.3.0).
@@ -123,6 +138,7 @@ fn denied(msg: &str) -> Response {
 pub(crate) async fn layer(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
     req.headers_mut().remove(MARK);
     req.headers_mut().remove(PROJECTS);
+    req.headers_mut().remove(TOKEN);
     let path = req.uri().path().to_owned();
     if !path.starts_with("/api/") && path != "/metrics" {
         return next.run(req).await;
@@ -169,6 +185,9 @@ pub(crate) async fn layer(State(state): State<AppState>, mut req: Request, next:
         if let Ok(v) = HeaderValue::from_str(&list.join(",")) {
             req.headers_mut().insert(PROJECTS, v);
         }
+    }
+    if let Ok(v) = HeaderValue::from_str(&token.id) {
+        req.headers_mut().insert(TOKEN, v);
     }
     if let Ok(v) = HeaderValue::from_str(&mark(&state)) {
         req.headers_mut().insert(MARK, v);
