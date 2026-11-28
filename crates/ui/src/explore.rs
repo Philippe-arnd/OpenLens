@@ -39,6 +39,7 @@ pub fn person(
                 @if let Some(r) = &x.role { div { dt { "Role" } dd { span.tag.tone-accent { (r) } } } }
                 @if let Some(a) = &x.account { div { dt { "Account" } dd { (a) } } }
                 @if let Some(pl) = &x.plan { div { dt { "Plan" } dd { (pl) } } }
+                @if let Some(s) = &x.signed_up { div { dt { "Signed up" } dd { (tf(s)) } } }
                 div { dt { "First seen" } dd { (tf(&x.first_seen)) } }
                 div { dt { "Last login" } dd { (tf(&x.last_seen)) } }
             }

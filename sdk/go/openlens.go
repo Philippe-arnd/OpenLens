@@ -48,6 +48,9 @@ type Traits struct {
 	Role    string
 	Account string
 	Plan    string
+	// CreatedAt is when the account was created: its signup (Identify
+	// only, #707). The zero time sends nothing.
+	CreatedAt time.Time
 	// Properties feed flag rules (IsEnabled only, never stored).
 	Properties map[string]string
 }
@@ -156,6 +159,9 @@ func (c *Client) Identify(distinctID string, t Traits) {
 	}
 	if t.Plan != "" {
 		p["$plan"] = t.Plan
+	}
+	if !t.CreatedAt.IsZero() {
+		p["$created_at"] = t.CreatedAt.UTC().Format(time.RFC3339)
 	}
 	c.Capture(distinctID, "$identify", p)
 }

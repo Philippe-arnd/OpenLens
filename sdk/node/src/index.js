@@ -124,6 +124,11 @@ export class OpenLens {
     if (dims.role) p.$role = dims.role;
     if (dims.account) p.$account = dims.account;
     if (dims.plan) p.$plan = dims.plan;
+    // When the account was created (RFC 3339 or a Date): its signup (#707).
+    if (dims.created_at) {
+      const t = dims.created_at instanceof Date ? dims.created_at : new Date(String(dims.created_at));
+      if (!isNaN(t.getTime())) p.$created_at = t.toISOString();
+    }
     this.capture(distinctId, "$identify", p);
   }
 

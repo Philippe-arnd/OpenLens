@@ -1,4 +1,10 @@
-export interface Dimensions { role?: string; account?: string; plan?: string }
+export interface Dimensions {
+  role?: string;
+  account?: string;
+  plan?: string;
+  /** When the account was created (RFC 3339 or a Date): its signup. `identify` only. */
+  created_at?: string | Date;
+}
 export interface Options {
   host: string;
   key: string;

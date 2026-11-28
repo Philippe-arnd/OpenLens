@@ -54,6 +54,10 @@ export interface Dimensions {
   plan?: string;
   /** The team's own account (staff, testers): left out of the board by default. */
   internal?: boolean;
+  /** When the account was created (RFC 3339 or a Date): its signup, so a
+   * user who signed up long before the wiring is not counted as new. Sent
+   * on `$identify` only, never stored on the device. */
+  created_at?: string | Date;
   /** Other properties flag rules can target (`seats`, `beta_tester`…): sent
    * to `/flags` to decide, never stored on events. At most 20. */
   properties?: Record<string, string | number | boolean>;
@@ -340,13 +344,24 @@ export function variant(key: string): string | null {
 }
 
 /** Identify the logged-in user and the dimensions OpenLens slices by. */
+/** `created_at` as RFC 3339, or nothing when it is not a date. */
+function createdAt(v: string | Date | undefined): string | undefined {
+  if (v === undefined || v === null) return undefined;
+  const t = v instanceof Date ? v : new Date(String(v));
+  return isNaN(t.getTime()) ? undefined : t.toISOString();
+}
+
 export function identify(id: string, dims: Dimensions = {}): void {
   if (!cfg || !id) return;
   const anon = state.uid ? undefined : state.anon;
+  const { created_at, ...traits } = dims;
   state.uid = String(id);
-  state.dims = { ...state.dims, ...dims };
+  state.dims = { ...state.dims, ...traits };
   save();
-  track("$identify", anon ? { $anon_distinct_id: anon } : {});
+  const props: Props = anon ? { $anon_distinct_id: anon } : {};
+  const created = createdAt(created_at);
+  if (created) props.$created_at = created;
+  track("$identify", props);
   loadFlags();
 }
 

@@ -322,3 +322,23 @@ fn error_acquisition_and_friction_facts_are_what_the_patterns_returned() {
         assert_eq!(facts(event, &text), Facts::default(), "{event} {head}");
     }
 }
+
+/// #707 (D-101): a signup date is kept only when it can be one: not in
+/// the future, not a placeholder before 1990, not unreadable.
+#[test]
+fn a_signup_date_is_ignored_when_it_cannot_be_one() {
+    let now = Utc::now();
+    let year_ago = (now - Duration::days(365)).to_rfc3339();
+    let kept = openlens_event::signup_of(&json!({ "$created_at": year_ago }).to_string(), now);
+    assert!(kept.is_some_and(|t| t < now));
+    for bad in [
+        (now + Duration::days(2)).to_rfc3339(),
+        "1970-01-01T00:00:00Z".to_owned(),
+        "yesterday".to_owned(),
+        "9".repeat(100),
+    ] {
+        let props = json!({ "$created_at": bad }).to_string();
+        assert!(openlens_event::signup_of(&props, now).is_none(), "{bad}");
+    }
+    assert!(openlens_event::signup_of(r#"{"$created_at":12}"#, now).is_none());
+}

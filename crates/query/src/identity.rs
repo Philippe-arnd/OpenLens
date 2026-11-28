@@ -35,13 +35,21 @@ const ALIAS_SQL: &str = "SELECT anon, min(person) AS person FROM (\
      distinct_id AS person FROM raw_events WHERE event = '$identify') \
      WHERE anon IS NOT NULL AND anon <> person GROUP BY anon";
 
-/// `persons(person, first_seen, internal)`: every identified user, their
-/// first `$identify` over all time (not just a query's window, so "first
-/// seen" is the real first visit of a returning user), and whether the app
-/// marked them as the team's own (`identify(id, { internal: true })`).
-const PERSONS_SQL: &str = "SELECT distinct_id AS person, min(timestamp) AS first_seen, \
-     max(CASE WHEN properties LIKE '%\"$internal\":true%' THEN 1 ELSE 0 END) = 1 AS internal \
-     FROM raw_events WHERE event = '$identify' GROUP BY distinct_id";
+/// `persons(person, first_seen, internal, signed_up)`: every identified
+/// user, their first `$identify` over all time (not just a query's window,
+/// so "first seen" is the real first visit of a returning user), whether
+/// the app marked them as the team's own (`identify(id, { internal: true
+/// })`), and the earliest account creation date it sent (`created_at`,
+/// #707, D-101: from 1990 on here, not after now in [`person_rows`]).
+/// A person's signup is `COALESCE(signed_up, first_seen)` (docs/kpis.md).
+const PERSONS_SQL: &str = "SELECT person, min(first_seen) AS first_seen, \
+     max(internal) = 1 AS internal, \
+     arrow_cast(min(CASE WHEN created >= CAST('1990-01-01T00:00:00' AS TIMESTAMP) \
+     THEN created END), 'Timestamp(Microsecond, Some(\"UTC\"))') AS signed_up FROM (\
+     SELECT distinct_id AS person, timestamp AS first_seen, \
+     CASE WHEN properties LIKE '%\"$internal\":true%' THEN 1 ELSE 0 END AS internal, \
+     try_cast(regexp_match(properties, '\"\\$created_at\":\"([^\"]{1,64})\"')[1] AS TIMESTAMP) AS created \
+     FROM raw_events WHERE event = '$identify') GROUP BY person";
 
 /// One identified person, as `persons` holds them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +60,9 @@ pub struct PersonRow {
     pub first_seen: i64,
     /// Marked as the team's own.
     pub internal: bool,
+    /// The account's creation date the app sent (`created_at`, #707,
+    /// D-101), in microseconds since the Unix epoch (UTC).
+    pub signed_up: Option<i64>,
 }
 
 /// The identity tables of one project (#450).
@@ -81,8 +92,8 @@ impl std::fmt::Debug for IdentitySource {
 /// The identity tables of one project, read together.
 #[derive(Debug, Clone)]
 pub(crate) struct Identity {
-    /// `person_aliases`; `None` when no anonymous id was linked.
-    pub(crate) aliases: Option<Arc<MemTable>>,
+    /// `person_aliases`, empty when no anonymous id was linked.
+    pub(crate) aliases: Arc<MemTable>,
     /// `persons`; may be empty.
     pub(crate) persons: Arc<MemTable>,
     /// The people of `persons` marked internal, for `is_internal`.
@@ -125,6 +136,11 @@ fn persons_schema() -> Arc<Schema> {
             true,
         ),
         Field::new("internal", DataType::Boolean, true),
+        Field::new(
+            "signed_up",
+            DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
+            true,
+        ),
     ]))
 }
 
@@ -146,6 +162,11 @@ fn person_rows(batches: &[RecordBatch]) -> Vec<PersonRow> {
         ) else {
             continue;
         };
+        let s = b
+            .column_by_name("signed_up")
+            .and_then(|s| s.as_any().downcast_ref::<TimestampMicrosecondArray>());
+        // A creation date in the future is none (#707, D-101).
+        let now = chrono::Utc::now().timestamp_micros();
         for n in 0..b.num_rows() {
             if p.is_null(n) || f.is_null(n) {
                 continue;
@@ -154,6 +175,10 @@ fn person_rows(batches: &[RecordBatch]) -> Vec<PersonRow> {
                 person: p.value(n).to_owned(),
                 first_seen: f.value(n),
                 internal: !i.is_null(n) && i.value(n),
+                signed_up: s
+                    .filter(|s| !s.is_null(n))
+                    .map(|s| s.value(n))
+                    .filter(|t| *t <= now),
             });
         }
     }
@@ -181,10 +206,21 @@ fn build(rows: &IdentityRows, from_source: bool) -> Result<Identity, QueryError>
         .collect::<TimestampMicrosecondArray>()
         .with_timezone("UTC");
     let flags: BooleanArray = rows.persons.iter().map(|p| Some(p.internal)).collect();
+    let signed: TimestampMicrosecondArray = rows
+        .persons
+        .iter()
+        .map(|p| p.signed_up)
+        .collect::<TimestampMicrosecondArray>()
+        .with_timezone("UTC");
     let schema = persons_schema();
     let batch = RecordBatch::try_new(
         schema.clone(),
-        vec![Arc::new(names), Arc::new(first), Arc::new(flags)],
+        vec![
+            Arc::new(names),
+            Arc::new(first),
+            Arc::new(flags),
+            Arc::new(signed),
+        ],
     )
     .map_err(storage)?;
     let persons = MemTable::try_new(schema, vec![vec![batch]]).map_err(storage)?;
@@ -198,7 +234,7 @@ fn build(rows: &IdentityRows, from_source: bool) -> Result<Identity, QueryError>
     );
     let lookup: HashMap<String, String> = rows.aliases.iter().cloned().collect();
     Ok(Identity {
-        aliases: (!lookup.is_empty()).then(|| Arc::new(aliases)),
+        aliases: Arc::new(aliases),
         persons: Arc::new(persons),
         internal,
         lookup: Arc::new(lookup),

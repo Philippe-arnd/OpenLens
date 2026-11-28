@@ -208,6 +208,7 @@ impl Meta {
                 account,
                 plan,
                 at,
+                signed_up: None,
             }],
         )
     }
@@ -232,7 +233,7 @@ impl Meta {
     pub fn person(&self, project: &str, distinct_id: &str) -> Result<Option<Person>> {
         self.read(|c| {
             Ok(c.query_row(
-                "SELECT distinct_id, role, account, plan, first_seen, last_seen FROM persons
+                "SELECT distinct_id, role, account, plan, first_seen, last_seen, signed_up FROM persons
                  WHERE project = ?1 AND distinct_id = ?2",
                 params![project, distinct_id],
                 |r| {
@@ -243,6 +244,10 @@ impl Meta {
                         plan: r.get(3)?,
                         first_seen: r.get(4)?,
                         last_seen: r.get(5)?,
+                        signed_up: r
+                            .get::<_, Option<i64>>(6)?
+                            .and_then(DateTime::<Utc>::from_timestamp_micros)
+                            .map(|t| t.to_rfc3339()),
                     })
                 },
             )
@@ -275,24 +280,42 @@ pub struct Seen<'a> {
     pub plan: Option<&'a str>,
     /// When.
     pub at: DateTime<Utc>,
+    /// The account's creation date, when the app sent a valid one
+    /// (`created_at`, #707, D-101): the earliest one is kept.
+    pub signed_up: Option<DateTime<Utc>>,
 }
 
 /// Upsert the person of `s` and, when the role changed, append to the role
-/// history; inside the caller's transaction.
-pub(crate) fn identify_in(c: &Connection, project: &str, s: &Seen<'_>) -> Result<()> {
+/// history; inside the caller's transaction. True when the person's signup
+/// date changed (an earlier `created_at`, #707), which the query layer reads.
+pub(crate) fn identify_in(c: &Connection, project: &str, s: &Seen<'_>) -> Result<bool> {
     let at = s.at.to_rfc3339();
-    let previous: Option<Option<String>> = c
-        .prepare_cached("SELECT role FROM persons WHERE project = ?1 AND distinct_id = ?2")?
-        .query_row(params![project, s.distinct_id], |r| r.get(0))
+    let previous: Option<(Option<String>, Option<i64>)> = c
+        .prepare_cached(
+            "SELECT role, signed_up FROM persons WHERE project = ?1 AND distinct_id = ?2",
+        )?
+        .query_row(params![project, s.distinct_id], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
         .optional()?;
+    let signed_up = s.signed_up.map(|t| t.timestamp_micros());
+    // The earliest creation date wins (an import and the SDK may disagree).
+    let earlier = match (previous.as_ref().and_then(|p| p.1), signed_up) {
+        (Some(old), Some(new)) => new < old,
+        (None, Some(_)) => true,
+        _ => false,
+    };
     c.prepare_cached(
-        "INSERT INTO persons (project, distinct_id, role, account, plan, first_seen, last_seen)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+        "INSERT INTO persons (project, distinct_id, role, account, plan, first_seen, last_seen, signed_up)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?7)
          ON CONFLICT (project, distinct_id) DO UPDATE SET
            role = COALESCE(excluded.role, role),
            account = COALESCE(excluded.account, account),
            plan = COALESCE(excluded.plan, plan),
-           last_seen = excluded.last_seen",
+           last_seen = excluded.last_seen,
+           signed_up = CASE WHEN excluded.signed_up IS NULL THEN signed_up
+             WHEN signed_up IS NULL THEN excluded.signed_up
+             ELSE min(signed_up, excluded.signed_up) END",
     )?
     .execute(params![
         project,
@@ -300,8 +323,10 @@ pub(crate) fn identify_in(c: &Connection, project: &str, s: &Seen<'_>) -> Result
         s.role,
         s.account,
         s.plan,
-        at
+        at,
+        signed_up
     ])?;
+    let previous = previous.map(|p| p.0);
     let changed = match (&previous, s.role) {
         (_, None) => false,
         (Some(Some(old)), Some(new)) => old != new,
@@ -313,5 +338,5 @@ pub(crate) fn identify_in(c: &Connection, project: &str, s: &Seen<'_>) -> Result
         )?
         .execute(params![project, s.distinct_id, r, at])?;
     }
-    Ok(())
+    Ok(earlier)
 }

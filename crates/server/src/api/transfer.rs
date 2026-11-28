@@ -7,7 +7,9 @@ use super::*;
 /// Body: JSONL. A line with `"type": "person"` is a user
 /// (`id`, `role`, `account`, `plan`, `created_at`, `last_seen_at`): it
 /// updates the person and adds `$identify` at `created_at` and `$seen` at
-/// `last_seen_at`. Any other line is an event (`event`, `distinct_id`,
+/// `last_seen_at`. A valid `created_at` (RFC 3339, from 1990 to now) is
+/// also the person's signup date (#707, D-101), carried by the
+/// `$identify` as `$created_at`. Any other line is an event (`event`, `distinct_id`,
 /// `timestamp`, `properties`), e.g. a past success event. Every imported
 /// event carries `$backfill: true`. A chunk whose SHA-256 was already
 /// imported is refused with 409, so re-running a backfill is safe.
@@ -61,6 +63,14 @@ pub(super) async fn import(
                 if let Some(v) = text(&o, k) {
                     props.insert(format!("${k}"), Value::String(v));
                 }
+            }
+            if let Some(c) = text(&o, "created_at")
+                .filter(|c| openlens_event::signup_date(c, chrono::Utc::now()).is_some())
+            {
+                props.insert(
+                    openlens_event::names::CREATED_AT.into(),
+                    Value::String(c),
+                );
             }
             persons.push((
                 id.clone(),
@@ -145,6 +155,9 @@ pub(super) async fn import(
                     .as_deref()
                     .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
                     .map_or(now, |t| t.with_timezone(&chrono::Utc)),
+                signed_up: created
+                    .as_deref()
+                    .and_then(|t| openlens_event::signup_date(t, now)),
             })
             .collect();
         crate::identity::record(&st, &pid, &events, &seen)?;

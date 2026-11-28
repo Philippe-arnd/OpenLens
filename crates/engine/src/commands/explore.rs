@@ -75,6 +75,7 @@ impl Serialize for Profile {
             "person": self.person.as_ref().map(|p| json!({
                 "distinct_id": p.distinct_id, "role": p.role, "account": p.account,
                 "plan": p.plan, "first_seen": p.first_seen, "last_seen": p.last_seen,
+                "signed_up": p.signed_up,
             })),
             "roles": self.roles,
             "replays": self.replays,

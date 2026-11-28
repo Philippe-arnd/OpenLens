@@ -25,6 +25,10 @@ pub struct PersonIdentity {
     pub first_seen: i64,
     /// Marked as the team's own.
     pub internal: bool,
+    /// The account's creation date sent by the app (`created_at`, #707,
+    /// D-101), in microseconds since the Unix epoch (UTC); none when it
+    /// never sent one, and the signup is then `first_seen`.
+    pub signed_up: Option<i64>,
 }
 
 /// A project's identity tables.
@@ -116,7 +120,8 @@ impl Meta {
 
     /// The `$identify` events of one captured batch in a single write
     /// transaction (#510): the people and their traits (D-009, `seen`) and
-    /// the identity tables (`rows`). True when an identity table changed.
+    /// the identity tables (`rows`). True when an identity table or a
+    /// person's signup date (#707) changed.
     /// Nothing is written when both are empty.
     pub fn record_identify(
         &self,
@@ -129,10 +134,10 @@ impl Meta {
         }
         self.with(|c| {
             let tx = c.unchecked_transaction()?;
-            for s in seen {
-                crate::projects::identify_in(&tx, project, s)?;
-            }
             let mut changed = false;
+            for s in seen {
+                changed |= crate::projects::identify_in(&tx, project, s)?;
+            }
             for row in rows {
                 changed |= record_one(&tx, project, row)?;
             }
@@ -183,7 +188,9 @@ impl Meta {
                 .query_map([project], |r| Ok((r.get(0)?, r.get(1)?)))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             let mut st = c.prepare_cached(
-                "SELECT person, id, first_seen, internal FROM person_ids WHERE project = ?1 ORDER BY id",
+                "SELECT i.person, i.id, i.first_seen, i.internal, p.signed_up FROM person_ids i
+                 LEFT JOIN persons p ON p.project = i.project AND p.distinct_id = i.person
+                 WHERE i.project = ?1 ORDER BY i.id",
             )?;
             let persons = st
                 .query_map([project], |r| {
@@ -192,6 +199,7 @@ impl Meta {
                         id: r.get(1)?,
                         first_seen: r.get(2)?,
                         internal: r.get::<_, i64>(3)? != 0,
+                        signed_up: r.get(4)?,
                     })
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;

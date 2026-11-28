@@ -946,7 +946,7 @@ async fn person(
         "distinct_id": distinct_id,
         "person": person.map(|p| json!({
             "role": p.role, "account": p.account, "plan": p.plan,
-            "first_seen": p.first_seen, "last_seen": p.last_seen,
+            "first_seen": p.first_seen, "last_seen": p.last_seen, "signed_up": p.signed_up,
         })),
         "role_history": roles.iter().map(|(r, since)| json!({ "role": r, "since": since })).collect::<Vec<_>>(),
         "recordings": replays.iter().map(|r| json!({
