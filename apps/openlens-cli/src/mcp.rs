@@ -869,9 +869,10 @@ impl Tools for OpenLensTools {
                             .find(|x| x.get("key").and_then(Value::as_str) == Some(key.as_str()))
                     })
                     .cloned();
-                let mut body = match stored {
-                    Some(Value::Object(m)) => m,
-                    _ => {
+                let mut body = if let Some(Value::Object(m)) = stored {
+                    m
+                } else {
+                    {
                         let need =
                             |k: &str| s(args, k).ok_or(format!("{k} is required for a new survey"));
                         let mut m = serde_json::Map::new();
