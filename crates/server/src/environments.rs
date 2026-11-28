@@ -55,7 +55,7 @@ pub(crate) fn current(state: &AppState, project: &str) -> Arc<ProjectEnv> {
     p
 }
 
-/// The sister hosts of the page asking for its flags (#710, D-102): the
+/// The sister hosts of the page asking for its flags (#710, D-112): the
 /// page's host comes from the request's `Origin`, else its `Referer`.
 /// Empty when neither is sent or no rule classifies that host.
 pub(crate) fn sister_hosts(state: &AppState, project: &str, headers: &HeaderMap) -> Vec<String> {

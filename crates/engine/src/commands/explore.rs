@@ -264,7 +264,7 @@ pub struct LifecycleInput {
 }
 
 /// `explore.lifecycle`: visitor → account created → activated → paid →
-/// retained, the stages with data only (#708, D-101).
+/// retained, the stages with data only (#708, D-111).
 pub struct GetLifecycle;
 
 impl Command for GetLifecycle {

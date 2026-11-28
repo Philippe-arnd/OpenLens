@@ -281,7 +281,7 @@ pub struct Seen<'a> {
     /// When.
     pub at: DateTime<Utc>,
     /// The account's creation date, when the app sent a valid one
-    /// (`created_at`, #707, D-101): the earliest one is kept.
+    /// (`created_at`, #707, D-111): the earliest one is kept.
     pub signed_up: Option<DateTime<Utc>>,
 }
 

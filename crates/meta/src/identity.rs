@@ -26,7 +26,7 @@ pub struct PersonIdentity {
     /// Marked as the team's own.
     pub internal: bool,
     /// The account's creation date sent by the app (`created_at`, #707,
-    /// D-101), in microseconds since the Unix epoch (UTC); none when it
+    /// D-111), in microseconds since the Unix epoch (UTC); none when it
     /// never sent one, and the signup is then `first_seen`.
     pub signed_up: Option<i64>,
 }

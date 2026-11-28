@@ -643,7 +643,7 @@ fn a_batch_of_identifies_is_recorded_in_one_write() {
     assert!(!m.record_identify("p", &[], &[]).unwrap());
 }
 
-/// #707 (D-101): the account's creation date is kept on the person, the
+/// #707 (D-111): the account's creation date is kept on the person, the
 /// earliest one wins whatever the order, an identify without one keeps
 /// it, and the identity tables the query layer reads carry it.
 #[test]
@@ -651,7 +651,10 @@ fn the_earliest_signup_date_wins_and_reaches_the_identity_tables() {
     let m = Meta::in_memory().unwrap();
     m.backfill_identities("p", &[], &[]).unwrap();
     let now = Utc::now();
-    let (early, late) = (now - chrono::Duration::days(400), now - chrono::Duration::days(30));
+    let (early, late) = (
+        now - chrono::Duration::days(400),
+        now - chrono::Duration::days(30),
+    );
     let seen = |signed_up| openlens_meta::Seen {
         distinct_id: "ann",
         role: None,
@@ -662,8 +665,14 @@ fn the_earliest_signup_date_wins_and_reaches_the_identity_tables() {
     };
     let row = [("ann".to_owned(), None, now.timestamp_micros(), false)];
     assert!(m.record_identify("p", &[seen(Some(late))], &row).unwrap());
-    assert!(m.record_identify("p", &[seen(Some(early))], &[]).unwrap(), "an earlier date is a change");
-    assert!(!m.record_identify("p", &[seen(Some(late))], &[]).unwrap(), "a later one is not");
+    assert!(
+        m.record_identify("p", &[seen(Some(early))], &[]).unwrap(),
+        "an earlier date is a change"
+    );
+    assert!(
+        !m.record_identify("p", &[seen(Some(late))], &[]).unwrap(),
+        "a later one is not"
+    );
     assert!(!m.record_identify("p", &[seen(None)], &[]).unwrap());
     let t = m.identities("p").unwrap().unwrap();
     let ann = t.persons.iter().find(|p| p.person == "ann").unwrap();

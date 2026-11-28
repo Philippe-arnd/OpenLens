@@ -40,7 +40,7 @@ const ALIAS_SQL: &str = "SELECT anon, min(person) AS person FROM (\
 /// so "first seen" is the real first visit of a returning user), whether
 /// the app marked them as the team's own (`identify(id, { internal: true
 /// })`), and the earliest account creation date it sent (`created_at`,
-/// #707, D-101: from 1990 on here, not after now in [`person_rows`]).
+/// #707, D-111: from 1990 on here, not after now in [`person_rows`]).
 /// A person's signup is `COALESCE(signed_up, first_seen)` (docs/kpis.md).
 const PERSONS_SQL: &str = "SELECT person, min(first_seen) AS first_seen, \
      max(internal) = 1 AS internal, \
@@ -61,7 +61,7 @@ pub struct PersonRow {
     /// Marked as the team's own.
     pub internal: bool,
     /// The account's creation date the app sent (`created_at`, #707,
-    /// D-101), in microseconds since the Unix epoch (UTC).
+    /// D-111), in microseconds since the Unix epoch (UTC).
     pub signed_up: Option<i64>,
 }
 
@@ -165,7 +165,7 @@ fn person_rows(batches: &[RecordBatch]) -> Vec<PersonRow> {
         let s = b
             .column_by_name("signed_up")
             .and_then(|s| s.as_any().downcast_ref::<TimestampMicrosecondArray>());
-        // A creation date in the future is none (#707, D-101).
+        // A creation date in the future is none (#707, D-111).
         let now = chrono::Utc::now().timestamp_micros();
         for n in 0..b.num_rows() {
             if p.is_null(n) || f.is_null(n) {

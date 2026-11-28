@@ -1,4 +1,4 @@
-//! The board's Visitors block (#709, D-101): the anonymous traffic of the
+//! The board's Visitors block (#709, D-111): the anonymous traffic of the
 //! window, per entry page and per channel (top 10 each), with sessions,
 //! bounce rate and signup rate. Shown only when the window has anonymous
 //! sessions: a project where everyone logs in never sees it. Plain

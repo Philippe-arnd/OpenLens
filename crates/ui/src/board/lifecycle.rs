@@ -1,4 +1,4 @@
-//! The board's Lifecycle block (#708, D-101): visitor → account created →
+//! The board's Lifecycle block (#708, D-111): visitor → account created →
 //! activated → paid → retained, one tile per stage the engine returned
 //! (a stage without data is not there: an internal tool shows no visitor
 //! and no paid tile). The numbers are those of the `lifecycle` command.

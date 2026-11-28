@@ -744,7 +744,7 @@ function linkHeaders(get: (k: string) => string | null, set: (k: string, v: stri
 }
 
 /** A landing on another host of the project passed its anonymous id
- * (`_ol`, #710, D-102): adopt it when this visitor has no history here,
+ * (`_ol`, #710, D-112): adopt it when this visitor has no history here,
  * never in cookieless mode or without consent, then take the parameter
  * out of the address bar (before the router hooks are installed). */
 function arrive(): void {
@@ -766,7 +766,7 @@ function arrive(): void {
   }
 }
 
-/** An anonymous visitor follows a link to a sister host (#710, D-102):
+/** An anonymous visitor follows a link to a sister host (#710, D-112):
  * the link carries the anonymous id for this one navigation and gets its
  * own address back right after. Left click, Enter and middle click. */
 function linkOut(e: Event): void {

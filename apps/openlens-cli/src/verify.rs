@@ -143,9 +143,7 @@ pub(crate) fn linkage<A: Api + ?Sized>(
     } else {
         format!("production hosts linked by the SDK: {}", hosts.join(", "))
     };
-    let check = |ok: bool, detail: String| {
-        json!({ "check": LINK_CHECK, "ok": ok, "detail": format!("{detail}; {hosts_note}"), "fix": fix })
-    };
+    let check = |ok: bool, detail: String| json!({ "check": LINK_CHECK, "ok": ok, "detail": format!("{detail}; {hosts_note}"), "fix": fix });
     let (status, list) = c.call("GET", "/api/projects", None)?;
     let key = Some(&list)
         .filter(|_| status == 200)
@@ -189,7 +187,9 @@ pub(crate) fn linkage<A: Api + ?Sized>(
     loop {
         let linked = n(c.sql(
             project,
-            &format!("SELECT count(*) AS n FROM events WHERE {recent} AND distinct_id = '{person}'"),
+            &format!(
+                "SELECT count(*) AS n FROM events WHERE {recent} AND distinct_id = '{person}'"
+            ),
         )?);
         if linked > 0 {
             return Ok(check(

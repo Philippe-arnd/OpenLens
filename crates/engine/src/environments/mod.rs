@@ -300,7 +300,7 @@ impl Rules {
             .map(|(_, env)| env)
     }
 
-    /// Is `host` one of the project's own hosts (#710, D-102): a rule,
+    /// Is `host` one of the project's own hosts (#710, D-112): a rule,
     /// exact or `*.suffix`, gives it an environment (not `ignore`)?
     #[must_use]
     pub fn is_own_host(&self, host: &str) -> bool {
@@ -308,7 +308,7 @@ impl Rules {
             .is_some_and(|e| e != IGNORE)
     }
 
-    /// The sister hosts of `host` (#710, D-102): the exact hosts (no
+    /// The sister hosts of `host` (#710, D-112): the exact hosts (no
     /// `*.suffix`) the rules map to the same environment as `host`, `host`
     /// itself left out, at most [`MAX_SISTERS`]. Empty when no rule
     /// classifies `host` or it is ignored.
@@ -327,7 +327,7 @@ impl Rules {
     }
 }
 
-/// Sister hosts handed to the browser SDK at most (#710, D-102).
+/// Sister hosts handed to the browser SDK at most (#710, D-112).
 pub const MAX_SISTERS: usize = 20;
 
 /// Add or change the rule for a host (engine command).

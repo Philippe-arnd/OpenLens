@@ -61,7 +61,7 @@ pub(crate) fn seen_of<'a>(project: &str, events: &'a [Event]) -> Vec<Seen<'a>> {
             account: e.account.as_deref(),
             plan: e.plan.as_deref(),
             at: e.timestamp,
-            // `identify(id, { created_at })` (#707, D-101), when valid.
+            // `identify(id, { created_at })` (#707, D-111), when valid.
             signed_up: openlens_event::signup_of(&e.properties, e.received_at),
         })
         .collect()

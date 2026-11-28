@@ -301,7 +301,7 @@ pub(crate) fn enrich(
             let get = |k: &str| props.get(k).and_then(|v| v.as_str()).map(str::to_owned);
             let ref_host = get("$referrer").as_deref().and_then(host);
             // A referrer on another of the project's hosts (the landing
-            // page, #710, D-102) is internal like the page's own host.
+            // page, #710, D-112) is internal like the page's own host.
             let sister = get("$referrer")
                 .as_deref()
                 .and_then(openlens_event::host_of)

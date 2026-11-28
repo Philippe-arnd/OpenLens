@@ -323,7 +323,7 @@ fn error_acquisition_and_friction_facts_are_what_the_patterns_returned() {
     }
 }
 
-/// #707 (D-101): a signup date is kept only when it can be one: not in
+/// #707 (D-111): a signup date is kept only when it can be one: not in
 /// the future, not a placeholder before 1990, not unreadable.
 #[test]
 fn a_signup_date_is_ignored_when_it_cannot_be_one() {

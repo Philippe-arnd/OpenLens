@@ -46,7 +46,7 @@ pub mod forms;
 pub mod goals;
 pub mod inforce;
 mod insights;
-/// The lifecycle: visitor → account → activated → paid → retained (#708, D-101).
+/// The lifecycle: visitor → account → activated → paid → retained (#708, D-111).
 pub mod lifecycle;
 /// Planned maintenance windows (#563, D-076).
 pub mod maintenance;
@@ -78,11 +78,11 @@ mod tasks;
 mod unavailable;
 mod variants;
 pub mod verdict;
-/// The board's Visitors block (#709, D-101).
-pub mod visitors;
 /// The backend of a release verdict, ready to show (#623).
 pub mod verdict_backend;
 mod verdict_read;
+/// The board's Visitors block (#709, D-111).
+pub mod visitors;
 pub mod vital_parts;
 pub mod vitals;
 pub use acquisition::{AcquisitionRow, Touch, acquisition};
@@ -546,12 +546,12 @@ pub struct Board {
     /// The release window of the period blocks and its comparison, when
     /// the board was asked for it (D-055); none: the fixed windows.
     pub window: Option<BoardWindow>,
-    /// The lifecycle of the window (#708, D-101), the same numbers as the
+    /// The lifecycle of the window (#708, D-111), the same numbers as the
     /// `lifecycle` command for these filters; none when the window has no
     /// account created and no anonymous visitor.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lifecycle: Option<lifecycle::Lifecycle>,
-    /// The anonymous traffic of the window (#709, D-101): entry pages and
+    /// The anonymous traffic of the window (#709, D-111): entry pages and
     /// channels with their signup rate; none without anonymous sessions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub visitors: Option<visitors::Visitors>,

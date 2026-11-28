@@ -1,4 +1,4 @@
-//! The lifecycle (#708, D-101): visitor → account created → activated →
+//! The lifecycle (#708, D-111): visitor → account created → activated →
 //! paid → retained / churned, with fixed definitions (docs/kpis.md).
 //!
 //! A stage shows only when its data exists: visitors when the window has
@@ -75,7 +75,7 @@ pub struct Stage {
     pub people: i64,
 }
 
-/// The visitor → account rate (D-101).
+/// The visitor → account rate (D-111).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct VisitorRate {
     /// False in cookieless mode: anonymous ids change every day and are
@@ -96,7 +96,7 @@ pub struct VisitorRate {
     pub upper: f64,
 }
 
-/// Retention of the accounts created in the window (D-101).
+/// Retention of the accounts created in the window (D-111).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Retention {
     /// Accounts created before the churn window started: old enough to judge.
@@ -288,7 +288,11 @@ pub(crate) async fn compute(
     // what they do not hold (the plan, the landing channel).
     let (in_rows, keyed, key) = match by {
         By::None => ("", String::new(), "''"),
-        By::Role => (", first_value(role ORDER BY first_ts) AS g", String::new(), "coalesce(x.g, '(none)')"),
+        By::Role => (
+            ", first_value(role ORDER BY first_ts) AS g",
+            String::new(),
+            "coalesce(x.g, '(none)')",
+        ),
         By::Release => (
             ", first_value(release ORDER BY first_ts) AS g",
             String::new(),
@@ -361,7 +365,11 @@ pub(crate) async fn compute(
     let paid_any = async {
         match &paid_sql {
             Some(sql) => Ok::<_, crate::EngineError>(
-                q.sql(project, sql).await?.rows.first().map_or(0, |r| int(r, "n")),
+                q.sql(project, sql)
+                    .await?
+                    .rows
+                    .first()
+                    .map_or(0, |r| int(r, "n")),
             ),
             None => Ok(0),
         }
@@ -373,7 +381,9 @@ pub(crate) async fn compute(
     );
     let mut groups: std::collections::BTreeMap<String, Counts> = Default::default();
     for row in &accounts?.rows {
-        let c = groups.entry(text(row, "g").unwrap_or_default()).or_default();
+        let c = groups
+            .entry(text(row, "g").unwrap_or_default())
+            .or_default();
         c.accounts += int(row, "accounts");
         c.activated += int(row, "activated");
         c.paid += int(row, "paid");
@@ -383,7 +393,9 @@ pub(crate) async fn compute(
         c.churned += int(row, "churned");
     }
     for row in &visitors?.rows {
-        let c = groups.entry(text(row, "g").unwrap_or_default()).or_default();
+        let c = groups
+            .entry(text(row, "g").unwrap_or_default())
+            .or_default();
         c.visitors += int(row, "visitors");
         c.cookieless += int(row, "cookieless");
     }

@@ -216,7 +216,10 @@ fn the_linkage_check_sends_a_visit_then_an_identify_and_finds_it_on_the_person()
     assert_eq!(c["check"], crate::verify::LINK_CHECK);
     assert_eq!(c["ok"], true, "{c}");
     assert!(
-        c["detail"].as_str().unwrap().contains("one production host"),
+        c["detail"]
+            .as_str()
+            .unwrap()
+            .contains("one production host"),
         "{c}"
     );
     let (_, body) = fake.sent("POST", "/capture").unwrap();
@@ -238,8 +241,8 @@ fn the_linkage_check_sends_a_visit_then_an_identify_and_finds_it_on_the_person()
         { "host": "app.example.com", "env": "production" },
     ]);
     let unlinked = capturing(|q| if q.contains("raw_events") { n(1) } else { n(0) });
-    let c = crate::verify::linkage(&unlinked, "app", &two_hosts, std::time::Duration::ZERO)
-        .unwrap();
+    let c =
+        crate::verify::linkage(&unlinked, "app", &two_hosts, std::time::Duration::ZERO).unwrap();
     assert_eq!(c["ok"], false, "{c}");
     let detail = c["detail"].as_str().unwrap();
     assert!(

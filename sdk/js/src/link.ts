@@ -1,5 +1,5 @@
 /**
- * One visitor across the project's own hosts (#710, D-102).
+ * One visitor across the project's own hosts (#710, D-112).
  *
  * localStorage is per origin, so a landing page on `www.example.com` and
  * the app on `app.example.com` would give the same visitor two anonymous

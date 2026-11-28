@@ -5,7 +5,7 @@
 //! the campaign that brought the user).
 //!
 //! Anonymous visitors who were never linked to a user are not users
-//! (#708, D-101): they are counted as `visitors`, next to the users whose
+//! (#708, D-111): they are counted as `visitors`, next to the users whose
 //! signup (#707) falls in the window, `signed_up`. Every count is made in
 //! SQL, so the engine's row cap never cuts a row.
 
@@ -29,7 +29,7 @@ pub struct AcquisitionRow {
     /// Of the users, those whose signup falls in the window (#707).
     pub signed_up: i64,
     /// `signed_up / (visitors + signed_up)`: a lower bound, since a
-    /// signup on another device leaves no link (D-101).
+    /// signup on another device leaves no link (D-111).
     pub signup_rate: f64,
     /// Of the users, reached a success event.
     pub reached: i64,

@@ -1,4 +1,4 @@
-//! The board's Visitors block (#709, D-101): the anonymous traffic of the
+//! The board's Visitors block (#709, D-111): the anonymous traffic of the
 //! window, per entry page and per channel, with the signup rate of each.
 //!
 //! - An **anonymous session** is one whose stored id is not a user's id,
@@ -73,7 +73,10 @@ pub(crate) async fn visitors(
     let w = f.clause_span(span, now)?;
     let start = before(now, span.start);
     let until = if span.end > 0 {
-        format!(" AND COALESCE(p.signed_up, p.first_seen) < {}", before(now, span.end))
+        format!(
+            " AND COALESCE(p.signed_up, p.first_seen) < {}",
+            before(now, span.end)
+        )
     } else {
         String::new()
     };
@@ -105,10 +108,8 @@ pub(crate) async fn visitors(
     // Channels are a short fixed list: all of them, so the sessions and
     // bounces of the block are their sums.
     let (pages_sql, channels_sql) = (grouped("entry", " LIMIT 10"), grouped("ch", ""));
-    let (pages, channels) = futures::join!(
-        q.sql(project, &pages_sql),
-        q.sql(project, &channels_sql),
-    );
+    let (pages, channels) =
+        futures::join!(q.sql(project, &pages_sql), q.sql(project, &channels_sql),);
     let read = |rows: &[serde_json::Map<String, serde_json::Value>]| -> Vec<VisitorRow> {
         rows.iter()
             .map(|r| VisitorRow {

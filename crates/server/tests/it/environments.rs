@@ -541,7 +541,7 @@ async fn flags_from(h: &Harness, origin: &str) -> serde_json::Value {
 
 #[tokio::test]
 async fn the_landing_host_is_internal_and_listed_as_a_sister_of_the_app() {
-    // #710, D-102: a landing page on www., the app on app., one project.
+    // #710, D-112: a landing page on www., the app on app., one project.
     let h = harness();
     capture(&h, vec![]).await;
     seeded(&h).await;

@@ -80,17 +80,17 @@ pub mod names {
     /// Distinct id of server events tied to no user (#593): left out of
     /// release shares.
     pub const SERVER_ID: &str = "$server";
-    /// The account's creation date on an `$identify` (#707, D-101), RFC
+    /// The account's creation date on an `$identify` (#707, D-111), RFC
     /// 3339: the person's signup when it is known.
     pub const CREATED_AT: &str = "$created_at";
 }
 
-/// The earliest signup date accepted (#707, D-101): an older one is a
+/// The earliest signup date accepted (#707, D-111): an older one is a
 /// placeholder (`1970-01-01`), not an account's creation.
 const SIGNUP_FLOOR: &str = "1990-01-01T00:00:00Z";
 
 /// An account's creation date as sent (`created_at`, RFC 3339), when it is
-/// one (#707, D-101): at most 64 bytes, parseable, not before 1990 and not
+/// one (#707, D-111): at most 64 bytes, parseable, not before 1990 and not
 /// after `now`. Anything else is ignored, never an error: the signup then
 /// falls back to the first `$identify`.
 #[must_use]

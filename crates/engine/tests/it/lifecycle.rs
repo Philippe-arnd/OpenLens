@@ -1,5 +1,5 @@
 //! The signup date (#707), the lifecycle (#708) and the Visitors block
-//! (#709), on small datasets counted by hand (D-101).
+//! (#709), on small datasets counted by hand (D-111).
 
 use chrono::{Duration, Utc};
 use openlens_engine::lifecycle::{By, Lifecycle, lifecycle};
@@ -42,7 +42,11 @@ fn store(evs: &[Event]) -> (tempfile::TempDir, QueryEngine) {
 }
 
 fn stage(l: &Lifecycle, key: &str) -> Option<i64> {
-    l.total.stages.iter().find(|s| s.key == key).map(|s| s.people)
+    l.total
+        .stages
+        .iter()
+        .find(|s| s.key == key)
+        .map(|s| s.people)
 }
 
 /// #707: a customer created a year ago and seen for the first time today
@@ -70,11 +74,17 @@ async fn a_backfilled_user_is_not_a_signup_today_and_an_internal_tool_has_no_vis
     // Three people identified today, two of them new: the backfilled one
     // is not a signup of this window.
     assert!(accounts > 0 && accounts < 3, "{l:?}");
-    assert!(stage(&l, "visitor").is_none(), "everyone is logged in: {l:?}");
+    assert!(
+        stage(&l, "visitor").is_none(),
+        "everyone is logged in: {l:?}"
+    );
     assert!(stage(&l, "paid").is_none(), "no revenue: {l:?}");
     assert!(l.total.visitor_rate.is_none());
     let b = board(&q, "p", &f, None).await.unwrap();
-    assert!(b.visitors.is_none(), "no anonymous traffic, no Visitors block");
+    assert!(
+        b.visitors.is_none(),
+        "no anonymous traffic, no Visitors block"
+    );
     assert_eq!(
         b.lifecycle.as_ref().map(|x| &x.total),
         Some(&l.total),
@@ -102,8 +112,22 @@ async fn a_landing_page_gives_a_visitor_to_account_rate_between_its_bounds() {
     }
     for (user, anon) in [("u1", "anon-1"), ("u2", "anon-4")] {
         let link = format!(r#"{{"$anon_distinct_id":"{anon}"}}"#);
-        evs.push(ev(user, "$identify", &format!("s-{user}"), 100, "/signup", &link));
-        evs.push(ev(user, "$pageview", &format!("s-{user}"), 99, "/app", "{}"));
+        evs.push(ev(
+            user,
+            "$identify",
+            &format!("s-{user}"),
+            100,
+            "/signup",
+            &link,
+        ));
+        evs.push(ev(
+            user,
+            "$pageview",
+            &format!("s-{user}"),
+            99,
+            "/app",
+            "{}",
+        ));
     }
     evs.push(ev("u3", "$identify", "s-u3", 90, "/signup", "{}"));
     evs.push(ev("u3", "$pageview", "s-u3", 89, "/app", "{}"));
@@ -121,15 +145,29 @@ async fn a_landing_page_gives_a_visitor_to_account_rate_between_its_bounds() {
     assert!(stage(&l, "visitor").unwrap() > stage(&l, "account").unwrap());
 
     let by = lifecycle(&q, "p", None, &f, By::Channel).await.unwrap();
-    let search = by.groups.iter().find(|g| g.value == "search").expect("{by:?}");
-    let linked = search.visitor_rate.as_ref().map_or(0, |r| r.linked_accounts);
+    let search = by
+        .groups
+        .iter()
+        .find(|g| g.value == "search")
+        .expect("{by:?}");
+    let linked = search
+        .visitor_rate
+        .as_ref()
+        .map_or(0, |r| r.linked_accounts);
     assert!(linked > 0, "the linked accounts landed from search: {by:?}");
 
     let b = board(&q, "p", &f, None).await.unwrap();
     let v = b.visitors.expect("a landing page shows the Visitors block");
     let home = v.pages.iter().find(|p| p.value == "/").expect("{v:?}");
-    assert!(home.signed_up > 0 && home.signed_up < home.visitors, "{home:?}");
+    assert!(
+        home.signed_up > 0 && home.signed_up < home.visitors,
+        "{home:?}"
+    );
     assert!(v.bounces > 0 && v.bounces < v.sessions, "{v:?}");
-    assert!(v.channels.iter().any(|c| c.value == "search" && c.signup_rate() > 0.0));
+    assert!(
+        v.channels
+            .iter()
+            .any(|c| c.value == "search" && c.signup_rate() > 0.0)
+    );
     assert_eq!(b.lifecycle.map(|x| x.total), Some(l.total));
 }
