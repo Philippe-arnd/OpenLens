@@ -53,12 +53,12 @@ fn person_day_sql(day: &str, f: &DayFeatures) -> Result<String, QueryError> {
     Ok(format!(
         "SELECT person, environment, release, role, feature, count(*) AS events, \
          count(DISTINCT session_id) AS sessions, \
-         sum({ERROR_COUNT}) AS errors, \
+         sum(err) AS errors, \
          sum(CASE WHEN {task} THEN 1 ELSE 0 END) AS successes, \
          min(timestamp) AS first_ts, max(timestamp) AS last_ts, \
          CAST({version} AS BIGINT) AS map_version \
          FROM (SELECT distinct_id AS person, environment, release, role, \
-               {feature} AS feature, event, session_id, timestamp \
+               {feature} AS feature, event, session_id, timestamp, {ERROR_COUNT} AS err \
                FROM events WHERE date = '{day}') e \
          GROUP BY 1, 2, 3, 4, 5",
         feature = f.feature
@@ -141,11 +141,11 @@ fn session_day_sql(day: &str, f: &DayFeatures) -> Result<String, QueryError> {
         "SELECT session_id, person, environment, release, role, \
          min(timestamp) AS first_ts, max(timestamp) AS last_ts, \
          sum(CASE WHEN {INTERACTION} THEN 1 ELSE 0 END) AS interactions, \
-         sum({ERROR_COUNT}) AS errors, \
+         sum(err) AS errors, \
          sum(CASE WHEN {task} THEN 1 ELSE 0 END) AS tasks, \
          CAST({version} AS BIGINT) AS map_version \
          FROM (SELECT session_id, distinct_id AS person, environment, release, role, \
-               {feature} AS feature, event, timestamp \
+               {feature} AS feature, event, timestamp, {ERROR_COUNT} AS err \
                FROM events WHERE date = '{day}' AND session_id IS NOT NULL) e \
          GROUP BY 1, 2, 3, 4, 5",
         feature = f.feature
