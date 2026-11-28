@@ -2,7 +2,7 @@
 //! change, and the switch it applies once an admin confirms. The flag
 //! rules themselves are in `openlens_flags`.
 
-use openlens_flags::Flag;
+use openlens_flags::{Flag, Rule};
 use openlens_meta::Meta;
 use serde::{Deserialize, Serialize};
 
@@ -63,10 +63,24 @@ pub struct UpdateInput {
     /// Rollout percentage; unchanged when absent.
     #[serde(default)]
     pub rollout: Option<u8>,
+    /// What it is for; unchanged when absent.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Target roles (empty: every role); unchanged when absent.
+    #[serde(default)]
+    pub roles: Option<Vec<String>>,
+    /// Accounts that always get it; unchanged when absent.
+    #[serde(default)]
+    pub accounts: Option<Vec<String>>,
+    /// Property rules, all must match; unchanged when absent.
+    #[serde(default)]
+    pub rules: Option<Vec<Rule>>,
 }
 
-/// `flags.update`: switch an existing flag on or off and/or set its
-/// rollout.
+/// `flags.update`: change the given fields of an existing flag. Every
+/// field left out keeps its value, including those this input cannot
+/// set (variants, users, holdout), so widening a rollout never drops an
+/// experiment's control group (#665).
 pub struct Update;
 
 impl Command for Update {
@@ -82,6 +96,18 @@ impl Command for Update {
             .ok_or_else(|| Error::Invalid("The flag is gone.".into()))?;
         f.enabled = input.enabled.unwrap_or(f.enabled);
         f.rollout = input.rollout.unwrap_or(f.rollout);
+        if let Some(d) = input.description {
+            f.description = d;
+        }
+        if let Some(r) = input.roles {
+            f.roles = r;
+        }
+        if let Some(a) = input.accounts {
+            f.accounts = a;
+        }
+        if let Some(r) = input.rules {
+            f.rules = r;
+        }
         save(host.meta(), &input.project, &f).map_err(Error::Invalid)?;
         Ok(f)
     }

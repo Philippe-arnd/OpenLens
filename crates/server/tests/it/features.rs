@@ -512,6 +512,61 @@ async fn flag_rules_target_plan_and_custom_properties() {
     assert!(resp.status().is_client_error());
 }
 
+/// #665: changing an existing flag through `PATCH` (what the MCP
+/// `flag_set` tool sends) keeps what it was not given, including the
+/// fields it cannot send: an experiment's users and holdout.
+#[tokio::test]
+async fn patching_a_flag_keeps_its_users_and_holdout() {
+    let h = harness();
+    let send = |method: &'static str, body: &'static str| {
+        let st = h.state.clone();
+        async move {
+            let resp = router(st)
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri("/api/projects/default/flags/winback")
+                        .header("authorization", "Bearer adm_test")
+                        .header("content-type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = resp.status();
+            let v: serde_json::Value = serde_json::from_slice(
+                &axum::body::to_bytes(resp.into_body(), 1 << 20)
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            (status, v)
+        }
+    };
+    let (status, _) = send(
+        "PUT",
+        r#"{"key":"winback","enabled":true,"rollout":20,"users":["u1","u2"],"holdout":20,"description":"at-risk users"}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, v) = send(
+        "PATCH",
+        r#"{"rollout":100,"roles":["admin"],"rules":[{"property":"plan","op":"in","values":["pro"]}]}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let f = &v["flag"];
+    assert_eq!(
+        f["roles"],
+        serde_json::json!(["admin"]),
+        "a passed field changes"
+    );
+    assert!(f["rules"].as_array().is_some_and(|r| !r.is_empty()));
+    assert_eq!(f["users"], serde_json::json!(["u1", "u2"]), "users kept");
+    assert_eq!(f["holdout"], 20, "holdout kept");
+    assert_eq!(f["description"], "at-risk users", "description kept");
+}
+
 #[tokio::test]
 async fn goals_part_two_guardrails_objectives_and_the_api() {
     let h = harness();
