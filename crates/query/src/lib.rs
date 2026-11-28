@@ -232,6 +232,12 @@ impl QueryEngine {
         }
     }
 
+    /// The data root this engine reads: what identifies its data in a
+    /// cache shared by several engines (tests run many in one process).
+    pub fn root(&self) -> &std::path::Path {
+        &self.root
+    }
+
     /// This engine, for free-form queries that may scan any range (Ask,
     /// the SQL page, the API): at most one runs at a time, and another one
     /// fails at once with [`QueryError::Busy`] instead of waiting (#326).

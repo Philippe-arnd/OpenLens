@@ -81,3 +81,61 @@ async fn features_sharing_a_success_event_list_each_path_once() {
             .all(|j| j.feature.contains("write") && j.feature.contains("draft"))
     );
 }
+
+#[tokio::test]
+async fn journeys_are_reused_until_they_are_an_hour_old() {
+    let (d, q) = journey_dataset();
+    let map = parse("features:\n  - key: write\n    name: Write\n    success: entry_saved\n    entry: { routes: ['/entries/new'] }\n").map.unwrap();
+    let f = Filters::default();
+    let total = |b: &openlens_engine::Board| b.journeys.iter().map(|j| j.users).sum::<i64>();
+    let first = board(&q, "p", &f, Some((&map, 1))).await.unwrap();
+    assert!(total(&first) > 0);
+    // Three more users take the same path: the next board reuses the
+    // journeys computed a moment ago (#730) instead of four slow queries.
+    let (mut w, _) = Writer::open(d.path(), FlushPolicy::default()).unwrap();
+    let mut evs = Vec::new();
+    for u in 6..9 {
+        let user = format!("j{u}");
+        for (i, (name, feat, path)) in [
+            ("$click", Some("search"), "/search"),
+            ("entry_saved", None, "/entries/new"),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let e = E {
+                user: &user,
+                role: "member",
+                session: "s",
+                event: name,
+                mins_ago: 40 - i as i64,
+                feature: *feat,
+                release: "v1",
+                props: "{}",
+            };
+            let mut ev = mk(&e, 1000 + u * 10 + i);
+            ev.path = Some((*path).into());
+            evs.push(ev);
+        }
+    }
+    w.append(&evs).unwrap();
+    w.flush().unwrap();
+    let again = board(&q, "p", &f, Some((&map, 1))).await.unwrap();
+    assert!(
+        again.users.dau > first.users.dau,
+        "the new users are counted"
+    );
+    assert_eq!(
+        total(&again),
+        total(&first),
+        "the journeys are the ones kept"
+    );
+    // Other filters are another key: computed now, with the new users.
+    let with_team = Filters {
+        environment: "production".into(),
+        internal: true,
+        ..Filters::default()
+    };
+    let other = board(&q, "p", &with_team, Some((&map, 1))).await.unwrap();
+    assert!(total(&other) > total(&first));
+}
