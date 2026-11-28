@@ -26,6 +26,7 @@ Everything on this list shows only when the app sends `plan` in `identify(id, { 
 | --- | --- |
 | **Upgrades** | Moves to a higher plan in the map's order, or from a free plan to a paid one, read from successive `$identify` plans of each user (90 days read). Counted over the last 30 days against the 30 days before, and per release (the release the user was on when the new plan was sent; the 5 newest). A change within one plan (`pro` → `pro_yearly`) is not a move. |
 | **Downgrades** | The reverse: a lower plan, or paid to free. |
+| **Free → paid conversion** | Of the free users first seen 30 to 89 days ago whose first plan (within their first week) was free, the share who moved to a paid plan within 30 days of their first visit. It drives the *conversion drivers* card (docs/agents/analyze.md). |
 
 ## Users
 

@@ -19,6 +19,7 @@ pub(super) fn tone(kind: &str) -> (&'static str, &'static str, &'static str) {
         "funnel_drop" => ("warn", "funnel", "Drop-off"),
         "stick_driver" => ("good", "star", "Retention"),
         "value_moment" => ("good", "spark", "Value moment"),
+        "conversion_driver" => ("good", "up", "Conversion"),
         "flag_win" => ("good", "up", "Flag win"),
         "role_blind_spot" => ("info", "shield", "Adoption"),
         "slow_pages" => ("accent", "bolt", "Performance"),
@@ -63,7 +64,7 @@ fn links(pid: &str, f: &Filters, b: &Board, c: &Insight) -> Vec<(String, String)
             ),
             (detail_url(pid, "/churn", f), "Churn".to_owned()),
         ],
-        "stick_driver" | "value_moment" | "friction" => b
+        "stick_driver" | "value_moment" | "friction" | "conversion_driver" => b
             .features
             .iter()
             .find(|x| x.declared && x.key == *s)

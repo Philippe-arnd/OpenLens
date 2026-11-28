@@ -17,7 +17,7 @@ pub const MIN_GROUP: i64 = 8;
 /// One insight card.
 #[derive(Debug, Clone, Serialize)]
 pub struct Insight {
-    /// Kind: stick_driver, value_moment, churn_point, friction, role_blind_spot, release_regression, slow_pages.
+    /// Kind: stick_driver, value_moment, churn_point, friction, role_blind_spot, release_regression, slow_pages, conversion_driver (#713).
     pub kind: &'static str,
     /// Headline in plain language.
     pub title: String,
@@ -92,7 +92,7 @@ pub(crate) struct CardRows {
 /// [`cohort_base`] on the board's people rows (#452, D-059): `ev` has one
 /// row per person, feature and UTC day (with `events`, `first_ts` and
 /// `last_ts`), and a person's first and last seen are those of its rows.
-fn rolled_cohort_base(people: &str, ident: &str, churn: i64) -> String {
+pub(crate) fn rolled_cohort_base(people: &str, ident: &str, churn: i64) -> String {
     format!(
         "WITH ev AS (SELECT distinct_id, feature, events, first_ts, last_ts FROM {people} WHERE {ident}), \
          users AS (SELECT ev.distinct_id, least(min(ev.first_ts), min(p.first_seen)) AS first_seen, max(ev.last_ts) AS last_seen \

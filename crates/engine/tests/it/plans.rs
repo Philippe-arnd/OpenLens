@@ -1,5 +1,6 @@
-//! Plans (#712, D-103): upgrades and downgrades per period and release,
-//! plan gaps, and nothing at all for an app without plans.
+//! Plans (#712, #713, D-103): upgrades and downgrades per period and
+//! release, plan gaps, the conversion drivers card, and nothing at all
+//! for an app without plans.
 
 use super::*;
 
@@ -69,6 +70,43 @@ async fn a_move_from_free_to_pro_counts_once_as_an_upgrade_on_its_release() {
     assert!(on("v1").is_none(), "nobody moved on v1: {plans:?}");
 }
 
+/// The planted conversion driver ranks first among the conversion
+/// drivers, and the plan nobody declared is a plan gap.
+#[tokio::test]
+async fn the_planted_conversion_driver_ranks_first() {
+    let (_d, q) = engine(&openlens_testkit::plans_dataset("p"));
+    let map = parse(&openlens_testkit::plans_feature_map()).map.unwrap();
+    let b = board(&q, "p", &Filters::default(), Some((&map, 1)))
+        .await
+        .unwrap();
+    let kinds: Vec<_> = b
+        .insights
+        .iter()
+        .map(|i| (i.kind, i.subject.as_str()))
+        .collect();
+    let first = b
+        .insights
+        .iter()
+        .find(|i| i.kind == "conversion_driver")
+        .unwrap_or_else(|| panic!("no conversion driver in {kinds:?}"));
+    assert_eq!(
+        first.subject,
+        openlens_testkit::CONVERSION_DRIVER,
+        "{kinds:?}"
+    );
+    assert!(first.evidence.contains("free users"), "{}", first.evidence);
+    let plans = b.plans.unwrap();
+    assert!(plans.upgrades + plans.prev_upgrades > plans.downgrades + plans.prev_downgrades);
+    assert!(
+        plans
+            .gaps
+            .iter()
+            .any(|(raw, _)| raw == openlens_testkit::UNMATCHED_PLAN),
+        "{:?}",
+        plans.gaps
+    );
+}
+
 /// An app whose map declares no plans (an internal tool, or one that has
 /// not drafted `plans:` yet) sees nothing new, even if it sends plans.
 #[tokio::test]
@@ -83,27 +121,8 @@ async fn an_app_without_plans_sees_nothing_new() {
     for m in [Some((&map, 1)), None] {
         let b = board(&q, "p", &Filters::default(), m).await.unwrap();
         assert!(b.plans.is_none());
+        assert!(b.insights.iter().all(|i| i.kind != "conversion_driver"));
         let v = serde_json::to_value(&b).unwrap();
         assert!(v.get("plans").is_none(), "no plans key in the board");
     }
-}
-
-/// A plan value the map does not match is a plan gap.
-#[tokio::test]
-async fn an_unmatched_plan_is_a_plan_gap() {
-    let (_d, q) = engine(&openlens_testkit::plans_dataset("p"));
-    let map = parse(&openlens_testkit::plans_feature_map()).map.unwrap();
-    let b = board(&q, "p", &Filters::default(), Some((&map, 1)))
-        .await
-        .unwrap();
-    let plans = b.plans.unwrap();
-    assert!(plans.upgrades + plans.prev_upgrades > plans.downgrades + plans.prev_downgrades);
-    assert!(
-        plans
-            .gaps
-            .iter()
-            .any(|(raw, _)| raw == openlens_testkit::UNMATCHED_PLAN),
-        "{:?}",
-        plans.gaps
-    );
 }
