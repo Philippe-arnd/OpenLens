@@ -63,7 +63,7 @@ journalctl -u openlens | grep -i owner    # first start: a single-use owner link
 | `publicUrl` | none | `OPENLENS_PUBLIC_URL` |
 | `environmentFile` | none | a file of `OPENLENS_*` variables, read by systemd |
 
-Other settings ([the list](README.md#optional-settings-d-016)) go in `systemd.services.openlens.environment`, or in the environment file when they are secret. The service is the unit of [systemd.md](systemd.md#what-the-unit-sets): data in `/var/lib/openlens`, its own user, the same sandbox, and `MemoryMax=1G`, which covers about 2 M events in 90 days. For more: `systemd.services.openlens.serviceConfig.MemoryMax = "2G";`.
+Other settings ([the list](README.md#optional-settings-d-016)) go in `systemd.services.openlens.environment`, or in the environment file when they are secret. The service is the unit of [systemd.md](systemd.md#what-the-unit-sets): data in `/var/lib/openlens`, its own user, the same sandbox, and `MemoryMax=1G`, which covers about 4 M events in 90 days.
 
 ## Updates
 

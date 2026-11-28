@@ -63,7 +63,7 @@ OpenLens listens on `127.0.0.1:8686`. Put a reverse proxy with HTTPS in front: r
 ### What the unit sets
 
 - **Its own user and data:** user `openlens`, data in `/var/lib/openlens` (`StateDirectory`, mode 750, files created 600). The binaries in `/opt/openlens` belong to root, so the server cannot change them.
-- **Memory:** `MemoryMax=1G`, which covers about 2 M events in 90 days. OpenLens reads that limit and sizes its query memory to it. Up to about 4 M events, give it 2 GiB: `sudo systemctl edit openlens`, then `[Service]` and `MemoryMax=2G` (the [requirements](README.md#requirements) have the measurements).
+- **Memory:** `MemoryMax=1G`, which covers about 4 M events in 90 days. OpenLens reads that limit and sizes its query memory to it, up to 768 MiB on any host (D-097), so a larger limit is not needed (the [requirements](README.md#requirements) have the measurements).
 - **Sandbox:** no capabilities, no new privileges, the system read-only except the data directory, no home directories, private `/tmp` and devices, kernel settings, modules, logs and clock protected, IPv4, IPv6 and Unix sockets only, the `@system-service` system calls without the privileged ones, no writable and executable memory. `systemd-analyze security openlens` rates it 1.4 ("OK"). `/proc` stays readable, because OpenLens reads its memory limit there.
 - **Long first start after an update:** a new version first copies the data to `backups/upgrade/`, before it listens, so the unit has no start timeout.
 

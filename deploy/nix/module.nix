@@ -85,8 +85,9 @@ in
         LimitNOFILE = 65536;
         UMask = "0077";
 
-        # 1 GiB covers about 2 M events in 90 days; 2G up to about 4 M
-        # (docs/deploy/README.md#requirements). OpenLens reads this limit.
+        # 1 GiB covers about 4 M events in 90 days; query memory stops at
+        # 768 MiB on any host (D-097,
+        # docs/deploy/README.md#requirements). OpenLens reads this limit.
         MemoryMax = lib.mkDefault "1G";
 
         # Sandbox, as deploy/systemd/openlens.service. /proc stays readable:

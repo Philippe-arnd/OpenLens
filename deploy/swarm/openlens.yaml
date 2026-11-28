@@ -45,7 +45,7 @@ services:
         delay: 5s
       resources:
         limits:
-          # 1 GiB up to about 2 M events in 90 days, 2G up to about 4 M
+          # 1 GiB up to about 4 M events in 90 days
           # (docs/deploy/README.md#requirements).
           memory: 1G
 

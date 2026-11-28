@@ -16,6 +16,29 @@ Numbers to keep OpenLens honest about "lean". Re-run them when ingestion, storag
 - **What one event is:** realistic SDK events (page views, clicks with a feature, Web Vitals, feature uses, submits) for 5,000 users, each about 250 bytes of JSON.
 - **Setup:** the server ran pinned to one core (`taskset -c 0`) of a 4-vCPU VPS (Intel Haswell, 2026-11-22), using the `perf` profile. The load generator ran on the other cores, over keep-alive HTTP/1.1 to `/capture`.
 
+## Footprint targets (D-097)
+
+What one small server promises for **4 M events in 90 days**, with no setting, measured every night by `perf.yml` (the `scale` job runs 4 M events, realistic profile, under a 1 GiB cap):
+
+| Target | Limit |
+| --- | --- |
+| Peak memory | ≤ 900 MB (the query pool stops at 768 MiB on any host) |
+| Board opened | ≤ 1 s (the default board is computed ahead, D-072) |
+| Board computed | ≤ 4 s |
+| One filtered board | ≤ 3 s |
+| Capture p99 while boards are read | ≤ 50 ms |
+| Capacity | ≥ 20,000 events/s |
+
+Since D-072 the page's "cold" load is a cache hit (about 1 ms): what costs is computing the board, which the `scale` summary reports first (`board_compute_ms`). Measured on 2026-11-26 under 1 GiB ([run 45855092155](https://github.com/Philippe-arnd/OpenLens/actions/runs/45855092155)):
+
+| Events | Board computed | Role-filtered board | 4 filtered boards, max | Peak RSS |
+| --- | --- | --- | --- | --- |
+| 1 M | 1.3–4.3 s | 1.3 s | 4.4 s | 350–390 MB |
+| 2 M | 1.4–4.2 s | 1.4 s | 3.6 s | 490–510 MB |
+| 4 M | 3.0–7.2 s | 3.0 s | 7.2 s | 650–790 MB |
+
+At 4 M the slowest queries are the success journeys (four 2-s queries a board) and the release adoption scan (a 90-day read of raw events): they are the next work.
+
 ## Board
 
 | Data | Board (API, one vCPU) |

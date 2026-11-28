@@ -100,7 +100,7 @@ job "openlens" {
 
       resources {
         cpu = 1000
-        # 1 GiB up to about 2 M events in 90 days, 2048 up to about 4 M
+        # 1 GiB up to about 4 M events in 90 days
         # (docs/deploy/README.md#requirements). OpenLens reads this limit.
         memory = 1024
       }

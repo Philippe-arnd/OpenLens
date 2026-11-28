@@ -41,7 +41,7 @@ What the job sets:
 - **One allocation at a time:** an update without canaries stops the old allocation before it places the new one, since two processes must never write the same data.
 - **Reverted by Nomad:** if the new allocation does not pass its `/healthz` check, the deployment fails and Nomad goes back to the last healthy version of the job (`auto_revert`).
 - **A long first start:** a new version first copies the data to `backups/upgrade/` before it listens, so the deployment waits up to 20 minutes and the check does not restart the task in its first 15.
-- **Memory:** `memory = 1024` (MB), which covers about 2 M events in 90 days; 2048 up to about 4 M ([requirements](README.md#requirements)). OpenLens reads the limit and sizes its query memory to it.
+- **Memory:** `memory = 1024` (MB), which covers about 4 M events in 90 days ([requirements](README.md#requirements)). OpenLens reads the limit and sizes its query memory to it.
 
 Optional settings go in the task's `env` block ([the list](README.md#optional-settings-d-016)). Keep secrets such as `OPENLENS_SMTP_URL` out of the job file: put them in Nomad Variables (`nomad var put nomad/jobs/openlens OPENLENS_SMTP_URL=...`) and add a `template` block with `env = true` that reads them with `nomadVar`.
 
