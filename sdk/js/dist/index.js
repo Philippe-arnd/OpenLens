@@ -324,6 +324,50 @@ var UnloadBudget = class {
   }
 };
 
+// src/link.ts
+var ANON_PARAM = "_ol";
+var MAX_SISTERS = 20;
+var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var HOST = /^[a-z0-9.\-:[\]_]{1,253}$/;
+function validAnon(v) {
+  return typeof v === "string" && v.length === 36 && UUID.test(v);
+}
+function validSisters(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((h) => typeof h === "string").map((h) => h.toLowerCase()).filter((h) => HOST.test(h)).slice(0, MAX_SISTERS);
+}
+function withAnon(href, base2, anon, sisters) {
+  if (!validAnon(anon) || sisters.length === 0) return null;
+  let u;
+  let here;
+  try {
+    u = new URL(href, base2);
+    here = new URL(base2);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+  const host = u.hostname.toLowerCase();
+  if (host === here.hostname.toLowerCase() || !sisters.includes(host)) return null;
+  u.searchParams.set(ANON_PARAM, anon);
+  return u.href;
+}
+function takeAnon(href) {
+  let u;
+  try {
+    u = new URL(href);
+  } catch {
+    return null;
+  }
+  if (!u.searchParams.has(ANON_PARAM)) return null;
+  const v = u.searchParams.get(ANON_PARAM);
+  u.searchParams.delete(ANON_PARAM);
+  return { id: validAnon(v) ? v.toLowerCase() : null, clean: u.href };
+}
+function mayAdopt(s) {
+  return !s.uid && !s.last;
+}
+
 // src/index.ts
 var VERSION = "0.1.0";
 var SESSION_GAP = 30 * 60 * 1e3;
@@ -338,6 +382,7 @@ var activeFlags = [];
 var activeVariants = {};
 var replayRate;
 var build;
+var sisterHosts = [];
 var activeSurveys = [];
 var surveyOpen = false;
 function uuid() {
@@ -506,6 +551,7 @@ function loadFlags() {
   origFetch(`${cfg.host.replace(/\/$/, "")}/flags?${q}`).then((r) => r.ok ? r.json() : null).then((j) => {
     var _a2, _b2, _c, _d;
     if (Array.isArray(j == null ? void 0 : j.surveys)) activeSurveys = j.surveys;
+    if (j) sisterHosts = validSisters(j.sister_hosts);
     const rate2 = j ? (_a2 = validRate(j.replay_rate)) != null ? _a2 : 1 : void 0;
     if (rate2 !== void 0) {
       replayRate = rate2;
@@ -533,13 +579,22 @@ function variant(key) {
   var _a;
   return (_a = activeVariants[key]) != null ? _a : null;
 }
+function createdAt(v) {
+  if (v === void 0 || v === null) return void 0;
+  const t = v instanceof Date ? v : new Date(String(v));
+  return isNaN(t.getTime()) ? void 0 : t.toISOString();
+}
 function identify(id, dims = {}) {
   if (!cfg || !id) return;
   const anon = state.uid ? void 0 : state.anon;
+  const { created_at, ...traits } = dims;
   state.uid = String(id);
-  state.dims = { ...state.dims, ...dims };
+  state.dims = { ...state.dims, ...traits };
   save();
-  track("$identify", anon ? { $anon_distinct_id: anon } : {});
+  const props = anon ? { $anon_distinct_id: anon } : {};
+  const created = createdAt(created_at);
+  if (created) props.$created_at = created;
+  track("$identify", props);
   loadFlags();
 }
 function reset() {
@@ -849,6 +904,36 @@ function linkHeaders(get, set) {
   const id = m == null ? void 0 : m[1];
   return id && !/^0+$/.test(id) ? id : void 0;
 }
+function arrive() {
+  let got;
+  try {
+    got = takeAnon(location.href);
+  } catch {
+    return;
+  }
+  if (!got) return;
+  if (got.id && consent !== "denied" && !(cfg == null ? void 0 : cfg.cookieless) && mayAdopt(state)) {
+    state.anon = got.id;
+    save();
+  }
+  try {
+    history.replaceState(history.state, "", got.clean);
+  } catch {
+  }
+}
+function linkOut(e) {
+  var _a;
+  if (!cfg || cfg.cookieless || consent !== "granted" || sisterHosts.length === 0) return;
+  const a = e.composedPath().find((x) => x instanceof HTMLAnchorElement && x.hasAttribute("href"));
+  if (!a) return;
+  refresh();
+  if (state.uid) return;
+  const orig = (_a = a.getAttribute("href")) != null ? _a : "";
+  const next = withAnon(a.href, location.href, state.anon, sisterHosts);
+  if (!next) return;
+  a.href = next;
+  setTimeout(() => a.setAttribute("href", orig), 0);
+}
 function init(config) {
   var _a, _b, _c;
   if (cfg || typeof window === "undefined") return;
@@ -873,7 +958,12 @@ function init(config) {
     activeVariants = {};
   }
   if (isBot()) consent = "denied";
+  arrive();
   if (consent === "denied") return;
+  if (!config.cookieless) {
+    document.addEventListener("click", linkOut, true);
+    document.addEventListener("auxclick", linkOut, true);
+  }
   loadFlags();
   const doc = document;
   if (config.autocapture !== false) {
