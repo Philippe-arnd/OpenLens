@@ -145,7 +145,8 @@ pub(crate) type Peer = Option<axum::Extension<axum::extract::ConnectInfo<std::ne
 /// A proxy we take `X-Forwarded-For` from: the host itself or a private
 /// network (Docker, Compose, a cluster), never the internet.
 pub(crate) fn trusted_proxy(ip: std::net::IpAddr) -> bool {
-    match ip {
+    // An IPv4 peer on a dual-stack listener arrives as `::ffff:a.b.c.d`.
+    match ip.to_canonical() {
         std::net::IpAddr::V4(v) => v.is_loopback() || v.is_private() || v.is_link_local(),
         std::net::IpAddr::V6(v) => {
             v.is_loopback() || v.is_unique_local() || v.is_unicast_link_local()
@@ -158,7 +159,9 @@ pub(crate) fn trusted_proxy(ip: std::net::IpAddr) -> bool {
 /// our proxy added; earlier ones come from the client). `None` for direct
 /// local traffic (server SDKs on the host, benchmarks, health checks).
 pub(crate) fn client_ip(peer: &Peer, headers: &HeaderMap) -> Option<String> {
-    let peer = peer.as_ref().map(|axum::Extension(c)| c.0.ip());
+    let peer = peer
+        .as_ref()
+        .map(|axum::Extension(c)| c.0.ip().to_canonical());
     if let Some(ip) = peer
         && !trusted_proxy(ip)
     {
@@ -447,6 +450,28 @@ pub(crate) async fn capture(
 #[cfg(test)]
 mod tests {
     use super::is_bot;
+
+    /// IPv4 peers on a dual-stack listener (`::ffff:a.b.c.d`) are judged
+    /// as the IPv4 address they are: a mapped loopback proxy is trusted,
+    /// and a mapped public client is rate-limited under its own address.
+    #[test]
+    fn ipv4_mapped_peers_are_judged_as_ipv4() {
+        use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+        let mapped = |v4: Ipv4Addr| IpAddr::V6(v4.to_ipv6_mapped());
+        assert!(super::trusted_proxy(mapped(Ipv4Addr::LOCALHOST)));
+        assert!(super::trusted_proxy(mapped(Ipv4Addr::new(10, 0, 0, 2))));
+        assert!(!super::trusted_proxy(mapped(Ipv4Addr::new(203, 0, 113, 9))));
+        let peer = Some(axum::Extension(axum::extract::ConnectInfo(
+            SocketAddr::new(mapped(Ipv4Addr::new(203, 0, 113, 9)), 40_000),
+        )));
+        let mut h = axum::http::HeaderMap::new();
+        h.insert("x-forwarded-for", "198.51.100.1".parse().unwrap());
+        assert_eq!(
+            super::client_ip(&peer, &h).as_deref(),
+            Some("203.0.113.9"),
+            "a public peer's own address, not the header it sent"
+        );
+    }
 
     #[test]
     fn writes_stop_when_the_volume_is_nearly_full() {
