@@ -3,8 +3,11 @@ name: perf
 # Nightly benchmark (#314): the perf build on a demo data dir, one minute
 # of ingestion, then one minute of ingestion while two readers compute
 # the board (`xtask bench --with-board`). The JSON is kept as an artifact
-# and compared with the average of the last 7 successful runs: a metric
-# more than 20 % worse opens (or comments on) one issue.
+# and checked by scripts/perf/compare.py: a missed target (fixed, from the
+# footprint decision) fails the run; a metric more than 20 % worse than
+# the last 7 runs on main is a trend, reported on one issue without
+# failing. Every night also measures the board at scale (4 M events,
+# realistic profile, 1 GiB cap).
 on:
   schedule:
     - cron: "47 2 * * *"
@@ -95,15 +98,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # The last runs on main, failed or not: a run that failed (a
+          # missed target, a trend) still uploads perf.json, and leaving
+          # it out froze the average on the last green nights (#578).
+          # Branch runs stay out. Runs without perf.json are skipped.
           mkdir -p earlier
-          for id in $(gh run list -R "$GITHUB_REPOSITORY" --workflow perf.yml --status success --limit 7 --json databaseId -q '.[].databaseId'); do
-            gh run download "$id" -R "$GITHUB_REPOSITORY" -n perf -D "earlier/$id" || true
+          n=0
+          for id in $(gh run list -R "$GITHUB_REPOSITORY" --workflow perf.yml --branch main --limit 20 --json databaseId,status -q '.[] | select(.status == "completed") | .databaseId'); do
+            [ "$id" = "$GITHUB_RUN_ID" ] && continue
+            gh run download "$id" -R "$GITHUB_REPOSITORY" -n perf -D "earlier/$id" > /dev/null 2>&1 || continue
+            [ -f "earlier/$id/perf.json" ] || continue
+            n=$((n + 1)); [ "$n" -ge 7 ] && break
           done
           set +e; python3 scripts/perf/compare.py perf.json earlier > report.md; code=$?; set -e
           cat report.md >> "$GITHUB_STEP_SUMMARY"
           echo "regressed=$code" >> "$GITHUB_ENV"
+      # 1: a target missed (the run fails); 2: a trend only (reported).
       - name: open or update the issue
-        if: env.regressed == '1' && github.ref == 'refs/heads/main'
+        if: (env.regressed == '1' || env.regressed == '2') && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -112,7 +124,9 @@ jobs:
           { cat report.md; echo; echo "Run: $RUN (${GITHUB_SHA::7})."; } > body.md
           open=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "$title in:title" --json number -q '.[0].number')
           if [ -n "$open" ]; then gh issue comment "$open" -R "$GITHUB_REPOSITORY" --body-file body.md; else gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body-file body.md; fi
-          exit 1
+      - name: fail on a missed target
+        if: env.regressed == '1'
+        run: exit 1
 
   # Board latency and memory at scale (#321), by hand only: a synthetic app
   # written by `xtask bench-gen`, then the board computed cold and warm,
@@ -125,15 +139,17 @@ jobs:
   # restart (#460). Each cap keeps its own artifact, scale-EVENTS-CAP.
   scale-matrix:
     name: scale plan
-    if: github.event_name == 'workflow_dispatch' && inputs.scale_events != '0'
+    # By hand with scale_events, and every night at 4 M events, realistic
+    # profile, under 1 GiB: the size the footprint decision promises.
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.scale_events != '0')
     runs-on: ubuntu-latest
     outputs:
       plan: ${{ steps.plan.outputs.plan }}
     steps:
       - id: plan
         env:
-          EVENTS: ${{ inputs.scale_events }}
-          MEMORY: ${{ inputs.scale_memory }}
+          EVENTS: ${{ github.event_name == 'schedule' && '4000000' || inputs.scale_events }}
+          MEMORY: ${{ github.event_name == 'schedule' && '1G' || inputs.scale_memory }}
         run: |
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json, os, re
@@ -155,7 +171,7 @@ jobs:
         include: ${{ fromJSON(needs.scale-matrix.outputs.plan) }}
     env:
       EVENTS: ${{ matrix.events }}
-      PROFILE: ${{ inputs.scale_profile }}
+      PROFILE: ${{ github.event_name == 'schedule' && 'realistic' || inputs.scale_profile }}
       GEN: ${{ github.workspace }}/.scale-gen
       BIN: ${{ github.workspace }}/bin
     steps:
@@ -175,7 +191,7 @@ jobs:
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ${{ env.GEN }}
-          key: scale-data-v1-${{ matrix.events }}-${{ inputs.scale_profile || 'default' }}-${{ steps.day.outputs.day }}-${{ hashFiles('xtask/src/bench_gen.rs', 'crates/query/src/rollup.rs', 'crates/storage/src/**', 'crates/testkit/src/**', 'Cargo.lock') }}
+          key: scale-data-v1-${{ matrix.events }}-${{ env.PROFILE || 'default' }}-${{ steps.day.outputs.day }}-${{ hashFiles('xtask/src/bench_gen.rs', 'crates/query/src/rollup.rs', 'crates/storage/src/**', 'crates/testkit/src/**', 'Cargo.lock') }}
       - name: generate
         id: gen
         if: steps.cache.outputs.cache-hit != 'true'
