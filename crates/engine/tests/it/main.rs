@@ -24,6 +24,7 @@ mod map_shape;
 mod release_git;
 mod release_write;
 mod releases;
+mod sampled;
 mod server_errors;
 mod slo;
 mod stats_windows;

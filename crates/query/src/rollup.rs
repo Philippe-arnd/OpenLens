@@ -12,7 +12,7 @@ fn person_sql(day: &str) -> String {
     format!(
         "SELECT {bucket} AS bucket, distinct_id AS person, environment, release, role, \
          count(*) AS events, \
-         sum(CASE WHEN event = '$error' THEN 1 ELSE 0 END) AS errors, \
+         sum({ERROR_COUNT}) AS errors, \
          min(timestamp) AS first_ts, max(timestamp) AS last_ts \
          FROM events WHERE date = '{day}' \
          GROUP BY 1, 2, 3, 4, 5",
@@ -53,7 +53,7 @@ fn person_day_sql(day: &str, f: &DayFeatures) -> Result<String, QueryError> {
     Ok(format!(
         "SELECT person, environment, release, role, feature, count(*) AS events, \
          count(DISTINCT session_id) AS sessions, \
-         sum(CASE WHEN event = '$error' THEN 1 ELSE 0 END) AS errors, \
+         sum({ERROR_COUNT}) AS errors, \
          sum(CASE WHEN {task} THEN 1 ELSE 0 END) AS successes, \
          min(timestamp) AS first_ts, max(timestamp) AS last_ts, \
          CAST({version} AS BIGINT) AS map_version \
@@ -100,6 +100,39 @@ fn version_sql(f: &DayFeatures) -> String {
 pub const INTERACTION: &str =
     "(event IN ('$pageview', '$click', '$submit', '$feature', '$survey') OR event NOT LIKE '$%')";
 
+/// The SQL of [`OCCURRENCES`], written once for both constants.
+macro_rules! occurrences {
+    () => {
+        "CASE WHEN strpos(properties, '\"$repeat\":true') > 0 \
+         THEN coalesce(CAST(regexp_match(properties, '\"\\$repeats\":([0-9]{1,7})[,}]')[1] AS BIGINT), 0) ELSE 1 END"
+    };
+}
+
+/// The occurrences one `$error` row stands for (#703, D-097): 1, or for
+/// the row the SDK sends with the repeats of an error it already sent in
+/// the session (`"$repeat":true`), its `$repeats` (at most 7 digits; a row
+/// without a readable count stands for none). Reads `properties` only on
+/// those rows.
+pub const OCCURRENCES: &str = occurrences!();
+
+/// The errors an event counts for: [`OCCURRENCES`] of an `$error`, else 0.
+/// Sum it wherever errors are counted, rather than counting `$error` rows.
+pub const ERROR_COUNT: &str = concat!(
+    "CASE WHEN event = '$error' THEN ",
+    occurrences!(),
+    " ELSE 0 END"
+);
+
+/// What one distribution-only event (`$vital`, `$scroll`, `$field`)
+/// stands for (#702, D-097): `1 / $sample` when the SDK sent it from a
+/// sample of sessions, else 1. Bounded to 1 – 100 000 so a hostile value
+/// cannot blow a count up. Sum it wherever such events, or the sessions
+/// they show, are counted as an absolute number; shares and percentiles
+/// need no weight. Reads `properties` only on rows that carry `$sample`.
+pub const SAMPLE_WEIGHT: &str = "CASE WHEN strpos(properties, '\"$sample\":') > 0 \
+     THEN least(greatest(coalesce(1.0 / nullif(CAST(regexp_match(properties, '\"\\$sample\":(0\\.[0-9]{1,20})[,}]')[1] AS DOUBLE), 0.0), 1.0), 1.0), 100000.0) \
+     ELSE 1.0 END";
+
 /// `session_day` of one UTC day (#493): per session, person, environment,
 /// release and role, from the `events` view (people already merged).
 fn session_day_sql(day: &str, f: &DayFeatures) -> Result<String, QueryError> {
@@ -108,7 +141,7 @@ fn session_day_sql(day: &str, f: &DayFeatures) -> Result<String, QueryError> {
         "SELECT session_id, person, environment, release, role, \
          min(timestamp) AS first_ts, max(timestamp) AS last_ts, \
          sum(CASE WHEN {INTERACTION} THEN 1 ELSE 0 END) AS interactions, \
-         sum(CASE WHEN event = '$error' THEN 1 ELSE 0 END) AS errors, \
+         sum({ERROR_COUNT}) AS errors, \
          sum(CASE WHEN {task} THEN 1 ELSE 0 END) AS tasks, \
          CAST({version} AS BIGINT) AS map_version \
          FROM (SELECT session_id, distinct_id AS person, environment, release, role, \
@@ -225,11 +258,13 @@ fn label_sql(day: &str) -> String {
     )
 }
 
-/// `scroll_q` of one UTC day (#324): sessions by deepest scroll, 10 % steps.
+/// `scroll_q` of one UTC day (#324): sessions by deepest scroll, 10 % steps,
+/// scaled up when the SDK sent `$scroll` from a sample of sessions (#702).
 fn scroll_sql(day: &str) -> String {
     format!(
-        "SELECT {DIMS}, CAST(least(floor(d / 10), 10) AS BIGINT) AS depth, count(*) AS sessions FROM ( \
-           SELECT {DIMS}, session_id, max({depth}) AS d FROM events \
+        "SELECT {DIMS}, CAST(least(floor(d / 10), 10) AS BIGINT) AS depth, \
+         CAST(round(sum(w)) AS BIGINT) AS sessions FROM ( \
+           SELECT {DIMS}, session_id, max({depth}) AS d, max({SAMPLE_WEIGHT}) AS w FROM events \
            WHERE date = '{day}' AND event = '$scroll' AND path IS NOT NULL GROUP BY 1, 2, 3, 4, 5) s \
          WHERE d IS NOT NULL GROUP BY 1, 2, 3, 4, 5",
         depth = num("depth")

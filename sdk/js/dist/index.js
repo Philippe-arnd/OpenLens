@@ -34,7 +34,9 @@ function buildFingerprint(urls, origin, host) {
     kept.add(u.pathname + u.search);
   }
   if (kept.size === 0) return void 0;
-  const text = [...kept].sort().join("\n");
+  return fnv([...kept].sort().join("\n"));
+}
+function fnv(text) {
   let h = 2166136261;
   for (let i = 0; i < text.length; i++) {
     h ^= text.charCodeAt(i);
@@ -234,11 +236,70 @@ function trackVitals(report) {
   addEventListener("pagehide", () => flush2(true), true);
 }
 
+// src/repeats.ts
+var MAX = 200;
+var Repeats = class {
+  constructor() {
+    this.seen = /* @__PURE__ */ new Map();
+  }
+  /** Is this the first `event` with fingerprint `key` in session `sid`?
+   * Then send it; else it is counted. `props` are what its repeat event
+   * will carry. */
+  first(event, key, sid, props) {
+    const k = `${event} ${key}`;
+    const s = this.seen.get(k);
+    if (s && s.sid === sid) {
+      s.n++;
+      return false;
+    }
+    if (s || this.seen.size < MAX) this.seen.set(k, { sid, event, props, n: 0 });
+    return true;
+  }
+  /** The repeat events to send now; the counts start again. */
+  take() {
+    const out = [];
+    for (const s of this.seen.values()) {
+      if (s.n > 0) {
+        out.push({ sid: s.sid, event: s.event, props: { ...s.props, $repeat: true, $repeats: s.n } });
+        s.n = 0;
+      }
+    }
+    return out;
+  }
+  /** Forget everything (consent withdrawn). */
+  clear() {
+    this.seen.clear();
+  }
+};
+function errorKey(kind, message, stack) {
+  const frame = stack == null ? void 0 : stack.split("\n").map((l) => l.trim()).find((l) => /:\d+:\d+\)?$/.test(l));
+  return `${kind} ${message.slice(0, 200)} ${frame != null ? frame : ""}`;
+}
+
 // src/sampling.ts
 function decide(prev, sid, rate2, rand) {
   if (prev && prev.sid === sid) return prev;
   if (rate2 === void 0) return void 0;
   return { sid, on: rand() < rate2 };
+}
+function drawEvents(prev, sid, rate2, rand) {
+  if (prev && prev.sid === sid) return prev;
+  const r = rate2 != null ? rate2 : 1;
+  return { sid, on: r >= 1 || rand() < r, r };
+}
+var SAMPLED = ["$vital", "$scroll", "$field"];
+function sample(event, props, d) {
+  if (event === "$click") {
+    if (d.on) return props;
+    const p = { ...props };
+    delete p.$x;
+    delete p.$y;
+    delete p.$vw;
+    return p;
+  }
+  if (!SAMPLED.includes(event)) return props;
+  if (!d.on) return null;
+  return d.r < 1 ? { ...props, $sample: d.r } : props;
 }
 function validRate(v) {
   return typeof v === "number" && v >= 0 && v <= 1 ? v : void 0;
@@ -337,6 +398,8 @@ var lastPath = "";
 var activeFlags = [];
 var activeVariants = {};
 var replayRate;
+var sampleRate;
+var repeats = new Repeats();
 var build;
 var activeSurveys = [];
 var surveyOpen = false;
@@ -432,27 +495,39 @@ function base() {
   if (vs.length) p.$variants = vs.map(([k, v]) => `${k}=${v}`).join(",");
   return p;
 }
-function track(event, props) {
-  var _a, _b, _c;
-  if (!cfg || consent === "denied") return;
-  const now = Date.now();
+function touch() {
   refresh();
-  touchSession(now);
+  touchSession(Date.now());
   save();
+}
+function enqueue(event, sid, props) {
+  var _a;
   queue.push({
     event,
     distinct_id: (_a = state.uid) != null ? _a : state.anon,
-    session_id: state.sid,
+    session_id: sid,
     uuid: uuid(),
-    timestamp: new Date(now).toISOString(),
+    timestamp: (/* @__PURE__ */ new Date()).toISOString(),
     properties: { ...base(), ...props }
   });
   if (queue.length > MAX_QUEUE) queue = queue.slice(-MAX_QUEUE);
+}
+function track(event, props) {
+  var _a, _b;
+  if (!cfg || consent === "denied") return;
+  touch();
+  const d = drawEvents(state.es, state.sid, sampleRate, Math.random);
+  if (d !== state.es) {
+    state.es = d;
+    save();
+  }
+  const sent = sample(event, props != null ? props : {}, d);
+  if (sent) enqueue(event, state.sid, sent);
   if (queue.length >= 20) flush();
   if (event === "$error" || (props == null ? void 0 : props.$rage) === true) {
     state.rs = { sid: state.sid, on: true };
     save();
-    (_c = (_b = window.__openlensReplay) == null ? void 0 : _b.wake) == null ? void 0 : _c.call(_b);
+    (_b = (_a = window.__openlensReplay) == null ? void 0 : _a.wake) == null ? void 0 : _b.call(_a);
   }
   maybeSurvey(event);
 }
@@ -504,20 +579,27 @@ function loadFlags() {
     if (v !== void 0 && v !== null && v !== "") q.set(`p.${k.toLowerCase()}`, String(v).slice(0, 100));
   }
   origFetch(`${cfg.host.replace(/\/$/, "")}/flags?${q}`).then((r) => r.ok ? r.json() : null).then((j) => {
-    var _a2, _b2, _c, _d;
+    var _a2, _b2, _c, _d, _e;
     if (Array.isArray(j == null ? void 0 : j.surveys)) activeSurveys = j.surveys;
     const rate2 = j ? (_a2 = validRate(j.replay_rate)) != null ? _a2 : 1 : void 0;
+    if (j) {
+      sampleRate = (_b2 = validRate(j.sample_rate)) != null ? _b2 : 1;
+      try {
+        store().setItem(`${storageKey()}_srate`, String(sampleRate));
+      } catch {
+      }
+    }
     if (rate2 !== void 0) {
       replayRate = rate2;
       try {
         store().setItem(`${storageKey()}_rate`, String(rate2));
       } catch {
       }
-      (_c = (_b2 = window.__openlensReplay) == null ? void 0 : _b2.wake) == null ? void 0 : _c.call(_b2);
+      (_d = (_c = window.__openlensReplay) == null ? void 0 : _c.wake) == null ? void 0 : _d.call(_c);
     }
     if (j == null ? void 0 : j.flags) {
       activeFlags = j.flags;
-      activeVariants = (_d = j.variants) != null ? _d : {};
+      activeVariants = (_e = j.variants) != null ? _e : {};
       try {
         store().setItem(`${storageKey()}_flags`, JSON.stringify(activeFlags));
         store().setItem(`${storageKey()}_variants`, JSON.stringify(activeVariants));
@@ -535,10 +617,19 @@ function variant(key) {
 }
 function identify(id, dims = {}) {
   if (!cfg || !id) return;
+  refresh();
   const anon = state.uid ? void 0 : state.anon;
   state.uid = String(id);
   state.dims = { ...state.dims, ...dims };
+  const h = fnv(state.uid + JSON.stringify(state.dims));
+  const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const same = !anon && h === state.ih && day === state.iday;
+  if (!same && consent !== "denied") {
+    state.ih = h;
+    state.iday = day;
+  }
   save();
+  if (same) return;
   track("$identify", anon ? { $anon_distinct_id: anon } : {});
   loadFlags();
 }
@@ -553,6 +644,7 @@ function setConsent(granted) {
   consent = granted ? "granted" : "denied";
   if (!granted) {
     queue = [];
+    repeats.clear();
     (_b = (_a = window.__openlensReplay) == null ? void 0 : _a.wake) == null ? void 0 : _b.call(_a);
     if (cfg && !cfg.cookieless) {
       try {
@@ -566,7 +658,9 @@ function setConsent(granted) {
   }
 }
 function flush(beacon = false) {
-  if (!cfg || consent !== "granted" || queue.length === 0) return;
+  if (!cfg || consent !== "granted") return;
+  for (const r of repeats.take()) enqueue(r.event, r.sid, r.props);
+  if (queue.length === 0) return;
   const batch = queue;
   const body = JSON.stringify({ sent_at: (/* @__PURE__ */ new Date()).toISOString(), batch });
   queue = [];
@@ -761,14 +855,12 @@ function autocapture() {
   };
   document.addEventListener("focusin", watch, true);
   document.addEventListener("pointerdown", watch, true);
-  const seen = {};
-  const report = (kind, message, stack, source) => {
-    var _a;
-    const k = message.slice(0, 200);
-    seen[k] = ((_a = seen[k]) != null ? _a : 0) + 1;
-    if (seen[k] > 5) return;
-    track("$error", { $kind: kind, $message: message.slice(0, 500), $stack: stack == null ? void 0 : stack.slice(0, 4e3), $source: source });
-  };
+  const report = (kind, message, stack, source) => once("$error", errorKey(kind, message, stack), {
+    $kind: kind,
+    $message: message.slice(0, 500),
+    $stack: stack == null ? void 0 : stack.slice(0, 4e3),
+    $source: source
+  });
   addEventListener("error", (e) => {
     var _a;
     if (e instanceof ErrorEvent) report("error", e.message || "error", (_a = e.error) == null ? void 0 : _a.stack, `${e.filename}:${e.lineno}:${e.colno}`);
@@ -786,7 +878,8 @@ function autocapture() {
       path = u.host === location.host ? u.pathname : u.host + u.pathname;
     } catch {
     }
-    track("$request_failed", { $method: method.toUpperCase(), $path: path.slice(0, 300), $status: status, trace_id: trace });
+    const props = { $method: method.toUpperCase(), $path: path.slice(0, 300), $status: status };
+    once("$request_failed", `${props.$method} ${props.$path} ${status}`, props, { trace_id: trace });
   };
   if (origFetch) {
     const f = origFetch;
@@ -832,6 +925,11 @@ function autocapture() {
     return r;
   };
 }
+function once(event, key, props, own = {}) {
+  if (!cfg || consent === "denied") return;
+  touch();
+  if (repeats.first(event, key, state.sid, props)) track(event, { ...props, ...own });
+}
 function traced(rawUrl) {
   var _a;
   if (!cfg || consent !== "granted") return false;
@@ -850,7 +948,7 @@ function linkHeaders(get, set) {
   return id && !/^0+$/.test(id) ? id : void 0;
 }
 function init(config) {
-  var _a, _b, _c;
+  var _a, _b, _c, _d;
   if (cfg || typeof window === "undefined") return;
   if (!config.host || !config.key) return;
   const gpc = navigator.globalPrivacyControl === true;
@@ -868,6 +966,7 @@ function init(config) {
     activeFlags = JSON.parse(store().getItem(`${storageKey()}_flags`) || "[]");
     activeVariants = JSON.parse(store().getItem(`${storageKey()}_variants`) || "{}");
     replayRate = validRate(Number((_c = store().getItem(`${storageKey()}_rate`)) != null ? _c : NaN));
+    sampleRate = validRate(Number((_d = store().getItem(`${storageKey()}_srate`)) != null ? _d : NaN));
   } catch {
     activeFlags = [];
     activeVariants = {};
@@ -903,11 +1002,7 @@ function startReplay() {
     allowed: () => consent === "granted",
     fetch: origFetch,
     unload: (url, body) => unloadBudget.send(unloadSender(), url, body),
-    touch: () => {
-      refresh();
-      touchSession(Date.now());
-      save();
-    },
+    touch,
     sampled: () => {
       refresh();
       const d = decide(state.rs, state.sid, replayRate, Math.random);

@@ -33,7 +33,7 @@ use crate::errors::{FINGERPRINT, SERVER_ERROR};
 use crate::goals::Goal;
 use crate::releases::Release;
 use crate::verdict::{self, FeatureUse, NewError, Report, Side, VitalP75};
-use crate::{Filters, Result, Span, float, int, lit, lookups, source, text};
+use crate::{Filters, OCCURRENCES, Result, Span, float, int, lit, lookups, source, text};
 
 /// Days read (the releases' window).
 const DAYS: i64 = crate::releases::WINDOW_DAYS;
@@ -104,12 +104,12 @@ async fn sides(
     let w = f.clause_at(DAYS, now)?;
     let errors_sql = format!(
         "WITH e AS (SELECT distinct_id, release, timestamp, error_message AS msg, error_source AS source, \
-           {SERVER_ERROR} AS srv \
+           {SERVER_ERROR} AS srv, {OCCURRENCES} AS occ \
            FROM {src} WHERE {w} AND event = '$error'), \
-         g AS (SELECT distinct_id, release, timestamp, msg, srv, {FINGERPRINT} AS fp FROM e), \
+         g AS (SELECT distinct_id, release, timestamp, msg, srv, occ, {FINGERPRINT} AS fp FROM e), \
          fr AS (SELECT fp, first_value(release ORDER BY timestamp) AS rel FROM g GROUP BY fp) \
          SELECT g.release AS release, g.fp AS fp, min(g.msg) AS sample, \
-         count(DISTINCT g.distinct_id) AS users, count(*) AS n, max(g.srv) AS server \
+         count(DISTINCT g.distinct_id) AS users, sum(g.occ) AS n, max(g.srv) AS server \
          FROM g JOIN fr ON g.fp = fr.fp AND g.release = fr.rel \
          GROUP BY g.release, g.fp ORDER BY users DESC, n DESC LIMIT {MAX_ROWS}"
     );

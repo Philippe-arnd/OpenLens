@@ -110,7 +110,7 @@ pub async fn breakdown(
     let sql = format!(
         "SELECT {col} AS value, count(DISTINCT distinct_id) AS users, count(DISTINCT session_id) AS sessions, \
          count(*) AS events, sum(CASE WHEN feature IS NOT NULL THEN 1 ELSE 0 END) AS tasks, \
-         sum(CASE WHEN event = '$error' THEN 1 ELSE 0 END) AS errors \
+         sum({ERROR_COUNT}) AS errors \
          FROM {src} WHERE {w} GROUP BY {col} ORDER BY users DESC, events DESC LIMIT 50"
     );
     Ok(q.sql(project, &sql)
@@ -166,7 +166,7 @@ pub async fn live(
     );
     let head = format!(
         "SELECT count(DISTINCT CASE WHEN timestamp >= now() - INTERVAL '5 minutes' THEN distinct_id END) AS u5, \
-         count(DISTINCT distinct_id) AS u30, sum(CASE WHEN event = '$error' THEN 1 ELSE 0 END) AS errors \
+         count(DISTINCT distinct_id) AS u30, sum({ERROR_COUNT}) AS errors \
          FROM {src} WHERE {w}"
     );
     let by = |col: &str| {

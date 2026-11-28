@@ -36,7 +36,7 @@ mod retry;
 mod rollup;
 pub use openlens_storage::DaySize;
 pub use openlens_storage::rollup::last_closed;
-pub use rollup::{DayFeatures, INTERACTION};
+pub use rollup::{DayFeatures, ERROR_COUNT, INTERACTION, OCCURRENCES, SAMPLE_WEIGHT};
 mod typed;
 pub use aggregate::MIN_USERS;
 use serde::Serialize;

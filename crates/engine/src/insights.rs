@@ -14,7 +14,7 @@
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use crate::{Filters, Result, int, text};
+use crate::{ERROR_COUNT, Filters, Result, int, text};
 use openlens_query::QueryEngine;
 
 /// Smallest group size an insight may rest on.
@@ -732,7 +732,7 @@ pub(crate) async fn flag_cohorts(
              FROM (SELECT session_id, min(distinct_id) AS uid, \
                    max(CASE WHEN strpos(concat(',', coalesce(flags, ''), ','), ',{key},') > 0 THEN 1 ELSE 0 END) AS has, \
                    count(*) AS n, date_part('epoch', max(timestamp)) - date_part('epoch', min(timestamp)) AS secs, \
-                   sum(CASE WHEN event = '$error' THEN 1 ELSE 0 END) AS errors, \
+                   sum({ERROR_COUNT}) AS errors, \
                    sum(CASE WHEN feature IS NOT NULL THEN 1 ELSE 0 END) AS tasks \
                    FROM {src} WHERE {w} AND session_id IS NOT NULL GROUP BY session_id) s GROUP BY has"
         );

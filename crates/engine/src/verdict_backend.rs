@@ -371,16 +371,17 @@ async fn route_errors(
     let base = format!(
         "WITH e AS (SELECT nullif(distinct_id, '{server}') AS uid, session_id, timestamp, \
            error_message AS msg, error_source AS source, {srv} AS srv, {trace} AS trace, \
-           {method} AS m, {route} AS r FROM events WHERE {w} AND event = '$error'), \
+           {method} AS m, {route} AS r, {occ} AS occ FROM events WHERE {w} AND event = '$error'), \
          g AS (SELECT *, {fp} AS efp, concat(m, ' ', r) AS fp FROM e \
            WHERE srv = 1 AND m IS NOT NULL AND r IS NOT NULL)",
         server = crate::errors::SERVER_ID,
         srv = crate::errors::SERVER_ERROR,
         trace = crate::errors::TRACE_ID,
         fp = crate::errors::FINGERPRINT,
+        occ = crate::OCCURRENCES,
     );
     let top_sql = format!(
-        "{base} SELECT fp, efp, min(msg) AS sample, count(*) AS n, count(DISTINCT uid) AS users \
+        "{base} SELECT fp, efp, min(msg) AS sample, sum(occ) AS n, count(DISTINCT uid) AS users \
          FROM g GROUP BY fp, efp ORDER BY users DESC, n DESC LIMIT 500"
     );
     let linked_sql = crate::errors::linked_sql(&base, "events", &browser);

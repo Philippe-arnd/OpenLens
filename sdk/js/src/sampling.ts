@@ -1,5 +1,6 @@
 /**
- * Replay sampling (#327, D-035).
+ * Replay sampling (#327, D-035), and the daily budget of the events that
+ * only feed distributions (#702, D-097).
  *
  * The server hands the SDK a rate with the flags (`replay_rate`: about 300
  * recordings a day). Once per session the SDK draws whether the session is
@@ -25,6 +26,42 @@ export function decide(prev: Decision | undefined, sid: string, rate: number | u
   if (prev && prev.sid === sid) return prev;
   if (rate === undefined) return undefined;
   return { sid, on: rand() < rate };
+}
+
+/** The draw of one session for the distribution-only events (#702,
+ * D-097), with the rate `r` it was drawn at. */
+export interface Draw extends Decision {
+  r: number;
+}
+
+/** The stored draw while the session lasts, else a new one at `rate`
+ * (every session while the rate is not known). */
+export function drawEvents(prev: Draw | undefined, sid: string, rate: number | undefined, rand: () => number): Draw {
+  if (prev && prev.sid === sid) return prev;
+  const r = rate ?? 1;
+  return { sid, on: r >= 1 || rand() < r, r };
+}
+
+/** Events that only feed distributions (p75, scroll depth, form drop-off):
+ * sent by drawn sessions only, with the rate as `$sample`. */
+const SAMPLED = ["$vital", "$scroll", "$field"];
+
+/** The properties to send for `event` in a session drawn `d`, or `null`
+ * when it is not sent. A click is always sent, but outside a drawn session
+ * without its position (`$x`, `$y`, `$vw`): heatmaps are a sample too.
+ * Every other event is never sampled. */
+export function sample(event: string, props: Record<string, unknown>, d: Draw): Record<string, unknown> | null {
+  if (event === "$click") {
+    if (d.on) return props;
+    const p = { ...props };
+    delete p.$x;
+    delete p.$y;
+    delete p.$vw;
+    return p;
+  }
+  if (!SAMPLED.includes(event)) return props;
+  if (!d.on) return null;
+  return d.r < 1 ? { ...props, $sample: d.r } : props;
 }
 
 /** A rate from the server: a number from 0 to 1, else unknown. */

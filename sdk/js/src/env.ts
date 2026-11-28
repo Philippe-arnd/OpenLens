@@ -60,7 +60,11 @@ export function buildFingerprint(urls: readonly string[], origin: string, host?:
     kept.add(u.pathname + u.search);
   }
   if (kept.size === 0) return undefined;
-  const text = [...kept].sort().join("\n");
+  return fnv([...kept].sort().join("\n"));
+}
+
+/** FNV-1a of `text`: 32 bits as 8 hex characters. */
+export function fnv(text: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < text.length; i++) {
     h ^= text.charCodeAt(i);

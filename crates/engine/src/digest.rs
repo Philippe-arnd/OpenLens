@@ -5,7 +5,7 @@ use openlens_featuremap::FeatureMap;
 use openlens_query::QueryEngine;
 use serde::Serialize;
 
-use crate::{Filters, Result, int, lit, source, text};
+use crate::{ERROR_COUNT, Filters, Result, int, lit, source, text};
 
 /// One number, this week and last week.
 #[derive(Debug, Clone, Default, Serialize)]
@@ -96,8 +96,8 @@ pub async fn digest(
                 count(DISTINCT CASE WHEN NOT ({now}) THEN distinct_id END) AS u0, \
                 count(DISTINCT CASE WHEN {now} THEN session_id END) AS s1, \
                 count(DISTINCT CASE WHEN NOT ({now}) THEN session_id END) AS s0, \
-                sum(CASE WHEN event = '$error' AND {now} THEN 1 ELSE 0 END) AS e1, \
-                sum(CASE WHEN event = '$error' AND NOT ({now}) THEN 1 ELSE 0 END) AS e0 \
+                sum(CASE WHEN {now} THEN {ERROR_COUNT} ELSE 0 END) AS e1, \
+                sum(CASE WHEN NOT ({now}) THEN {ERROR_COUNT} ELSE 0 END) AS e0 \
          FROM {src} WHERE {w}"
     );
     let successes: Vec<(String, String)> = map

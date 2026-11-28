@@ -12,5 +12,7 @@ export declare function detectRelease(script?: HTMLScriptElement | null): string
  * deploy changes it. `undefined` when the page loads no such file.
  */
 export declare function buildFingerprint(urls: readonly string[], origin: string, host?: string): string | undefined;
+/** FNV-1a of `text`: 32 bits as 8 hex characters. */
+export declare function fnv(text: string): string;
 /** The script and stylesheet URLs of the current page. */
 export declare function pageAssets(): string[];

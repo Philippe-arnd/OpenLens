@@ -6,7 +6,7 @@
 
 use serde::Serialize;
 
-use crate::{Filters, Result, int, text};
+use crate::{Filters, OCCURRENCES, Result, int, text};
 use openlens_query::QueryEngine;
 
 /// One group of errors.
@@ -16,7 +16,8 @@ pub struct ErrorGroup {
     pub fingerprint: String,
     /// One real message of the group.
     pub sample: String,
-    /// Occurrences.
+    /// Occurrences: the rows, plus the repeats the SDK counted instead of
+    /// sending (#703, D-097).
     pub count: i64,
     /// Distinct users hit.
     pub users: i64,
@@ -167,7 +168,7 @@ pub async fn error_groups_of(
     let base = format!(
         "WITH e AS (SELECT nullif(distinct_id, '{SERVER_ID}') AS uid, session_id, timestamp, role, release, \
            coalesce(feature, path) AS place, error_message AS msg, error_source AS source, error_stack AS stack, \
-           {SERVER_ERROR} AS srv, {TRACE_ID} AS trace \
+           {SERVER_ERROR} AS srv, {TRACE_ID} AS trace, {OCCURRENCES} AS occ \
            FROM {src} WHERE {w} AND event = '$error'), \
          g AS (SELECT *, {FINGERPRINT} AS fp FROM e)"
     );
@@ -177,7 +178,7 @@ pub async fn error_groups_of(
         Origin::Server => " HAVING max(srv) = 1",
     };
     let groups_sql = format!(
-        "{base} SELECT fp, min(msg) AS sample, count(*) AS n, count(DISTINCT uid) AS users, \
+        "{base} SELECT fp, min(msg) AS sample, sum(occ) AS n, count(DISTINCT uid) AS users, \
          count(DISTINCT session_id) AS sessions, CAST(min(timestamp) AS VARCHAR) AS first_seen, \
          CAST(max(timestamp) AS VARCHAR) AS last_seen, \
          last_value(session_id ORDER BY timestamp) AS last_session, \

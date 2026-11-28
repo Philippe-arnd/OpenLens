@@ -100,6 +100,11 @@ async fn sdk_is_served_as_cacheable_javascript() {
 
 /// `replay_rate` from `/flags` (#327).
 async fn replay_rate(h: &Harness) -> f64 {
+    rates(h).await.0
+}
+
+/// `replay_rate` and `sample_rate` (#702) from `/flags`.
+async fn rates(h: &Harness) -> (f64, f64) {
     let r = get(
         h,
         &format!("/flags?key={}&distinct_id=u1", h.key),
@@ -109,7 +114,10 @@ async fn replay_rate(h: &Harness) -> f64 {
     .await;
     assert_eq!(r.status(), StatusCode::OK);
     let v: serde_json::Value = serde_json::from_str(&body_text(r).await).unwrap();
-    v["replay_rate"].as_f64().unwrap()
+    (
+        v["replay_rate"].as_f64().unwrap(),
+        v["sample_rate"].as_f64().unwrap(),
+    )
 }
 
 #[tokio::test]
@@ -147,8 +155,15 @@ async fn the_replay_rate_follows_yesterdays_active_users() {
         assert_eq!(status, StatusCode::OK);
     }
     openlens_server::flush_now(&h.state).unwrap();
-    let rate = replay_rate(&h).await;
+    let (rate, sample) = rates(&h).await;
     assert!(rate < everything, "{rate} < {everything}");
+    // The same count gives the share of sessions sending distribution-only
+    // events (#702, D-097), from a larger budget.
+    assert!(sample > rate, "{sample} > {rate}");
+    assert_eq!(
+        sample,
+        openlens_engine::replay_rate::sample_rate_for(i64::from(active))
+    );
     // About the daily budget of recordings out of yesterday's users.
     let budget = openlens_engine::replay_rate::DAILY_BUDGET as f64;
     assert!((rate * f64::from(active) - budget).abs() < 1.0, "{rate}");

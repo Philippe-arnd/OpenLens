@@ -704,6 +704,7 @@ mod tests {
             active_users: 10_000,
             day: "2026-11-26".into(),
             budget: floor * 3,
+            sample_rate: 0.2,
         };
         let why = super::rate_reason(&r);
         assert!(why.contains(&r.budget.to_string()), "{why}");

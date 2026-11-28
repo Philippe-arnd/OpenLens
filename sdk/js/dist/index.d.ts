@@ -65,7 +65,10 @@ export declare function isEnabled(key: string): boolean;
 /** The variant of an experiment flag this user gets (null when the flag is
  * off or has no variants). Events carry it, so arms can be compared. */
 export declare function variant(key: string): string | null;
-/** Identify the logged-in user and the dimensions OpenLens slices by. */
+/** Identify the logged-in user and the dimensions OpenLens slices by.
+ * `$identify` is sent when it links an anonymous visitor, when the id or a
+ * trait changed since the last one of this browser, and at most once a day
+ * otherwise (#702, D-097): apps call this on every page load. */
 export declare function identify(id: string, dims?: Dimensions): void;
 /** Forget the user (call on logout). A no-op while nobody is identified, so
  * calling it on every logged-out page load does not mint a new visitor. */

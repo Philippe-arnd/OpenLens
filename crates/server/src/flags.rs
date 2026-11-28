@@ -4,7 +4,9 @@
 //!   key): the keys of the flags that are on for that user. The raw role is
 //!   resolved to its canonical role with the feature map before targeting.
 //!   It also carries `replay_rate`, the share of sessions the SDK records
-//!   from their start (#327).
+//!   from their start (#327), and `sample_rate`, the share of sessions
+//!   that send the distribution-only events (`$vital`, `$scroll`,
+//!   `$field`; #702, D-097).
 //! - Admin (bearer): `GET /api/projects/{id}/flags`,
 //!   `PUT|DELETE /api/projects/{id}/flags/{key}`, and `PATCH` to switch a
 //!   flag on or off or change its rollout (`flags.update`).
@@ -159,7 +161,9 @@ pub(crate) async fn public(
         .filter(|s| s.eligible(&subject))
         .map(|s| s.public())
         .collect();
-    // The share of sessions to record from their start (#327, D-035).
+    // The share of sessions to record from their start (#327, D-035), and
+    // of those that send the distribution-only events (#702, D-097): one
+    // daily count for both.
     let replay = crate::replay::rate(&state, &project.id, &project.timezone).await;
     (
         StatusCode::OK,
@@ -169,6 +173,7 @@ pub(crate) async fn public(
             "variants": variants,
             "surveys": surveys,
             "replay_rate": replay.rate,
+            "sample_rate": replay.sample_rate,
         })),
     )
         .into_response()

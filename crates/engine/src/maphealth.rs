@@ -19,7 +19,7 @@ use openlens_featuremap::FeatureMap;
 use openlens_query::QueryEngine;
 use serde::Serialize;
 
-use crate::{Filters, Result, int, source, text};
+use crate::{Filters, OCCURRENCES, Result, int, source, text};
 
 /// Below this many users, rates are not judged.
 const MIN_USERS: i64 = 20;
@@ -744,7 +744,7 @@ pub async fn feature_context(
     let ok = succ.as_deref().unwrap_or("NULL");
     let errors = format!(
         "SELECT coalesce(error_message, '(no message)') AS msg, \
-         count(*) AS n, count(DISTINCT distinct_id) AS u, last_value(session_id ORDER BY timestamp) AS last_session \
+         sum({OCCURRENCES}) AS n, count(DISTINCT distinct_id) AS u, last_value(session_id ORDER BY timestamp) AS last_session \
          FROM {src} WHERE {w30} AND event = '$error' AND session_id IN \
          (SELECT DISTINCT session_id FROM {src} WHERE {w30} AND feature = {k}) \
          GROUP BY 1 ORDER BY u DESC, n DESC LIMIT 10"
