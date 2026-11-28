@@ -208,8 +208,10 @@ pub(super) enum Command {
         #[command(subcommand)]
         action: FeaturesCmd,
     },
-    /// Check the wiring: events arrive, roles resolve, features fire; and
-    /// list the release layers that are active.
+    /// Check the wiring: events arrive, roles resolve, features fire, an
+    /// anonymous visit is linked to the person once identified (it sends
+    /// two test events and waits up to 45 s); and list the release layers
+    /// that are active.
     Verify {
         /// Project id.
         #[arg(long, default_value = "default")]

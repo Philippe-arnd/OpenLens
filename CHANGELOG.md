@@ -7,6 +7,7 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 ### Added
 
 - **One visitor from the landing page to the app** (#710, D-102): `GET /flags` lists the project's sister hosts (the exact hosts its host rules map to the page's environment, at most 20). When an anonymous visitor follows a link to one of them, the browser SDK adds the anonymous id to that link (`_ol=<id>`, at the click only); the SDK on the other host adopts it when it has no history of that visitor, then removes it from the address bar. No cookie, never in cookieless mode or without consent; a single-host app sees no change.
+- **`verify` checks that a visit is linked to the person** (#711): `openlens-cli verify` (and the MCP `verify`) sends a test anonymous page view and an `$identify` linking it (a test person marked internal, in `development`), waits up to 45 s for the page view to belong to the person, and reports `visitor linked to the person`, saying when the project has a single production host. It does not change `ok`. The wiring guide gains a *Landing page and app* section: one project key on both, host rules naming both hosts, `identify` right after account creation with `created_at`.
 
 ### Changed
 

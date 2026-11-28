@@ -81,6 +81,12 @@ pub(crate) fn verify_report<A: Api + ?Sized>(c: &A, project: &str) -> Result<Val
         json!([])
     };
     let classified = unclassified.as_array().is_none_or(Vec::is_empty);
+    let rules = if env_status == 200 {
+        envs["rules"].clone()
+    } else {
+        json!([])
+    };
+    let linked = linkage(c, project, &rules, LINK_WAIT)?;
     let checks = json!([
         { "check": "events arrive", "ok": events > 0, "detail": events, "fix": "add the SDK snippet and load a page" },
         { "check": "users are identified", "ok": identified > 0, "detail": identified, "fix": "call openlens.identify(user.id, { role }) after login" },
@@ -88,6 +94,7 @@ pub(crate) fn verify_report<A: Api + ?Sized>(c: &A, project: &str) -> Result<Val
         { "check": "release is tagged", "ok": releases > 0, "detail": releases, "fix": "pass release (version or git SHA) to init or data-release" },
         { "check": "feature map pushed", "ok": map_status == 200, "detail": map["version"], "fix": "openlens-cli features push" },
         { "check": "hosts are classified", "ok": classified, "detail": unclassified, "fix": "openlens-cli env rule <host> <production|staging|preview|ignore>" },
+        linked,
     ]);
     let ok = checks
         .as_array()
@@ -99,6 +106,115 @@ pub(crate) fn verify_report<A: Api + ?Sized>(c: &A, project: &str) -> Result<Val
         "release_layers": layers,
         "robots_last_day": bots,
         "note": "features with 0 events have not been exercised yet; click through them once to confirm they fire" }))
+}
+
+/// The name of the linkage check in the verify report (#711).
+pub(crate) const LINK_CHECK: &str = "visitor linked to the person";
+
+/// How long the linkage check waits for the server to store and link its
+/// test events (they are flushed every ~10 s, the links read every 30 s).
+const LINK_WAIT: std::time::Duration = std::time::Duration::from_secs(45);
+
+/// The linkage check (#711): an anonymous page view, then an `$identify`
+/// that links its anonymous id, sent with the project key; the page view
+/// must then belong to the person in `events`. The test person is marked
+/// as the team's own (`$internal`) and sent in `development`, so it
+/// counts in no production number. `rules` are the project's host rules,
+/// to say when there is no second production host (no landing page).
+pub(crate) fn linkage<A: Api + ?Sized>(
+    c: &A,
+    project: &str,
+    rules: &Value,
+    wait: std::time::Duration,
+) -> Result<Value, String> {
+    let fix = "check that the server is up to date; in the app, call openlens.identify(user.id, …) right after account creation and at login";
+    let hosts: Vec<&str> = rules
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter(|r| r["env"] == "production")
+                .filter_map(|r| r["host"].as_str())
+                .filter(|h| !h.starts_with("*."))
+                .collect()
+        })
+        .unwrap_or_default();
+    let hosts_note = if hosts.len() < 2 {
+        "the project has one production host: no landing page on another host to link".to_owned()
+    } else {
+        format!("production hosts linked by the SDK: {}", hosts.join(", "))
+    };
+    let check = |ok: bool, detail: String| {
+        json!({ "check": LINK_CHECK, "ok": ok, "detail": format!("{detail}; {hosts_note}"), "fix": fix })
+    };
+    let (status, list) = c.call("GET", "/api/projects", None)?;
+    let key = Some(&list)
+        .filter(|_| status == 200)
+        .and_then(|l| l["projects"].as_array())
+        .and_then(|ps| ps.iter().find(|p| p["id"] == project))
+        .and_then(|p| p["key"].as_str())
+        .map(str::to_owned);
+    let Some(key) = key else {
+        return Ok(check(
+            false,
+            "not run: the project's capture key could not be read with this token".into(),
+        ));
+    };
+    let stamp = chrono::Utc::now();
+    let tag = stamp.timestamp_nanos_opt().unwrap_or_default();
+    let (anon, person) = (format!("verify-anon-{tag}"), format!("verify-person-{tag}"));
+    let at = |ms: i64| (stamp + chrono::Duration::milliseconds(ms)).to_rfc3339();
+    let props = json!({ "$environment": "development", "$lib": "openlens-cli", "$verify": true });
+    let mut page = props.clone();
+    page["$pathname"] = json!("/openlens-verify");
+    let mut identify = props;
+    identify["$anon_distinct_id"] = json!(anon);
+    identify["$internal"] = json!(true);
+    let body = json!({
+        "key": key,
+        "batch": [
+            { "event": "$pageview", "distinct_id": anon, "timestamp": at(0), "properties": page },
+            { "event": "$identify", "distinct_id": person, "timestamp": at(1), "properties": identify },
+        ],
+    });
+    let (status, v) = c.call("POST", "/capture", Some(Body::Json(body)))?;
+    if status != 200 {
+        return Ok(check(
+            false,
+            format!("the test events were refused: {}", api_error(status, &v)),
+        ));
+    }
+    let n = |rows: Vec<Value>| rows.first().and_then(|r| r["n"].as_i64()).unwrap_or(0);
+    let recent = "timestamp >= now() - INTERVAL '1 hour' AND event = '$pageview'";
+    let started = std::time::Instant::now();
+    loop {
+        let linked = n(c.sql(
+            project,
+            &format!("SELECT count(*) AS n FROM events WHERE {recent} AND distinct_id = '{person}'"),
+        )?);
+        if linked > 0 {
+            return Ok(check(
+                true,
+                format!(
+                    "an anonymous page view was given to the person once identified ({} s)",
+                    started.elapsed().as_secs()
+                ),
+            ));
+        }
+        if started.elapsed() >= wait {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_secs(3));
+    }
+    let stored = n(c.sql(
+        project,
+        &format!("SELECT count(*) AS n FROM raw_events WHERE {recent} AND distinct_id = '{anon}'"),
+    )?);
+    let why = if stored > 0 {
+        "the anonymous page view is stored but still not given to the person"
+    } else {
+        "the test page view was not stored yet"
+    };
+    Ok(check(false, format!("{why} after {} s", wait.as_secs())))
 }
 
 /// The block an app's own agents add to their `AGENTS.md`: keep the
