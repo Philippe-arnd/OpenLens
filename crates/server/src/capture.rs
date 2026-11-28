@@ -378,17 +378,8 @@ pub(crate) async fn capture(
         }
     }
     crate::cookieless::resolve(&state, &mut normalized.events, &peer, &headers);
-    // Forgotten people stay forgotten (#230).
-    normalized.events.retain(|e| {
-        !state
-            .meta
-            .is_forgotten(&e.project, &e.distinct_id)
-            .unwrap_or(false)
-    });
     crate::audience::init(&state.data_dir);
     crate::audience::enrich(&mut normalized.events, &peer, &headers);
-    let accepted = normalized.events.len();
-    Metrics::add(&m.events_accepted, accepted as u64);
     Metrics::add(&m.events_rejected, normalized.rejected.len() as u64);
     let rejected: Vec<_> = normalized
         .rejected
@@ -401,7 +392,16 @@ pub(crate) async fn capture(
     let pid = project.id.clone();
     let mut events = normalized.events;
     let tz = project.timezone.clone();
-    let stored = tokio::task::spawn_blocking(move || -> Result<(), String> {
+    let stored = tokio::task::spawn_blocking(move || -> Result<usize, String> {
+        // Forgotten people stay forgotten (#230): a metadata read, so off
+        // the async workers (#676).
+        events.retain(|e| {
+            !st.meta
+                .is_forgotten(&e.project, &e.distinct_id)
+                .unwrap_or(false)
+        });
+        let accepted = events.len();
+        Metrics::add(&m.events_accepted, accepted as u64);
         // Automatic release names from the build fingerprint (#495).
         releases::assign(&st, &pid, &tz, &mut events, Utc::now());
         // People, aliases and person ids (D-009, #450), before the events
@@ -416,11 +416,11 @@ pub(crate) async fn capture(
         if ms >= 100 {
             tracing::warn!(project = %pid, ms, identifies = seen.len(), "capture: metadata write slow");
         }
-        store(&st, &events)
+        store(&st, &events).map(|()| accepted)
     })
     .await;
     match stored {
-        Ok(Ok(())) => {
+        Ok(Ok(accepted)) => {
             let mut resp = (
                 StatusCode::OK,
                 Json(json!({ "accepted": accepted, "rejected": rejected })),
