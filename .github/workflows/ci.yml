@@ -1,7 +1,8 @@
 name: CI
 
 # PR gate: fmt, clippy, tests (incl. HTTP integration tests of every route),
-# layers, licences, SDK budget. ~2.5 min with a warm cache.
+# layers, licences, SDK budget. Budget: 5 min with a warm cache (#691:
+# dependencies built at opt-level 1, tests run with cargo-nextest).
 # Browser e2e: only when the SDK or the capture path changes, and nightly;
 # the dashboard check (CSP, WCAG 2.2 AA, keyboard) also when the UI changes.
 # Docker packaging is tested in release.yml.
@@ -65,7 +66,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2
         with:
-          tool: cargo-deny
+          tool: cargo-deny,cargo-nextest
       # Pull requests: the fast gate (5 minutes at most). Nightly, release
       # tags and on demand: also the heavy tests (`--heavy`). An empty string
       # is falsy in `a && '' || b`, so the condition names the non-empty case.

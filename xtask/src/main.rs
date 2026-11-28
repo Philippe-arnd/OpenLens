@@ -1,6 +1,7 @@
 //! Repository automation.
 //!
-//! - `cargo xtask ci`: everything CI runs (fmt, clippy, tests, layers, deny).
+//! - `cargo xtask ci`: everything CI runs (fmt, clippy, tests with
+//!   cargo-nextest when installed, doctests, layers, deny).
 //! - `cargo xtask layers`: check crate layering against `src/layers.rs`.
 //! - `cargo xtask demo <data-dir>`: write a realistic synthetic app (300
 //!   users, planted patterns) into the `default` project of a data dir, to
@@ -92,20 +93,7 @@ fn ci(heavy: bool) -> Result<(), String> {
             "warnings",
         ],
     )?;
-    if heavy {
-        run(
-            "cargo",
-            &[
-                "test",
-                "--workspace",
-                "--all-targets",
-                "--",
-                "--include-ignored",
-            ],
-        )?;
-    } else {
-        run("cargo", &["test", "--workspace", "--all-targets"])?;
-    }
+    tests(heavy)?;
     check_layers()?;
     env_docs::check()?;
     file_length::check()?;
@@ -123,6 +111,36 @@ fn ci(heavy: bool) -> Result<(), String> {
         eprintln!("xtask: cargo-deny not installed, licence check NOT run");
     }
     Ok(())
+}
+
+/// The tests. cargo-nextest runs every test binary at once (each test in
+/// its own process), where `cargo test` runs the binaries one after the
+/// other: the two big integration binaries no longer queue (#691). nextest
+/// does not run doctests, so they run apart. CI installs nextest; locally,
+/// without it, the same tests run with `cargo test`, and the gate says so.
+fn tests(heavy: bool) -> Result<(), String> {
+    let nextest = Command::new("cargo")
+        .args(["nextest", "--version"])
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if nextest {
+        let mut args = vec!["nextest", "run", "--workspace", "--all-targets"];
+        if heavy {
+            args.extend(["--run-ignored", "all"]);
+        }
+        run("cargo", &args)?;
+    } else {
+        eprintln!(
+            "xtask: cargo-nextest not installed (cargo install cargo-nextest --locked); \
+             running the same tests with cargo test, one binary at a time (slower)"
+        );
+        let mut args = vec!["test", "--workspace", "--all-targets"];
+        if heavy {
+            args.extend(["--", "--include-ignored"]);
+        }
+        run("cargo", &args)?;
+    }
+    run("cargo", &["test", "--workspace", "--doc"])
 }
 
 fn check_layers() -> Result<(), String> {
