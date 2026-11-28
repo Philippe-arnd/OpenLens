@@ -115,7 +115,7 @@ How a project ships, per environment, over a period (the last 90 days by default
 | **Time to restore** | Median time from a failed change to the rollback that put the previous release back, else to the next shipped change that did not fail. Failures with neither are counted as *not restored yet*. |
 
 ## Where they show up
-- **Focus board** (home screen): ranked insight cards, then a KPI strip (DAU/WAU/MAU and users who came back, stickiness, average session, tasks per user per day, sessions with errors) and Web Vitals at p75. A filter bar sets role, release and environment.
+- **Focus board** (home screen): ranked insight cards (when each family shows a card, including its false discovery control, is in [docs/agents/analyze.md](agents/analyze.md) and D-099), then a KPI strip (DAU/WAU/MAU and users who came back, stickiness, average session, tasks per user per day, sessions with errors) and Web Vitals at p75. A filter bar sets role, release and environment.
 - **Focus board sections:** feature pulse (adoption, uses per user, active days, completion, task time), *Who uses what* (roles × features), weekly retention cohorts, journeys, funnels, flag cohorts and release comparison.
 - **MCP:** `kpi_report { env, role, release, by: role | account | plan | page | feature }` returns the headline KPIs plus a 30-day breakdown in one compact payload. `insights` returns the cards, and `user_timeline` returns one person's story.
 - **Export:** `openlens-cli export` writes the raw events as JSONL, day by day, for analysis elsewhere.
