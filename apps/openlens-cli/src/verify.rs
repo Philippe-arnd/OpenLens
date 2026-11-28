@@ -145,8 +145,8 @@ pub(crate) fn linkage<A: Api + ?Sized>(
     };
     let check = |ok: bool, detail: String| json!({ "check": LINK_CHECK, "ok": ok, "detail": format!("{detail}; {hosts_note}"), "fix": fix });
     let (status, list) = c.call("GET", "/api/projects", None)?;
-    let key = Some(&list)
-        .filter(|_| status == 200)
+    let key = (status == 200)
+        .then_some(&list)
         .and_then(|l| l["projects"].as_array())
         .and_then(|ps| ps.iter().find(|p| p["id"] == project))
         .and_then(|p| p["key"].as_str())
