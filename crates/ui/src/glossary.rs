@@ -127,6 +127,15 @@ pub(crate) const KPI: &[(&str, &str)] = &[
 /// numeric header (`th.num`) goes through [`th_num`]; the test below fails
 /// on a literal one left plain, except the counts in [`NOT_METRIC`].
 pub(crate) const COLUMNS: &[(&str, &str)] = &[
+    // Visitors and acquisition (#708, #709, docs/kpis.md).
+    (
+        "Visitors",
+        "Anonymous visitors in the window: people browsing without being logged in, counted once per browser.",
+    ),
+    (
+        "Signup rate",
+        "Accounts created out of visitors and accounts: a lower bound, since a visitor who signs up on another device is not linked.",
+    ),
     (
         "Rage clicks",
         "Clicks in a burst: three fast clicks on the same element, a sign that it did not respond as expected.",
