@@ -164,3 +164,56 @@ async fn the_board_churn_line_agrees_with_the_churn_page() {
     let rate = line.rate().unwrap();
     assert!(rate > 0.0 && rate <= 1.0, "{rate}");
 }
+
+/// The board's churn line is kept for an hour (#748): a user who comes
+/// back changes the Churn page at once, and the board's line once it is
+/// computed again (another filter here, a new hour on a server).
+#[tokio::test]
+async fn the_board_churn_line_is_reused_until_it_is_an_hour_old() {
+    let (d, q) = seed();
+    let f = Filters::default();
+    let first = openlens_engine::board(&q, "p", &f, None)
+        .await
+        .unwrap()
+        .churn
+        .unwrap();
+    let (mut w, _) = Writer::open(d.path(), FlushPolicy::default()).unwrap();
+    let back: Vec<Event> = (0..3)
+        .map(|i| {
+            let e = E {
+                user: "c0",
+                role: "member",
+                session: "back",
+                event: "$pageview",
+                mins_ago: 30 + i,
+                feature: None,
+                release: "v1",
+                props: "{}",
+            };
+            mk(&e, 9000 + i as usize)
+        })
+        .collect();
+    w.append(&back).unwrap();
+    w.flush().unwrap();
+    let page = openlens_engine::churn(&q, "p", None, &f).await.unwrap();
+    assert!(page.churned_recent < first.churned_recent, "c0 is back");
+    let again = openlens_engine::board(&q, "p", &f, None)
+        .await
+        .unwrap()
+        .churn
+        .unwrap();
+    assert_eq!(
+        again.churned_recent, first.churned_recent,
+        "the line computed a moment ago is kept"
+    );
+    let other = Filters {
+        internal: true,
+        ..Filters::default()
+    };
+    let fresh = openlens_engine::board(&q, "p", &other, None)
+        .await
+        .unwrap()
+        .churn
+        .unwrap();
+    assert_eq!(fresh.churned_recent, page.churned_recent);
+}
