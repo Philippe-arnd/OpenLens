@@ -220,7 +220,7 @@ fn every_tool_says_what_it_changes_and_describes_every_parameter() {
             let text = schema["description"].as_str().unwrap_or("");
             assert!(
                 !text.trim().is_empty(),
-                "tool `{name}`: describe its parameter `{param}` (shared ones in `mcp::with`)"
+                "tool `{name}`: describe its parameter `{param}` (shared ones in `mcp_schema::with`)"
             );
         }
     }

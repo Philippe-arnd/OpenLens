@@ -67,7 +67,7 @@ const FIELDS: &[&str] = &[
 
 /// The tools of this module.
 pub(crate) fn specs() -> Vec<ToolSpec> {
-    let with = crate::mcp::with;
+    let with = crate::mcp_schema::with;
     let fields = || {
         json!({
             "title": {"type": "string", "maxLength": 200, "description": "A short headline"},

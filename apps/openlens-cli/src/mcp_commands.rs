@@ -86,8 +86,8 @@ const ALERT_FIELDS: &[&str] = &[
 
 /// The tools of this module.
 pub(crate) fn specs() -> Vec<ToolSpec> {
-    let proj = || crate::mcp::with(json!({}));
-    let with = crate::mcp::with;
+    let proj = || crate::mcp_schema::with(json!({}));
+    let with = crate::mcp_schema::with;
     let filters =
         || json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"}});
     let filtered = |extra: Value| {
