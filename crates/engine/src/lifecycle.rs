@@ -234,7 +234,7 @@ fn line(value: String, c: &Counts, p: Present) -> LifecycleLine {
             ratio(c.accounts, c.visitors + c.accounts)
         },
     });
-    let retention = p.retention.then(|| Retention {
+    let retention = p.retention.then_some(Retention {
         judged: c.judged,
         retained: c.retained,
         churned: c.churned,
