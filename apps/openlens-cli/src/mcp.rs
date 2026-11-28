@@ -54,8 +54,24 @@ fn s(args: &Value, k: &str) -> Option<String> {
     args.get(k).and_then(Value::as_str).map(str::to_owned)
 }
 
+/// A path segment or query value, percent-encoded (RFC 3986 unreserved
+/// characters kept). Every value an agent passes goes through it before
+/// it reaches a URL (#667).
+fn enc(v: &str) -> String {
+    v.bytes()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
+                (b as char).to_string()
+            } else {
+                format!("%{b:02X}")
+            }
+        })
+        .collect()
+}
+
+/// The project id as a path segment, percent-encoded.
 fn project(args: &Value) -> String {
-    s(args, "project").unwrap_or_else(|| "default".into())
+    enc(&s(args, "project").unwrap_or_else(|| "default".into()))
 }
 
 /// The `PATCH /api/projects/{id}` body of the `environments` tool's
@@ -468,33 +484,12 @@ impl Tools for OpenLensTools {
             "releases" => {
                 let mut path = format!("/api/projects/{}/releases", project(args));
                 if let Some(e) = s(args, "env") {
-                    let enc: String = e
-                        .bytes()
-                        .map(|b| {
-                            if b.is_ascii_alphanumeric() || b"-_.".contains(&b) {
-                                (b as char).to_string()
-                            } else {
-                                format!("%{b:02X}")
-                            }
-                        })
-                        .collect();
-                    path.push_str(&format!("?env={enc}"));
+                    path.push_str(&format!("?env={}", enc(&e)));
                 }
                 let (st, v) = c.call("GET", &path, None)?;
                 ok_or(st, v)
             }
             "release_report" => {
-                let enc = |v: &str| -> String {
-                    v.bytes()
-                        .map(|b| {
-                            if b.is_ascii_alphanumeric() || b"-_.".contains(&b) {
-                                (b as char).to_string()
-                            } else {
-                                format!("%{b:02X}")
-                            }
-                        })
-                        .collect()
-                };
                 let Some(release) = s(args, "release") else {
                     return Err("release is required".into());
                 };
@@ -512,17 +507,7 @@ impl Tools for OpenLensTools {
             "delivery" => {
                 let mut q = Vec::new();
                 if let Some(e) = s(args, "env") {
-                    let enc: String = e
-                        .bytes()
-                        .map(|b| {
-                            if b.is_ascii_alphanumeric() || b"-_.".contains(&b) {
-                                (b as char).to_string()
-                            } else {
-                                format!("%{b:02X}")
-                            }
-                        })
-                        .collect();
-                    q.push(format!("env={enc}"));
+                    q.push(format!("env={}", enc(&e)));
                 }
                 if let Some(d) = args.get("days").and_then(Value::as_i64) {
                     q.push(format!("days={d}"));
@@ -657,7 +642,7 @@ impl Tools for OpenLensTools {
                 };
                 for k in keys {
                     if let Some(v) = s(args, k) {
-                        q.push(format!("{k}={}", v.replace(['&', '#', '?', ' '], "")));
+                        q.push(format!("{k}={}", enc(&v)));
                     }
                 }
                 let path = format!("/api/projects/{}/board?{}", project(args), q.join("&"));
@@ -684,7 +669,7 @@ impl Tools for OpenLensTools {
                         let breakdown = match s(args, "by") {
                             Some(by) => {
                                 let mut bq = q.clone();
-                                bq.push(format!("by={}", by.replace(['&', '#', '?', ' '], "")));
+                                bq.push(format!("by={}", enc(&by)));
                                 let path = format!(
                                     "/api/projects/{}/breakdown?{}",
                                     project(args),
@@ -725,10 +710,7 @@ impl Tools for OpenLensTools {
                     Some("start") => {
                         let q: Vec<String> = ["env", "role", "release", "since", "from", "to"]
                             .iter()
-                            .filter_map(|k| {
-                                s(args, k)
-                                    .map(|v| format!("{k}={}", v.replace(['&', '#', '?', ' '], "")))
-                            })
+                            .filter_map(|k| s(args, k).map(|v| format!("{k}={}", enc(&v))))
                             .collect();
                         c.call("POST", &format!("{base}?{}", q.join("&")), None)?
                     }
@@ -746,14 +728,9 @@ impl Tools for OpenLensTools {
             }
             "vitals" => {
                 let mut q = Vec::new();
-                let keys: &[&str] = if name == "board" {
-                    &["env", "role", "release", "since", "from", "to"]
-                } else {
-                    &["env", "role", "release"]
-                };
-                for k in keys {
+                for k in ["env", "role", "release"] {
                     if let Some(v) = s(args, k) {
-                        q.push(format!("{k}={}", v.replace(['&', '#', '?', ' '], "")));
+                        q.push(format!("{k}={}", enc(&v)));
                     }
                 }
                 let path = format!("/api/projects/{}/vitals?{}", project(args), q.join("&"));
@@ -770,16 +747,7 @@ impl Tools for OpenLensTools {
             }
             "user_timeline" => {
                 let who = s(args, "distinct_id").ok_or("distinct_id is required")?;
-                let who: String = who
-                    .bytes()
-                    .map(|b| {
-                        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
-                            (b as char).to_string()
-                        } else {
-                            format!("%{b:02X}")
-                        }
-                    })
-                    .collect();
+                let who = enc(&who);
                 let (st, v) = c.call(
                     "GET",
                     &format!("/api/projects/{}/people/{who}", project(args)),
@@ -830,7 +798,7 @@ impl Tools for OpenLensTools {
                 });
                 let (st, v) = c.call(
                     "PUT",
-                    &format!("/api/projects/{}/flags/{key}", project(args)),
+                    &format!("/api/projects/{}/flags/{}", project(args), enc(&key)),
                     Some(Body::Json(body)),
                 )?;
                 ok_or(st, v)
@@ -857,7 +825,7 @@ impl Tools for OpenLensTools {
                 });
                 let (st, v) = c.call(
                     "PUT",
-                    &format!("/api/projects/{}/surveys/{key}", project(args)),
+                    &format!("/api/projects/{}/surveys/{}", project(args), enc(&key)),
                     Some(Body::Json(body)),
                 )?;
                 ok_or(st, v)
@@ -886,6 +854,44 @@ impl Tools for OpenLensTools {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #667: a value an agent passes reaches the server as itself. `+`,
+    /// spaces, `&`, `#`, `?`, `/` and `%` used to be stripped or misread
+    /// (a release `1.4.0+build.7` became `1.4.0 build.7`).
+    #[test]
+    fn values_reach_the_url_unchanged() {
+        fn decode(e: &str) -> Vec<u8> {
+            let b = e.as_bytes();
+            let mut out = Vec::new();
+            let mut i = 0;
+            while i < b.len() {
+                if b[i] == b'%' {
+                    out.push(u8::from_str_radix(&e[i + 1..i + 3], 16).unwrap());
+                    i += 3;
+                } else {
+                    out.push(b[i]);
+                    i += 1;
+                }
+            }
+            out
+        }
+        for v in [
+            "1.4.0+build.7",
+            "v2 beta",
+            "a&b=c#d?e",
+            "p/flags/x?",
+            "é%2F",
+            "",
+        ] {
+            let e = enc(v);
+            assert!(
+                e.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"-_.~%".contains(&b)),
+                "{e} has a character with a meaning in a URL"
+            );
+            assert_eq!(decode(&e), v.as_bytes(), "{v} round-trips");
+        }
+    }
 
     #[test]
     fn every_tool_call_handles_is_listed_for_agents() {
