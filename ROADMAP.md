@@ -4,7 +4,9 @@ OpenLens is a method plus the tool that carries it out ([docs/method.md](docs/me
 
 **North star.** A PM's first login shows a populated **Focus board**: KPIs by role and release, what makes users stick, where they churn, which journeys lead to value. Nobody configured anything by hand. We target the 80% of apps that are a web front end with logged-in users who have a role.
 
-## Status (2026-11-22)
+## Status
+
+Last updated: 2026-11-28. Latest stable release: v0.7.0 (2026-11-27); `main` is on its way to v0.8.0. Each release's notes are in [docs/releases/](docs/releases/), and everything else is in [CHANGELOG.md](CHANGELOG.md).
 
 | Milestone | Status | Exit check |
 | --- | --- | --- |
@@ -16,7 +18,10 @@ OpenLens is a method plus the tool that carries it out ([docs/method.md](docs/me
 | M5 See it | ✅ | ✅ churn card → replay of a session that churned there |
 | M6 Production + dogfooding | 🚧 | ⏳ Journal and Kanban on OpenLens since 2026-11-22: 30 days without data loss (until 2026-12-22) |
 | M7 The former Later list (D-016) | ✅ | every item shipped, optional ones off until configured |
-| M8 Kubernetes (v0.2) | 🚧 | `helm install` with no value and `kubectl apply -k`, installed, upgraded and smoke-tested on kind in CI |
+| M8 Kubernetes (v0.2) | ✅ | ✅ `helm install` with no value and `kubectl apply -k`, installed, upgraded and smoke-tested on kind in CI (#148); shipped in v0.2.0 |
+| M9 Maintenance on autopilot | 🚧 | ✅ dependencies, security checks, the release train and upgrades of running installs run without a person; ⏳ repository settings only the owner can change (#243) |
+| M10 Polish (v0.3) | 🚧 | ✅ every item shipped in v0.3.0–v0.6.0 except the release cycle on autopilot (#237): its layers shipped in v0.6.0 and v0.7.0, the issue stays open |
+| M11 Explore, category parity (v0.4) | ✅ | ✅ every item shipped in v0.3.0–v0.6.0 ([docs/target-app-parity.md](docs/target-app-parity.md)) |
 
 ---
 
@@ -85,7 +90,7 @@ A layered workspace, `cargo xtask ci`, AGENTS.md, Docker and compose with the he
 - ✅ LLM rewording of cards (optional `OPENLENS_LLM_API_KEY`; numbers guarded, originals kept)
 - ✅ S3 copy (optional): closed days and a daily metadata snapshot, signed with our own SigV4 (checked against the AWS example)
 
-## M8: Kubernetes, packaged for agents (v0.2) 🚧
+## M8: Kubernetes, packaged for agents (v0.2) ✅
 Same philosophy as the Coolify template: one command, no required value, and a guide an agent can follow from an empty cluster to a wired app.
 - ✅ Helm chart (`deploy/helm/openlens`): exactly one replica (single writer), PVC, a generated admin token kept across upgrades, an optional Ingress with TLS, probes, a hardened pod, optional features from Secrets (#145).
 - ✅ Plain manifests and a Kustomize base rendered from the chart, plus an Ingress component and an example overlay (#146).
@@ -95,3 +100,33 @@ Same philosophy as the Coolify template: one command, no required value, and a g
 
 **Exit:** on a fresh kind cluster, an agent following the guide gets a running instance, a wired example app and a green `verify`, with no hand edits.
 
+## M9: Maintenance on autopilot 🚧
+Dependencies, CI, releases and upgrades of running installs happen without a person: bots propose, CI proves, automerge ships.
+- ✅ Renovate: grouped updates, merged once CI is green, an issue when it is not (#195).
+- ✅ Security: RustSec checks, and an issue on a new advisory that closes itself once the check is green again (#196).
+- ✅ A release train: CI cuts a stable release every Tuesday when the nightlies are green (#197), with screenshots regenerated, a notes draft and post-release checks (#246, #258).
+- ✅ Running installs update safely: `:latest`, minor channels and `:edge`; a backup on version change and a data-format guard in the binary (#199); Coolify, Docker, systemd and an opt-in Kubernetes auto-update (#198, #238).
+- ✅ A scheduled agent picks up red builds and failed bumps (#200); toolchains, runners and base images stay current (#201).
+- ⏳ Repository settings only the owner can change (#243).
+
+## M10: Polish (v0.3) 🚧
+Feedback from dogfooding v0.2.
+- ✅ A replay player that fits the screen, and comments pinned to a timestamp (#212, #213).
+- ✅ Times in the viewer's time zone (#215), project icons from the app's favicon (#214).
+- ✅ Settings for users, projects, storage and backups, flags and surveys, and the feature map, all from the UI (#216, #218–#221).
+- ✅ Readable board and events, a person profile and a data explorer (#217, #222).
+- ✅ Scale by looking at the present (#223): a bench at 60 M events, daily rollups, the board read since the current release, past periods in the background, query guard rails and an S3 cold tier, automatic replay sampling (#321–#327).
+- ✅ Self-hosting beyond Coolify: Docker and Compose, binary and systemd, panels, Nomad, Swarm, NixOS, with hands-off updates (#238).
+- 🚧 The release cycle on autopilot (#237). Shipped so far: releases detected with no setup (#495), a Releases page and deploy hooks (#500, #504), a verdict per release (#522), `openlens-cli release` (#521), delivery metrics (#523), release notes read from GitHub and the verdict written back (#574, #575).
+
+## M11: Explore, category parity (v0.4) ✅
+A clean-room pass over the public feature lists of product and web analytics suites (2026-11-22). Every feature works with no configuration, from the feature map. The row-by-row status is in [docs/target-app-parity.md](docs/target-app-parity.md).
+- ✅ Feature flow, audience, acquisition, live view, forms and revenue (#224–#226, #228, #231, #232).
+- ✅ Alerts and a timeline of changes (#227, #267), uptime from real traffic with alerts (#256, #266).
+- ✅ Share links and embeds (#229); erasure, access export, cookieless mode and an audit log (#230, #273); import from other tools' export formats (#233).
+- ✅ Goals with guardrails (#235, #272), a full churn section (#247, #269), flag variants and property targeting (#252, #279).
+- ✅ Feature map quality (#240), Ask OpenLens (#244), findings turned into tickets with their effect measured (#245).
+- ✅ Navigation and settings: sections with tabs, breadcrumbs, setup progress, a page per feature, every board card opens its detail, KPI definitions on hover, AI settings, environments by host, Web Vitals explained, idle replays paused (#402–#406, #408–#411).
+
+## Next
+Not scheduled yet: the open issues of the [Backlog](https://github.com/Philippe-arnd/OpenLens/milestone/12) milestone, grouped in batches A to E (#720–#724), and the gaps in [docs/gaps.md](docs/gaps.md).
