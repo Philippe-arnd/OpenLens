@@ -156,8 +156,6 @@ pub fn router(state: AppState) -> Router {
         .route("/r.js", get(recorder))
         .route("/s.js", get(survey_widget))
         .route("/agents.md", get(agents_guide))
-        .merge(capture)
-        .merge(otlp::routes())
         .route("/api/projects/{project}/digest", get(digest::api))
         .route("/api/openapi.json", get(openapi::serve))
         .route("/oidc/start", get(oidc::start))
@@ -178,6 +176,12 @@ pub fn router(state: AppState) -> Router {
         .merge(status_page::routes())
         .merge(check_ins::routes())
         .merge(capacity::routes())
+        // Pages, the API, the scripts and the assets go out gzip or Brotli
+        // compressed when the client asks (#674). The ingestion routes are
+        // merged after this layer, so their responses stay as they were.
+        .layer(tower_http::compression::CompressionLayer::new())
+        .merge(capture)
+        .merge(otlp::routes())
         .layer(axum::middleware::from_fn(csrf::layer))
         .layer(axum::middleware::from_fn(trusted_headers_layer))
         // Pages, the API and Ask (a few model rounds) get two minutes.

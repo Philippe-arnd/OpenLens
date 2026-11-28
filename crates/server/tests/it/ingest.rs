@@ -281,3 +281,63 @@ async fn identity_is_backfilled_from_existing_events_with_the_same_results() {
         .unwrap();
     assert_eq!(h.state.meta.identities("default").unwrap().unwrap(), kept);
 }
+
+/// The response to `uri` with `accept-encoding` set: its encoding and body.
+async fn fetch_encoded(h: &Harness, uri: &str, encoding: &str) -> (Option<String>, Vec<u8>) {
+    let resp = router(h.state.clone())
+        .oneshot(
+            Request::get(uri)
+                .header("accept-encoding", encoding)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "{uri}");
+    let enc = resp
+        .headers()
+        .get("content-encoding")
+        .map(|v| v.to_str().unwrap().to_owned());
+    let body = axum::body::to_bytes(resp.into_body(), 1 << 22)
+        .await
+        .unwrap();
+    (enc, body.to_vec())
+}
+
+/// Scripts and assets go out compressed when asked; ingestion answers do
+/// not (#674).
+#[tokio::test]
+async fn scripts_and_assets_are_compressed_but_ingestion_answers_are_not() {
+    let h = harness();
+    for uri in ["/c.js", "/assets/app.css", "/r.js", "/assets/player.js"] {
+        let (plain_enc, plain) = fetch_encoded(&h, uri, "identity").await;
+        assert_eq!(plain_enc, None, "{uri}");
+        let (br_enc, br) = fetch_encoded(&h, uri, "br").await;
+        assert_eq!(br_enc.as_deref(), Some("br"), "{uri}");
+        assert!(br.len() < plain.len(), "{uri}");
+        let (gz_enc, gz) = fetch_encoded(&h, uri, "gzip").await;
+        assert_eq!(gz_enc.as_deref(), Some("gzip"), "{uri}");
+        let mut inflated = Vec::new();
+        std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&gz[..]), &mut inflated)
+            .unwrap();
+        assert_eq!(inflated, plain, "{uri}");
+    }
+
+    let resp = router(h.state.clone())
+        .oneshot(
+            Request::post("/capture")
+                .header("content-type", "application/json")
+                .header("accept-encoding", "gzip, br")
+                .body(Body::from(batch(&h.key)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(resp.headers().get("content-encoding").is_none());
+    let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["accepted"], 2);
+}

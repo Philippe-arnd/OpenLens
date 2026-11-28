@@ -16,6 +16,17 @@ Numbers to keep OpenLens honest about "lean". Re-run them when ingestion, storag
 - **What one event is:** realistic SDK events (page views, clicks with a feature, Web Vitals, feature uses, submits) for 5,000 users, each about 250 bytes of JSON.
 - **Setup:** the server ran pinned to one core (`taskset -c 0`) of a 4-vCPU VPS (Intel Haswell, 2026-11-22), using the `perf` profile. The load generator ran on the other cores, over keep-alive HTTP/1.1 to `/capture`.
 
+## Transfer sizes (#674, 2026-11-28)
+
+Pages, the API, the scripts and the assets are compressed (gzip or Brotli, whichever the browser prefers, at the library's default level); the ingestion routes (`/capture`, `/e`, `/flags`, `/r`, `/v1/metrics`) are not. Bytes on the wire, measured by the server's integration test through the real router:
+
+| Resource | Before | gzip | Brotli |
+| --- | --- | --- | --- |
+| `/c.js` (every customer page) | 19,876 | 8,120 | 8,224 |
+| `/assets/app.css` | 107,103 | 22,670 | 23,917 |
+| `/r.js` (replay recorder) | 200,916 | 64,956 | 47,107 |
+| `/assets/player.js` (replay player) | 291,808 | 92,845 | 73,117 |
+
 ## Board
 
 | Data | Board (API, one vCPU) |
