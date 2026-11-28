@@ -32,6 +32,12 @@ pub trait Tools {
     /// Run a tool. `Err` is reported to the agent as a tool error (not a
     /// protocol error), so it can read the message and fix its call.
     fn call(&self, name: &str, args: &Value) -> Result<Value, String>;
+    /// Why a tool that is not listed is refused, when the server knows it
+    /// (for example, it belongs to another profile). `None` reports an
+    /// unknown tool.
+    fn unavailable(&self, _name: &str) -> Option<String> {
+        None
+    }
 }
 
 fn response(id: &Value, result: Value) -> Value {
@@ -73,7 +79,10 @@ pub fn handle(tools: &dyn Tools, name: &str, version: &str, req: &Value) -> Opti
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             if !tools.list().iter().any(|t| t.name == tool) {
-                return Some(error(&id, -32602, &format!("unknown tool `{tool}`")));
+                let message = tools
+                    .unavailable(tool)
+                    .unwrap_or_else(|| format!("unknown tool `{tool}`"));
+                return Some(error(&id, -32602, &message));
             }
             let args = params
                 .get("arguments")

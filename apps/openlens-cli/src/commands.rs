@@ -279,6 +279,17 @@ pub(super) enum Command {
         #[arg(long, default_value = "default")]
         project: String,
     },
+    /// What to work on next (#715): findings ranked by impact ×
+    /// confidence, each with its id and state (new, proposed, approved,
+    /// shipped, learned).
+    NextActions {
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+        /// Only the actions in this state.
+        #[arg(long, value_parser = ["new", "proposed", "approved", "shipped", "learned", "dismissed"])]
+        state: Option<String>,
+    },
     /// Status announcements and incident updates (#562): list, post,
     /// update, edit, close, delete, and whether they go to the alert
     /// channels.
@@ -478,6 +489,11 @@ pub(super) enum Command {
         /// Directory agents may write to.
         #[arg(long, required = true)]
         automation_write_root: PathBuf,
+        /// Which tools to serve (D-115): `product` (the default: wiring,
+        /// map, KPIs, releases), `ops` (uptime, status page,
+        /// announcements, maintenance, jobs) or `all`.
+        #[arg(long, value_enum, default_value_t = crate::mcp_profile::Profile::Product)]
+        profile: crate::mcp_profile::Profile,
     },
 }
 

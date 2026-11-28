@@ -1,13 +1,15 @@
 //! OpenLens tools for the MCP server (`openlens-cli mcp`).
 //!
 //! Every tool goes through the same HTTP API as the CLI. Tools that read
-//! files only accept paths inside `--automation-read-root`.
+//! files only accept paths inside `--automation-read-root`. The server
+//! serves the tools of one profile (`--profile`, D-115).
 
 use std::path::{Path, PathBuf};
 
 use openlens_mcp::{ToolSpec, Tools};
 use serde_json::{Value, json};
 
+use crate::mcp_profile::Profile;
 use crate::{Body, Client};
 
 pub(crate) struct OpenLensTools {
@@ -16,10 +18,16 @@ pub(crate) struct OpenLensTools {
     // Reserved for tools that write (exports); kept so the root is enforced
     // from day one.
     _write_root: PathBuf,
+    profile: Profile,
 }
 
 impl OpenLensTools {
-    pub(crate) fn new(client: Client, read: &Path, write: &Path) -> Result<Self, String> {
+    pub(crate) fn new(
+        client: Client,
+        read: &Path,
+        write: &Path,
+        profile: Profile,
+    ) -> Result<Self, String> {
         let canon = |p: &Path| {
             p.canonicalize()
                 .map_err(|e| format!("{}: {e}", p.display()))
@@ -35,6 +43,7 @@ impl OpenLensTools {
             client,
             read_root,
             _write_root: write_root,
+            profile,
         })
     }
 
@@ -116,8 +125,9 @@ fn ok_or(status: u16, v: Value) -> Result<Value, String> {
     }
 }
 
-impl Tools for OpenLensTools {
-    fn list(&self) -> Vec<ToolSpec> {
+impl OpenLensTools {
+    /// Every tool, whatever the profile.
+    fn every_tool() -> Vec<ToolSpec> {
         let proj = json!({ "project": { "type": "string", "description": "Project id (default: default)" } });
         let with = |extra: Value| {
             let mut p = proj.clone();
@@ -343,8 +353,27 @@ impl Tools for OpenLensTools {
         tools.extend(crate::agent_kit::specs(&proj));
         tools
     }
+}
+
+impl Tools for OpenLensTools {
+    /// The tools of this server's profile.
+    fn list(&self) -> Vec<ToolSpec> {
+        let mut tools = Self::every_tool();
+        tools.retain(|t| self.profile.serves(t.name));
+        tools
+    }
+
+    fn unavailable(&self, name: &str) -> Option<String> {
+        self.profile.refusal(name)
+    }
 
     fn call(&self, name: &str, args: &Value) -> Result<Value, String> {
+        if !self.profile.serves(name) {
+            return Err(self
+                .profile
+                .refusal(name)
+                .unwrap_or_else(|| format!("unknown tool {name}")));
+        }
         let c = &self.client;
         match name {
             "guide" => {
@@ -891,7 +920,7 @@ mod tests {
     fn every_tool_call_handles_is_listed_for_agents() {
         let dir = tempfile::tempdir().unwrap();
         let client = Client::new(Some("http://localhost:1".into()), Some("t".into())).unwrap();
-        let tools = OpenLensTools::new(client, dir.path(), dir.path()).unwrap();
+        let tools = OpenLensTools::new(client, dir.path(), dir.path(), Profile::All).unwrap();
         let listed: Vec<&str> = tools.list().iter().map(|t| t.name).collect();
         // Parse the dispatch arms of `call` from this file, so a new arm
         // without a ToolSpec fails here.
@@ -926,7 +955,7 @@ mod tests {
         #[cfg(unix)]
         std::os::unix::fs::symlink(dir.path().join("secret.txt"), root.join("link.txt")).unwrap();
         let client = Client::new(Some("http://localhost:1".into()), Some("t".into())).unwrap();
-        let tools = OpenLensTools::new(client, &root, &root).unwrap();
+        let tools = OpenLensTools::new(client, &root, &root, Profile::All).unwrap();
         assert!(tools.readable("ok.yaml").is_ok());
         assert!(tools.readable("../secret.txt").is_err());
         #[cfg(unix)]

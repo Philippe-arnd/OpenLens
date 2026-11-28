@@ -18,6 +18,7 @@ mod mcp_commands;
 mod mcp_maintenance;
 #[cfg(test)]
 mod mcp_parity;
+mod mcp_profile;
 mod mcp_status_page;
 
 use std::path::PathBuf;
@@ -584,6 +585,15 @@ fn run(cli: Cli) -> Result<bool, String> {
             out(&v);
             Ok(status == 200)
         }
+        Command::NextActions { project, state } => {
+            let mut path = format!("/api/projects/{project}/next-actions");
+            if let Some(s) = state {
+                path.push_str(&format!("?state={s}"));
+            }
+            let (status, v) = client()?.call("GET", &path, None)?;
+            out(&v);
+            Ok(status == 200)
+        }
         Command::Maintenance { action } => maintenance::run(&client()?, action),
         Command::Announce { action } => announce::run(&client()?, action),
         Command::StatusPage { action } => status_page::run(&client()?, action),
@@ -874,9 +884,14 @@ fn run(cli: Cli) -> Result<bool, String> {
         Command::Mcp {
             automation_read_root,
             automation_write_root,
+            profile,
         } => {
-            let tools =
-                mcp::OpenLensTools::new(client()?, automation_read_root, automation_write_root)?;
+            let tools = mcp::OpenLensTools::new(
+                client()?,
+                automation_read_root,
+                automation_write_root,
+                *profile,
+            )?;
             openlens_mcp::serve(&tools, "openlens", env!("CARGO_PKG_VERSION"))
                 .map_err(|e| e.to_string())?;
             Ok(true)

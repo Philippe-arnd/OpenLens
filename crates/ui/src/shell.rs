@@ -90,6 +90,7 @@ pub(crate) const NAV: &[NavGroup] = &[
             ("/goals", "Goals", &["Goals"]),
             ("/flags", "Flags", &["Flags"]),
             ("/surveys", "Surveys", &["Surveys"]),
+            ("/actions", "Next actions", &["Next actions"]),
             ("/tickets", "Tickets", &["Tickets", "New ticket"]),
             ("/digest", "Digest", &["Weekly digest"]),
         ],

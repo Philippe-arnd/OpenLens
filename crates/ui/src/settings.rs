@@ -220,7 +220,7 @@ pub fn tickets(
         html! {
             div.heading { div {
                 h1 { "Tickets" }
-                p.muted { "From a finding to a ticket, a release, and the measured effect: OpenLens follows each issue to the release that ships it, measures its metric 14 days later (against the flag's other sessions, or the metric's normal weekly range) and comments on the issue: improved, worse or inconclusive." }
+                p.muted { "From a finding to a ticket, a release, and the measured effect: OpenLens follows each issue to the release that ships it, measures its metric 14 days later (against the flag's other sessions, or the metric's normal weekly range) and comments on the issue: improved, worse or inconclusive. The findings to act on, ranked, with what agents propose: " a href={ "/p/" (p.id) "/actions" } { "Next actions" } "." }
             } }
             @if !measured.is_empty() {
                 // no_detail (#409): the measured tickets are listed below.

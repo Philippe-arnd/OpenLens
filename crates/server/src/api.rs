@@ -74,6 +74,15 @@ pub(crate) fn routes() -> Router<AppState> {
             "/api/projects/{project}/tickets",
             get(crate::tickets::api_list).post(crate::tickets::api_create),
         )
+        // Next actions (#715, D-114).
+        .route(
+            "/api/projects/{project}/next-actions",
+            get(crate::next_actions::api_list),
+        )
+        .route(
+            "/api/projects/{project}/next-actions/{action}/propose",
+            post(crate::next_actions::api_propose),
+        )
         .route("/api/feature-map/validate", post(validate_map))
         .route(
             "/api/projects/{project}/import",

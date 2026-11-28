@@ -98,10 +98,20 @@ pub(crate) fn required(method: &Method, path: &str) -> Scope {
         .strip_prefix("/api/projects/")
         .and_then(|rest| rest.split_once('/'))
         .is_some_and(|(_, tail)| tail == "board/jobs" || tail.starts_with("board/jobs/"));
+    // Proposing a next action drafts a ticket and posts nothing outside
+    // OpenLens (#715, D-114): an agent with a read token may.
+    let propose = *method == Method::POST
+        && path
+            .strip_prefix("/api/projects/")
+            .and_then(|rest| rest.split_once('/'))
+            .and_then(|(_, tail)| tail.strip_prefix("next-actions/"))
+            .and_then(|tail| tail.strip_suffix("/propose"))
+            .is_some_and(|id| !id.is_empty() && !id.contains('/'));
     let reads = matches!(*method, Method::GET | Method::HEAD)
         || (*method == Method::POST
             && (path.ends_with("/sql") || path == "/api/feature-map/validate"))
-        || board_job;
+        || board_job
+        || propose;
     if reads { Scope::Read } else { Scope::Write }
 }
 
@@ -218,6 +228,16 @@ mod tests {
         assert_eq!(
             required(&Method::POST, "/api/projects/a/environments/allow"),
             Scope::Admin
+        );
+        // An agent proposes with a read token; nothing else under the
+        // next actions changes with it (#715).
+        assert_eq!(
+            required(&Method::POST, "/api/projects/a/next-actions/0a1b/propose"),
+            Scope::Read
+        );
+        assert_eq!(
+            required(&Method::POST, "/api/projects/a/next-actions/0a1b/x/propose"),
+            Scope::Write
         );
     }
 }

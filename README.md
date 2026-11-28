@@ -88,6 +88,8 @@ From then on, agents keep the map current. Over **MCP** (`openlens-cli mcp`) the
 - `insights`, `kpi_report` (by role, account, plan, page or feature), `user_timeline`;
 - `errors`, `vitals`, `releases`, `digest`, read-only `sql`, `flags`, `surveys`.
 
+That is the default product profile. Operations agents (uptime, status page, announcements, maintenance, job check-ins) start it with `openlens-cli mcp --profile ops`, or `--profile all` for every tool.
+
 ## 🔌 Wire an app
 
 ```html

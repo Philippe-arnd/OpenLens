@@ -42,6 +42,7 @@ mod llm_presets;
 mod maintenance;
 mod manage;
 pub mod metrics;
+mod next_actions;
 mod oidc;
 mod openapi;
 mod otlp;

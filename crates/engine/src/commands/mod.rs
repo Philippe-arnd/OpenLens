@@ -17,6 +17,7 @@ use serde::de::DeserializeOwned;
 
 use crate::{Board, Filters};
 
+pub mod actions;
 pub mod alerts;
 pub mod announcements;
 pub mod ask;
@@ -114,6 +115,11 @@ pub const REGISTRY: &[Spec] = &[
     spec::<tickets::DraftTicket>(),
     spec::<tickets::File>(),
     spec::<tickets::SetTarget>(),
+    // Next actions (#715, D-114).
+    spec::<actions::Next>(),
+    spec::<actions::Propose>(),
+    spec::<actions::Approve>(),
+    spec::<actions::Dismiss>(),
     spec::<deploys::RotateHook>(),
     spec::<deploys::Record>(),
     // A release recorded by its deploy step (#521).
