@@ -491,7 +491,71 @@ pub struct Journey {
 /// (#452, D-059). The first success comes from the success rows `firsts`
 /// (`success_day` for the closed days, the events of the success event
 /// for the rest, D-062).
+///
+/// The answer is kept for [`JOURNEYS_FOR`] per data root, project, filters
+/// and success events (#730): four queries of about 2 s each at 4 M events,
+/// for a 30-day aggregate that new data barely moves, were paid again on
+/// every recompute of every board (after each flush). A new feature map
+/// with other success events is another key.
 pub(crate) async fn journeys(
+    q: &QueryEngine,
+    project: &str,
+    firsts: &crate::board_success::SuccessRows<'_>,
+    sf: &str,
+    f: &Filters,
+    successes: &[(String, String)],
+) -> Result<Vec<Journey>> {
+    let key = format!(
+        "{}\u{0}{project}\u{0}{f:?}\u{0}{successes:?}",
+        q.root().display()
+    );
+    if let Some(kept) = journeys_kept(&key) {
+        return Ok(kept);
+    }
+    let out = journeys_now(q, project, firsts, sf, f, successes).await?;
+    keep_journeys(key, &out);
+    Ok(out)
+}
+
+/// How long computed journeys are reused.
+pub(crate) const JOURNEYS_FOR: std::time::Duration = std::time::Duration::from_secs(3600);
+/// Journeys kept at most (one per board key; the oldest goes first).
+const JOURNEYS_KEPT: usize = 256;
+
+type JourneyCache =
+    std::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, Vec<Journey>)>>;
+
+fn journey_cache() -> &'static JourneyCache {
+    static CACHE: std::sync::OnceLock<JourneyCache> = std::sync::OnceLock::new();
+    CACHE.get_or_init(JourneyCache::default)
+}
+
+/// The journeys kept for `key`, when they are recent enough. A poisoned
+/// lock reads as nothing kept: the journeys are computed again.
+fn journeys_kept(key: &str) -> Option<Vec<Journey>> {
+    let cache = journey_cache().lock().ok()?;
+    let (at, j) = cache.get(key)?;
+    (at.elapsed() < JOURNEYS_FOR).then(|| j.clone())
+}
+
+fn keep_journeys(key: String, j: &[Journey]) {
+    let Ok(mut cache) = journey_cache().lock() else {
+        return;
+    };
+    cache.retain(|_, (at, _)| at.elapsed() < JOURNEYS_FOR);
+    if cache.len() >= JOURNEYS_KEPT
+        && let Some(oldest) = cache
+            .iter()
+            .min_by_key(|(_, (at, _))| *at)
+            .map(|(k, _)| k.clone())
+    {
+        cache.remove(&oldest);
+    }
+    cache.insert(key, (std::time::Instant::now(), j.to_vec()));
+}
+
+/// [`journeys`], computed.
+async fn journeys_now(
     q: &QueryEngine,
     project: &str,
     firsts: &crate::board_success::SuccessRows<'_>,
