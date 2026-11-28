@@ -9,7 +9,14 @@ use openlens_query::{Limits, QueryEngine};
 use openlens_storage::{FlushPolicy, Writer};
 
 /// One event `mins_ago`, in production.
-fn ev(who: &str, event: &str, session: &str, mins_ago: i64, path: &str, props: &str) -> Event {
+pub(super) fn ev(
+    who: &str,
+    event: &str,
+    session: &str,
+    mins_ago: i64,
+    path: &str,
+    props: &str,
+) -> Event {
     let ts = Utc::now() - Duration::minutes(mins_ago);
     Event {
         uuid: format!("{who}-{event}-{session}-{mins_ago}"),
@@ -32,7 +39,7 @@ fn ev(who: &str, event: &str, session: &str, mins_ago: i64, path: &str, props: &
     }
 }
 
-fn store(evs: &[Event]) -> (tempfile::TempDir, QueryEngine) {
+pub(super) fn store(evs: &[Event]) -> (tempfile::TempDir, QueryEngine) {
     let dir = tempfile::tempdir().unwrap();
     let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
     w.append(evs).unwrap();
