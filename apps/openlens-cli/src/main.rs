@@ -18,6 +18,7 @@ mod mcp_commands;
 mod mcp_maintenance;
 #[cfg(test)]
 mod mcp_parity;
+mod mcp_schema;
 mod mcp_status_page;
 
 use std::path::PathBuf;

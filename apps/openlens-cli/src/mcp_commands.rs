@@ -6,7 +6,7 @@
 //! small; [`specs`] are listed after its tools and [`call`] answers the
 //! names it does not know.
 
-use openlens_mcp::ToolSpec;
+use openlens_mcp::{Effect, ToolSpec};
 use serde_json::{Value, json};
 
 use crate::{Body, Client};
@@ -86,14 +86,8 @@ const ALERT_FIELDS: &[&str] = &[
 
 /// The tools of this module.
 pub(crate) fn specs() -> Vec<ToolSpec> {
-    let proj = || json!({ "project": { "type": "string", "description": "Project id (default: default)" } });
-    let with = |extra: Value| {
-        let mut p = proj();
-        if let (Some(a), Some(b)) = (p.as_object_mut(), extra.as_object()) {
-            a.extend(b.clone());
-        }
-        p
-    };
+    let proj = || crate::mcp_schema::with(json!({}));
+    let with = crate::mcp_schema::with;
     let filters =
         || json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"}});
     let filtered = |extra: Value| {
@@ -106,174 +100,199 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
     vec![
         ToolSpec {
             name: "routes",
+            effect: Effect::ReadOnly,
             description: "The app's server routes over the last `days` (1 to 90, default 7) in one environment (production unless env), from the server SDK's middleware: per method and route template, requests, 5xx count and share, p50 and p95 in ms (upper bounds of the duration histogram), the largest duration, the feature whose key action the route is (`server:` in the feature map), and its exemplars: `slowest` (the slowest request of the period) and `first_5xx` (the first answered 5xx), each with ms, time, status and, when known, trace id and session id (open its replay at that time). Release verdicts judge the same routes (5xx share up significantly, or p95 1.5 times and 200 ms slower); `release_report` shows them as `route` checks, a slower route's p95 check with its slowest request as `exemplar`. Empty, with a note, until the server SDK sends stats. `dependencies` lists the app's outgoing calls per external host over the same days (from the Node SDK's `captureOutgoing()` or OTLP `http.client.request.duration`): calls, failed calls (5xx or no response) and their share, p95 in ms, and how each host moved since the release before (`fails_more`, `slower`). Dependencies are shown, never judged: `release_report` lists those that got worse as `dependencies`, and they never change a verdict. A host failing for 15 minutes raises a `dep:<host>` alert.",
-            input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"days":{"type":"integer","minimum":1,"maximum":90}}))}),
+            input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"days":{"description":"How many days back to read, 1 to 90 (default: 7)","type":"integer","minimum":1,"maximum":90}}))}),
         },
         ToolSpec {
             name: "runtime",
+            effect: Effect::ReadOnly,
             description: "Runtime health of the app's server per release in one environment (production unless env), from the Node SDK (on with its Express middleware, or `captureRuntime()`), newest first: process starts and restarts (starts more than 30 minutes after the release's first runtime event), restarts per day, the largest RSS and heap used in bytes, the median of the stats windows' event-loop delay p50 and p99 in ms (1, 5 or 10-minute windows, D-091), and next to the release before: RSS growth (0.25 = 25 % more) and its `restarts` check. Only restarts per day are judged: significantly up, at least twice and 5 more per day, makes a release's verdict regressed (a crash loop); memory and loop delay are shown, never judged. `release_report` carries the same as `runtime`. Empty, with a note, until the SDK sends runtime stats.",
             input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"}}))}),
         },
         ToolSpec {
             name: "capacity",
+            effect: Effect::ReadOnly,
             description: "What this OpenLens instance keeps, as its disk allows (D-088): recordings kept per project a day, with `value`, `floor` (300: never less), `ceiling` and a `reason`; replay retention (30 days) and event retention (400 days), fixed whatever the disk (D-015, `derived` false); the disk budget (80 % of the data volume minus other files, or `OPENLENS_DISK_BUDGET`) and where it comes from, the volume, free and used bytes, and each project's bytes a day and share of the budget; `stats_window`, the route-stats window in seconds (60, 300 or 600: finer when the budget has room and the busiest project has few active routes, D-091) with its `reason`, which the server SDKs follow. `derived` is false when the floor applies because the volume or the disk could not be measured; `reason` says why. Instance-wide: needs the admin token.",
             input_schema: json!({"type":"object","properties":{}}),
         },
         ToolSpec {
             name: "delete_goal",
+            effect: Effect::Destructive,
             description: "Remove a goal (its id from `goals`). Objectives that used it as a key result keep the others.",
-            input_schema: json!({"type":"object","properties":with(json!({"goal":{"type":"string"}})),"required":["goal"]}),
+            input_schema: json!({"type":"object","properties":with(json!({"goal":{"description":"The goal id, from `goals`","type":"string"}})),"required":["goal"]}),
         },
         ToolSpec {
             name: "set_objective",
+            effect: Effect::Additive,
             description: "Set an objective: a sentence (`title`), one to three existing goal ids from `goals` as its key results, and the last day of its period (`end`, YYYY-MM-DD, within a year). At most 10 open objectives per project.",
             input_schema: json!({"type":"object","properties":with(json!({
-                "title":{"type":"string"},
-                "goals":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":3},
-                "end":{"type":"string"}
+                "title":{"description":"The objective, as a sentence","type":"string"},
+                "goals":{"description":"One to three goal ids from `goals`: its key results","type":"array","items":{"type":"string"},"minItems":1,"maxItems":3},
+                "end":{"description":"The last day of its period, YYYY-MM-DD, within a year","type":"string"}
             })),"required":["title","goals","end"]}),
         },
         ToolSpec {
             name: "delete_objective",
+            effect: Effect::Destructive,
             description: "Remove an objective (its id from `goals`); its goals stay.",
-            input_schema: json!({"type":"object","properties":with(json!({"objective":{"type":"string"}})),"required":["objective"]}),
+            input_schema: json!({"type":"object","properties":with(json!({"objective":{"description":"The objective id, from `goals`","type":"string"}})),"required":["objective"]}),
         },
         ToolSpec {
             name: "status",
+            effect: Effect::ReadOnly,
             description: "Is the app up now: up, down, maintenance (a planned window covers production), unknown or off, since when, the open incidents and the maintenance windows running or starting within 7 days. Check it around a deploy.",
             input_schema: json!({"type":"object","properties":proj()}),
         },
         ToolSpec {
             name: "alerts",
+            effect: Effect::ReadOnly,
             description: "Uptime and alerting: the status, availability over a day and a week (planned maintenance left out, `maintenance_left_out` in seconds), the maintenance windows, response times over a day (median, p95), incidents of 30 days, the last 15 checks, and the alert settings (what raises an alert, quiet hours, the probe's path, channels; a webhook or ntfy topic that is set reads '(set)').",
             input_schema: json!({"type":"object","properties":proj()}),
         },
         ToolSpec {
             name: "uptime_days",
+            effect: Effect::ReadOnly,
             description: "Uptime history, one row per UTC day: from and to (YYYY-MM-DD, at most 400 days; default the last 90), env (default production). Per day: state (up, partial: down under an hour, down: an hour or more, none: not checked), availability (share of good checks), up_seconds, and stats (checks, failed, down_seconds, measured_seconds, incidents, p50/p95/max ms); plus the range's availability, seconds up and measured. Read it for an SLO or a monthly report.",
             input_schema: json!({"type":"object","properties":with(json!({
-                "from":{"type":"string"},
-                "to":{"type":"string"},
+                "from":{"description":"First day, YYYY-MM-DD UTC (default: 90 days ago)","type":"string"},
+                "to":{"description":"Last day, YYYY-MM-DD UTC, at most 400 days after from (default: today)","type":"string"},
                 "env":{"type":"string"}
             }))}),
         },
         ToolSpec {
             name: "availability",
+            effect: Effect::ReadOnly,
             description: "Availability of an environment (env, default production) over 24h, 7d, 30d, 90d, this month, last month (project's zone) and 365d: time up over time measured, seconds not measured (no check: neither up nor down), seconds of planned maintenance left out, incidents, p95 ms; and slo when a target is set: target, 30-day availability, error budget, spent and left (seconds), burn rate over the last hour and day (1 = the budget lasts 30 days). The figures of an SLA or a monthly report.",
             input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"}}))}),
         },
         ToolSpec {
             name: "availability_target",
+            effect: Effect::Destructive,
             description: "Set or remove an environment's availability target over a rolling 30 days: target a share from 0.5 to 0.99999 (0.999 for 99.9%), or null to remove it; env defaults to production. Alerts go out when its error budget is spent or burning fast.",
             input_schema: json!({"type":"object","properties":with(json!({
                 "env":{"type":"string"},
-                "target":{"type":["number","null"],"minimum":0.5,"maximum":0.99999}
+                "target":{"description":"The share of time up to aim for, 0.5 to 0.99999 (0.999 for 99.9%), or null to remove it","type":["number","null"],"minimum":0.5,"maximum":0.99999}
             })),"required":["target"]}),
         },
         ToolSpec {
             name: "incidents",
+            effect: Effect::ReadOnly,
             description: "Every incident of the project (kept as long as the project), newest first, page by page: limit (1-100, default 50) and before (the previous page's next). Each has its id, rule (down, traffic, failing, cert, insight:…, error:…, env:<env>:down…), start, end (null while open), minutes and cause.",
             input_schema: json!({"type":"object","properties":with(json!({
-                "before":{"type":"integer"},
-                "limit":{"type":"integer","minimum":1,"maximum":100}
+                "before":{"description":"The `next` of the previous page, to read the page after it","type":"integer"},
+                "limit":{"description":"Incidents per page, 1 to 100 (default: 50)","type":"integer","minimum":1,"maximum":100}
             }))}),
         },
         ToolSpec {
             name: "jobs",
+            effect: Effect::ReadOnly,
             description: "Cron and background jobs that check in (POST /check-in/<key>/<slug>, or checkIn in a server SDK): per job its state (learning, ok, missed: no check-in for 1.5 times its usual gap, failed: its last check-in said error, slower: its last run took twice its usual time or more), last check-in, status and duration, the gap expected (declared with expectEvery, or learned: the median gap once there are 3), when it counts as missed, and its usual duration; and whether jobs count in availability. Missed, failed and slower open incidents (job:<slug>:missed|failed|slower) announced once on the alert channels.",
             input_schema: json!({"type":"object","properties":proj()}),
         },
         ToolSpec {
             name: "check_in",
+            effect: Effect::Additive,
             description: "Record a check-in of a job (slug: 1 to 64 of a-z, 0-9, _ and -) as its cron would: status ok (default) or error, ms (its duration), expect_every (seconds between runs, 10 to 31 days, instead of learning it; 0 learns again). One per job every 10 seconds; at most 200 jobs per project.",
             input_schema: json!({"type":"object","properties":with(json!({
-                "slug":{"type":"string","maxLength":64},
-                "status":{"type":"string","enum":["ok","error"]},
-                "ms":{"type":"integer","minimum":0},
-                "expect_every":{"type":"integer","minimum":0}
+                "slug":{"description":"The job's id: 1 to 64 of a-z, 0-9, _ and -","type":"string","maxLength":64},
+                "status":{"description":"How the run went (default: ok)","type":"string","enum":["ok","error"]},
+                "ms":{"description":"How long the run took, in milliseconds","type":"integer","minimum":0},
+                "expect_every":{"description":"Seconds expected between runs, 10 s to 31 days; 0 learns the gap again","type":"integer","minimum":0}
             })),"required":["slug"]}),
         },
         ToolSpec {
             name: "job_set",
+            effect: Effect::Destructive,
             description: "Change the jobs of a project: in_availability (true or false: count check-ins and missed runs in the Uptime page's 24-hour and 7-day availability; off by default), and/or remove (a job's slug: forget it and its check-ins, its open incidents close without a message).",
             input_schema: json!({"type":"object","properties":with(json!({
-                "in_availability":{"type":"boolean"},
-                "remove":{"type":"string"}
+                "in_availability":{"description":"Count check-ins and missed runs in availability (off by default)","type":"boolean"},
+                "remove":{"description":"A job's slug: forget it and its check-ins","type":"string"}
             }))}),
         },
         ToolSpec {
             name: "alert_set",
+            effect: Effect::Destructive,
             description: "Change alert settings: only the fields given change. down (probe the app address every minute), down_wait (minutes before announcing), traffic (traffic stopped), regressions (regressions and new error groups), cert (certificate expiring), failing (spike of failing requests), budget_spent and budget_burn (an availability target's error budget spent, or gone within 2 days at the last day's rate), quiet ([start, end) hours in the project's zone, or null), health_path, email, webhook (Slack, Discord or JSON URL), ntfy (topic or URL). With test true, then sends a test message on every channel and says which failed.",
             input_schema: json!({"type":"object","properties":with(json!({
-                "down":{"type":"boolean"},
-                "down_wait":{"type":"integer","minimum":0},
-                "traffic":{"type":"boolean"},
-                "regressions":{"type":"boolean"},
-                "cert":{"type":"boolean"},
-                "failing":{"type":"boolean"},
-                "budget_spent":{"type":"boolean"},
-                "budget_burn":{"type":"boolean"},
-                "quiet":{"type":["array","null"],"items":{"type":"integer","minimum":0,"maximum":23},"minItems":2,"maxItems":2},
-                "health_path":{"type":"string"},
-                "email":{"type":"boolean"},
-                "webhook":{"type":"string"},
-                "ntfy":{"type":"string"},
-                "test":{"type":"boolean","default":false}
+                "down":{"description":"Alert when the app's address stops answering (checked every minute)","type":"boolean"},
+                "down_wait":{"description":"Minutes the app stays down before the alert goes out","type":"integer","minimum":0},
+                "traffic":{"description":"Alert when traffic stops","type":"boolean"},
+                "regressions":{"description":"Alert on regressed releases and new error groups","type":"boolean"},
+                "cert":{"description":"Alert when the TLS certificate is about to expire","type":"boolean"},
+                "failing":{"description":"Alert on a spike of failing requests","type":"boolean"},
+                "budget_spent":{"description":"Alert when an availability target's error budget is spent","type":"boolean"},
+                "budget_burn":{"description":"Alert when the error budget would be gone within 2 days at the last day's rate","type":"boolean"},
+                "quiet":{"description":"Quiet hours [start, end) in the project's zone, 0 to 23, or null for none","type":["array","null"],"items":{"type":"integer","minimum":0,"maximum":23},"minItems":2,"maxItems":2},
+                "health_path":{"description":"The path the uptime probe requests, such as /health","type":"string"},
+                "email":{"description":"Send alerts by email","type":"boolean"},
+                "webhook":{"description":"Slack, Discord or JSON webhook URL; empty removes it","type":"string"},
+                "ntfy":{"description":"ntfy topic or URL; empty removes it","type":"string"},
+                "test":{"description":"Then send a test message on every channel (default: false)","type":"boolean","default":false}
             }))}),
         },
         ToolSpec {
             name: "ticket_target",
+            effect: Effect::Destructive,
             description: "Set the GitHub repository (owner/name) that create_ticket with to='github' files issues in; empty unsets it. The GitHub token is set by a person on the Tickets page.",
-            input_schema: json!({"type":"object","properties":with(json!({"repo":{"type":"string"}})),"required":["repo"]}),
+            input_schema: json!({"type":"object","properties":with(json!({"repo":{"description":"The GitHub repository as owner/name; empty unsets it","type":"string"}})),"required":["repo"]}),
         },
         ToolSpec {
             name: "flag_update",
+            effect: Effect::Destructive,
             description: "Switch an existing flag on or off and/or set its rollout (0-100 %), keeping its targeting. Widen a rollout step by step once the board shows its cohort is fine; flag_set creates or rewrites a flag.",
             input_schema: json!({"type":"object","properties":with(json!({
-                "key":{"type":"string"},
-                "enabled":{"type":"boolean"},
-                "rollout":{"type":"integer","minimum":0,"maximum":100}
+                "key":{"description":"The flag's key, from `flags`","type":"string"},
+                "enabled":{"description":"Switch it on (true) or off (false)","type":"boolean"},
+                "rollout":{"description":"Share of matching users who get it, 0 to 100 %","type":"integer","minimum":0,"maximum":100}
             })),"required":["key"]}),
         },
         ToolSpec {
             name: "churn",
+            effect: Effect::ReadOnly,
             description: "Who leaves and why (report): churn rate, net change, churned per week, survival and median lifetime, the last feature or page before leaving against where users who stayed were, errors on the last day, who is at risk now and a suggested churn_after_days; and the win-back flags made from the users at risk, with how many treated and held-out users were active in the last 7 days (winback_flags).",
             input_schema: json!({"type":"object","properties":proj()}),
         },
         ToolSpec {
             name: "winback_flag",
+            effect: Effect::Additive,
             description: "Make a flag, off, listing the users at risk now with a control group held out (holdout %, default 20, at most 50), for a win-back nudge behind openlens.isEnabled(key). Switch it on with flag_update; churn then compares the two groups.",
-            input_schema: json!({"type":"object","properties":with(json!({"holdout":{"type":"integer","minimum":0,"maximum":50}}))}),
+            input_schema: json!({"type":"object","properties":with(json!({"holdout":{"description":"Share of users at risk held out as the control group, 0 to 50 % (default: 20)","type":"integer","minimum":0,"maximum":50}}))}),
         },
         ToolSpec {
             name: "acquisition",
+            effect: Effect::ReadOnly,
             description: "Where users come from: per channel (default), source, campaign or referrer (`by`), by first touch (default) or last touch (`touch`): users, those who reached a success event, those active on two days or more, and those who churned.",
             input_schema: json!({"type":"object","properties":filtered(json!({
-                "by":{"type":"string","enum":["channel","source","campaign","referrer"]},
-                "touch":{"type":"string","enum":["first","last"]}
+                "by":{"description":"Group users per channel, source, campaign or referrer (default: channel)","type":"string","enum":["channel","source","campaign","referrer"]},
+                "touch":{"description":"Credit the first or the last touch (default: first)","type":"string","enum":["first","last"]}
             }))}),
         },
         ToolSpec {
             name: "forms",
+            effect: Effect::ReadOnly,
             description: "The app's forms, the most abandoned first: sessions that started and submitted each, median time to fill, and per field the sessions, the abandons where it was the last field touched, corrections and median time; a session that gave up, to replay.",
             input_schema: json!({"type":"object","properties":filtered(json!({}))}),
         },
         ToolSpec {
             name: "audience",
+            effect: Effect::ReadOnly,
             description: "Who uses the app, from page views of 30 days: users per country, device class, browser, OS, language and screen width. `geo` false means countries cannot be known on this server.",
             input_schema: json!({"type":"object","properties":filtered(json!({}))}),
         },
         ToolSpec {
             name: "live",
+            effect: Effect::ReadOnly,
             description: "Who is on the app right now: users of the last 5 and 30 minutes, errors, roles, releases, features and pages of the last 30 minutes, and the latest events.",
             input_schema: json!({"type":"object","properties":filtered(json!({}))}),
         },
         ToolSpec {
             name: "flows",
+            effect: Effect::ReadOnly,
             description: "How sessions move between features, step by step: the nodes of each step and the links between them with their sessions, and how many sessions reached a success event. `from` (a feature key) starts at its first use; `to: success` keeps the sessions that reached one.",
             input_schema: json!({"type":"object","properties":filtered(json!({
-                "from":{"type":"string"},
-                "to":{"type":"string","enum":["success"]}
+                "from":{"description":"A feature key: start the flows at its first use","type":"string"},
+                "to":{"description":"success keeps only the sessions that reached a success event","type":"string","enum":["success"]}
             }))}),
         },
     ]

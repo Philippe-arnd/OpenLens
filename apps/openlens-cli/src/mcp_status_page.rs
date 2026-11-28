@@ -3,7 +3,7 @@
 //! anyone sees it (`status_page.public`). Each tool calls the route of its
 //! command (D-020). [`call`] answers the names it knows.
 
-use openlens_mcp::ToolSpec;
+use openlens_mcp::{Effect, ToolSpec};
 use serde_json::{Map, Value, json};
 
 use crate::{Body, Client};
@@ -44,6 +44,7 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
     vec![
         ToolSpec {
             name: "status_page",
+            effect: Effect::ReadOnly,
             description: "The public status page. Without `slug`: its settings (enabled, slug, components with their public names and response_time, path `/status/<slug>`, and the monitored environments that can be shown). With `slug`: the page as anyone reads it (`/status/<slug>.json`): state, components with 90 daily bars and availability over 24h/7d/30d/90d, announcements, planned maintenance and detected incidents.",
             input_schema: json!({"type":"object","properties":{
                 "project": {"type": "string", "description": "Project id (default: default)"},
@@ -52,12 +53,13 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "status_page_set",
+            effect: Effect::Destructive,
             description: "Change the public status page (only the fields given change): enabled (needs a slug), slug (3 to 40 of a-z, 0-9 and -, unique across projects), components ([{environment, name, response_time}]; production is always first, other environments must be monitored). Off by default.",
             input_schema: json!({"type":"object","properties":{
                 "project": {"type": "string", "description": "Project id (default: default)"},
-                "enabled": {"type": "boolean"},
-                "slug": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$"},
-                "components": {"type": "array", "maxItems": 21, "items": {"type": "object", "properties": {
+                "enabled": {"description":"Publish the page (needs a slug)","type": "boolean"},
+                "slug": {"description":"Its address /status/<slug>: 3 to 40 of a-z, 0-9 and -, unique across projects","type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$"},
+                "components": {"description":"What the page shows, [{environment, name, response_time}]; production always comes first","type": "array", "maxItems": 21, "items": {"type": "object", "properties": {
                     "environment": {"type": "string"},
                     "name": {"type": "string", "maxLength": 60},
                     "response_time": {"type": "boolean"}

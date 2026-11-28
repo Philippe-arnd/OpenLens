@@ -2,7 +2,7 @@
 //! project's planned maintenance windows, and schedule, extend, end or
 //! cancel one. Like every tool, they call the REST API (D-020).
 
-use openlens_mcp::ToolSpec;
+use openlens_mcp::{Effect, ToolSpec};
 use serde_json::{Value, json};
 
 use crate::{Body, Client};
@@ -39,22 +39,24 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
     vec![
         ToolSpec {
             name: "maintenance",
+            effect: Effect::ReadOnly,
             description: "Planned maintenance windows of a project: planned, running and ended within 30 days, with their id, dates (Unix seconds and in words), components and text. During a window its components show 'maintenance', their incidents are recorded but not announced, and the time is not counted against availability.",
             input_schema: json!({"type":"object","properties":{"project":{"type":"string","description":"Project id (default: default)"}}}),
         },
         ToolSpec {
             name: "maintenance_set",
+            effect: Effect::Destructive,
             description: "Change planned maintenance. action=schedule: text (required), start (now by default, RFC 3339, or YYYY-MM-DD HH:MM in the project's zone), end or minutes (at most 4320), components (production by default, or environment names), announce (once on the alert channels). Open one right before a deploy and end it after. action=extend: id and minutes (added to its end) or end. action=end: id, ends a running window now; incidents still failing are announced from then. action=cancel: id, removes a window that has not started.",
             input_schema: json!({"type":"object","properties":{
                 "project":{"type":"string","description":"Project id (default: default)"},
-                "action":{"type":"string","enum":["schedule","extend","end","cancel"]},
-                "id":{"type":"integer"},
-                "text":{"type":"string","maxLength":500},
-                "start":{"type":"string"},
-                "end":{"type":"string"},
-                "minutes":{"type":"integer","minimum":1,"maximum":4320},
-                "components":{"type":"array","items":{"type":"string"},"maxItems":10},
-                "announce":{"type":"boolean","default":false}
+                "action":{"description":"schedule a window, extend it, end it now, or cancel one not started","type":"string","enum":["schedule","extend","end","cancel"]},
+                "id":{"description":"The window id, from `maintenance` (extend, end and cancel)","type":"integer"},
+                "text":{"description":"What the maintenance is, shown on the status page (schedule)","type":"string","maxLength":500},
+                "start":{"description":"When it starts: RFC 3339 or YYYY-MM-DD HH:MM in the project's zone (default: now)","type":"string"},
+                "end":{"description":"When it ends: RFC 3339 or YYYY-MM-DD HH:MM in the project's zone","type":"string"},
+                "minutes":{"description":"Its length (schedule) or the minutes added to its end (extend), at most 4320","type":"integer","minimum":1,"maximum":4320},
+                "components":{"description":"production or environment names it covers (default: production)","type":"array","items":{"type":"string"},"maxItems":10},
+                "announce":{"description":"Announce it once on the alert channels (default: false)","type":"boolean","default":false}
             },"required":["action"]}),
         },
     ]
