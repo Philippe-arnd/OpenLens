@@ -105,7 +105,7 @@ pub enum Stage {
         /// Day it was measured or will be (release day + 14).
         measure_on: String,
     },
-    /// Measured: `improved`, `no effect`, `worse` or `no metric`.
+    /// Measured: `improved`, `worse`, `inconclusive` or `no metric`.
     Measured {
         /// Release name.
         release: String,
@@ -263,6 +263,8 @@ mod tests {
             closed: None,
             shipped_in: None,
             outcome: None,
+            flag: None,
+            method: None,
         }
     }
 

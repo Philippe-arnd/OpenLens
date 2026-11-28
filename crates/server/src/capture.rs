@@ -285,6 +285,23 @@ pub(crate) fn is_bot(ua: &str) -> bool {
         .any(|k| ua.contains(k))
 }
 
+/// Health checks are not route stats (#726, D-110): drop the
+/// `$request_stats` of the fixed health routes and of the project's uptime
+/// health path, from `/capture` and `/v1/metrics` alike. The project's
+/// settings are read only for a batch that holds route stats.
+pub(crate) fn drop_health_checks(
+    state: &AppState,
+    project: &str,
+    events: &mut Vec<openlens_event::Event>,
+) {
+    use openlens_engine::routes::health;
+    if !health::has_route_stats(events) {
+        return;
+    }
+    let settings = openlens_engine::commands::alerts::Settings::load(&state.meta, project);
+    health::drop_health_checks(events, Some(&settings.health_path));
+}
+
 /// Write `events` and wait until they are durable (blocking). Written
 /// under the lock, waited for outside it, so one fsync serves every
 /// request that arrives meanwhile (#333). `/v1/metrics` writes here too.
@@ -366,6 +383,7 @@ pub(crate) async fn capture(
     // Host rules of the project (#410, D-034): an ignored host's events go,
     // an unclassified host is `unknown`, not production.
     crate::environments::apply(&state, &project.id, &mut normalized.events);
+    drop_health_checks(&state, &project.id, &mut normalized.events);
     // Crawlers and monitors posting directly (the SDK already skips them in
     // browsers): kept, but in their own environment, out of every number.
     let ua = headers

@@ -227,7 +227,7 @@ pub fn heatmap(
                         } @else {
                             section.card.wide {
                                 (click_svg(map, rage))
-                                p.muted.small { "Each dot is a 2% × 20 px area; darker means more " (if rage { "rage clicks" } else { "clicks" }) ". Red marks rage clicks. Clicks from every screen width are drawn together at the median width: the engine keeps one width per page, not per click, so there is no Mobile, Tablet or Desktop view." }
+                                p.muted.small { "Each dot is a 2% × 20 px area; darker means more " (if rage { "rage clicks" } else { "clicks" }) ". Red marks rage clicks. Clicks from every screen width are drawn together at the median width: the engine keeps one width per page, not per click, so there is no Mobile, Tablet or Desktop view. Above about 2,000 active users a day, positions come from a sample of sessions (every click is still counted in the lists): the map shows where people click, not how many times." }
                             }
                         }
                         div.grid {

@@ -2,6 +2,12 @@
 //! (a field left, with time spent and whether it changed) and `$submit`
 //! events, per form and session: starts, submits, abandonment, time to
 //! fill, the last field before giving up, and fields people come back to.
+//!
+//! Above the daily budget the SDK sends `$field` from a sample of sessions
+//! only (#702, D-107), each with the rate as `$sample`: a session counts
+//! for `1 / $sample` sessions, so starts, submits and the per-field counts
+//! stay absolute numbers. A session without `$field` (not drawn) is not a
+//! start, so its `$submit` is not counted either and shares stay unbiased.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -9,7 +15,7 @@ use openlens_featuremap::FeatureMap;
 use openlens_query::QueryEngine;
 use serde::Serialize;
 
-use crate::{Filters, Result, source, text};
+use crate::{Filters, Result, SAMPLE_WEIGHT, source, text};
 
 /// One field of a form.
 #[derive(Debug, Clone, Default, Serialize)]
@@ -74,6 +80,9 @@ pub struct Step {
     pub ms: i64,
     /// Page.
     pub path: String,
+    /// Sessions this step stands for: `1 / $sample` of a sampled `$field`,
+    /// else 1 (#702).
+    pub weight: f64,
 }
 
 /// Per form while folding: the stats, each field with its times, the
@@ -93,6 +102,14 @@ pub fn fold(steps: &[Step]) -> Vec<FormStats> {
         fields: Vec<(String, i64)>,
         submitted: bool,
         path: String,
+        weight: f64,
+    }
+    // Weighted counts while folding, rounded at the end.
+    #[derive(Default)]
+    struct Counts {
+        starts: f64,
+        submits: f64,
+        fields: HashMap<String, [f64; 3]>,
     }
     let mut visits: BTreeMap<(String, String), Visit> = BTreeMap::new();
     for s in steps {
@@ -103,10 +120,14 @@ pub fn fold(steps: &[Step]) -> Vec<FormStats> {
             v.path.clone_from(&s.path);
         }
         match &s.field {
-            Some(f) => v.fields.push((f.clone(), s.ms)),
+            Some(f) => {
+                v.fields.push((f.clone(), s.ms));
+                v.weight = v.weight.max(s.weight.max(1.0));
+            }
             None => v.submitted = true,
         }
     }
+    let mut counts: HashMap<String, Counts> = HashMap::new();
     let mut forms: BTreeMap<String, Acc> = BTreeMap::new();
     for ((form, session), v) in visits {
         if v.fields.is_empty() {
@@ -123,10 +144,12 @@ pub fn fold(steps: &[Step]) -> Vec<FormStats> {
                 HashMap::new(),
             )
         });
-        e.0.starts += 1;
+        let w = v.weight;
+        let c = counts.entry(form.clone()).or_default();
+        c.starts += w;
         *e.3.entry(v.path.clone()).or_default() += 1;
         if v.submitted {
-            e.0.submits += 1;
+            c.submits += w;
             e.2.push(v.fields.iter().map(|f| f.1).sum());
         } else if e.0.abandoned_session.is_none() {
             e.0.abandoned_session = Some(session.clone());
@@ -143,26 +166,27 @@ pub fn fold(steps: &[Step]) -> Vec<FormStats> {
                 )
             });
             fs.1.push(*ms);
+            let fc = c.fields.entry(f.clone()).or_default();
             match seen.get(f.as_str()) {
                 // Back to a field after another one: a correction.
-                Some(prev) if *prev + 1 < i => {
-                    fs.0.revisited += 1;
-                }
+                Some(prev) if *prev + 1 < i => fc[2] += w,
                 Some(_) => {}
-                None => fs.0.sessions += 1,
+                None => fc[0] += w,
             }
             seen.insert(f.as_str(), i);
         }
         if !v.submitted
             && let Some((last, _)) = v.fields.last()
-            && let Some(fs) = e.1.get_mut(last)
         {
-            fs.0.last_before_leaving += 1;
+            c.fields.entry(last.clone()).or_default()[1] += w;
         }
     }
+    let n = |x: f64| x.round() as i64;
     let mut out: Vec<FormStats> = forms
         .into_values()
         .map(|(mut f, fields, mut times, paths)| {
+            let c = counts.remove(&f.form).unwrap_or_default();
+            (f.starts, f.submits) = (n(c.starts), n(c.submits));
             f.median_secs = median(&mut times) as f64 / 1000.0;
             f.path = paths
                 .into_iter()
@@ -173,6 +197,10 @@ pub fn fold(steps: &[Step]) -> Vec<FormStats> {
                 .into_values()
                 .map(|(mut s, mut ms)| {
                     s.median_ms = median(&mut ms);
+                    if let Some(fc) = c.fields.get(&s.name) {
+                        (s.sessions, s.last_before_leaving, s.revisited) =
+                            (n(fc[0]), n(fc[1]), n(fc[2]));
+                    }
                     s
                 })
                 .collect();
@@ -204,7 +232,8 @@ pub async fn forms(
         "coalesce(regexp_match(properties, '\"\\$form\":\"([^\"]{1,100})\"')[1], path, '(page)')";
     let sql = format!(
         "SELECT session_id, {form} AS form, regexp_match(properties, '\"\\$field\":\"([^\"]{{1,60}})\"')[1] AS field, \
-         CAST(regexp_match(properties, '\"\\$ms\":([0-9]+)')[1] AS BIGINT) AS ms, event, coalesce(path, '') AS path \
+         CAST(regexp_match(properties, '\"\\$ms\":([0-9]+)')[1] AS BIGINT) AS ms, event, coalesce(path, '') AS path, \
+         {SAMPLE_WEIGHT} AS w \
          FROM {src} WHERE {w} AND event IN ('$field', '$submit') AND session_id IS NOT NULL \
          ORDER BY session_id, timestamp LIMIT 300000"
     );
@@ -224,6 +253,10 @@ pub async fn forms(
                 field,
                 ms: r.get("ms").and_then(serde_json::Value::as_i64).unwrap_or(0),
                 path: text(r, "path").unwrap_or_default(),
+                weight: r
+                    .get("w")
+                    .and_then(serde_json::Value::as_f64)
+                    .unwrap_or(1.0),
             })
         })
         .collect();
@@ -241,6 +274,7 @@ mod tests {
             field: field.map(Into::into),
             ms,
             path: "/signup".into(),
+            weight: 1.0,
         }
     }
 
@@ -276,5 +310,27 @@ mod tests {
         assert!((f.median_secs - 3.0).abs() < 1e-9);
         assert_eq!(f.path, "/signup");
         assert!(f.abandoned_session.is_some());
+    }
+
+    /// `$field` sent from a sample of sessions (#702): counts are scaled
+    /// back up, shares are unchanged.
+    #[test]
+    fn sampled_fields_count_for_the_sessions_they_stand_for() {
+        let all = vec![
+            st("a", Some("email"), 1000),
+            st("a", None, 0),
+            st("b", Some("email"), 1000),
+        ];
+        let sampled: Vec<Step> = all
+            .iter()
+            .map(|s| Step {
+                weight: 4.0,
+                ..s.clone()
+            })
+            .collect();
+        let (f, g) = (&fold(&all)[0], &fold(&sampled)[0]);
+        assert!(g.starts > f.starts && g.submits > f.submits, "{g:?}");
+        assert!((g.abandonment() - f.abandonment()).abs() < 1e-9);
+        assert!(g.fields[0].sessions > f.fields[0].sessions);
     }
 }

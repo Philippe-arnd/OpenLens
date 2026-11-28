@@ -336,3 +336,78 @@ async fn runtime_stats_are_read_per_release_and_never_count_as_users_or_events()
     let v: serde_json::Value = serde_json::from_str(&body_text(r).await).unwrap();
     assert!(v["releases"].as_array().unwrap().is_empty() && v["note"].is_string());
 }
+
+/// #726, D-110: health checks are not route stats. The fixed health routes
+/// and the project's own uptime health path are dropped at ingestion; a
+/// real route is kept, and a server error on a health route too.
+#[tokio::test]
+async fn health_check_route_stats_are_not_stored_and_real_routes_are() {
+    let h = harness();
+    h.state
+        .meta
+        .set_project_setting("default", "alerts", r#"{"health_path":"/internal/up"}"#)
+        .unwrap();
+    let point = |uuid: u32, method: &str, route: &str| {
+        serde_json::json!({
+            "event": "$request_stats",
+            "distinct_id": "$server",
+            "uuid": format!("0191f0c0-0000-7000-8000-{uuid:012}"),
+            "properties": {
+                "$lib": "node", "$environment": "production",
+                "$metric": "http.server.request.duration", "$unit": "s",
+                "http.request.method": method, "http.route": route,
+                "http.response.status_code": 200,
+                "count": 60, "sum": 0.06, "min": 0.001, "max": 0.002,
+                "bucket_counts": [60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                "$window_s": 60,
+            },
+        })
+    };
+    let events = vec![
+        point(31, "GET", "/health"),
+        point(32, "HEAD", "/api/health/"),
+        point(33, "GET", "/internal/up"),
+        point(34, "GET", "/api/items"),
+        serde_json::json!({
+            "event": "$error", "distinct_id": "$server",
+            "uuid": "0191f0c0-0000-7000-8000-000000000035",
+            "properties": { "$lib": "node", "$environment": "production", "$kind": "server",
+                "http.route": "/health", "$message": "Error: health db down",
+                "$source": "/app/dist/health.js:1:2" },
+        }),
+    ];
+    let body = serde_json::json!({ "key": h.key, "batch": events }).to_string();
+    let (status, v) = post(&h, "/capture", body.into_bytes(), false).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    openlens_server::flush_now(&h.state).unwrap();
+
+    let rows = h
+        .state
+        .query
+        .sql(
+            "default",
+            "SELECT event, properties FROM raw_events WHERE event IN ('$request_stats', '$error')",
+        )
+        .await
+        .unwrap()
+        .rows;
+    let stored = |event: &str, needle: &str| {
+        rows.iter().any(|r| {
+            r["event"] == event && r["properties"].as_str().is_some_and(|p| p.contains(needle))
+        })
+    };
+    assert!(
+        stored("$request_stats", "/api/items"),
+        "a real route is kept"
+    );
+    for health in ["\"/health\"", "/api/health", "/internal/up"] {
+        assert!(
+            !stored("$request_stats", health),
+            "{health} is a health check"
+        );
+    }
+    assert!(
+        stored("$error", "health db down"),
+        "a failing health check is still an error"
+    );
+}

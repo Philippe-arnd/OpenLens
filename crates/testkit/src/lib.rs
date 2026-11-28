@@ -153,7 +153,9 @@ pub fn hostile_check_in_queries() -> Vec<String> {
 use chrono::{DateTime, Duration, Utc};
 use openlens_event::Event;
 
+mod persona;
 mod realistic;
+pub use persona::{PERSONA_KNOWN_USERS, PERSONA_NOMINAL_EVENTS, PERSONA_SAMPLED_PER_DAY, Persona};
 pub use realistic::{EVENTS_PER_USER, realistic_feature_map, realistic_user};
 
 /// Deterministic xorshift PRNG (no dependency, reproducible datasets).
@@ -412,6 +414,78 @@ pub fn planted_dataset(project: &str) -> Vec<Event> {
                 "{}",
                 &mut n,
             ));
+        }
+    }
+    out
+}
+
+/// Features of [`unplanted_dataset`], each used in a session with its
+/// own chance, whoever the user is.
+pub const UNPLANTED_FEATURES: [(&str, f64); 5] = [
+    ("search", 0.5),
+    ("export", 0.3),
+    ("reports", 0.4),
+    ("billing", 0.2),
+    ("settings", 0.25),
+];
+
+/// The flag of [`unplanted_dataset`], on in a random half of the sessions.
+pub const UNPLANTED_FLAG: &str = "new-search";
+
+/// The same app as [`planted_dataset`] with nothing planted (#705): 300
+/// users in two roles over ~90 days and two releases, but retention, the
+/// features used, the role, the release, the flag and errors are all
+/// independent of each other. Any insight a test finds here that rests on
+/// a p-value is a false discovery.
+pub fn unplanted_dataset(project: &str) -> Vec<Event> {
+    let now = Utc::now();
+    let mut rng = Rng(0x0dd5_eed0_7051_a2b3);
+    let mut out = Vec::new();
+    let mut n = 0u64;
+    for u in 0..300 {
+        let user = format!("n{u}");
+        let role = if u % 5 == 0 { "admin" } else { "member" };
+        let first = now - Duration::days(rng.range(30, 85)) - Duration::hours(rng.range(0, 20));
+        let retained = rng.chance(0.5);
+        let last = if retained {
+            now - Duration::hours(rng.range(2, 72))
+        } else {
+            (first + Duration::days(rng.range(9, 20)))
+                .min(now - Duration::days(planted::CHURN_DAYS + 3))
+        };
+        let mut day = first;
+        let mut s = 0;
+        while day <= last {
+            s += 1;
+            let session = format!("{user}-s{s}");
+            let release = if day > now - Duration::days(10) {
+                "v2"
+            } else {
+                "v1"
+            };
+            let flagged = rng.chance(0.5);
+            let mut t = day;
+            let mut ev = |name: &str, feature: Option<&str>, path: &str, t: DateTime<Utc>| {
+                let mut e = event(
+                    project, &user, role, &session, name, t, feature, path, release, "{}", &mut n,
+                );
+                if flagged {
+                    e.flags = Some(UNPLANTED_FLAG.into());
+                }
+                out.push(e);
+            };
+            ev("$identify", None, "/", t);
+            ev("$pageview", None, "/home", t);
+            for (feature, chance) in UNPLANTED_FEATURES {
+                if rng.chance(chance) {
+                    t += Duration::minutes(rng.range(1, 4));
+                    ev("$click", Some(feature), &format!("/{feature}"), t);
+                }
+            }
+            if rng.chance(0.03) {
+                ev("$error", None, "/home", t);
+            }
+            day += Duration::days(rng.range(1, 4));
         }
     }
     out

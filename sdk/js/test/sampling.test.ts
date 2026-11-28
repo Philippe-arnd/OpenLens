@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { type Item, chunks, decide, size, trim, validRate } from "../src/sampling";
+import { type Item, chunks, decide, drawEvents, sample, size, trim, validRate } from "../src/sampling";
 
 test("a session is drawn once: later calls and other tabs keep the draw", () => {
   let draws = 0;
@@ -81,4 +81,36 @@ test("a buffer sent after a trigger is cut in chunks within the limits, in order
   assert.deepEqual(out.flat(), buf.map((x) => x.e), "nothing lost or reordered");
   // An event larger than a chunk is sent alone.
   assert.equal(chunks([inc(10), full(50_000), inc(10)], 300, 30_000).length, 3);
+});
+
+test("distribution-only events: drawn once per session, every session while the rate is unknown", () => {
+  let draws = 0;
+  const rand = () => {
+    draws++;
+    return 0.5;
+  };
+  const unknown = drawEvents(undefined, "s1", undefined, rand);
+  assert.ok(unknown.on);
+  assert.equal(drawEvents(unknown, "s1", 0.1, rand), unknown, "kept for the session");
+  const out = drawEvents(unknown, "s2", 0.1, rand);
+  assert.equal(out.on, false);
+  assert.equal(drawEvents(out, "s2", 1, rand), out, "other tabs agree");
+  assert.equal(draws, 1);
+});
+
+test("only vitals, scroll and fields are sampled, and they carry the rate", () => {
+  const out = { sid: "s", on: false, r: 0.25 };
+  const drawn = { sid: "s", on: true, r: 0.25 };
+  for (const e of ["$vital", "$scroll", "$field"]) {
+    assert.equal(sample(e, { a: 1 }, out), null, e);
+    assert.equal(sample(e, { a: 1 }, drawn)?.$sample, 0.25, e);
+    assert.equal(sample(e, { a: 1 }, { ...drawn, r: 1 })?.$sample, undefined, "no tag at rate 1");
+  }
+  for (const e of ["$identify", "$pageview", "$submit", "$feature", "$survey", "$error", "$request_failed", "signup"]) {
+    assert.deepEqual(sample(e, { a: 1 }, out), { a: 1 }, e);
+  }
+  // A click is always sent; only its position is sampled.
+  const click = { $tag: "button", $x: 0.5, $y: 10, $vw: 1280, $rage: true };
+  assert.deepEqual(sample("$click", click, out), { $tag: "button", $rage: true });
+  assert.deepEqual(sample("$click", click, drawn), click);
 });

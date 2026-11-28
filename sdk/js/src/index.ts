@@ -7,10 +7,11 @@
  * No cookies. Input values are never captured.
  */
 
-import { buildFingerprint, detectEnvironment, detectRelease, pageAssets } from "./env";
+import { buildFingerprint, detectEnvironment, detectRelease, fnv, pageAssets } from "./env";
 import { trackVitals } from "./vitals";
 import type { Bridge } from "./replay";
-import { type Decision, decide, validRate } from "./sampling";
+import { Repeats, errorKey } from "./repeats";
+import { type Decision, type Draw, decide, drawEvents, sample, validRate } from "./sampling";
 import { type Sender, type Store, UnloadBudget, clearParked, park, takeParked } from "./unload";
 
 declare global {
@@ -67,6 +68,14 @@ interface State {
   /** Is this session recorded for replay (#327)? Drawn once per session,
    * shared by its tabs. */
   rs?: Decision;
+  /** Does this session send the distribution-only events (#702)? Drawn
+   * once per session, shared by its tabs. */
+  es?: Draw;
+  /** Hash of the user id and traits last identified, and the UTC day it
+   * was sent: `$identify` goes out again only when they change, or once a
+   * day. */
+  ih?: string;
+  iday?: string;
 }
 
 const VERSION = "0.1.0";
@@ -83,6 +92,11 @@ let activeFlags: string[] = [];
 let activeVariants: Record<string, string> = {};
 /** Share of sessions recorded from their start, from `/flags` (#327). */
 let replayRate: number | undefined;
+/** Share of sessions sending the distribution-only events, from `/flags`
+ * (#702, D-107). Unknown: every session. */
+let sampleRate: number | undefined;
+/** Errors and failed requests already sent in the session (#703). */
+const repeats = new Repeats();
 /** Fingerprint of the build this page runs (`$build`, #495), computed once
  * per page load in `init`. */
 let build: string | undefined;
@@ -213,22 +227,39 @@ function base(): Props {
   return p;
 }
 
-/** Record an event. */
-export function track(event: string, props?: Props): void {
-  if (!cfg || consent === "denied") return;
-  const now = Date.now();
+/** Refresh the state from other tabs and extend the session. */
+function touch(): void {
   refresh();
-  touchSession(now);
+  touchSession(Date.now());
   save();
+}
+
+/** Queue an event of session `sid`. */
+function enqueue(event: string, sid: string, props: Props): void {
   queue.push({
     event,
     distinct_id: state.uid ?? state.anon,
-    session_id: state.sid,
+    session_id: sid,
     uuid: uuid(),
-    timestamp: new Date(now).toISOString(),
+    timestamp: new Date().toISOString(),
     properties: { ...base(), ...props },
   });
   if (queue.length > MAX_QUEUE) queue = queue.slice(-MAX_QUEUE);
+}
+
+/** Record an event. */
+export function track(event: string, props?: Props): void {
+  if (!cfg || consent === "denied") return;
+  touch();
+  // The daily budget of distribution-only events (#702): drawn once per
+  // session, stored with it so every tab agrees.
+  const d = drawEvents(state.es, state.sid, sampleRate, Math.random);
+  if (d !== state.es) {
+    state.es = d;
+    save();
+  }
+  const sent = sample(event, props ?? {}, d);
+  if (sent) enqueue(event, state.sid, sent);
   if (queue.length >= 20) flush();
   // An error or a rage click: the recorder sends what it buffered and
   // records the rest of the session (#327).
@@ -297,10 +328,19 @@ function loadFlags(): void {
   }
   origFetch(`${cfg.host.replace(/\/$/, "")}/flags?${q}`)
     .then((r) => (r.ok ? r.json() : null))
-    .then((j: { flags?: string[]; variants?: Record<string, string>; surveys?: SurveyDef[]; replay_rate?: unknown } | null) => {
+    .then((j: { flags?: string[]; variants?: Record<string, string>; surveys?: SurveyDef[]; replay_rate?: unknown; sample_rate?: unknown } | null) => {
       if (Array.isArray(j?.surveys)) activeSurveys = j.surveys;
       // A server without sampling (no `replay_rate`) records every session.
       const rate = j ? (validRate(j.replay_rate) ?? 1) : undefined;
+      // And without a budget (no `sample_rate`) every session sends all.
+      if (j) {
+        sampleRate = validRate(j.sample_rate) ?? 1;
+        try {
+          store().setItem(`${storageKey()}_srate`, String(sampleRate));
+        } catch {
+          // memory only
+        }
+      }
       if (rate !== undefined) {
         replayRate = rate;
         try {
@@ -335,13 +375,26 @@ export function variant(key: string): string | null {
   return activeVariants[key] ?? null;
 }
 
-/** Identify the logged-in user and the dimensions OpenLens slices by. */
+/** Identify the logged-in user and the dimensions OpenLens slices by.
+ * `$identify` is sent when it links an anonymous visitor, when the id or a
+ * trait changed since the last one of this browser, and at most once a day
+ * otherwise (#702, D-107): apps call this on every page load. */
 export function identify(id: string, dims: Dimensions = {}): void {
   if (!cfg || !id) return;
+  refresh();
   const anon = state.uid ? undefined : state.anon;
   state.uid = String(id);
   state.dims = { ...state.dims, ...dims };
+  const h = fnv(state.uid + JSON.stringify(state.dims));
+  const day = new Date().toISOString().slice(0, 10);
+  const same = !anon && h === state.ih && day === state.iday;
+  // Without consent nothing is sent: nothing to remember either.
+  if (!same && consent !== "denied") {
+    state.ih = h;
+    state.iday = day;
+  }
   save();
+  if (same) return;
   track("$identify", anon ? { $anon_distinct_id: anon } : {});
   loadFlags();
 }
@@ -360,6 +413,7 @@ export function setConsent(granted: boolean): void {
   consent = granted ? "granted" : "denied";
   if (!granted) {
     queue = [];
+    repeats.clear();
     // The recorder empties its buffer (#327).
     window.__openlensReplay?.wake?.();
     // Forget what was parked for the next visit (#433). Not through
@@ -380,7 +434,11 @@ export function setConsent(granted: boolean): void {
 
 /** Send queued events now. */
 export function flush(beacon = false): void {
-  if (!cfg || consent !== "granted" || queue.length === 0) return;
+  if (!cfg || consent !== "granted") return;
+  // The repeats counted since the last flush (#703), one event per
+  // fingerprint, in the session of the first.
+  for (const r of repeats.take()) enqueue(r.event, r.sid, r.props);
+  if (queue.length === 0) return;
   const batch = queue;
   const body = JSON.stringify({ sent_at: new Date().toISOString(), batch });
   queue = [];
@@ -623,14 +681,14 @@ function autocapture(): void {
   document.addEventListener("focusin", watch, true);
   document.addEventListener("pointerdown", watch, true);
 
-  // Errors: at most 5 of the same message per page.
-  const seen: Record<string, number> = {};
-  const report = (kind: string, message: string, stack?: string, source?: string) => {
-    const k = message.slice(0, 200);
-    seen[k] = (seen[k] ?? 0) + 1;
-    if (seen[k]! > 5) return;
-    track("$error", { $kind: kind, $message: message.slice(0, 500), $stack: stack?.slice(0, 4000), $source: source });
-  };
+  // Errors: one per session and fingerprint, then a count (#703).
+  const report = (kind: string, message: string, stack?: string, source?: string) =>
+    once("$error", errorKey(kind, message, stack), {
+      $kind: kind,
+      $message: message.slice(0, 500),
+      $stack: stack?.slice(0, 4000),
+      $source: source,
+    });
   addEventListener("error", (e) => {
     if (e instanceof ErrorEvent) report("error", e.message || "error", e.error?.stack, `${e.filename}:${e.lineno}:${e.colno}`);
   });
@@ -651,7 +709,10 @@ function autocapture(): void {
     } catch {
       // keep the raw value
     }
-    track("$request_failed", { $method: method.toUpperCase(), $path: path.slice(0, 300), $status: status, trace_id: trace });
+    const props = { $method: method.toUpperCase(), $path: path.slice(0, 300), $status: status };
+    // One per session, method, path and status, then a count (#703). The
+    // repeats carry no trace id: they are not one request.
+    once("$request_failed", `${props.$method} ${props.$path} ${status}`, props, { trace_id: trace });
   };
   if (origFetch) {
     const f = origFetch;
@@ -700,6 +761,15 @@ function autocapture(): void {
   } as typeof XMLHttpRequest.prototype.open;
 }
 
+/** Send `event` the first time its fingerprint `key` is seen in the
+ * session; afterwards only count it (#703). `props` go on the repeat event
+ * too, `own` only on the first. */
+function once(event: string, key: string, props: Props, own: Props = {}): void {
+  if (!cfg || consent === "denied") return;
+  touch();
+  if (repeats.first(event, key, state.sid, props)) track(event, { ...props, ...own });
+}
+
 /** Should this request carry the session header? Same origin, or one the
  * app listed in `traceOrigins`, and only with consent (#593). */
 function traced(rawUrl: string): boolean {
@@ -743,6 +813,7 @@ export function init(config: Config): void {
     activeFlags = JSON.parse(store().getItem(`${storageKey()}_flags`) || "[]") as string[];
     activeVariants = JSON.parse(store().getItem(`${storageKey()}_variants`) || "{}") as Record<string, string>;
     replayRate = validRate(Number(store().getItem(`${storageKey()}_rate`) ?? NaN));
+    sampleRate = validRate(Number(store().getItem(`${storageKey()}_srate`) ?? NaN));
   } catch {
     activeFlags = [];
     activeVariants = {};
@@ -777,11 +848,7 @@ function startReplay(): void {
     allowed: () => consent === "granted",
     fetch: origFetch,
     unload: (url, body) => unloadBudget.send(unloadSender(), url, body),
-    touch: () => {
-      refresh();
-      touchSession(Date.now());
-      save();
-    },
+    touch,
     sampled: () => {
       refresh();
       const d = decide(state.rs, state.sid, replayRate, Math.random);

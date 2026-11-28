@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import { OpenLens, detectRelease, requestContext, BOUNDS_S } from "../src/index.js";
+import { OpenLens, detectRelease, requestContext, BOUNDS_S, isHealthRoute } from "../src/index.js";
 
 function server(handler) {
   return new Promise((resolve) => {
@@ -130,6 +130,22 @@ test("requests are an OpenTelemetry http.server.request.duration histogram per r
   assert.ok(ok.properties.max < 1, "seconds, not milliseconds");
   assert.ok(bad.properties.max > ok.properties.max);
   assert.ok(stats.every((e) => e.distinct_id === "$server"));
+});
+
+test("health checks are not route stats (#726): nothing is sent for them, a real route still is", async () => {
+  const { s, got, host } = await collector();
+  const ol = new OpenLens({ host, key: "k", flushInterval: 60000 });
+  for (const route of ["/health", "/api/health/", "/HEALTHZ", "/health/live", "/readyz", "/ping"]) {
+    ol.recordRequest({ method: "HEAD", route, status: 200, ms: 1 });
+    ol.recordRequest({ method: "GET", route, status: 503, ms: 1 });
+  }
+  ol.recordRequest({ method: "GET", route: "/api/items", status: 200, ms: 4 });
+  ol.recordRequest({ method: "GET", route: "/healthy", status: 200, ms: 4 });
+  await ol.shutdown();
+  s.close();
+  const routes = got.filter((e) => e.event === "$request_stats").map((e) => e.properties["http.route"]);
+  assert.ok(routes.includes("/api/items") && routes.includes("/healthy"), "real routes are kept");
+  assert.ok(!routes.some((r) => isHealthRoute(r)), `no health route sent: ${routes}`);
 });
 
 test("the Express middleware records the route template and reads, never writes, trace context", async () => {

@@ -8,6 +8,11 @@
 //! production. With no data yet every session is recorded. Sessions left
 //! out still keep the last minute or two in the browser's memory and send
 //! it when an error or a rage click happens (see `sdk/js/src/replay.ts`).
+//!
+//! The same count gives the share of sessions that send the events which
+//! only feed distributions (`$vital`, `$scroll`, `$field`; #702, D-107):
+//! `min(1, EVENT_BUDGET / yesterday's active users)`, handed out with the
+//! flags as `sample_rate`.
 
 use chrono::{Duration, NaiveDate, Utc};
 use serde::Serialize;
@@ -18,6 +23,11 @@ use openlens_query::QueryEngine;
 /// Recordings a day the rate aims for, at least: the floor of the budget
 /// the disk gives ([`crate::capacity`], D-088).
 pub const DAILY_BUDGET: i64 = 300;
+
+/// Sessions a day, about, that send the distribution-only events
+/// (`$vital`, `$scroll`, `$field`; #702, D-107). Fixed: the distributions
+/// they feed (p75, scroll depth, form drop-off) are stable long before.
+pub const EVENT_BUDGET: i64 = 2000;
 
 /// The replay rate of a project and why.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -30,6 +40,10 @@ pub struct ReplayRate {
     pub day: String,
     /// Recordings a day the rate aims for (D-088).
     pub budget: i64,
+    /// Share of sessions that send the distribution-only events, 0 to 1
+    /// ([`EVENT_BUDGET`], #702, D-107). Every one of their events carries
+    /// it as `$sample`.
+    pub sample_rate: f64,
 }
 
 impl ReplayRate {
@@ -41,6 +55,7 @@ impl ReplayRate {
             active_users: 0,
             day: String::new(),
             budget: DAILY_BUDGET,
+            sample_rate: 1.0,
         }
     }
 }
@@ -54,6 +69,17 @@ pub fn rate_for(active: i64, budget: i64) -> f64 {
         1.0
     } else {
         budget as f64 / active as f64
+    }
+}
+
+/// The share of sessions that send the distribution-only events with
+/// `active` users yesterday: `min(1, EVENT_BUDGET / active)`.
+#[must_use]
+pub fn sample_rate_for(active: i64) -> f64 {
+    if active <= EVENT_BUDGET {
+        1.0
+    } else {
+        EVENT_BUDGET as f64 / active as f64
     }
 }
 
@@ -100,5 +126,23 @@ pub async fn replay_rate(
         active_users: active,
         day,
         budget,
+        sample_rate: sample_rate_for(active),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn distribution_events_keep_a_larger_share_than_recordings() {
+        for active in [0, 299, 300, 1_000, 2_000, 2_001, 50_000, 10_000_000] {
+            let (s, r) = (sample_rate_for(active), rate_for(active, DAILY_BUDGET));
+            assert!(s >= r && s <= 1.0 && s > 0.0, "{active}: {s} vs {r}");
+            if active > EVENT_BUDGET {
+                // About the budget of sessions a day, never more.
+                assert!((s * active as f64 - EVENT_BUDGET as f64).abs() < 1.0);
+            }
+        }
+    }
 }

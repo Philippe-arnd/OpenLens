@@ -39,9 +39,11 @@ Framework recipes (Next.js, Nuxt, SvelteKit, Astro, Remix), strict CSP and ad-bl
 - **Clicks** on interactive elements, including inside web components (open shadow roots). `$feature` comes from the nearest `data-feature` attribute, inside or around the component, and 3 quick clicks set a `$rage` flag.
 - **Form submits**, also inside web components. Input values are never captured.
 - **Sessions:** a new one after 30 minutes of inactivity or a UTC day change. Tabs of the same app share the visitor and the session.
-- **Errors** (`$error`): uncaught errors and unhandled rejections, at most 5 of the same message per page.
+- **Errors** (`$error`): uncaught errors and unhandled rejections, one per session and fingerprint (message and first stack frame). The same error again in the session is only counted: the count goes out with the next batch, or on page hide, as one more `$error` with `$repeat: true` and `$repeats` (#703).
 - **Web Vitals** (`$vital`): LCP, INP, CLS, FCP and TTFB, each rated good, needs-improvement or poor. Each also says where it comes from, without any text: the element (a short CSS selector, `$el`), LCP's element type, resource path and four parts (`$el_type`, `$res`, `$ttfb`, `$load_delay`, `$load_time`, `$render_delay`), INP's interaction type and three parts (`$input`, `$input_delay`, `$processing`, `$presentation`), and the device class (`$device`). Elements under `data-openlens-ignore` are not named; under `data-openlens-mask`, only their tag names are sent.
-- **Failed requests** (`$request_failed`): fetch/XHR 5xx and network errors, sent as path and status only.
+- **Failed requests** (`$request_failed`): fetch/XHR 5xx and network errors, sent as path and status only, one per session, method, path and status, then a count as for errors.
+- **Scroll depth** (`$scroll`) and **form fields** (`$field`, a field left: its name, time spent and whether it changed, never the value).
+- **A daily budget** (#702, D-107): above about 2,000 active users a day, only a sample of sessions sends `$vital`, `$scroll` and `$field` and the position of clicks (`$x`, `$y`, `$vw`). The server gives the share with the flags (`sample_rate`), the SDK draws once per session (all tabs agree), and each sampled event carries the share as `$sample`, so counts can be scaled back up. Page views, clicks, submits, features, identify, surveys, errors, failed requests and custom events are never sampled.
 - **Environment** (`$environment`), detected from the hostname:
   - localhost → `development`;
   - `staging.` → `staging`;
@@ -57,7 +59,7 @@ Framework recipes (Next.js, Nuxt, SvelteKit, Astro, Remix), strict CSP and ad-bl
 | Call | What it does |
 | --- | --- |
 | `init(config)` | Start. Config: `host`, `key`, `release?`, `environment?`, `autocapture?`, `consent?` (`"granted"`, `"pending"` or `"denied"`), `replay?` |
-| `identify(id, { role, account, plan, internal })` | Name the user and the dimensions the board slices by. Links the anonymous visit before login. `internal: true` marks the team's own accounts, which the board leaves out by default. |
+| `identify(id, { role, account, plan, internal })` | Name the user and the dimensions the board slices by. Links the anonymous visit before login. `internal: true` marks the team's own accounts, which the board leaves out by default. Safe to call on every page load: `$identify` is sent when it links an anonymous visit, when the id or a trait changed, and otherwise at most once a day. |
 | `track(event, props?)` | A custom event, such as a feature's success moment |
 | `feature(key, props?)` | Mark the use of a feature without a DOM element |
 | `isEnabled(flagKey)` | Feature flag. Synchronous: the last answer is cached. |
@@ -65,7 +67,7 @@ Framework recipes (Next.js, Nuxt, SvelteKit, Astro, Remix), strict CSP and ad-bl
 | `setConsent(granted)` | Grant or withdraw consent at runtime |
 | `flush()` | Send queued events now |
 
-Flags are fetched at init and after `identify`. The active flags travel with every event as `$flags`.
+Flags are fetched at init and after an `identify` that sends `$identify`. The active flags travel with every event as `$flags`.
 
 ## Privacy
 

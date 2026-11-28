@@ -30,10 +30,21 @@ Roles are the main way to slice every number, so they are declared explicitly, n
 
 | KPI | Definition |
 | --- | --- |
-| **Errors** | Uncaught JS errors and unhandled promise rejections. Reported as an error count, **error rate** (sessions with at least one error divided by all sessions), affected users, and the top error groups. Each is split by page, role and feature. |
+| **Errors** | Uncaught JS errors and unhandled promise rejections. Reported as an error count, **error rate** (sessions with at least one error divided by all sessions), affected users, and the top error groups. Each is split by page, role and feature. The browser SDK sends one error per session and fingerprint and counts the repeats (#703, D-107): the error count is the error events without `$repeat` plus the sum of `$repeats`; the error rate and affected users read sessions and people, so a repeat row (sent in the session of the first) changes neither. |
 | **Core Web Vitals** | **LCP**, **INP** and **CLS**, plus **TTFB** and **FCP**, measured in the browser from the W3C Performance APIs. Reported at p75 per page, device class and role, and graded good / needs improvement / poor using the public thresholds. |
 | **Failed requests** | `fetch`/XHR calls answering 5xx or failing on the network, as a rate per page and per feature. Only the URL path and status are captured, never bodies. |
 | **Page load** | Navigation timing (time to load and time to interactive) at p50 and p75 per page. |
+
+### Sampled events (#702, D-107)
+
+Above about 2,000 active users a day, the browser SDK sends `$vital`, `$scroll` and `$field`, and the position of clicks, from a sample of sessions only: `min(1, 2000 / yesterday's active users)`, the same daily count as replay sampling, drawn once per session. Each sampled event carries the share as `$sample`.
+
+- **Unchanged:** every number that counts people or sessions (DAU, WAU, MAU, sessions, bounces, retention, error rate) does not depend on these events: `$scroll`, `$vital` and `$field` are not interactions, and every session keeps its page views, clicks and submits. A test guards this (`crates/engine/tests/it/sampled.rs`).
+- **Scaled:** absolute counts of these events weigh each by `1 / $sample` (no `$sample` is 1): form starts, submits and per-field counts on the Forms page, and the sessions per scroll depth in the page rollups.
+- **Shares and percentiles** (Web Vitals p75, scroll depth reached, form abandonment) need no weight. The number of vital *measurements* shown next to a p75 is the measurements taken, not scaled: it is what the precision depends on.
+- **Heatmaps:** clicks are all kept (rage clicks, hotspots, bounces), but their positions are a sample: the click map shows where people click, not how many times.
+- **Session duration** runs from the first to the last event; in a session left out of the sample, a trailing `$scroll` or `$vital` is missing, so durations of large apps can read slightly shorter.
+- **Feature uses** with a map that resolves features from routes count every event on the route, these included (and so do completed tasks when the map declares no success event): above the budget they count fewer such events.
 
 ### Web Vitals explained
 
@@ -115,7 +126,7 @@ How a project ships, per environment, over a period (the last 90 days by default
 | **Time to restore** | Median time from a failed change to the rollback that put the previous release back, else to the next shipped change that did not fail. Failures with neither are counted as *not restored yet*. |
 
 ## Where they show up
-- **Focus board** (home screen): ranked insight cards, then a KPI strip (DAU/WAU/MAU and users who came back, stickiness, average session, tasks per user per day, sessions with errors) and Web Vitals at p75. A filter bar sets role, release and environment.
+- **Focus board** (home screen): ranked insight cards (when each family shows a card, including its false discovery control, is in [docs/agents/analyze.md](agents/analyze.md) and D-109), then a KPI strip (DAU/WAU/MAU and users who came back, stickiness, average session, tasks per user per day, sessions with errors) and Web Vitals at p75. A filter bar sets role, release and environment.
 - **Focus board sections:** feature pulse (adoption, uses per user, active days, completion, task time), *Who uses what* (roles × features), weekly retention cohorts, journeys, funnels, flag cohorts and release comparison.
 - **MCP:** `kpi_report { env, role, release, by: role | account | plan | page | feature }` returns the headline KPIs plus a 30-day breakdown in one compact payload. `insights` returns the cards, and `user_timeline` returns one person's story.
 - **Export:** `openlens-cli export` writes the raw events as JSONL, day by day, for analysis elsewhere.

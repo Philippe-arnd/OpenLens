@@ -15,7 +15,7 @@ pub const FEATURES: u64 = 24;
 /// `events` needs.
 pub const EVENTS_PER_USER: u64 = 160;
 /// Raw roles as an app sends them, case variants included.
-const RAW_ROLES: [&str; 6] = [
+pub(super) const RAW_ROLES: [&str; 6] = [
     "Admin",
     "owner",
     "member",
@@ -23,8 +23,8 @@ const RAW_ROLES: [&str; 6] = [
     "viewer",
     "billing-admin",
 ];
-const OTHER_PATHS: [&str; 4] = ["/", "/settings", "/billing", "/login"];
-const VITALS: [(&str, f64); 5] = [
+pub(super) const OTHER_PATHS: [&str; 4] = ["/", "/settings", "/billing", "/login"];
+pub(super) const VITALS: [(&str, f64); 5] = [
     ("LCP", 2380.5),
     ("INP", 180.0),
     ("CLS", 0.05),
@@ -36,12 +36,12 @@ const DAYS: i64 = 90;
 
 impl Rng {
     /// Uniform in `[0, 1)`.
-    fn unit(&mut self) -> f64 {
+    pub(super) fn unit(&mut self) -> f64 {
         (self.next() >> 11) as f64 / (1u64 << 53) as f64
     }
 
     /// Poisson-distributed count (Knuth), for small means.
-    fn poisson(&mut self, mean: f64) -> u32 {
+    pub(super) fn poisson(&mut self, mean: f64) -> u32 {
         let limit = (-mean).exp();
         let mut k = 0;
         let mut p = self.unit();

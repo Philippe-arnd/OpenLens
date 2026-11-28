@@ -98,6 +98,9 @@ fn host(headers: &HeaderMap) -> String {
 pub(crate) struct Finding {
     kind: String,
     subject: String,
+    /// The flag the change ships behind (#704).
+    #[serde(default)]
+    flag: Option<String>,
 }
 
 fn info(p: &openlens_meta::Project) -> openlens_ui::ProjectInfo<'_> {
@@ -121,6 +124,7 @@ fn finding(id: &str, f: &Finding, headers: &HeaderMap) -> FindingInput {
         kind: f.kind.clone(),
         subject: f.subject.clone(),
         host: host(headers),
+        flag: f.flag.clone(),
     }
 }
 
@@ -145,6 +149,7 @@ pub(crate) async fn new(
                 markdown: &d.draft.markdown,
                 kind: &q.kind,
                 subject: &q.subject,
+                flag: d.draft.ticket.flag.as_deref(),
                 repo: d.repo,
                 existing: d.existing,
                 admin: v.admin,
@@ -283,6 +288,9 @@ pub(crate) struct ApiTicket {
     /// `markdown` (default: only draft it) or `github` (open or update).
     #[serde(default)]
     to: String,
+    /// The flag the change ships behind (#704): judged on its cohorts.
+    #[serde(default)]
+    flag: Option<String>,
 }
 
 /// `POST /api/projects/{id}/tickets` (bearer): draft a ticket, or file it.
@@ -300,6 +308,7 @@ pub(crate) async fn api_create(
         kind: b.kind,
         subject: b.subject,
         host: host(&headers),
+        flag: b.flag,
     };
     if b.to != "github" {
         return match cmd::DraftTicket::run(&state, &Caller::default(), input).await {
@@ -307,6 +316,7 @@ pub(crate) async fn api_create(
                 "title": d.draft.ticket.title,
                 "markdown": d.draft.markdown,
                 "fingerprint": d.draft.ticket.fp,
+                "flag": d.draft.ticket.flag,
             }))
             .into_response(),
             Err(Error::NotFound) => StatusCode::NOT_FOUND.into_response(),

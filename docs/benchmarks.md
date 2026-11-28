@@ -68,6 +68,72 @@ Until #502 the board took one in-memory snapshot of the 90-day projection, then 
 
 **Watch out for subqueries in `OR`.** DataFusion turns `x IN (SELECT …)` into a semi-join, but not when it sits in an `OR` with `NOT EXISTS (…)`. The "identified users" filter written that way cost 20× more: 0.7 s instead of 35 ms per query. A scalar-subquery variant was fast, but it sometimes returned rows out of `ORDER BY` order. The engine now decides in Rust, from the cached `persons` count, and writes either the plain `IN` or `TRUE`. To see what each query costs, run with `RUST_LOG=openlens_query=debug`.
 
+## Event mix (#701, 2026-11-28)
+
+What the stored events are made of, on the two apps that send their production events to the owner's instance (Journal and Kanban, from 2026-11-22 to 2026-11-28 10:41 UTC, `raw_events`, production). Both are small (1 to 6 users a day), so the browser numbers are a first look, not a profile; the server numbers do not depend on traffic.
+
+**Browser events per active user-day** (an active user-day is one user with events on one UTC day):
+
+| Event | Journal | Kanban | Kind |
+| --- | --- | --- | --- |
+| `$click` | 3.9 | 8.0 | interaction (kept) |
+| `$vital` | 3.2 | 5.2 | distribution only |
+| `$scroll` | 2.8 | 5.6 | distribution only |
+| `$pageview` | 2.5 | 2.9 | interaction (kept) |
+| `$identify` | 1.4 | 7.0 | sent on every page load, mostly unchanged |
+| success and custom events | 1.6 | 4.2 | the signal |
+| `$submit`, `$request_failed` | 0.6 | 1.7 | kept |
+| total | 16 (225 events, 14 user-days) | 35 (346 events, 10 user-days) | |
+
+**Server events per day**, whatever the traffic (Node SDK, stats window of 60 s on a host with disk to spare, D-091), extrapolated from the first 10 h 41 of 2026-11-28:
+
+| Event | Journal | Kanban | What it held |
+| --- | --- | --- | --- |
+| `$runtime_stats` | ~1,440 | ~1,440 | one a minute, idle or not |
+| `$request_stats` | ~1,490 | ~2,920 | mostly `/health` and `/api/health` probes |
+| `$client_stats` | ~2,900 | — | one app calling `localhost` 6 times a minute and refused |
+
+Server telemetry was about **99%** of the events stored on 2026-11-28 (2,598 server events against 28 browser events for Journal, 1,940 against 36 for Kanban).
+
+**Targets** (what the lot A changes aim at):
+- **Browser:** at most about **25 stored events per active user-day** on an app of the persona's size (tens of thousands of users), with the distribution-only events (`$vital`, `$scroll`, `$field`) capped by a daily budget (#702, D-107) and `$identify` sent only when something changed (#703).
+- **Server:** an idle instance sends **a few hundred events a day** (runtime health every 10 minutes), then grows with the routes really used, never with health checks (#726, D-110).
+
+To measure it again (MCP `sql` or `openlens-cli sql`):
+
+```sql
+SELECT event, count(*) AS n,
+       count(DISTINCT distinct_id || CAST(date AS VARCHAR)) AS user_days
+FROM raw_events
+WHERE date >= DATE '2026-11-22' AND environment = 'production'
+GROUP BY event ORDER BY n DESC
+```
+### Persona size (#706)
+
+The target persona is a product manager whose app has tens of thousands of active users. `cargo xtask bench-gen <data-dir> --profile persona --map-out map.yaml` writes that app as it is stored **after** the event budget (D-107), over 90 days:
+
+- **People:** 120,000 known users, each active on a share of days drawn from a Pareto law (α = 1.6) with a mean of about 25 %, so about **30,000 daily active users**. Six raw roles (as the realistic profile), plans free (80 %) and pro (20 %).
+- **Browser events:** about **25 stored per active user-day**: one or two sessions a day, each opened by a page view, then clicks (about 25 % of the stored events), page views (12 %), success and custom events (15 %), `$submit` and `$request_failed` (5 %), feature uses and a few errors for the rest, and one `$identify` per active user-day (the SDK sends at most one a UTC day when nothing changed).
+- **Distribution-only events, capped as the budget does:** `$vital`, `$scroll` and `$field` only on the user-days the budget draws, about 2,000 a day (share `min(1, 2000 / daily active users)`, so 1 in 15 here), each carrying the share as `$sample`. Clicks carry their position (`$x`, `$y`, `$vw`) only on those days.
+- **Anonymous visitors:** one known user in three is first seen anonymous on the landing page (`/`, `/pricing`, `/signup`), and its first `$identify` links that visit with `$anon_distinct_id`; 120,000 more visitors never sign up (three times those signups).
+- **Server telemetry** of one app server: `$request_stats` for 30 routes every 10 minutes (24 feature APIs and 6 others, a 5xx row in 3 % of windows) and `$runtime_stats` every 10 minutes, with a process start at each release (every 15 days).
+
+It is deterministic. Its size is derived from these numbers, not chosen: about **68 M events** (about 67 M browser events of known users, 0.5 M of anonymous visitors, 0.4 M of server stats); bench-gen prints the exact count (`events`) and the population (`persona`) in its JSON. `--events N` scales the known users, and the visitors with them, to about `N` events (the server stats stay one server's; under about 8,000 known users the budget measures every session, so no `$sample`); without `--events` the profile is written at full size, and `--events 68000000` is the full size too. `--users` is ignored. `map.yaml` is the realistic profile's 24-feature, 3-role map, which the persona uses as well; with `--map-out` it is stored as the project's map before the rollups.
+
+**Locally:** with the perf build (a debug build is far too slow at this size), `./target/perf/xtask bench-gen /tmp/olp --profile persona --map-out /tmp/olp-map.yaml`, then start the server on `/tmp/olp` as in "How to run" and time the board. The data dir takes several GB: delete it afterwards (`docs/development.md`).
+
+**In CI:** the `scale` job of `perf.yml` (run by hand) with `scale_profile` set to `persona` and `scale_events` to `68000000` (or a smaller count for a scaled-down persona), and the caps to measure in `scale_memory`. The `scale_profile` input comes with its own CI change (rule 14); until it is merged, run it locally.
+
+| Persona, 90 days, budget on, one node | Value |
+| --- | --- |
+| events (known users, active a day) | not measured yet |
+| generation and rollups | not measured yet |
+| ingestion (`xtask bench`, events/s on one vCPU) | not measured yet |
+| data on disk, total and per day | not measured yet |
+| cold board (3 runs), per memory cap | not measured yet |
+| server CPU for the board | not measured yet |
+| server peak memory | not measured yet |
+
 ## How to run
 
 ```sh

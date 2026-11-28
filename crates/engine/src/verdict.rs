@@ -20,7 +20,8 @@
 //!   (good, needs improvement, poor).
 //! - **Features**: the success rate of each feature with a success
 //!   event, worse when it drops by [`MIN_FEATURE_DROP`] or more,
-//!   significantly. The features the release's code change touched
+//!   significantly: under the Benjamini–Hochberg cutoff of all the
+//!   features compared, at a 5% false discovery rate (D-109). The features the release's code change touched
 //!   ([`Side::touched`], #576, D-095) are judged and listed first, before
 //!   every other check, with the same thresholds; one that cannot be
 //!   compared says so.
@@ -315,7 +316,9 @@ fn pct(r: f64) -> String {
 }
 
 /// A share compared with a two-proportion test: worse when it moved the
-/// wrong way by at least `min` and significantly.
+/// wrong way by at least `min` and significantly, `sig` saying which
+/// p-values are (under [`ALPHA`] for a KPI, under the family's false
+/// discovery cutoff for a feature, D-109).
 fn share_check(
     key: &str,
     label: &str,
@@ -323,10 +326,11 @@ fn share_check(
     (p, pn): (f64, i64),
     up: bool,
     min: f64,
+    sig: &dyn Fn(f64) -> bool,
 ) -> Check {
     let outcome = match stats::two_proportions(c, cn, p, pn) {
         None => Outcome::TooFew,
-        Some(pv) if pv < ALPHA && (c - p).abs() >= min => {
+        Some(pv) if sig(pv) && (c - p).abs() >= min => {
             if (c > p) == up {
                 Outcome::Better
             } else {
@@ -403,6 +407,7 @@ pub fn compare(
             (p.bounce_rate(), p.sessions),
             false,
             MIN_MOVE,
+            &|pv| pv < ALPHA,
         ));
         checks.push(share_check(
             "task_rate",
@@ -411,6 +416,7 @@ pub fn compare(
             (p.task_rate(), p.sessions),
             true,
             MIN_MOVE,
+            &|pv| pv < ALPHA,
         ));
         let per_user = |s: &Side| share(s.sessions, s.users);
         checks.push(Check {
@@ -524,12 +530,27 @@ pub fn compare(
 /// cannot be compared says so, shown and not judged. The thresholds are
 /// the same for every feature.
 fn feature_checks(c: &Side, p: &Side) -> (Vec<Check>, Vec<Check>) {
-    let one = |f: &FeatureUse, touched: bool| {
+    let rates = |f: &FeatureUse| {
         let pf = p.feature(&f.feature)?;
-        let (rc, rp) = (
+        Some((
             share(f.succeeded, f.sessions),
             share(pf.succeeded, pf.sessions),
-        );
+            pf.sessions,
+        ))
+    };
+    // Every feature compared is one test of the family, touched or not
+    // (D-109): the more features, the stricter each test.
+    let ps: Vec<f64> = c
+        .features
+        .iter()
+        .filter_map(|f| {
+            let (rc, rp, pn) = rates(f)?;
+            stats::two_proportions(rc, f.sessions, rp, pn)
+        })
+        .collect();
+    let cut = stats::fdr_cutoff(&ps, stats::FDR);
+    let one = |f: &FeatureUse, touched: bool| {
+        let (rc, rp, pn) = rates(f)?;
         let label = if touched {
             format!("Success rate of {} (changed in this release)", f.feature)
         } else {
@@ -539,9 +560,10 @@ fn feature_checks(c: &Side, p: &Side) -> (Vec<Check>, Vec<Check>) {
             &f.feature,
             &label,
             (rc, f.sessions),
-            (rp, pf.sessions),
+            (rp, pn),
             true,
             MIN_FEATURE_DROP,
+            &|pv| stats::discovered(cut, pv),
         );
         ch.kind = "feature";
         Some(ch)

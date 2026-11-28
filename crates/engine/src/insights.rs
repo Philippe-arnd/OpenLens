@@ -4,12 +4,21 @@
 //! carries the cohort sizes behind its numbers, a suggested next step, and
 //! a score used to rank the board. Cards below the minimum cohort sizes are
 //! not shown: no insight is better than a misleading one.
+//!
+//! A family that tests every feature, role or flag at once (stick drivers,
+//! role blind spots, flag regressions, flag wins) shows a card only when
+//! its p-value passes the family's Benjamini–Hochberg cutoff at a 5% false
+//! discovery rate ([`crate::stats::fdr_cutoff`], D-109), on top of its
+//! size and lift thresholds: the more candidates, the stricter the test.
 
 use serde::Serialize;
 use serde_json::{Map, Value};
 
 use crate::{Filters, Result, int, text};
 use openlens_query::QueryEngine;
+
+mod flags;
+pub(crate) use self::flags::*;
 
 /// Smallest group size an insight may rest on.
 pub const MIN_GROUP: i64 = 8;
@@ -191,8 +200,12 @@ pub(crate) async fn compute(
         needed: 2 * MIN_GROUP,
     };
 
-    // Stick drivers and the value moment.
+    // Stick drivers and the value moment. Every feature with both groups
+    // large enough is tested; the drivers are those of the features
+    // passing the family's false discovery cutoff (D-109).
     if n_all >= 2 * MIN_GROUP {
+        let mut tested: Vec<f64> = Vec::new();
+        let mut found: Vec<(f64, Vec<Insight>)> = Vec::new();
         let early = rows(early)?;
         let mut features: Vec<String> = early.iter().filter_map(|r| text(r, "feature")).collect();
         features.sort();
@@ -218,13 +231,19 @@ pub(crate) async fn compute(
                 kept_with as f64 / with as f64,
                 kept_without as f64 / without as f64,
             );
+            let Some(p) = crate::stats::two_proportions_from(MIN_GROUP, ra, with, rb, without)
+            else {
+                continue;
+            };
+            tested.push(p);
             if ra > rb + 0.1 {
+                let mut these = Vec::new();
                 let lift = if rb > 0.0 {
                     format!("{:.1}×", ra / rb)
                 } else {
                     "far".into()
                 };
-                cards.push(Insight {
+                these.push(Insight {
                     kind: "stick_driver",
                     title: format!("Users who use {feat} in their first week stay {lift} more"),
                     evidence: format!(
@@ -255,7 +274,7 @@ pub(crate) async fn compute(
                 if let Some((k, a, b, wk)) = best
                     && a - b > ra - rb
                 {
-                    cards.push(Insight {
+                    these.push(Insight {
                         kind: "value_moment",
                         title: format!("Value moment: {feat} {k}+ times in week 1"),
                         evidence: format!(
@@ -271,6 +290,13 @@ pub(crate) async fn compute(
                         figure: None,
                     });
                 }
+                found.push((p, these));
+            }
+        }
+        let cut = crate::stats::fdr_cutoff(&tested, crate::stats::FDR);
+        for (p, these) in found {
+            if crate::stats::discovered(cut, p) {
+                cards.extend(these);
             }
         }
     }
@@ -319,6 +345,10 @@ pub(crate) async fn compute(
     let mut feats: Vec<String> = roles.iter().filter_map(|r| text(r, "feature")).collect();
     feats.sort();
     feats.dedup();
+    // Every role and feature pair is tested; the blind spots are those
+    // passing the family's false discovery cutoff (D-109).
+    let mut tested: Vec<f64> = Vec::new();
+    let mut found: Vec<(f64, Insight)> = Vec::new();
     for feat in &feats {
         let used = |role: &str| {
             roles
@@ -343,8 +373,13 @@ pub(crate) async fn compute(
                 used(role) as f64 / *n as f64,
                 others_used as f64 / others as f64,
             );
+            let Some(p) = crate::stats::two_proportions_from(MIN_GROUP, mine, *n, theirs, others)
+            else {
+                continue;
+            };
+            tested.push(p);
             if theirs >= 0.3 && mine <= theirs * 0.2 {
-                cards.push(Insight {
+                found.push((p, Insight {
                     kind: "role_blind_spot",
                     title: format!("{role}s almost never use {feat}"),
                     evidence: format!("{} of {n} {role}s vs {} of other users", pct(mine), pct(theirs)),
@@ -352,10 +387,17 @@ pub(crate) async fn compute(
                     score: (theirs - mine) * (*n as f64).sqrt() * 1.2,
                     subject: format!("{role}:{feat}"),
                     figure: Some(mine),
-                });
+                }));
             }
         }
     }
+    let cut = crate::stats::fdr_cutoff(&tested, crate::stats::FDR);
+    cards.extend(
+        found
+            .into_iter()
+            .filter(|(p, _)| crate::stats::discovered(cut, *p))
+            .map(|(_, card)| card),
+    );
 
     // Release regression.
     let rel = rows(releases)?;
@@ -652,105 +694,34 @@ pub struct FlagCohort {
     pub p_tasks: Option<f64>,
 }
 
-fn valid_flag(k: &str) -> bool {
+pub(crate) fn valid_flag(k: &str) -> bool {
     !k.is_empty()
         && k.len() <= 64
         && k.bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
 }
 
-/// Compare the sessions of each flag seen lately (at most 5) with the rest.
-pub(crate) async fn flag_cohorts(
-    q: &QueryEngine,
-    project: &str,
-    src: &str,
-    f: &Filters,
-) -> Result<Vec<FlagCohort>> {
-    let q = &q.with_params(&f.params()?);
-    let w = f.clause(30)?;
-    let seen = q
-        .sql(
-            project,
-            &format!("SELECT DISTINCT flags FROM {src} WHERE {w} AND flags IS NOT NULL LIMIT 200"),
-        )
-        .await?;
-    let mut keys: Vec<String> = seen
-        .rows
-        .iter()
-        .filter_map(|r| text(r, "flags"))
-        .flat_map(|s| s.split(',').map(str::to_owned).collect::<Vec<_>>())
-        .filter(|k| valid_flag(k))
-        .collect();
-    keys.sort();
-    keys.dedup();
-    keys.truncate(5);
-    let runs = keys.iter().map(|key| {
-        // `key` is restricted to [a-z0-9_-], so it is safe inside the literal.
-        let sql = format!(
-            "SELECT has, count(DISTINCT uid) AS users, count(*) AS sessions, \
-             avg(CASE WHEN n > 1 THEN secs END) AS avg_secs, avg(CAST(tasks AS DOUBLE)) AS tps, stddev(CAST(tasks AS DOUBLE)) AS tps_sd, \
-             avg(CASE WHEN errors > 0 THEN 1.0 ELSE 0.0 END) AS err \
-             FROM (SELECT session_id, min(distinct_id) AS uid, \
-                   max(CASE WHEN strpos(concat(',', coalesce(flags, ''), ','), ',{key},') > 0 THEN 1 ELSE 0 END) AS has, \
-                   count(*) AS n, date_part('epoch', max(timestamp)) - date_part('epoch', min(timestamp)) AS secs, \
-                   sum(CASE WHEN event = '$error' THEN 1 ELSE 0 END) AS errors, \
-                   sum(CASE WHEN feature IS NOT NULL THEN 1 ELSE 0 END) AS tasks \
-                   FROM {src} WHERE {w} AND session_id IS NOT NULL GROUP BY session_id) s GROUP BY has"
-        );
-        async move { (key.clone(), q.sql(project, &sql).await) }
-    });
-    let mut out = Vec::new();
-    for (key, res) in futures::future::join_all(runs).await {
-        let mut c = FlagCohort {
-            flag: key,
-            with: CohortStats::default(),
-            without: CohortStats::default(),
-            p_errors: None,
-            p_tasks: None,
-        };
-        for r in res?.rows {
-            let stats = CohortStats {
-                users: int(&r, "users"),
-                sessions: int(&r, "sessions"),
-                avg_secs: r.get("avg_secs").and_then(Value::as_f64).unwrap_or(0.0),
-                tasks_per_session: r.get("tps").and_then(Value::as_f64).unwrap_or(0.0),
-                error_rate: r.get("err").and_then(Value::as_f64).unwrap_or(0.0),
-                tasks_sd: r.get("tps_sd").and_then(Value::as_f64).unwrap_or(0.0),
-            };
-            if int(&r, "has") == 1 {
-                c.with = stats
-            } else {
-                c.without = stats
-            }
-        }
-        let (w, o) = (&c.with, &c.without);
-        c.p_errors =
-            crate::stats::two_proportions(w.error_rate, w.sessions, o.error_rate, o.sessions);
-        c.p_tasks = crate::stats::two_means(
-            w.tasks_per_session,
-            w.tasks_sd,
-            w.sessions,
-            o.tasks_per_session,
-            o.tasks_sd,
-            o.sessions,
-        );
-        out.push(c);
-    }
-    Ok(out)
-}
-
-/// Cards for flags whose cohort clearly differs from everyone else.
+/// Cards for flags whose cohort clearly differs from everyone else. The
+/// error p-values of the flags shown are one family and their task
+/// p-values another, each held to its false discovery cutoff (D-109).
 pub(crate) fn flag_cards(cohorts: &[FlagCohort]) -> Vec<Insight> {
     let mut cards = Vec::new();
-    for c in cohorts {
+    let judged: Vec<&FlagCohort> = cohorts
+        .iter()
+        .filter(|c| c.with.users >= MIN_GROUP && c.without.users >= MIN_GROUP)
+        .collect();
+    let cutoff = |pick: fn(&FlagCohort) -> Option<f64>| {
+        let ps: Vec<f64> = judged.iter().filter_map(|c| pick(c)).collect();
+        crate::stats::fdr_cutoff(&ps, crate::stats::FDR)
+    };
+    let (cut_errors, cut_tasks) = (cutoff(|c| c.p_errors), cutoff(|c| c.p_tasks));
+    let sig =
+        |cut: Option<f64>, p: Option<f64>| p.is_some_and(|p| crate::stats::discovered(cut, p));
+    for c in judged {
         let (w, o) = (&c.with, &c.without);
-        if w.users < MIN_GROUP || o.users < MIN_GROUP {
-            continue;
-        }
-        let sig = |p: Option<f64>| p.is_some_and(|p| p < crate::stats::ALPHA);
         if w.error_rate > o.error_rate * 1.5
             && w.error_rate - o.error_rate > 0.03
-            && sig(c.p_errors)
+            && sig(cut_errors, c.p_errors)
         {
             cards.push(Insight {
                 kind: "flag_regression",
@@ -778,7 +749,7 @@ pub(crate) fn flag_cards(cohorts: &[FlagCohort]) -> Vec<Insight> {
             });
         } else if o.tasks_per_session > 0.0
             && w.tasks_per_session > o.tasks_per_session * 1.2
-            && sig(c.p_tasks)
+            && sig(cut_tasks, c.p_tasks)
         {
             cards.push(Insight {
                 kind: "flag_win",

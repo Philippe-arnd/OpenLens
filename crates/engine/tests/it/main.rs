@@ -24,6 +24,7 @@ mod map_shape;
 mod release_git;
 mod release_write;
 mod releases;
+mod sampled;
 mod server_errors;
 mod slo;
 mod stats_windows;
@@ -406,6 +407,43 @@ async fn insights_find_every_planted_pattern() {
         "no duplicate cards: {kinds:?}"
     );
     assert!(b.readiness.judged_users > 100);
+}
+
+/// The card kinds decided by a p-value (D-109).
+const TESTED_KINDS: [&str; 4] = [
+    "stick_driver",
+    "role_blind_spot",
+    "flag_regression",
+    "flag_win",
+];
+
+#[tokio::test]
+async fn insights_find_almost_nothing_where_nothing_is_planted() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut w, _) = Writer::open(dir.path(), FlushPolicy::default()).unwrap();
+    w.append(&openlens_testkit::unplanted_dataset("p")).unwrap();
+    w.flush().unwrap();
+    let q = QueryEngine::new(dir.path(), Limits::default());
+    let b = board(&q, "p", &Filters::default(), None).await.unwrap();
+    // Every family had candidates to test.
+    assert!(b.readiness.judged_users > 100, "{:?}", b.readiness);
+    assert!(
+        b.flag_cohorts
+            .iter()
+            .any(|c| c.flag == openlens_testkit::UNPLANTED_FLAG && c.p_errors.is_some()),
+        "{:?}",
+        b.flag_cohorts
+    );
+    assert!(b.role_features.len() >= openlens_testkit::UNPLANTED_FEATURES.len());
+    // Five features, two roles and a flag tested at a 5% false discovery
+    // rate per family: a chance card at most.
+    let found: Vec<_> = b
+        .insights
+        .iter()
+        .filter(|i| TESTED_KINDS.contains(&i.kind))
+        .map(|i| (i.kind, i.subject.as_str()))
+        .collect();
+    assert!(found.len() <= 1, "chance cards: {found:?}");
 }
 
 #[tokio::test]

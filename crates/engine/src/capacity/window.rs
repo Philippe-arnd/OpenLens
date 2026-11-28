@@ -2,8 +2,9 @@
 //! minutes, chosen with the capacity (hourly), advertised to the server
 //! SDKs in the capture response (`x-openlens-stats-window`).
 //!
-//! The window is the length of one `$request_stats`, `$client_stats` and
-//! `$runtime_stats` data point. A finer window stores more points for the
+//! The window is the length of one `$request_stats` and `$client_stats`
+//! data point (`$runtime_stats` come every 10 minutes whatever it is,
+//! #726, D-110). A finer window stores more points for the
 //! same requests, so it is chosen like extra recordings are: the bytes the
 //! stat events would take over the fixed 400 days, beyond what 10-minute
 //! windows take, must fit in the room the budget leaves after the floor.

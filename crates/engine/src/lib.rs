@@ -699,6 +699,11 @@ pub(crate) async fn any_person(q: &QueryEngine, project: &str) -> Result<bool> {
 /// agree on bounces (D-041, D-047).
 pub(crate) use openlens_query::INTERACTION;
 
+/// The errors an event counts for, repeats included (#703, D-107), the
+/// occurrences one `$error` row stands for, and the weight of a sampled
+/// distribution-only event (#702, D-107).
+pub(crate) use openlens_query::{ERROR_COUNT, OCCURRENCES, SAMPLE_WEIGHT};
+
 /// The typed columns of a `$vital` (#449), written at ingestion.
 const VITAL_COLUMNS: &str = "vital_name, vital_value, vital_device, vital_el, vital_kind, \
      vital_res, vital_ttfb, vital_load_delay, vital_load_time, vital_render_delay, \

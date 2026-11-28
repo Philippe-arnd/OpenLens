@@ -39,7 +39,7 @@ impl SessionRows<'_> {
         let events = format!(
             "SELECT session_id, distinct_id, release, min(timestamp) AS first_ts, \
              max(timestamp) AS last_ts, sum(CASE WHEN {INTERACTION} THEN 1 ELSE 0 END) AS n, \
-             sum(CASE WHEN event = '$error' THEN 1 ELSE 0 END) AS errors, \
+             sum({ERROR_COUNT}) AS errors, \
              sum(CASE WHEN {task} THEN 1 ELSE 0 END) AS tasks \
              FROM {src} WHERE {w}{skip} AND session_id IS NOT NULL \
              GROUP BY session_id, distinct_id, release, date",
