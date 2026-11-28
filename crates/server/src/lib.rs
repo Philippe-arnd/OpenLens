@@ -50,6 +50,7 @@ mod privacy;
 mod releases;
 mod replay;
 mod reword;
+mod rollup_write;
 mod routes_api;
 mod s3;
 mod scopes;
@@ -600,19 +601,13 @@ async fn roll_up(state: &AppState, now: chrono::DateTime<chrono::Utc>) -> usize 
                 }
             };
             drop(quiet);
-            let Ok(_guard) = privacy::MAINTENANCE.lock() else {
-                return written;
-            };
-            match openlens_storage::rollup::write(&state.data_dir, &p.id, day, generation, &batches)
-            {
-                Ok(true) => {
-                    written += 1;
-                    state.boards.closed().days_changed(&p.id, [day]);
-                }
-                Ok(false) => {}
-                Err(err) => {
-                    tracing::warn!(project = %p.id, day = %label, %err, "rollup not written")
-                }
+            let write = rollup_write::day(state, &p.id, day, move |root, id| {
+                openlens_storage::rollup::write(root, id, day, generation, &batches)
+            });
+            match write.await {
+                Some(true) => written += 1,
+                Some(false) => {}
+                None => return written,
             }
         }
     }
