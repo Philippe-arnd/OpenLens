@@ -55,6 +55,20 @@ pub(crate) fn current(state: &AppState, project: &str) -> Arc<ProjectEnv> {
     p
 }
 
+/// The sister hosts of the page asking for its flags (#710, D-102): the
+/// page's host comes from the request's `Origin`, else its `Referer`.
+/// Empty when neither is sent or no rule classifies that host.
+pub(crate) fn sister_hosts(state: &AppState, project: &str, headers: &HeaderMap) -> Vec<String> {
+    let page = ["origin", "referer"]
+        .iter()
+        .filter_map(|k| headers.get(*k).and_then(|v| v.to_str().ok()))
+        .find_map(openlens_event::host_of);
+    match page {
+        Some(h) => current(state, project).rules.sister_hosts(&h),
+        None => Vec::new(),
+    }
+}
+
 /// Store `rules` for `project`; ingestion uses them from the next batch.
 pub(crate) fn save(state: &AppState, project: &str, rules: &Rules) -> Result<(), String> {
     let r = state

@@ -4,7 +4,8 @@
 //!   key): the keys of the flags that are on for that user. The raw role is
 //!   resolved to its canonical role with the feature map before targeting.
 //!   It also carries `replay_rate`, the share of sessions the SDK records
-//!   from their start (#327).
+//!   from their start (#327), and `sister_hosts`, the project's other hosts
+//!   in the asking page's environment (#710, D-102).
 //! - Admin (bearer): `GET /api/projects/{id}/flags`,
 //!   `PUT|DELETE /api/projects/{id}/flags/{key}`, and `PATCH` to switch a
 //!   flag on or off or change its rollout (`flags.update`).
@@ -161,6 +162,8 @@ pub(crate) async fn public(
         .collect();
     // The share of sessions to record from their start (#327, D-035).
     let replay = crate::replay::rate(&state, &project.id, &project.timezone).await;
+    // The project's other hosts in this page's environment (#710, D-102).
+    let sisters = crate::environments::sister_hosts(&state, &project.id, &headers);
     (
         StatusCode::OK,
         cors,
@@ -169,6 +172,7 @@ pub(crate) async fn public(
             "variants": variants,
             "surveys": surveys,
             "replay_rate": replay.rate,
+            "sister_hosts": sisters,
         })),
     )
         .into_response()

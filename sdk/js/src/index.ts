@@ -12,6 +12,7 @@ import { trackVitals } from "./vitals";
 import type { Bridge } from "./replay";
 import { type Decision, decide, validRate } from "./sampling";
 import { type Sender, type Store, UnloadBudget, clearParked, park, takeParked } from "./unload";
+import { mayAdopt, takeAnon, validSisters, withAnon } from "./link";
 
 declare global {
   interface Window {
@@ -86,6 +87,8 @@ let replayRate: number | undefined;
 /** Fingerprint of the build this page runs (`$build`, #495), computed once
  * per page load in `init`. */
 let build: string | undefined;
+/** The project's other hosts in this environment, from `/flags` (#710). */
+let sisterHosts: string[] = [];
 
 /** A micro-survey the server says this user may be asked (see survey.ts). */
 export interface SurveyDef {
@@ -299,6 +302,7 @@ function loadFlags(): void {
     .then((r) => (r.ok ? r.json() : null))
     .then((j: { flags?: string[]; variants?: Record<string, string>; surveys?: SurveyDef[]; replay_rate?: unknown } | null) => {
       if (Array.isArray(j?.surveys)) activeSurveys = j.surveys;
+      if (j) sisterHosts = validSisters((j as Record<string, unknown>).sister_hosts);
       // A server without sampling (no `replay_rate`) records every session.
       const rate = j ? (validRate(j.replay_rate) ?? 1) : undefined;
       if (rate !== undefined) {
@@ -724,6 +728,45 @@ function linkHeaders(get: (k: string) => string | null, set: (k: string, v: stri
   return id && !/^0+$/.test(id) ? id : undefined;
 }
 
+/** A landing on another host of the project passed its anonymous id
+ * (`_ol`, #710, D-102): adopt it when this visitor has no history here,
+ * never in cookieless mode or without consent, then take the parameter
+ * out of the address bar (before the router hooks are installed). */
+function arrive(): void {
+  let got: ReturnType<typeof takeAnon>;
+  try {
+    got = takeAnon(location.href);
+  } catch {
+    return;
+  }
+  if (!got) return;
+  if (got.id && consent !== "denied" && !cfg?.cookieless && mayAdopt(state)) {
+    state.anon = got.id;
+    save();
+  }
+  try {
+    history.replaceState(history.state, "", got.clean);
+  } catch {
+    // a sandboxed frame: the parameter stays visible, nothing else changes
+  }
+}
+
+/** An anonymous visitor follows a link to a sister host (#710, D-102):
+ * the link carries the anonymous id for this one navigation and gets its
+ * own address back right after. Left click, Enter and middle click. */
+function linkOut(e: Event): void {
+  if (!cfg || cfg.cookieless || consent !== "granted" || sisterHosts.length === 0) return;
+  const a = e.composedPath().find((x): x is HTMLAnchorElement => x instanceof HTMLAnchorElement && x.hasAttribute("href"));
+  if (!a) return;
+  refresh();
+  if (state.uid) return;
+  const orig = a.getAttribute("href") ?? "";
+  const next = withAnon(a.href, location.href, state.anon, sisterHosts);
+  if (!next) return;
+  a.href = next;
+  setTimeout(() => a.setAttribute("href", orig), 0);
+}
+
 /** Start OpenLens. Safe to call once; later calls are ignored. */
 export function init(config: Config): void {
   if (cfg || typeof window === "undefined") return;
@@ -748,7 +791,12 @@ export function init(config: Config): void {
     activeVariants = {};
   }
   if (isBot()) consent = "denied";
+  arrive();
   if (consent === "denied") return;
+  if (!config.cookieless) {
+    document.addEventListener("click", linkOut, true);
+    document.addEventListener("auxclick", linkOut, true);
+  }
   loadFlags();
   // A prerendered page (speculation rules) is not a visit until it is shown.
   const doc = document as Document & { prerendering?: boolean };

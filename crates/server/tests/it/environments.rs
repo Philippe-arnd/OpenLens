@@ -526,3 +526,106 @@ async fn the_settings_tab_previews_then_relabels() {
         "qa"
     );
 }
+
+/// `GET /flags` asked from a page of `origin`.
+async fn flags_from(h: &Harness, origin: &str) -> serde_json::Value {
+    let req = Request::builder()
+        .uri(format!("/flags?key={}&distinct_id=u1", h.key))
+        .header("origin", origin)
+        .body(Body::empty())
+        .unwrap();
+    let resp = router(h.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    serde_json::from_str(&body_text(resp).await).unwrap()
+}
+
+#[tokio::test]
+async fn the_landing_host_is_internal_and_listed_as_a_sister_of_the_app() {
+    // #710, D-102: a landing page on www., the app on app., one project.
+    let h = harness();
+    capture(&h, vec![]).await;
+    seeded(&h).await;
+    for (host, env) in [
+        ("www.example.com", "production"),
+        ("app.example.com", "production"),
+        ("*.preview.example.com", "production"),
+        ("staging.example.com", "staging"),
+        ("junk.example.com", "ignore"),
+    ] {
+        patch(
+            &h,
+            serde_json::json!({ "environment_rule": { "host": host, "env": env } }),
+        )
+        .await;
+    }
+    let landing = |id: &str, referrer: &str| {
+        serde_json::json!({
+            "event": "$pageview",
+            "distinct_id": id,
+            "properties": {
+                "$current_url": "https://app.example.com/signup",
+                "$pathname": "/signup",
+                "$lang": "en",
+                "$referrer": referrer,
+            },
+        })
+    };
+    capture(
+        &h,
+        vec![
+            landing("from-landing", "https://www.example.com/pricing"),
+            landing("from-blog", "https://blog.someone.dev/post"),
+        ],
+    )
+    .await;
+    openlens_server::flush_now(&h.state).unwrap();
+    let r = h
+        .state
+        .query
+        .sql(
+            "default",
+            "SELECT distinct_id, properties FROM raw_events ORDER BY distinct_id",
+        )
+        .await
+        .unwrap();
+    let row = |id: &str| {
+        r.rows
+            .iter()
+            .find(|row| row.get("distinct_id").and_then(|v| v.as_str()) == Some(id))
+            .map(|row| serde_json::to_string(row).unwrap())
+            .unwrap_or_default()
+    };
+    assert!(
+        row("from-landing").contains(r#"\"$channel\":\"internal\""#),
+        "{:?}",
+        r.rows
+    );
+    assert!(
+        row("from-blog").contains(r#"\"$channel\":\"referral\""#),
+        "a foreign referrer stays a referral: {:?}",
+        r.rows
+    );
+
+    // `/flags` from the landing lists the app, and nothing else.
+    let v = flags_from(&h, "https://www.example.com").await;
+    let sisters: Vec<&str> = v["sister_hosts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|x| x.as_str())
+        .collect();
+    assert!(sisters.contains(&"app.example.com"), "{v}");
+    assert!(
+        !sisters.iter().any(|s| s.starts_with("*.")
+            || *s == "www.example.com"
+            || *s == "staging.example.com"
+            || *s == "junk.example.com"),
+        "{v}"
+    );
+    // A page on a host no rule names: nothing to link.
+    let v = flags_from(&h, "https://elsewhere.org").await;
+    assert!(
+        v["sister_hosts"].as_array().is_some_and(Vec::is_empty),
+        "{v}"
+    );
+}

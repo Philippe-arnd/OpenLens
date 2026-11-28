@@ -44,3 +44,4 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Status page | The public, read-only page of a project at `/status/<slug>`: its state, components, 90 daily bars, announcements and planned maintenance |
 | Component | A line of the status page: production or a monitored environment, under a public name |
 | Job check-ins | On Uptime: cron and background jobs that report each run; OpenLens learns how often they run and alerts when one is missed, fails or gets slower |
+| Sister hosts | The project's other hosts in the same environment (a landing page and its app, from the host rules), between which a link carries the anonymous visitor |

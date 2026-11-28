@@ -4,7 +4,13 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **One visitor from the landing page to the app** (#710, D-102): `GET /flags` lists the project's sister hosts (the exact hosts its host rules map to the page's environment, at most 20). When an anonymous visitor follows a link to one of them, the browser SDK adds the anonymous id to that link (`_ol=<id>`, at the click only); the SDK on the other host adopts it when it has no history of that visitor, then removes it from the address bar. No cookie, never in cookieless mode or without consent; a single-host app sees no change.
+
 ### Changed
+
+- **A referrer on one of the project's hosts is `internal`** (#710, D-102), not `referral`: any host the host rules cover, except `ignore`d ones. A visit from the landing page to the app keeps the landing's channel.
 
 - **The npm packages are `@openlens-obs/web` and `@openlens-obs/node`** (the `@openlens` scope was taken on npm). Both are published on release tags from v0.8.0 on, with the release's version; `npm.yml` failed before on every tag, since the package versions stayed at 0.1.0.
 

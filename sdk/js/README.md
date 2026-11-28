@@ -72,6 +72,7 @@ Flags are fetched at init and after `identify`. The active flags travel with eve
 - Do Not Track and Global Privacy Control are respected: nothing is sent.
 - Page URLs are sent without their query string and fragment, except `utm_*`, `ref` and `gclid`.
 - `consent: "pending"` holds events until `setConsent(true)` is called.
+- A link from one of the project's hosts to another (landing page to app, both in the host rules) carries the anonymous id as `_ol=<id>`, added at the click only, for an anonymous visitor with consent; the other host adopts it when it has no history of that visitor and removes it from the address bar. No cookie; never in cookieless mode.
 - `data-openlens-ignore`: nothing in that subtree is captured.
 - **Session replay** is on by default. Once the page is idle and consent is granted, the recorder (`/r.js`, rrweb under MIT) loads from your OpenLens server.
 - Not every session is recorded: the server sets a rate for about 300 recordings a day. A session left out keeps its last minute or two in memory and sends it only after an error or a rage click, then records the rest of the session.
