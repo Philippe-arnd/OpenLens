@@ -263,6 +263,7 @@ pub(crate) async fn export(
     };
     let person = state.meta.person(&project, &who).ok().flatten();
     let roles = state.meta.role_history(&project, &who).unwrap_or_default();
+    let plans = state.meta.plan_history(&project, &who).unwrap_or_default();
     let recordings: Vec<_> = ids
         .iter()
         .flat_map(|i| openlens_replay::list(&state.data_dir, &project, Some(i)).unwrap_or_default())
@@ -284,6 +285,7 @@ pub(crate) async fn export(
             "first_seen": p.first_seen, "last_seen": p.last_seen, "signed_up": p.signed_up,
         })),
         "role_history": roles.iter().map(|(r, s)| json!({ "role": r, "since": s })).collect::<Vec<_>>(),
+        "plan_history": plans.iter().map(|(pl, s)| json!({ "plan": pl, "since": s })).collect::<Vec<_>>(),
         "recordings": recordings,
         "events": events,
         "note": "OpenLens never stores IP addresses; page views carry a country, device, browser and OS derived at capture.",

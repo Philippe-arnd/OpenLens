@@ -933,6 +933,7 @@ async fn person(
     let explore::Profile {
         person,
         roles,
+        plans,
         replays,
         events,
     } = match explore::GetPerson::run(&state, &Caller::default(), input).await {
@@ -949,6 +950,7 @@ async fn person(
             "first_seen": p.first_seen, "last_seen": p.last_seen, "signed_up": p.signed_up,
         })),
         "role_history": roles.iter().map(|(r, since)| json!({ "role": r, "since": since })).collect::<Vec<_>>(),
+        "plan_history": plans.iter().map(|(pl, since)| json!({ "plan": pl, "since": since })).collect::<Vec<_>>(),
         "recordings": replays.iter().map(|r| json!({
             "session_id": r.session_id, "started": r.started, "chunks": r.chunks,
             "dashboard": format!("/p/{}/replays/{}", p.id, r.session_id),

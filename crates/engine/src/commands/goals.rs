@@ -128,6 +128,9 @@ pub struct Evaluated {
     pub choices: Vec<GoalChoice>,
     /// Every objective.
     pub objectives: Vec<ObjectiveRow>,
+    /// The business KPIs (#714) this project cannot set a goal on now:
+    /// (key, label, why), so a refusal says why (rule 11).
+    pub unavailable: Vec<(String, String, String)>,
     /// First-seen days of the releases (for deadlines in releases).
     release_days: Vec<String>,
 }
@@ -151,6 +154,9 @@ impl Serialize for Evaluated {
             "suggestions": self.choices.iter().map(|c| json!({
                 "kpi": c.kpi, "label": c.label, "current": c.current, "suggested_target": c.suggested,
                 "higher_is_better": c.up, "share": c.share,
+            })).collect::<Vec<_>>(),
+            "not_available": self.unavailable.iter().map(|(kpi, label, why)| json!({
+                "kpi": kpi, "label": label, "why": why,
             })).collect::<Vec<_>>(),
         })
         .serialize(s)
@@ -192,6 +198,19 @@ pub async fn evaluate<H: Host>(host: &H, p: &Project, tz: &str) -> Result<Evalua
             let (current, series) = goals::kpi_values_with(&b, &w, &g.kpi);
             let (st, projected) = goals::status(&g, current, &series, today);
             let (label, _, share) = goals::kpi_info(&g.kpi);
+            let days_left = chrono::NaiveDate::parse_from_str(&g.deadline, "%Y-%m-%d")
+                .map_or(0, |d| (d - today).num_days());
+            // A KPI with no weekly series (#714) has no trend to judge,
+            // which is not the same as too few points yet.
+            let status = if st == Status::NotEnoughData
+                && current.is_some()
+                && days_left >= 0
+                && goals::without_trend(&g.kpi)
+            {
+                "no trend yet".to_owned()
+            } else {
+                st.label().to_owned()
+            };
             let guards = g
                 .guardrails
                 .iter()
@@ -215,7 +234,7 @@ pub async fn evaluate<H: Host>(host: &H, p: &Project, tz: &str) -> Result<Evalua
                 .cloned()
                 .collect();
             GoalRow {
-                status: st.label().to_owned(),
+                status,
                 state: st,
                 good: matches!(st, Status::Reached | Status::OnTrack),
                 bad: matches!(st, Status::OffTrack),
@@ -224,8 +243,7 @@ pub async fn evaluate<H: Host>(host: &H, p: &Project, tz: &str) -> Result<Evalua
                 current,
                 projected,
                 series,
-                days_left: chrono::NaiveDate::parse_from_str(&g.deadline, "%Y-%m-%d")
-                    .map_or(0, |d| (d - today).num_days()),
+                days_left,
                 guards,
                 moves,
                 marks: during,
@@ -241,7 +259,13 @@ pub async fn evaluate<H: Host>(host: &H, p: &Project, tz: &str) -> Result<Evalua
                 .filter(|x| x.success.is_some())
                 .map(|x| format!("success:{}", x.key)),
         );
+        keys.extend(
+            m.features
+                .iter()
+                .map(|x| format!("feature_adoption:{}", x.key)),
+        );
     }
+    let unavailable = unavailable(map.as_ref().map(|(m, _)| m), &b, &w);
     let choices = keys
         .into_iter()
         .filter_map(|k| {
@@ -291,6 +315,7 @@ pub async fn evaluate<H: Host>(host: &H, p: &Project, tz: &str) -> Result<Evalua
         rows,
         choices,
         objectives,
+        unavailable,
         release_days: b.releases.iter().map(|r| r.first_seen.clone()).collect(),
     })
 }
@@ -326,10 +351,43 @@ pub struct NewGuardrail {
     pub limit: Option<f64>,
 }
 
+/// The business KPIs (#714) the project cannot set a goal on now, with
+/// their label and why.
+fn unavailable(
+    map: Option<&openlens_featuremap::FeatureMap>,
+    b: &crate::Board,
+    w: &goals::Weekly,
+) -> Vec<(String, String, String)> {
+    goals::business_kpis(map)
+        .into_iter()
+        .filter_map(|k| {
+            let why = goals::why_not(&k, map, b, w)?;
+            let label = goals::kpi_info(&k).0;
+            Some((k, label, why))
+        })
+        .collect()
+}
+
+/// Why a KPI that is not among the choices cannot be a goal, in words.
+fn refusal(ev: &Evaluated, kpi: &str) -> String {
+    if let Some((_, label, why)) = ev.unavailable.iter().find(|u| u.0 == kpi) {
+        return format!("{label} (`{kpi}`) is not available for this project: {why}.");
+    }
+    if let Some(f) = kpi.strip_prefix("feature_adoption:") {
+        return format!(
+            "There is no feature `{f}` in the feature map: `feature_adoption:` takes the key of one of its features."
+        );
+    }
+    if kpi.strip_prefix("success:").is_none() && !goals::KPIS.iter().any(|k| k.0 == kpi) {
+        return format!("`{kpi}` is not a KPI a goal can target: pick one from the suggestions.");
+    }
+    format!("`{kpi}` has no value yet.")
+}
+
 /// Validate and build a goal against what the board shows now.
 fn build_goal(ev: &Evaluated, existing: usize, i: NewGoal) -> Result<Goal, String> {
     let Some(c) = ev.choices.iter().find(|c| c.kpi == i.kpi) else {
-        return Err("This KPI has no value yet.".into());
+        return Err(refusal(ev, &i.kpi));
     };
     if !i.target.is_finite() || i.target < 0.0 || (c.share && i.target > 1.0) {
         return Err("The target is out of range.".into());
@@ -357,7 +415,7 @@ fn build_goal(ev: &Evaluated, existing: usize, i: NewGoal) -> Result<Goal, Strin
             continue;
         }
         let Some(gc) = ev.choices.iter().find(|x| x.kpi == k) else {
-            return Err(format!("The guardrail `{k}` has no value yet."));
+            return Err(format!("The guardrail: {}", refusal(ev, &k)));
         };
         let limit =
             limit.unwrap_or_else(|| goals::Guardrail::suggested(gc.current, gc.up, gc.share));
@@ -751,5 +809,101 @@ fn fmt(v: f64, share: bool) -> String {
         format!("{v:.0}")
     } else {
         format!("{v:.2}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn evaluated(
+        choices: Vec<GoalChoice>,
+        unavailable: Vec<(String, String, String)>,
+    ) -> Evaluated {
+        Evaluated {
+            rows: Vec::new(),
+            choices,
+            objectives: Vec::new(),
+            unavailable,
+            release_days: Vec::new(),
+        }
+    }
+
+    fn new_goal(kpi: &str, target: f64) -> NewGoal {
+        let deadline = chrono::Utc::now().date_naive() + chrono::Duration::days(60);
+        NewGoal {
+            kpi: kpi.to_owned(),
+            target,
+            deadline: Some(deadline.format("%Y-%m-%d").to_string()),
+            releases: None,
+            owner: String::new(),
+            guardrails: Vec::new(),
+        }
+    }
+
+    /// #714: a project whose map declares no plans is refused a free →
+    /// paid conversion goal, with the reason; a feature's adoption needs a
+    /// feature of the map.
+    #[test]
+    fn business_goals_without_their_data_are_refused_with_the_reason() {
+        let map = openlens_featuremap::parse(
+            "version: 1\nfeatures:\n  - key: search\n    name: Search\n    entry: { routes: ['/search'] }\n",
+        )
+        .map
+        .unwrap();
+        assert!(map.plans.is_empty());
+        let (b, w) = (crate::Board::default(), goals::Weekly::default());
+        let ev = evaluated(Vec::new(), unavailable(Some(&map), &b, &w));
+        let err = build_goal(&ev, 0, new_goal("paid_conversion", 0.2)).unwrap_err();
+        assert!(err.contains("plans:"), "{err}");
+        let err = build_goal(&ev, 0, new_goal("feature_adoption:nope", 0.5)).unwrap_err();
+        assert!(
+            err.contains("`nope`") && err.contains("feature map"),
+            "{err}"
+        );
+        // A feature of the map with no active user is refused for that.
+        let err = build_goal(&ev, 0, new_goal("feature_adoption:search", 0.5)).unwrap_err();
+        assert!(!err.contains("no feature"), "{err}");
+    }
+
+    /// #714: a revenue goal is set like any other, from the value now.
+    #[test]
+    fn a_revenue_goal_is_set_from_its_value_now() {
+        let today = chrono::Utc::now().date_naive();
+        let day = |back: i64| {
+            (today - chrono::Duration::days(back))
+                .format("%Y-%m-%d")
+                .to_string()
+        };
+        let rows: Vec<(String, Option<String>, f64)> = (0..60)
+            .map(|i| (day(i), Some("EUR".to_owned()), 10.0 + (60 - i) as f64))
+            .collect();
+        let w = goals::Weekly {
+            revenue: goals::fold_revenue(&rows, None, today),
+            ..goals::Weekly::default()
+        };
+        let b = crate::Board::default();
+        let (current, series) = goals::kpi_values_with(&b, &w, "revenue");
+        let current = current.unwrap();
+        let (label, up, share) = goals::kpi_info("revenue");
+        let (_, suggested) = goals::suggest(current, &series, up, share);
+        let ev = evaluated(
+            vec![GoalChoice {
+                kpi: "revenue".into(),
+                label,
+                up,
+                share,
+                current,
+                suggested,
+            }],
+            unavailable(None, &b, &w),
+        );
+        assert!(ev.unavailable.iter().all(|u| u.0 != "revenue"));
+        let g = build_goal(&ev, 0, new_goal("revenue", current * 1.5)).unwrap();
+        // Its gap: the target is above the value it was set at.
+        assert!(g.up && g.target > g.baseline, "{g:?}");
+        let (st, projected) = goals::status(&g, Some(current), &series, today);
+        assert_ne!(st, Status::NotEnoughData, "revenue has a weekly trend");
+        assert!(projected.is_some());
     }
 }

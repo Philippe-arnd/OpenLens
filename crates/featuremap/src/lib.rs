@@ -24,6 +24,8 @@ pub const MAX_BYTES: usize = 256 * 1024;
 pub const MAX_FEATURES: usize = 500;
 /// Maximum roles in a map.
 pub const MAX_ROLES: usize = 50;
+/// Maximum plans in a map (#712).
+pub const MAX_PLANS: usize = 50;
 /// Default churn window, in days.
 pub const DEFAULT_CHURN_DAYS: u32 = 14;
 
@@ -45,6 +47,11 @@ pub struct FeatureMap {
     /// Canonical roles, in priority order (first match wins).
     #[serde(default)]
     pub roles: Vec<Role>,
+    /// Optional (#712, D-113): the plans the app sells, lowest first. Without
+    /// it, plan changes are still kept on raw values, but upgrades,
+    /// downgrades and paid or free are unknown and not shown.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plans: Vec<Plan>,
     /// Declared features.
     #[serde(default)]
     pub features: Vec<Feature>,
@@ -79,6 +86,27 @@ pub struct Role {
     /// Raw values: exact (case-insensitive) or with `*` wildcards.
     #[serde(rename = "match")]
     pub matches: Vec<String>,
+}
+
+/// A plan and the raw values that map to it (#712, D-113). Plans are listed
+/// lowest first: a move to a later plan is an upgrade, to an earlier one a
+/// downgrade.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Plan {
+    /// Canonical key, e.g. `pro`.
+    pub key: String,
+    /// Raw values: exact (case-insensitive) or with `*` wildcards.
+    #[serde(rename = "match")]
+    pub matches: Vec<String>,
+    /// Whether users on this plan pay (default true). A free plan says
+    /// `paid: false`: nothing is guessed from its name.
+    #[serde(default = "paid_default")]
+    pub paid: bool,
+}
+
+fn paid_default() -> bool {
+    true
 }
 
 /// A declared feature.
@@ -272,6 +300,7 @@ pub fn validate(m: &FeatureMap) -> Vec<Issue> {
     if m.features.len() > MAX_FEATURES {
         v.push(err("features", format!("at most {MAX_FEATURES} features")));
     }
+    plans(m, &mut v);
     if m.roles.is_empty() {
         v.push(warn("roles", "no roles declared: every KPI is split by role, so list the app's roles and the raw values that map to them"));
     }
@@ -406,6 +435,12 @@ pub fn validate(m: &FeatureMap) -> Vec<Issue> {
             in_sql.push((format!("roles[{i}].matches[{j}]"), x));
         }
     }
+    for (i, pl) in m.plans.iter().enumerate() {
+        in_sql.push((format!("plans[{i}].key"), &pl.key));
+        for (j, x) in pl.matches.iter().enumerate() {
+            in_sql.push((format!("plans[{i}].match[{j}]"), x));
+        }
+    }
     for (i, f) in m.features.iter().enumerate() {
         in_sql.push((format!("features[{i}].key"), &f.key));
         for (j, x) in f.renamed_from.iter().enumerate() {
@@ -421,6 +456,62 @@ pub fn validate(m: &FeatureMap) -> Vec<Issue> {
         }
     }
     v
+}
+
+/// The `plans:` section (#712, D-113): keys, match values, and the order
+/// (free plans first, since plans go from lowest to highest).
+fn plans(m: &FeatureMap, v: &mut Vec<Issue>) {
+    if m.plans.len() > MAX_PLANS {
+        v.push(err(
+            "plans",
+            format!("at most {MAX_PLANS} plans; group raw values under fewer canonical plans"),
+        ));
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut paid_before: Option<&str> = None;
+    for (i, pl) in m.plans.iter().enumerate() {
+        let p = format!("plans[{i}]");
+        if !valid_key(&pl.key) {
+            v.push(err(
+                format!("{p}.key"),
+                format!(
+                    "`{}` is not a valid key: use lowercase letters, digits, `-` or `_`",
+                    pl.key
+                ),
+            ));
+        }
+        if !seen.insert(pl.key.as_str()) {
+            v.push(err(
+                format!("{p}.key"),
+                format!("plan `{}` is declared twice", pl.key),
+            ));
+        }
+        if pl.matches.is_empty() {
+            v.push(err(
+                format!("{p}.match"),
+                "list at least one raw plan value sent by identify(), e.g. [\"pro\", \"pro_yearly\"]",
+            ));
+        }
+        for (j, mv) in pl.matches.iter().enumerate() {
+            if mv.trim().is_empty() || mv.len() > 200 {
+                v.push(err(
+                    format!("{p}.match[{j}]"),
+                    "values must be 1-200 characters",
+                ));
+            }
+        }
+        match (pl.paid, paid_before) {
+            (true, None) => paid_before = Some(pl.key.as_str()),
+            (false, Some(before)) => v.push(warn(
+                format!("{p}.paid"),
+                format!(
+                    "free plan `{}` comes after paid plan `{before}`: plans go from lowest to highest, so list free plans first",
+                    pl.key
+                ),
+            )),
+            _ => {}
+        }
+    }
 }
 
 /// `requires` and `renamed_from` across features: unknown keys, a feature
@@ -538,6 +629,87 @@ impl FeatureMap {
             .iter()
             .find(|r| r.matches.iter().any(|m| glob(m.trim(), raw.trim())))
             .map(|r| r.key.as_str())
+    }
+
+    /// The plan a raw value belongs to and its rank (0 is the lowest): the
+    /// first plan, in map order, with a matching value (#712).
+    pub fn resolve_plan(&self, raw: &str) -> Option<(usize, &Plan)> {
+        self.plans
+            .iter()
+            .enumerate()
+            .find(|(_, p)| p.matches.iter().any(|m| glob(m.trim(), raw.trim())))
+    }
+
+    /// The canonical plan of a raw value: its key, or `unmatched:<raw>`
+    /// when no plan of the map matches it (a plan gap, like a role gap).
+    pub fn canonical_plan(&self, raw: &str) -> String {
+        match self.resolve_plan(raw) {
+            Some((_, p)) => p.key.clone(),
+            None => format!("unmatched:{raw}"),
+        }
+    }
+
+    /// A move from the raw plan `from` to the raw plan `to` (#712, D-113):
+    /// `Some(true)` an upgrade (free to paid, else a higher plan in the
+    /// map's order), `Some(false)` a downgrade (the reverse), `None` when
+    /// it is neither (the same plan) or unknown (a value no plan matches,
+    /// or no `plans:` section).
+    pub fn plan_move(&self, from: &str, to: &str) -> Option<bool> {
+        let (a, pa) = self.resolve_plan(from)?;
+        let (b, pb) = self.resolve_plan(to)?;
+        if pa.paid != pb.paid {
+            return Some(pb.paid);
+        }
+        match b.cmp(&a) {
+            std::cmp::Ordering::Greater => Some(true),
+            std::cmp::Ordering::Less => Some(false),
+            std::cmp::Ordering::Equal => None,
+        }
+    }
+
+    /// Whether the map can tell free users from paying ones: it declares
+    /// at least one free plan and one paid plan (#713).
+    pub fn knows_paid(&self) -> bool {
+        self.plans.iter().any(|p| p.paid) && self.plans.iter().any(|p| !p.paid)
+    }
+
+    /// SQL expression over the raw `plan` column (#713): 1 for a paid
+    /// plan, 0 for a free one, NULL for a value no plan matches or no
+    /// plan; the first matching plan wins, as in [`FeatureMap::resolve_plan`].
+    /// None unless [`FeatureMap::knows_paid`].
+    pub fn plan_paid_sql(&self) -> Option<String> {
+        if !self.knows_paid() {
+            return None;
+        }
+        self.plan_paying_sql()
+    }
+
+    /// [`FeatureMap::plan_paid_sql`] for a map that declares at least one
+    /// paid plan, with or without a free one (#714): the lifecycle's paid
+    /// stage counts the people whose plan resolves to a paid plan. None
+    /// when no plan is paid.
+    pub fn plan_paying_sql(&self) -> Option<String> {
+        if !self.plans.iter().any(|p| p.paid) {
+            return None;
+        }
+        let mut s = String::from("CASE WHEN plan IS NULL THEN NULL");
+        for p in &self.plans {
+            let paid = u8::from(p.paid);
+            for m in &p.matches {
+                let pat = sql_escape(&m.trim().to_lowercase());
+                if pat.contains('*') {
+                    let like = pat
+                        .replace('%', "\\%")
+                        .replace('_', "\\_")
+                        .replace('*', "%");
+                    s.push_str(&format!(" WHEN lower(plan) LIKE '{like}' THEN {paid}"));
+                } else {
+                    s.push_str(&format!(" WHEN lower(plan) = '{pat}' THEN {paid}"));
+                }
+            }
+        }
+        s.push_str(" ELSE NULL END");
+        Some(s)
     }
 
     /// Every feature whose routes match this path, in map order (the first

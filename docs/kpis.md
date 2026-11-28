@@ -12,6 +12,22 @@ Roles are the main way to slice every number, so they are declared explicitly, n
 - **Tracked over time:** role changes are stored with their date, and each event keeps the role the user had *at the time*. A user who moves from `member` to `admin` counts in the right bucket before and after the change. Reports state which rule they use, either "role at event time" (the default) or "current role".
 - **Multiple roles:** a user with several roles has a primary role, which is the first listed match in `roles:` order. Their other roles stay queryable.
 
+## Plans: declared, matched, tracked (SaaS only)
+
+Everything on this list shows only when the app sends `plan` in `identify(id, { plan })` **and** the feature map declares a `plans:` section (D-113). An internal tool that sends no plan sees nothing new; there is no setting.
+
+- **Declared:** `plans:` lists the app's canonical plans **from lowest to highest** (for example `free`, `pro`, `team`). Each plan says whether it is paid: `paid: true` by default, so the free plan must say `paid: false` (nothing is guessed from a name).
+- **Matched:** like roles, each plan lists the raw values the app sends (exact values or `*` patterns, case-insensitive; the first plan that matches wins). Raw values are always kept.
+- **Unmatched values** count as `unmatched:<value>`, in no upgrade or downgrade. The map health (`features lint --live`, finding `plan_gap`), the Feature map page and the board's `plans.gaps` list them until someone maps them.
+- **Tracked over time:** each plan change is stored with its date (`plan_history`, written when an `$identify` carries a plan different from the current one, by capture and by the import), and each event keeps the plan the user had *at the time* ("plan at event time", the default and only rule). A user who moves from `free` to `pro` counts as free before the change and as pro after it.
+- **Without `plans:`** the plan history is still kept on raw values, but upgrades, downgrades, paid and free are unknown and not shown.
+
+| KPI | Definition |
+| --- | --- |
+| **Upgrades** | Moves to a higher plan in the map's order, or from a free plan to a paid one, read from successive `$identify` plans of each user (90 days read). Counted over the last 30 days against the 30 days before, and per release (the release the user was on when the new plan was sent; the 5 newest). A change within one plan (`pro` → `pro_yearly`) is not a move. |
+| **Downgrades** | The reverse: a lower plan, or paid to free. |
+| **Free → paid conversion** | Of the free users first seen 30 to 89 days ago whose first plan (within their first week) was free, the share who moved to a paid plan within 30 days of their first visit. It drives the *conversion drivers* card (docs/agents/analyze.md). |
+
 ## Users
 
 | KPI | Definition |
@@ -101,7 +117,7 @@ Where people are on the way from a first visit to a customer who stays (#708, D-
 | **Visitor** | Anonymous visitors seen in the window who were never linked to a user, plus the accounts created in the window whose linked anonymous ids were seen in it. Shown when the window has anonymous traffic. |
 | **Account created** | People whose **signup** (see Users) falls in the window and who have an event in it under the filters. |
 | **Activated** | Of the accounts created, those who reached a success event of the feature map (the value moment). Shown when the map declares success events. |
-| **Paid** | Of the accounts created, those with revenue (see Users) on a success event in the window. Shown when a success event carries revenue; a `plan` alone does not make anyone paid yet (#712). |
+| **Paid** | Of the accounts created, those who pay. When the map's `plans:` declares a paid plan, a person pays when their plan (the plan of their last event in the window) resolves to a paid plan (#714, D-119); a value no plan matches is not paid. Without `plans:`, those with revenue (see Users) on a success event in the window, the fallback. Shown when at least one person of the window pays. |
 | **Retained / churned** | Of the accounts created in the window before the churn window started (old enough to judge), those active in the last 7 days, and those inactive for longer than the churn window (`churn_after_days`). Shown for a window that ends now. |
 | **Visitor → account rate** | Accounts created in the window with at least one linked anonymous id seen in it ÷ (never-linked anonymous visitors of the window + those accounts). A **lower bound**: a signup on another device, after cleared storage or from an email link leaves no link. The upper bound, every account created ÷ (never-linked visitors + every account created), is given with it. In cookieless mode (most visitors carry the server's daily ids, which are never linked) the rate is *not available*. |
 
@@ -132,8 +148,22 @@ How a project ships, per environment, over a period (the last 90 days by default
 | **Change failure rate** | Failed changes ÷ changes. A change fails when its deploy fails, a later deploy reports a rollback, an older release takes the users back (rolled back), or its release's verdict is *regressed*. Verdicts are those of the Releases list, judged in one environment at a time: the environment asked for, else production. |
 | **Time to restore** | Median time from a failed change to the rollback that put the previous release back, else to the next shipped change that did not fail. Failures with neither are counted as *not restored yet*. |
 
+## Goals
+
+A goal targets one of the KPIs below (#235, #272). Goals read the fixed windows, and their trend is a straight line through the KPI per release when releases give it, else per week (the last 12 weeks), projected to the deadline. The business KPIs (#714, D-119) are offered, in the Goals page, `set_goal` and `goals.set`, **only when their data exists** for the project; otherwise `goals` lists them under `not_available` with why, and setting one is refused with that reason. Higher is better for all of them.
+
+| Goal KPI | Definition | Weekly trend |
+| --- | --- | --- |
+| Engagement and technical | Sessions with errors, bounce rate, average session, tasks per session, stickiness, DAU, MAU, LCP, INP and CLS at p75, and `success:<feature>` (the share of a feature's users who reach its success event), as defined above. | Per release, else per week. |
+| **Revenue** (`revenue`) | Revenue (see Users) of the last 30 days, in the map's display currency, or in the single currency events use. Refused when amounts come in several currencies that the map's `revenue:` rates do not convert into one, and when no success event carries an amount. | The revenue of the 30 days ending each week (16 weeks read, plus 30 days). |
+| **Free → paid conversion** (`paid_conversion`) | The free → paid conversion of the Plans section. Needs `plans:` with a free plan and a paid one, and a free user old enough to judge. | Per week of first visit: the share of that week's free users who converted. |
+| **Visitor → account rate** (`signup_rate`) | The lifecycle's visitor → account rate over the last 30 days, its lower bound. Needs anonymous traffic, and is refused in cookieless mode. | None: a goal on it shows its gap and *no trend yet*. |
+| **Week-1 retention** (`weekly_retention`) | The board's weekly retention cohorts: the share of a weekly cohort of new users active again the week after; the value is the newest cohort whose week 1 is over. Needs one such cohort. | Per cohort week. |
+| **Adoption of a feature** (`feature_adoption:<feature>`) | Distinct identified users who used the feature (any event carrying it) in the last 30 days ÷ users active in the last 30 days. Any feature of the map; a key that is not in the map is refused. | Users of the feature in each week ÷ users active that week. |
+
 ## Where they show up
 - **Focus board** (home screen): ranked insight cards, then a KPI strip (DAU/WAU/MAU and users who came back, stickiness, average session, tasks per user per day, sessions with errors) and Web Vitals at p75. A filter bar sets role, release and environment.
 - **Focus board sections:** feature pulse (adoption, uses per user, active days, completion, task time), *Who uses what* (roles × features), weekly retention cohorts, journeys, funnels, flag cohorts and release comparison.
-- **MCP:** `kpi_report { env, role, release, by: role | account | plan | page | feature }` returns the headline KPIs plus a 30-day breakdown in one compact payload. `insights` returns the cards, and `user_timeline` returns one person's story.
+- **Plans tile** (only with `plans:` in the map): upgrades in the last 30 days against the 30 before, with the downgrades and the number of plan gaps.
+- **MCP:** `kpi_report { env, role, release, by: role | account | plan | page | feature }` returns the headline KPIs plus a 30-day breakdown in one compact payload, and `plans` (upgrades, downgrades, per release, gaps; `plan_rule: "plan at event time"`) when the map declares plans. `insights` returns the cards, and `user_timeline` returns one person's story.
 - **Export:** `openlens-cli export` writes the raw events as JSONL, day by day, for analysis elsewhere.

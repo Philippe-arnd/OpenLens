@@ -29,7 +29,14 @@ pub fn p_from_z(z: f64) -> f64 {
 
 /// Two-proportion z-test: rates `p1` over `n1` sessions vs `p2` over `n2`.
 pub fn two_proportions(p1: f64, n1: i64, p2: f64, n2: i64) -> Option<f64> {
-    if n1 < MIN_SESSIONS || n2 < MIN_SESSIONS {
+    two_proportions_min(p1, n1, p2, n2, MIN_SESSIONS)
+}
+
+/// [`two_proportions`] with `min` units per side instead of
+/// [`MIN_SESSIONS`]: the insight cards compare groups of users, with
+/// their own minimum (`insights::MIN_GROUP`, #713).
+pub fn two_proportions_min(p1: f64, n1: i64, p2: f64, n2: i64, min: i64) -> Option<f64> {
+    if n1 < min.max(1) || n2 < min.max(1) {
         return None;
     }
     let (n1f, n2f) = (n1 as f64, n2 as f64);

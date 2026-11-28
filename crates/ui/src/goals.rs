@@ -210,7 +210,7 @@ fn set_goal(pid: &str, choices: &[GoalChoice], deadline: &str) -> Markup {
                     }
                 }
             }
-            p.muted.small { "Status: on track when the straight line through the releases (or the weeks, for KPIs without a per-release value) reaches the target by the deadline, at risk when it misses by less than 10% of the target, not enough data under three points." }
+            p.muted.small { "Status: on track when the straight line through the releases (or the weeks, for KPIs without a per-release value) reaches the target by the deadline, at risk when it misses by less than 10% of the target, not enough data under three points, no trend yet for the visitor → account rate, which has no weekly series." }
         }
     }
 }
@@ -222,6 +222,7 @@ pub fn goals(
     rows: &[GoalRow],
     choices: &[GoalChoice],
     objectives: &[ObjectiveRow],
+    unavailable: &[(String, String, String)],
     admin: bool,
     deadline: &str,
 ) -> Markup {
@@ -270,6 +271,14 @@ pub fn goals(
                     }
                 }
                 @if admin && !choices.is_empty() { (set_goal(p.id, choices, deadline)) }
+                @if admin && !unavailable.is_empty() {
+                    details.card.pad.small {
+                        summary.muted { "Not available as goals here (" (unavailable.len()) ")" }
+                        ul.plain-list.small { @for (_, label, why) in unavailable {
+                            li { strong { (label) } ": " (why) }
+                        } }
+                    }
+                }
                 @if admin && !rows.is_empty() {
                     form.card.wide.form-card method="post" action={ "/p/" (p.id) "/objectives" } aria-labelledby="set-obj-h" {
                         div.section-head {

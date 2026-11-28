@@ -386,6 +386,13 @@ pub fn feature_map(v: &MapView<'_>) -> Markup {
                     p.muted.small { "Add them to a role's " code { "match" } " list, or they count apart on the board." }
                 }
             }
+            @if !v.live.unmapped_plans.is_empty() {
+                section.card.wide {
+                    h2.sun { (icon("gap")) "Plans sent that no plan matches" }
+                    p { @for (i, r) in v.live.unmapped_plans.iter().enumerate() { @if i > 0 { ", " } code { (r) } } }
+                    p.muted.small { "Add them to a plan's " code { "match" } " list, or their moves count as neither upgrades nor downgrades." }
+                }
+            }
             @if let Some(m) = v.map {
                 (table_card(
                     "Features",

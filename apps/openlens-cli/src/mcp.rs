@@ -184,12 +184,12 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "goals",
-                description: "Goals on KPIs and objectives: value now, target, deadline, status (reached, on track, at risk, off track), guardrails and whether they are breached, what moved each goal (releases with their effect, flag/survey/map changes and notes since it was set), and suggested targets per KPI.",
+                description: "Goals on KPIs and objectives: value now, target, deadline, status (reached, on track, at risk, off track), guardrails and whether they are breached, what moved each goal (releases with their effect, flag/survey/map changes and notes since it was set), suggested targets per KPI, and `not_available`: the business KPIs this project cannot set a goal on yet, with why.",
                 input_schema: json!({"type":"object","properties":proj}),
             },
             ToolSpec {
                 name: "set_goal",
-                description: "Set a goal: a KPI key from `goals` suggestions (or success:<feature>), a target in KPI units (a share as 0-1), and a deadline (YYYY-MM-DD) or a number of releases. Optional guardrails: KPIs that must not get worse, with a limit (default 5% worse than now).",
+                description: "Set a goal: a KPI key from `goals` suggestions (or success:<feature>), a target in KPI units (a share as 0-1). Business KPIs, offered only when their data exists: revenue (last 30 days, one currency), paid_conversion (needs plans: with a free and a paid plan), signup_rate (needs anonymous traffic, not cookieless), weekly_retention (week-1 retention of weekly cohorts), feature_adoption:<feature key of the map>; a refused one says why. Also a deadline (YYYY-MM-DD) or a number of releases. Optional guardrails: KPIs that must not get worse, with a limit (default 5% worse than now).",
                 input_schema: json!({"type":"object","properties":with(json!({
                     "kpi":{"type":"string"},
                     "target":{"type":"number"},
@@ -256,12 +256,12 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "kpi_report",
-                description: "Headline KPIs in one compact payload: users (DAU/WAU/MAU, stickiness), sessions, vitals, top features and roles, latest two releases. With `by` (role|account|plan|page|feature), also users, sessions, events, tasks and errors per value (30 days). Roles are 'role at event time'.",
+                description: "Headline KPIs in one compact payload: users (DAU/WAU/MAU, stickiness), sessions, vitals, top features and roles, latest two releases. With `by` (role|account|plan|page|feature), also users, sessions, events, tasks and errors per value (30 days). Roles are 'role at event time'. When the feature map declares `plans:`, also `plans`: upgrades and downgrades (last 30 days, the 30 before, per release) and plan gaps, plans being 'plan at event time'.",
                 input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"},"by":{"type":"string","enum":["role","account","plan","page","feature"]}}))}),
             },
             ToolSpec {
                 name: "user_timeline",
-                description: "One user's story: role, account, plan, role changes, recorded sessions (with dashboard links) and their latest 100 events (90 days). Use it to see what a churned or frustrated user did.",
+                description: "One user's story: role, account, plan, role and plan changes, recorded sessions (with dashboard links) and their latest 100 events (90 days). Use it to see what a churned or frustrated user did.",
                 input_schema: json!({"type":"object","properties":with(json!({"distinct_id":{"type":"string"}})),"required":["distinct_id"]}),
             },
             ToolSpec {
@@ -695,7 +695,7 @@ impl Tools for OpenLensTools {
                             }
                             None => Value::Null,
                         };
-                        json!({
+                        let mut report = json!({
                             "role_rule": "role at event time",
                             "breakdown": breakdown,
                             "filters": v["filters"],
@@ -706,7 +706,13 @@ impl Tools for OpenLensTools {
                             "roles": top("roles", 8),
                             "releases": top("releases", 2),
                             "total_events": v["total_events"],
-                        })
+                        });
+                        // Plans (#712, D-113): only when the map declares them.
+                        if !v["plans"].is_null() {
+                            report["plans"] = v["plans"].clone();
+                            report["plan_rule"] = json!("plan at event time");
+                        }
+                        report
                     }
                     _ => v,
                 })

@@ -113,6 +113,10 @@ pub(crate) const KPI: &[(&str, &str)] = &[
         "Sum of the purchase events' amounts in the period, in the project's currency; payers are distinct users who paid.",
     ),
     (
+        "Upgrades",
+        "Moves to a higher plan of the feature map's `plans:` (or from a free plan to a paid one) sent by identify() in the last 30 days, against the 30 days before; downgrades are the reverse. Shown only when the map declares plans.",
+    ),
+    (
         "Users",
         "Distinct people who used this feature in the last 30 days.",
     ),

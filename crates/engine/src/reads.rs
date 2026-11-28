@@ -16,6 +16,9 @@ pub struct MapLive {
     pub success_hits: Vec<(String, i64)>,
     /// Raw role values no role of the map matches.
     pub unmapped_roles: Vec<String>,
+    /// Raw plan values no plan of the map matches (#712); empty when the
+    /// map declares no plans.
+    pub unmapped_plans: Vec<String>,
 }
 
 /// [`MapLive`] for a project: uses and users per feature, hits per
@@ -47,7 +50,26 @@ pub async fn map_live(q: &QueryEngine, project: &str, map: Option<&FeatureMap>) 
             successes.join(", ")
         )
     });
-    let (a, b) = futures::join!(q.sql(project, &uses), q.sql(project, &roles));
+    let plans = format!(
+        "SELECT DISTINCT plan FROM raw_events WHERE date >= '{since}' AND plan IS NOT NULL LIMIT 200"
+    );
+    let plans_fut = async {
+        if m.plans.is_empty() {
+            None
+        } else {
+            Some(q.sql(project, &plans).await)
+        }
+    };
+    let (a, b, c) = futures::join!(q.sql(project, &uses), q.sql(project, &roles), plans_fut);
+    if let Some(Ok(r)) = c {
+        for row in &r.rows {
+            if let Some(raw) = text(row, "plan")
+                && m.resolve_plan(&raw).is_none()
+            {
+                out.unmapped_plans.push(raw);
+            }
+        }
+    }
     if let Ok(r) = a {
         for row in &r.rows {
             if let Some(f) = text(row, "feature") {

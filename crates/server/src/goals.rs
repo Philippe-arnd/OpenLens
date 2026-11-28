@@ -74,6 +74,7 @@ pub(crate) async fn page(
                     &ev.rows,
                     &ev.choices,
                     &ev.objectives,
+                    &ev.unavailable,
                     v.admin,
                     &default_deadline,
                 ),

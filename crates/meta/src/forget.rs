@@ -5,7 +5,8 @@ use super::*;
 impl Meta {
     /// Forget people (#230): their events are rewritten out of the files
     /// and new ones are dropped at capture. Also drops their person rows,
-    /// role history and identity rows (ids and aliases, #450). The list stays (it is re-applied after a restore).
+    /// role and plan history
+    /// and identity rows (ids and aliases, #450). The list stays (it is re-applied after a restore).
     pub fn forget(&self, project: &str, ids: &[String]) -> Result<()> {
         let now = Utc::now().timestamp();
         self.with(|c| {
@@ -17,6 +18,7 @@ impl Meta {
                 )?;
                 tx.execute("DELETE FROM persons WHERE project = ?1 AND distinct_id = ?2", params![project, id])?;
                 tx.execute("DELETE FROM role_history WHERE project = ?1 AND distinct_id = ?2", params![project, id])?;
+                tx.execute("DELETE FROM plan_history WHERE project = ?1 AND distinct_id = ?2", params![project, id])?;
                 identity::forget_in(&tx, project, id)?;
             }
             tx.commit()?;

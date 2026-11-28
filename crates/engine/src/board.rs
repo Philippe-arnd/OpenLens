@@ -305,6 +305,7 @@ pub async fn board_reusing(
         people: &people,
         success_list: &success_list,
         churn_days: map.map_or(14, |(m, _)| i64::from(m.churn_days())),
+        plan_paid: map.and_then(|(m, _)| m.plan_paying_sql()),
     };
     let life = crate::lifecycle::compute(
         q,
@@ -592,6 +593,7 @@ pub async fn board_reusing(
         retention,
         churn_line,
         server,
+        (plan_moves, conversion),
     ) = futures::try_join!(
         insights::compute(q, project, &card_rows, f, ident, churn, &successes),
         insights::journeys(q, project, &success_reads, &journey_rows, f, &successes),
@@ -602,7 +604,21 @@ pub async fn board_reusing(
         tasks::retention(q, project, &p90, f, ident),
         crate::churn::line(q, project, map.map(|(m, _)| m), f, &src, ident),
         crate::board_backend::read(q, project, f, server_spans, map.map(|(m, _)| m), now),
+        // Plans (#712, #713, D-113): nothing without `plans:` in the map.
+        crate::plans::read(
+            q,
+            project,
+            f,
+            map.map(|(m, _)| m),
+            &card_rows.people90,
+            ident
+        ),
     )?;
+    b.plans = plan_moves;
+    if !conversion.is_empty() {
+        cards.extend(conversion);
+        cards.sort_by(|a, b| b.score.total_cmp(&a.score));
+    }
     b.server = Some(server);
     b.churn = Some(churn_line);
     b.retention_trend = tasks::retention_trend(&retention);

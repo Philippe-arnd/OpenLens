@@ -361,6 +361,28 @@ pub(super) fn outcomes(
             more: None,
         })
     });
+    // Plans (#712, D-113): a tile only when the feature map declares plans.
+    let plans_tile = b.plans.as_ref().map(|p| {
+        let mut sub = format!("{} downgrades, last 30 days", compact(p.downgrades));
+        if !p.gaps.is_empty() {
+            sub.push_str(&format!(
+                " · {} plan values the map does not match",
+                p.gaps.len()
+            ));
+        }
+        Kpi {
+            value: html! { (compact(p.upgrades)) },
+            sub,
+            moved: delta(p.upgrades as f64, p.prev_upgrades as f64, true, false).map(|d| {
+                (
+                    d,
+                    format!("was {} the 30 days before", compact(p.prev_upgrades)),
+                )
+            }),
+            graded: None,
+            more: None,
+        }
+    });
     html! {
         section.outcomes aria-labelledby="out-h" {
             h2.eyebrow id="out-h" { "Outcomes" } // no_detail: each tile opens its page
@@ -372,6 +394,9 @@ pub(super) fn outcomes(
                 (kpi_to(&detail_url(pid, "/pages", f), "Largest paint p75", "Speed", speed, false))
                 @if let Some(k) = money_tile {
                     (kpi_to(&detail_url(pid, "/revenue", f), "Revenue", "Income", k, false))
+                }
+                @if let Some(k) = plans_tile {
+                    (kpi_to(&detail_url(pid, "/audience", f), "Upgrades", "Plans", k, false))
                 }
             }
         }

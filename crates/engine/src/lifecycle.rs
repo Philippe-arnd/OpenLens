@@ -3,16 +3,19 @@
 //!
 //! A stage shows only when its data exists: visitors when the window has
 //! anonymous traffic, activated when the map declares success events,
-//! paid when a success event carries revenue, retention when the window
-//! ends now. An internal tool, where everyone is identified, sees account
-//! → activated → retained with no setting (D-014).
+//! paid when someone pays (their plan resolves to a paid plan of the
+//! map's `plans:`, #714; without `plans:`, a success event carries
+//! revenue), retention when the window ends now. An internal tool,
+//! where everyone is identified, sees account → activated → retained
+//! with no setting (D-014).
 //!
 //! Every number is aggregated in SQL (the engine returns at most 10 000
 //! rows): the people rows of the board (`person_day` for the closed days,
 //! D-038, D-040) give each person's last event and success events; the
 //! `persons` table their signup (`signed_up`, else the first `$identify`,
 //! #707); `raw_events`, cut to the ids of `person_aliases`, the accounts
-//! whose anonymous visits were linked; the success events, the payers.
+//! whose anonymous visits were linked; each person's last plan in the
+//! window (or, without `plans:`, the success events), the payers.
 
 use chrono::{DateTime, Utc};
 use openlens_featuremap::FeatureMap;
@@ -261,6 +264,10 @@ pub(crate) struct Reads<'a> {
     pub success_list: &'a str,
     /// The churn window, in days.
     pub churn_days: i64,
+    /// SQL over the raw `plan` column, 1 for a paid plan
+    /// ([`FeatureMap::plan_paying_sql`]); none without a paid plan in the
+    /// map's `plans:`, and payers are then read from revenue (#714).
+    pub plan_paid: Option<String>,
 }
 
 /// The lifecycle over `span` at `now` (the board's own window).
@@ -319,7 +326,15 @@ pub(crate) async fn compute(
     } else {
         " LEFT JOIN k ON k.distinct_id = x.distinct_id"
     };
-    let payers = if r.success_list.is_empty() {
+    // A payer: whose plan at their last event of the window resolves to
+    // a paid plan of the map (#714); without `plans:`, who has revenue on
+    // a success event in the window.
+    let payers = if let Some(paid) = &r.plan_paid {
+        format!(
+            "SELECT distinct_id FROM (SELECT distinct_id, last_value(plan ORDER BY timestamp) AS plan \
+             FROM {src} WHERE {w} AND plan IS NOT NULL GROUP BY distinct_id) cur WHERE ({paid}) = 1"
+        )
+    } else if r.success_list.is_empty() {
         "SELECT CAST(NULL AS VARCHAR) AS distinct_id WHERE false".to_owned()
     } else {
         format!(
@@ -357,7 +372,7 @@ pub(crate) async fn compute(
          sum(CASE WHEN starts_with(x.distinct_id, 'ck_') THEN 1 ELSE 0 END) AS cookieless \
          FROM x{join_k} GROUP BY 1"
     );
-    let paid_sql = if r.success_list.is_empty() {
+    let paid_sql = if r.success_list.is_empty() && r.plan_paid.is_none() {
         None
     } else {
         Some(format!("SELECT count(*) AS n FROM ({payers}) AS p"))
@@ -495,6 +510,7 @@ pub async fn lifecycle(
         people: &people,
         success_list: &success_list,
         churn_days: m.map_or(14, |m| i64::from(m.churn_days())),
+        plan_paid: m.and_then(FeatureMap::plan_paying_sql),
     };
     compute(q, project, f, span, now, &reads, by).await
 }

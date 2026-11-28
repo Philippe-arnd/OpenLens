@@ -48,6 +48,33 @@ pub struct Revenue {
 pub(crate) const AMOUNT: &str = "coalesce(CAST(regexp_match(properties, '\"revenue\":(-?[0-9]+(\\.[0-9]+)?)')[1] AS DOUBLE), \
      CAST(regexp_match(properties, '\"value\":(-?[0-9]+(\\.[0-9]+)?)')[1] AS DOUBLE))";
 
+/// An event's currency: its `currency` property, upper-cased (#231).
+pub(crate) const CURRENCY: &str =
+    "upper(regexp_match(properties, '\"currency\":\"([A-Za-z]{3})\"')[1])";
+
+/// An amount in the currency it is shown in: the display currency when
+/// the map sets one and it converts (same currency, or a rate), else its
+/// own (`?` when the event gave none and no display currency is set).
+pub(crate) fn shown(
+    settings: Option<&openlens_featuremap::RevenueSettings>,
+    cur: Option<String>,
+    amt: f64,
+) -> (String, f64) {
+    match settings {
+        Some(s) => {
+            let c = cur.unwrap_or_else(|| s.currency.clone());
+            if c == s.currency {
+                (c, amt)
+            } else if let Some(rate) = s.rates.get(&c) {
+                (s.currency.clone(), amt * rate)
+            } else {
+                (c, amt)
+            }
+        }
+        None => (cur.unwrap_or_else(|| "?".into()), amt),
+    }
+}
+
 /// Revenue of a project, or None when no success event carries an amount.
 pub async fn revenue(
     q: &QueryEngine,
@@ -74,7 +101,7 @@ pub async fn revenue(
         .collect::<Result<Vec<_>>>()?
         .join(", ");
     let amount = AMOUNT;
-    let cur = "upper(regexp_match(properties, '\"currency\":\"([A-Za-z]{3})\"')[1])";
+    let cur = CURRENCY;
     let sql = format!(
         "SELECT event, role, release, distinct_id, {cur} AS cur, {amount} AS amt FROM {src} \
          WHERE {w} AND event IN ({list}) AND {amount} IS NOT NULL LIMIT 500000"
@@ -88,24 +115,6 @@ pub async fn revenue(
     }
     let active = active?.rows.first().map_or(0, |r| int(r, "n")).max(1);
     let settings = m.revenue.as_ref();
-    let display = settings.map(|s| s.currency.clone());
-    // Amount in the currency it is shown in, or None when it can't be
-    // converted (another currency, no rate).
-    let shown = |cur: Option<String>, amt: f64| -> (String, f64) {
-        match (&display, settings) {
-            (Some(d), Some(s)) => {
-                let c = cur.unwrap_or_else(|| d.clone());
-                if &c == d {
-                    (c, amt)
-                } else if let Some(rate) = s.rates.get(&c) {
-                    (d.clone(), amt * rate)
-                } else {
-                    (c, amt)
-                }
-            }
-            _ => (cur.unwrap_or_else(|| "?".into()), amt),
-        }
-    };
     let feature_of = |event: &str| -> String {
         successes
             .iter()
@@ -126,7 +135,7 @@ pub async fn revenue(
             continue;
         }
         let raw_cur = text(r, "cur");
-        let (c, v) = shown(raw_cur.clone(), amt);
+        let (c, v) = shown(settings, raw_cur.clone(), amt);
         if raw_cur.is_some_and(|rc| rc != c) {
             converted = true;
         }

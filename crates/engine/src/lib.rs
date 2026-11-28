@@ -56,6 +56,7 @@ pub mod mapsessions;
 pub mod mapshape;
 mod pages;
 mod people;
+pub mod plans;
 pub mod reads;
 pub mod relations;
 /// The features each release touched, from its changed files and the map's
@@ -531,6 +532,11 @@ pub struct Board {
     pub environments: Vec<String>,
     /// Raw role values no rule of the feature map matches, with user counts.
     pub role_gaps: Vec<(String, i64)>,
+    /// Upgrades, downgrades and plan gaps (#712, D-113); none when the
+    /// feature map declares no plans, so an app without plans shows
+    /// nothing about them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plans: Option<plans::PlanMoves>,
     /// Version of the feature map in use, if any.
     pub map_version: Option<i64>,
     /// Ranked insight cards (at most 7).

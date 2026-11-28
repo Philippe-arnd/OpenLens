@@ -22,6 +22,7 @@ mod lifecycle;
 mod maintenance;
 mod map_lookups;
 mod map_shape;
+mod plans;
 mod release_git;
 mod release_write;
 mod releases;

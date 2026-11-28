@@ -153,7 +153,9 @@ pub fn hostile_check_in_queries() -> Vec<String> {
 use chrono::{DateTime, Duration, Utc};
 use openlens_event::Event;
 
+mod plans;
 mod realistic;
+pub use plans::{CONVERSION_DRIVER, UNMATCHED_PLAN, plans_dataset, plans_feature_map};
 pub use realistic::{EVENTS_PER_USER, realistic_feature_map, realistic_user};
 
 /// Deterministic xorshift PRNG (no dependency, reproducible datasets).

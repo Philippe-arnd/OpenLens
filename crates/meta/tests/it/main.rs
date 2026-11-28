@@ -66,6 +66,33 @@ fn role_changes_are_recorded_with_dates_and_repeats_are_not() {
     assert_eq!(person.plan.as_deref(), Some("pro"));
 }
 
+/// #712 (D-113): a user who moves from free to pro has the plan of the
+/// time: free before the change, pro after; a repeat is no change, and
+/// forgetting the user drops the history.
+#[test]
+fn a_plan_change_is_dated_and_the_plan_at_a_time_follows_it() {
+    let m = Meta::in_memory().unwrap();
+    let t0 = Utc::now() - Duration::days(10);
+    let upgrade = t0 + Duration::days(4);
+    m.identify("p", "u1", Some("member"), None, Some("free"), t0)
+        .unwrap();
+    m.identify("p", "u1", None, None, Some("free"), t0 + Duration::days(1))
+        .unwrap();
+    m.identify("p", "u1", None, None, None, t0 + Duration::days(2))
+        .unwrap();
+    m.identify("p", "u1", None, None, Some("pro"), upgrade)
+        .unwrap();
+    let hist = m.plan_history("p", "u1").unwrap();
+    let plans: Vec<_> = hist.iter().map(|(p, _)| p.as_str()).collect();
+    assert_eq!(plans, ["free", "pro"], "repeats and silences are no change");
+    let at = |t| openlens_meta::plan_at(&hist, t);
+    assert_eq!(at(t0 - Duration::hours(1)), None, "before the first plan");
+    assert_eq!(at(upgrade - Duration::hours(1)), Some("free"));
+    assert_eq!(at(upgrade + Duration::hours(1)), Some("pro"));
+    m.forget("p", &["u1".to_owned()]).unwrap();
+    assert!(m.plan_history("p", "u1").unwrap().is_empty());
+}
+
 #[test]
 fn admin_token_is_stable_across_reopen_and_never_stored_in_clear() {
     let dir = tempfile::tempdir().unwrap();
