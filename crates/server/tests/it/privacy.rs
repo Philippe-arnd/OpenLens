@@ -383,3 +383,30 @@ async fn confirm_dialogs_post_the_same_forms_and_an_empty_confirmation_is_refuse
     assert_eq!(h.state.meta.flags("default").unwrap().len(), 1);
     assert!(h.state.meta.project("default").unwrap().is_some());
 }
+
+/// Revoking a link that does not exist says so instead of redirecting as
+/// if it worked.
+#[tokio::test]
+async fn revoking_an_unknown_share_link_is_not_reported_as_done() {
+    let h = harness();
+    let owner = login_cookie(&h).await;
+    let status = post_form(&h, "/p/default/settings/share/sl_nope/revoke", &owner, "").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// Files of a project that no longer exists (written by a late flush
+/// after its delete) are swept; a live project's files stay.
+#[tokio::test]
+async fn files_of_deleted_projects_are_swept() {
+    let h = harness();
+    let ghost = h.state.data_dir.join("replay").join("project=ghost");
+    let live = h.state.data_dir.join("replay").join("project=default");
+    let ghost_events = openlens_storage::project_dir(&h.state.data_dir, "ghost").unwrap();
+    for d in [&ghost, &live, &ghost_events] {
+        std::fs::create_dir_all(d).unwrap();
+        std::fs::write(d.join("f"), b"x").unwrap();
+    }
+    assert!(openlens_server::sweep_deleted_projects(&h.state) > 0);
+    assert!(!ghost.exists() && !ghost_events.exists());
+    assert!(live.exists());
+}

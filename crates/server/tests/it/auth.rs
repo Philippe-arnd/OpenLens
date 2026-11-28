@@ -442,3 +442,58 @@ async fn wrong_current_passwords_are_slowed_down_and_audited() {
         .count();
     assert!(n >= 4, "{n} failures audited");
 }
+
+/// A new link for someone who already has an account keeps their access:
+/// a role or project list left out is not reset to the defaults.
+#[tokio::test]
+async fn a_new_login_link_keeps_the_access_a_user_has() {
+    let h = harness();
+    let link = |body: serde_json::Value| {
+        let st = h.state.clone();
+        async move {
+            let resp = router(st)
+                .oneshot(
+                    Request::post("/api/login-links")
+                        .header("authorization", "Bearer adm_test")
+                        .header("content-type", "application/json")
+                        .body(if body.is_null() {
+                            Body::empty()
+                        } else {
+                            Body::from(body.to_string())
+                        })
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            let v: serde_json::Value = serde_json::from_slice(
+                &axum::body::to_bytes(resp.into_body(), 1 << 20)
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            v
+        }
+    };
+    link(serde_json::json!({"email": "v@example.com", "role": "viewer", "projects": ["default"]}))
+        .await;
+    let again = link(serde_json::json!({"email": "v@example.com"})).await;
+    assert_eq!(
+        again["user"]["projects"],
+        serde_json::json!(["default"]),
+        "scope kept"
+    );
+    link(serde_json::json!({"email": "a@example.com", "role": "admin"})).await;
+    let again = link(serde_json::json!({"email": "a@example.com"})).await;
+    assert_eq!(again["user"]["role"], "admin", "role kept");
+    let changed = link(serde_json::json!({"email": "a@example.com", "role": "viewer"})).await;
+    assert_eq!(
+        changed["user"]["role"], "viewer",
+        "an explicit role still applies"
+    );
+    let owner = link(serde_json::Value::Null).await;
+    assert!(
+        owner["expires_in_days"].as_u64() < again["expires_in_days"].as_u64(),
+        "an owner link says it lasts less than an invite"
+    );
+}

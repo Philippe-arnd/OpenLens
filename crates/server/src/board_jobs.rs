@@ -211,13 +211,14 @@ impl BoardJobs {
 }
 
 /// Drop the jobs finished more than [`KEEP`] ago, then the oldest finished
-/// ones while there are more than [`CAPACITY`].
+/// ones until there is room for one more under [`CAPACITY`], so a full
+/// registry of finished jobs never refuses new ones.
 fn purge(m: &mut HashMap<String, Job>, now: Instant) {
     m.retain(|_, j| {
         j.ended
             .is_none_or(|e| now.saturating_duration_since(e) < KEEP)
     });
-    while m.len() > CAPACITY {
+    while m.len() >= CAPACITY {
         let Some(oldest) = m
             .values()
             .filter(|j| !j.state.active())
@@ -362,6 +363,21 @@ mod tests {
         purge(&mut m, now);
         assert!(!m.contains_key("old"));
         assert!(m.contains_key("new") && m.contains_key("run"));
+    }
+
+    /// A registry full of recently finished jobs still takes a new one:
+    /// purge leaves room under the capacity (it used to stop at exactly
+    /// the capacity, so `start` refused every job for an hour).
+    #[test]
+    fn a_full_registry_of_finished_jobs_makes_room() {
+        let now = Instant::now();
+        let mut m = HashMap::new();
+        for i in 0..CAPACITY {
+            let id = format!("j{i}");
+            m.insert(id.clone(), job(&id, JobState::Done, Some(now)));
+        }
+        purge(&mut m, now);
+        assert!(m.len() < CAPACITY);
     }
 
     #[test]

@@ -299,7 +299,7 @@ async fn delete_project(
     }
     let st = state.clone();
     let pid = project.clone();
-    let res = tokio::task::spawn_blocking(move || purge_project(&st, &project)).await;
+    let res = tokio::task::spawn_blocking(move || crate::purge::purge_project(&st, &project)).await;
     match res {
         Ok(Ok(true)) => {
             crate::privacy::audit(&state, &headers, Some(&pid), "project.delete", "(api)");
@@ -350,37 +350,6 @@ async fn create_project(
         Ok(Err(e)) => err(StatusCode::CONFLICT, &e.to_string()),
         Err(_) => err(StatusCode::INTERNAL_SERVER_ERROR, "metadata store unavailable"),
     }
-}
-
-/// Delete a project and every file of it (blocking): events, replays,
-/// source maps and its metadata. False when it did not exist.
-pub(crate) fn purge_project(st: &AppState, project: &str) -> Result<bool, String> {
-    // Events still in the write-ahead log go to their files first, so
-    // nothing of this project is written back after the delete.
-    crate::flush_now(st)?;
-    let existed = st.meta.delete_project(project).map_err(|e| e.to_string())?;
-    if existed {
-        let mut dirs = vec![
-            st.data_dir
-                .join("replay")
-                .join(format!("project={project}")),
-            st.data_dir
-                .join("sourcemaps")
-                .join(format!("project={project}")),
-        ];
-        if let Ok(d) = openlens_storage::project_dir(&st.data_dir, project) {
-            dirs.push(d);
-        }
-        if let Ok(d) = openlens_storage::rollup::rollups_dir(&st.data_dir, project) {
-            dirs.push(d);
-        }
-        for d in dirs {
-            if d.exists() {
-                std::fs::remove_dir_all(&d).map_err(|e| e.to_string())?;
-            }
-        }
-    }
-    Ok(existed)
 }
 
 #[derive(Deserialize)]
@@ -489,8 +458,10 @@ struct LinkRequest {
 }
 
 /// `POST /api/login-links`: a one-time link. Without a body it logs in as the
-/// owner; with `{email, role, projects?}` it invites (or updates) that user
-/// and logs in as them (D-016).
+/// owner; with `{email, role?, projects?}` it invites that user (a viewer
+/// of every project unless told otherwise) and logs in as them (D-016).
+/// For a user who already exists, a role or project list left out keeps
+/// the stored one: a new link never changes anyone's access by default.
 async fn login_link(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -516,27 +487,33 @@ async fn login_link(
     let host = crate::public_url(&headers);
     let res = tokio::task::spawn_blocking(move || {
         let user = match &req.email {
-            Some(email) => Some(meta.upsert_user(
-                email,
-                req.role.as_deref().unwrap_or("viewer"),
-                req.projects.as_deref(),
-            )?),
+            Some(email) => Some(match meta.user_by_email(email)? {
+                Some(u) if req.role.is_none() && req.projects.is_none() => u,
+                Some(u) => meta.upsert_user(
+                    email,
+                    req.role.as_deref().unwrap_or(&u.role),
+                    req.projects.as_deref().or(u.projects.as_deref()),
+                )?,
+                None => meta.upsert_user(
+                    email,
+                    req.role.as_deref().unwrap_or("viewer"),
+                    req.projects.as_deref(),
+                )?,
+            }),
             None => None,
         };
-        let t = meta.create_login_link_for(
-            user.as_ref().map(|u| u.id.as_str()),
-            // An owner link opens everything: one day (#315). Invites: a week.
-            if user.is_some() {
-                7 * 24 * 3600
-            } else {
-                24 * 3600
-            },
-        )?;
-        Ok::<_, openlens_meta::MetaError>((user, t))
+        // An owner link opens everything: one day (#315). Invites: a week.
+        let ttl = if user.is_some() {
+            7 * 24 * 3600
+        } else {
+            24 * 3600
+        };
+        let t = meta.create_login_link_for(user.as_ref().map(|u| u.id.as_str()), ttl)?;
+        Ok::<_, openlens_meta::MetaError>((user, t, ttl / (24 * 3600)))
     })
     .await;
     match res {
-        Ok(Ok((user, t))) => {
+        Ok(Ok((user, t, days))) => {
             let who = user
                 .as_ref()
                 .map_or_else(|| "owner".to_owned(), |u| u.email.clone());
@@ -549,7 +526,7 @@ async fn login_link(
             );
             Json(json!({
                 "url": format!("{host}/l/{t}"),
-                "expires_in_days": 7,
+                "expires_in_days": days,
                 "user": user,
             }))
             .into_response()

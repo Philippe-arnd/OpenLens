@@ -133,10 +133,29 @@ pub(crate) async fn revoke(
     headers: HeaderMap,
     Path((id, lid)): Path<(String, String)>,
 ) -> Response {
-    let _ = state.meta.revoke_share_link(&id, &lid);
-    state.caches.share_pages.clear();
-    crate::privacy::audit(&state, &headers, Some(&id), "share.revoke", &lid);
-    Redirect::to(&format!("/p/{id}/settings/sharing")).into_response()
+    // Say so when nothing was revoked: a leaked link must never look
+    // revoked while it still serves the board.
+    match state.meta.revoke_share_link(&id, &lid) {
+        Ok(true) => {
+            state.caches.share_pages.clear();
+            crate::privacy::audit(&state, &headers, Some(&id), "share.revoke", &lid);
+            Redirect::to(&format!("/p/{id}/settings/sharing")).into_response()
+        }
+        Ok(false) => html_page(
+            StatusCode::NOT_FOUND,
+            openlens_ui::message(
+                "Link not found",
+                "No share link with this id exists in this project, so nothing was revoked.",
+            ),
+        ),
+        Err(_) => html_page(
+            StatusCode::SERVICE_UNAVAILABLE,
+            openlens_ui::message(
+                "Link not revoked",
+                "The metadata store did not answer, so the link still works. Try again in a moment.",
+            ),
+        ),
+    }
 }
 
 fn not_found() -> Response {
