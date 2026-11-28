@@ -81,8 +81,13 @@ strip = true
 [profile.dev]
 debug = "line-tables-only"
 
+# Dependencies (DataFusion above all) optimised in dev and test builds;
+# our own crates stay at opt-level 0 so they rebuild fast. The integration
+# tests spend most of their time inside DataFusion, which is what slowed the PR
+# gate's test step (#691). `[profile.test]` inherits all of this.
 [profile.dev.package."*"]
 debug = false
+opt-level = 1
 
 # Optimised build without LTO: fast enough to compile locally for perf checks.
 [profile.perf]
