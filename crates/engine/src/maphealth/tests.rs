@@ -3,25 +3,25 @@ use super::*;
 
 const MAP: &str = "features:
   - key: docs
-name: Docs
-area: Reading
-success: doc_read
-entry: {routes: ['/docs/*']}
+    name: Docs
+    area: Reading
+    success: doc_read
+    entry: {routes: ['/docs/*']}
   - key: edit
-name: Edit
-area: Writing
-success: doc_saved
-entry: {routes: ['/docs/:id/edit']}
+    name: Edit
+    area: Writing
+    success: doc_saved
+    entry: {routes: ['/docs/:id/edit']}
   - key: share
-name: Share
-area: Writing
-success: shared
-requires: [edit]
-entry: {routes: ['/share']}
+    name: Share
+    area: Writing
+    success: shared
+    requires: [edit]
+    entry: {routes: ['/share']}
   - key: old
-name: Old thing
-success: old_done
-entry: {routes: ['/old']}
+    name: Old thing
+    success: old_done
+    entry: {routes: ['/old']}
 ";
 
 fn usage() -> Usage {
