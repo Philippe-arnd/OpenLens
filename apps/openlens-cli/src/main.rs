@@ -652,22 +652,16 @@ fn run(cli: Cli) -> Result<bool, String> {
             Ok(status == 200)
         }
         Command::Lifecycle { project, by, env } => {
-            let mut q = Vec::new();
-            if let Some(b) = by {
-                q.push(format!("by={}", query_value(b)));
-            }
-            if let Some(e) = env {
-                q.push(format!("env={}", query_value(e)));
-            }
-            let (status, v) = client()?.call(
-                "GET",
-                &format!(
-                    "/api/projects/{}/lifecycle?{}",
-                    query_value(project),
-                    q.join("&")
-                ),
-                None,
-            )?;
+            let q: Vec<String> = [("by", by), ("env", env)]
+                .into_iter()
+                .filter_map(|(k, v)| v.as_deref().map(|v| format!("{k}={}", query_value(v))))
+                .collect();
+            let path = format!(
+                "/api/projects/{}/lifecycle?{}",
+                query_value(project),
+                q.join("&")
+            );
+            let (status, v) = client()?.call("GET", &path, None)?;
             out(&v);
             Ok(status == 200)
         }
