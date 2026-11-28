@@ -30,6 +30,7 @@ mod csrf;
 mod delivery;
 mod digest;
 mod environments;
+mod errpages;
 mod explore;
 mod features;
 mod flags;
@@ -180,11 +181,10 @@ pub fn router(state: AppState) -> Router {
         .merge(capacity::routes())
         .layer(axum::middleware::from_fn(csrf::layer))
         .layer(axum::middleware::from_fn(trusted_headers_layer))
-        // Pages, the API and Ask (a few model rounds) get two minutes.
-        .layer(tower_http::timeout::TimeoutLayer::with_status_code(
-            axum::http::StatusCode::REQUEST_TIMEOUT,
-            Duration::from_secs(120),
-        ))
+        // Unknown URLs get a page, or JSON under /api (#679).
+        .fallback(errpages::not_found)
+        // Pages, the API and Ask get two minutes, then an explained 504.
+        .layer(axum::middleware::from_fn(errpages::deadline))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             scopes::layer,
