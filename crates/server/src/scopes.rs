@@ -99,7 +99,7 @@ pub(crate) fn required(method: &Method, path: &str) -> Scope {
         .and_then(|rest| rest.split_once('/'))
         .is_some_and(|(_, tail)| tail == "board/jobs" || tail.starts_with("board/jobs/"));
     // Proposing a next action drafts a ticket and posts nothing outside
-    // OpenLens (#715, D-104): an agent with a read token may.
+    // OpenLens (#715, D-114): an agent with a read token may.
     let propose = *method == Method::POST
         && path
             .strip_prefix("/api/projects/")

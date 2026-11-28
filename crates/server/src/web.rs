@@ -139,7 +139,7 @@ pub(crate) fn routes() -> Router<AppState> {
         )
         .route("/p/{project}/tickets/new", get(crate::tickets::new))
         .route("/p/{project}/tickets/target", post(crate::tickets::target))
-        // Next actions (#715, D-104).
+        // Next actions (#715, D-114).
         .route("/p/{project}/actions", get(crate::next_actions::page))
         .route(
             "/p/{project}/actions/{action}/approve",

@@ -2,7 +2,7 @@
 //!
 //! Every tool goes through the same HTTP API as the CLI. Tools that read
 //! files only accept paths inside `--automation-read-root`. The server
-//! serves the tools of one profile (`--profile`, D-105).
+//! serves the tools of one profile (`--profile`, D-115).
 
 use std::path::{Path, PathBuf};
 

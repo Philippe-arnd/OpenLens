@@ -1,4 +1,4 @@
-//! Next actions (#715, D-104): an agent proposes, a person approves, and
+//! Next actions (#715, D-114): an agent proposes, a person approves, and
 //! the ticket is filed once, however many times either clicks.
 
 use std::sync::Mutex;

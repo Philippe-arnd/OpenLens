@@ -489,7 +489,7 @@ pub(super) enum Command {
         /// Directory agents may write to.
         #[arg(long, required = true)]
         automation_write_root: PathBuf,
-        /// Which tools to serve (D-105): `product` (the default: wiring,
+        /// Which tools to serve (D-115): `product` (the default: wiring,
         /// map, KPIs, releases), `ops` (uptime, status page,
         /// announcements, maintenance, jobs) or `all`.
         #[arg(long, value_enum, default_value_t = crate::mcp_profile::Profile::Product)]

@@ -1,4 +1,4 @@
-//! Next actions (#715, D-104): the findings of the board, the errors, the
+//! Next actions (#715, D-114): the findings of the board, the errors, the
 //! goals and the feature map, ranked in one list with where each stands
 //! (new, proposed by an agent, approved, shipped, learned). An admin
 //! approves an action, which files its ticket, or dismisses it for 30

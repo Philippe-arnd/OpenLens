@@ -1,4 +1,4 @@
-//! Next actions (#715, D-104): the page and its Approve and Dismiss forms,
+//! Next actions (#715, D-114): the page and its Approve and Dismiss forms,
 //! and the REST routes the CLI and the MCP tools use (D-020): the list,
 //! and an agent's proposal. The ranking, the states and the storage live
 //! in `openlens_engine::commands::actions`. Every change is written to the

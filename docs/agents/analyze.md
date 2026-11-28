@@ -1,6 +1,6 @@
 # Analysing an app with OpenLens (agent guide)
 
-Start from the summaries and drill down only where something stands out. Every tool is available as an MCP tool (`openlens-cli mcp`) and over the HTTP API. `openlens-cli mcp` serves the **product** tools by default; the operations tools (the rows marked *ops*: `status`, `alerts`, `alert_set`, `availability`, `availability_target`, `uptime_days`, `incidents`, `maintenance`, `maintenance_set`, `jobs`, `check_in`, `job_set`, the status page, announcements and `capacity`) need `openlens-cli mcp --profile ops`, or `--profile all` for both (D-105).
+Start from the summaries and drill down only where something stands out. Every tool is available as an MCP tool (`openlens-cli mcp`) and over the HTTP API. `openlens-cli mcp` serves the **product** tools by default; the operations tools (the rows marked *ops*: `status`, `alerts`, `alert_set`, `availability`, `availability_target`, `uptime_days`, `incidents`, `maintenance`, `maintenance_set`, `jobs`, `check_in`, `job_set`, the status page, announcements and `capacity`) need `openlens-cli mcp --profile ops`, or `--profile all` for both (D-115).
 
 | PM question | Tool | Drill down with |
 | --- | --- | --- |

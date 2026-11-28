@@ -1,4 +1,4 @@
-//! MCP profiles (#716, D-105): which tools `openlens-cli mcp` serves.
+//! MCP profiles (#716, D-115): which tools `openlens-cli mcp` serves.
 //!
 //! The product profile (the default) holds the method's tools: wiring,
 //! the feature map, the KPIs, releases and their verdict. The operations
@@ -55,7 +55,9 @@ pub(crate) const PRODUCT_TOOLS: &[&str] = &[
     "login_link",
     "map_health",
     "map_overview",
+    "next_actions",
     "projects",
+    "propose_action",
     "record_release",
     "release_report",
     "releases",
@@ -80,7 +82,7 @@ pub(crate) const PRODUCT_TOOLS: &[&str] = &[
 ];
 
 /// The operations profile's tools. Their scope is frozen (fixes only)
-/// until the product batches land (D-105).
+/// until the product batches land (D-115).
 pub(crate) const OPS_TOOLS: &[&str] = &[
     "alert_set",
     "alerts",

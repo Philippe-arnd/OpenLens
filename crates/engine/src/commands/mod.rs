@@ -115,7 +115,7 @@ pub const REGISTRY: &[Spec] = &[
     spec::<tickets::DraftTicket>(),
     spec::<tickets::File>(),
     spec::<tickets::SetTarget>(),
-    // Next actions (#715, D-104).
+    // Next actions (#715, D-114).
     spec::<actions::Next>(),
     spec::<actions::Propose>(),
     spec::<actions::Approve>(),

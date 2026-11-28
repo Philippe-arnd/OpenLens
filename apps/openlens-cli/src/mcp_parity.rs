@@ -3,7 +3,7 @@
 //! without a command, or a stale entry in these lists fails the test, so
 //! "anything you can do in the UI, an agent can do through MCP" (rule 10)
 //! is checked rather than hoped for. It also checks the profiles (#716,
-//! D-105): every tool is in exactly one of the product and operations
+//! D-115): every tool is in exactly one of the product and operations
 //! profiles, and `all` serves their union.
 
 use openlens_engine::commands::REGISTRY;
@@ -51,7 +51,7 @@ const TOOL_OF: &[(&str, &str)] = &[
     ("alerts.set", "alert_set"),
     ("alerts.test", "alert_set"),
     ("tickets.target", "ticket_target"),
-    // Next actions (#715, D-104).
+    // Next actions (#715, D-114).
     ("actions.next", "next_actions"),
     ("actions.propose", "propose_action"),
     ("flags.list", "flags"),
@@ -123,7 +123,7 @@ const PENDING: &[&str] = &[
     // The sidebar's Go to… field (#541): navigation for people in the
     // dashboard. Agents name features and people by key in every tool.
     "goto.lookup",
-    // A person's decisions on a next action (#715, D-104): an agent
+    // A person's decisions on a next action (#715, D-114): an agent
     // proposes (`propose_action`), an admin approves or dismisses it on
     // the Next actions page.
     "actions.approve",
