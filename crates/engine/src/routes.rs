@@ -741,23 +741,32 @@ fn label(s: &RouteStat) -> String {
 }
 
 /// The verdict's backend checks: each route with enough requests on both
-/// releases, its 5xx share and its p95.
+/// releases, its 5xx share and its p95. The 5xx tests of all the routes
+/// compared are one family, held to its Benjamini–Hochberg cutoff at a 5%
+/// false discovery rate (D-099).
 #[must_use]
 pub fn checks(current: &[RouteStat], previous: &[RouteStat]) -> Vec<Check> {
+    let pairs: Vec<(&RouteStat, &RouteStat)> = current
+        .iter()
+        .filter_map(|c| {
+            let p = previous
+                .iter()
+                .find(|p| p.method == c.method && p.route == c.route)?;
+            (c.requests >= MIN_REQUESTS && p.requests >= MIN_REQUESTS).then_some((c, p))
+        })
+        .collect();
+    let ps: Vec<f64> = pairs
+        .iter()
+        .filter_map(|(c, p)| {
+            stats::two_proportions(c.error_rate(), c.requests, p.error_rate(), p.requests)
+        })
+        .collect();
+    let cut = stats::fdr_cutoff(&ps, stats::FDR);
     let mut out = Vec::new();
-    for c in current {
-        let Some(p) = previous
-            .iter()
-            .find(|p| p.method == c.method && p.route == c.route)
-        else {
-            continue;
-        };
-        if c.requests < MIN_REQUESTS || p.requests < MIN_REQUESTS {
-            continue;
-        }
+    for (c, p) in pairs {
         let (rc, rp) = (c.error_rate(), p.error_rate());
         let outcome = match stats::two_proportions(rc, c.requests, rp, p.requests) {
-            Some(pv) if pv < stats::ALPHA && (rc - rp).abs() >= MIN_5XX_MOVE => {
+            Some(pv) if stats::discovered(cut, pv) && (rc - rp).abs() >= MIN_5XX_MOVE => {
                 if rc > rp {
                     Outcome::Worse
                 } else {

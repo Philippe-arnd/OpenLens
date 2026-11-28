@@ -862,3 +862,34 @@ Supersedes the trace-header and naming parts of D-082 (nothing of it was release
 **Why:** #237 asks for the verdict where the app's agents look, with nobody doing anything, and #575 for idempotent, bounded writes with a security review of their own. Reusing the ticket link and the ticket machinery adds no credential and no setting (rule 17). Writing only final verdicts of recent production releases keeps the comments few and true.
 
 **Consequences:** a release recorded without a range (the project's first) is not written back, since it has no read. A crash between GitHub's answer and the save can, rarely, leave one duplicate comment. `openlens-cli verify` does not check the token's write permissions yet: the Releases page and `release_report` say when GitHub refused.
+
+## D-099 (2026-11-28, agent for #705) Insight cards: Benjamini–Hochberg at a 5% false discovery rate within each card family
+
+**Decision:** a card family that decides with a p-value holds its p-values to the Benjamini–Hochberg cutoff of the family at a 5% false discovery rate (`stats::FDR`, `stats::fdr_cutoff`), instead of testing each candidate at 5%. One family is one card type over all its candidates on one board (every feature, every role and feature pair, every flag). A candidate counts in the family as soon as it has a p-value, whether or not it passes the lift threshold, so the cutoff is not loosened by leaving tests out. The size and lift thresholds stay as they were, on top of the test. No new setting.
+
+Inventory (one board, before this change):
+
+| Family | Hypotheses per board | What decided before | Now |
+| --- | --- | --- | --- |
+| Stick driver | every feature used in the first week, with 8 judged users with it and 8 without | retention 10 points higher, no test | plus a two-proportion test (8 users per side, `two_proportions_from`), Benjamini–Hochberg over the features |
+| Value moment | up to 3 repetition thresholds of a driver, the best kept | a larger gap than the driver's, no test | shown only with a driver that passed; its own choice of threshold is **not corrected** |
+| Churn point | 1 (the top of 5 last places) | share ≥ 25%, > 1.2 × the place's reach, 8 users | **not corrected**: one card per board, and churned users are part of the users it is compared with, so no two-sample test fits without new queries |
+| Friction | every feature with a success event and 8 starters | finish rate under 50% | **not corrected**: a level, not a comparison; there is no null to test |
+| Role blind spot | every role (8 users, not `unmatched:`) × feature | others ≥ 30% and the role ≤ a fifth of that, no test | plus a two-proportion test (8 users per side), Benjamini–Hochberg over the pairs |
+| Release regression | 1 (newest release against the one before) | D-067's rule (16 sessions, 1.5 × and 3 points), no test | **not corrected**: one test, and the rule is shared with the verdict (D-067) so the card and the verdict keep agreeing |
+| Slow pages | 1 (the first poor vital with 8 samples) | a rating | **not corrected**: a rating, not a test |
+| Funnel drop | up to 4 funnels, one card each | a step losing 40% | **not corrected**: a level, not a comparison |
+| Flag regression | up to 5 flags | p < 0.05, 1.5 × and 3 points | Benjamini–Hochberg over the flags' error p-values |
+| Flag win | up to 5 flags | p < 0.05 and 1.2 × | Benjamini–Hochberg over the flags' task p-values |
+| Feature relations, *leads to value* | every pair with 20 shared sessions whose second feature has a success event (before keeping 50) | p < 0.05 (30 sessions per side) | Benjamini–Hochberg over every tested pair |
+| Verdict: KPIs | 3 fixed (errors by D-067, bounce, tasks) | D-067; p < 0.05 and 5 points | unchanged: a fixed, small number that does not grow with the app |
+| Verdict: features | every feature with a success event on both releases | p < 0.05 and 10 points | Benjamini–Hochberg over the features compared, touched or not (D-095) |
+| Verdict: routes | every route with enough requests on both releases | 5xx: p < 0.05 and the minimum move; p95: a fixed ratio | 5xx: Benjamini–Hochberg over the routes compared; p95 unchanged (no test) |
+| Verdict: runtime, vitals, guardrails, dependencies | 1; 3 ratings; per guardrail; per host, shown only | their own rules | unchanged (D-083, D-087, D-090) |
+| Flag variants | arms against the baseline | Bonferroni (`variants.rs`) | unchanged |
+
+The cutoff is the largest `p(k)` (the k-th smallest of the m p-values) strictly under `k × 0.05 / m`; every p-value at or under it is a discovery. Strictly under keeps a family of one test exactly the old `p < 0.05`, and never gives more discoveries than testing each at 5%.
+
+**Why:** #705: with 20 features, 4 roles and 5 flags the board runs about a hundred tests, so at 5% each some cards came out by chance. Benjamini–Hochberg bounds the share of chance cards among those shown and loses less power than Bonferroni, which suits ranked leads to look at; the flag variants keep Bonferroni, where each arm is a decision. Stick drivers and blind spots had no test at all although the counts were already in the query, so adding one costs nothing. Their test keeps the cards' 8 users per side rather than the 30 sessions of the session tests, so small apps keep their cards; the normal approximation is rough there, which the lift thresholds make up for. The release regression card keeps D-067's rule so it never disagrees with the verdict.
+
+**Consequences:** a board shows fewer stick drivers, blind spots and flag cards, mostly on large apps with many candidates; a strong effect still shows (the testkit's planted patterns are found as before). A stick driver or blind spot whose groups have identical outcomes (no variance) gets no p-value and no card. A synthetic board with nothing planted (`openlens_testkit::unplanted_dataset`) shows at most one card that rests on a p-value. Churn points, friction, funnel drops, slow pages and the release regression card are not corrected and say nothing about chance; the docs ask agents to read a single one as a lead.

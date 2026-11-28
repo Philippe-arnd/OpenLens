@@ -46,7 +46,8 @@ pub struct Relation {
     /// Success rate of `then` in sessions that used it without `first`.
     pub success_without: Option<f64>,
     /// Using `first` raises the success of `then`, and the difference is
-    /// significant (two-proportion test, 30 sessions on each side at least).
+    /// significant (two-proportion test, 30 sessions on each side at least),
+    /// under the false discovery cutoff of all the relations tested (D-099).
     pub leads_to_value: bool,
 }
 
@@ -153,7 +154,7 @@ pub fn from_counts(m: &FeatureMap, c: &Counts) -> Vec<Relation> {
         .collect();
     let of = |k: &str| c.features.get(k).copied().unwrap_or((0, 0));
     let total = c.sessions as f64;
-    let mut out: Vec<Relation> = c
+    let tested: Vec<(Relation, Option<f64>)> = c
         .pairs
         .iter()
         .filter(|(_, p)| p.both >= MIN_TOGETHER)
@@ -184,9 +185,22 @@ pub fn from_counts(m: &FeatureMap, c: &Counts) -> Vec<Relation> {
                 first_share: first_n as f64 / p.both as f64,
                 ..Relation::default()
             };
-            if success.contains(then.as_str()) {
-                value(&mut r, (after, after_ok), (without, without_ok));
-            }
+            let p = if success.contains(then.as_str()) {
+                value(&mut r, (after, after_ok), (without, without_ok))
+            } else {
+                None
+            };
+            (r, p)
+        })
+        .collect();
+    // Every relation with a p-value is one test of the family (D-099).
+    let ps: Vec<f64> = tested.iter().filter_map(|(_, p)| *p).collect();
+    let cut = crate::stats::fdr_cutoff(&ps, crate::stats::FDR);
+    let mut out: Vec<Relation> = tested
+        .into_iter()
+        .map(|(mut r, p)| {
+            r.leads_to_value = p.is_some_and(|p| crate::stats::discovered(cut, p))
+                && r.success_after > r.success_without;
             r
         })
         .collect();
@@ -200,16 +214,15 @@ pub fn from_counts(m: &FeatureMap, c: &Counts) -> Vec<Relation> {
     out
 }
 
-/// Leads-to-value of `r`: the success of `then` in the sessions where
-/// `first` came before it (`after`: sessions, successes), against the
-/// sessions that used it without `first` (`without`).
-fn value(r: &mut Relation, after: (i64, i64), without: (i64, i64)) {
+/// The success of `then` in the sessions where `first` came before it
+/// (`after`: sessions, successes), against the sessions that used it
+/// without `first` (`without`), and the p-value of their difference
+/// (`None` when it cannot be tested). Whether it leads to value is
+/// decided over all the relations ([`from_counts`]).
+fn value(r: &mut Relation, after: (i64, i64), without: (i64, i64)) -> Option<f64> {
     let rate = |(n, ok): (i64, i64)| (n > 0).then(|| ok as f64 / n as f64);
     r.success_after = rate(after);
     r.success_without = rate(without);
-    if let (Some(a), Some(w)) = (r.success_after, r.success_without) {
-        r.leads_to_value = a > w
-            && crate::stats::two_proportions(a, after.0, w, without.0)
-                .is_some_and(|p| p < crate::stats::ALPHA);
-    }
+    let (a, w) = (r.success_after?, r.success_without?);
+    crate::stats::two_proportions(a, after.0, w, without.0)
 }
