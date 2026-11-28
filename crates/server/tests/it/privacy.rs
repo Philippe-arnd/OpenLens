@@ -383,3 +383,52 @@ async fn confirm_dialogs_post_the_same_forms_and_an_empty_confirmation_is_refuse
     assert_eq!(h.state.meta.flags("default").unwrap().len(), 1);
     assert!(h.state.meta.project("default").unwrap().is_some());
 }
+
+#[tokio::test]
+async fn the_audit_log_names_the_scoped_token_that_acted() {
+    let h = harness();
+    let (token, plain) = h
+        .state
+        .meta
+        .create_api_token("write", None, "ci-agent")
+        .unwrap();
+    let map = "features:\n  - key: export-pdf\n    name: Export to PDF\n    entry: { routes: ['/export'] }\n";
+    for (bearer, forged) in [(plain.as_str(), true), ("adm_test", false)] {
+        let mut req = Request::put("/api/projects/default/feature-map")
+            .header("authorization", format!("Bearer {bearer}"));
+        if forged {
+            // A client cannot name another token: the layer drops this.
+            req = req.header("x-openlens-scope-token", "tok_someone_else");
+        }
+        let r = router(h.state.clone())
+            .oneshot(req.body(Body::from(map)).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+    }
+    let saves: Vec<String> = h
+        .state
+        .meta
+        .audit_log(50)
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.3 == "feature_map.save")
+        .map(|e| e.1)
+        .collect();
+    assert_eq!(saves.len(), 2, "{saves:?}");
+    let scoped = saves.iter().find(|a| a.contains(&token.id));
+    assert!(
+        scoped.is_some_and(|a| a.contains("ci-agent") && !a.contains("admin")),
+        "{saves:?}"
+    );
+    assert!(
+        saves
+            .iter()
+            .any(|a| a.contains("admin token") && !a.contains("ci-agent")),
+        "{saves:?}"
+    );
+    assert!(
+        !saves.iter().any(|a| a.contains("tok_someone_else")),
+        "{saves:?}"
+    );
+}
