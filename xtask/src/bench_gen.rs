@@ -195,7 +195,7 @@ fn write_persona(
         w.flush().map_err(|e| e.to_string())?;
         chunk.clear();
         chunks += 1;
-        if chunks % 20 == 0 || k + 1 == units {
+        if chunks.is_multiple_of(20) || k + 1 == units {
             eprintln!(
                 "xtask: {done} events written, {} / {units} units ({:.0} s)",
                 k + 1,

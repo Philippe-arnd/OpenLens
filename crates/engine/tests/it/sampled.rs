@@ -143,7 +143,7 @@ async fn people(q: &QueryEngine) -> String {
 async fn sampling_distribution_events_moves_no_number_that_counts_people() {
     let (_a, all) = store(|_| true, None);
     // One session in four drawn, as with 8,000 active users a day.
-    let (_b, sampled) = store(|i| i % 4 == 0, Some(0.25));
+    let (_b, sampled) = store(|i| i.is_multiple_of(4), Some(0.25));
     // And none drawn at all.
     let (_c, none) = store(|_| false, Some(0.25));
     let reference = people(&all).await;
@@ -158,7 +158,7 @@ async fn sampling_distribution_events_moves_no_number_that_counts_people() {
 #[tokio::test]
 async fn sampled_form_fields_are_scaled_back_up() {
     let (_a, all) = store(|_| true, None);
-    let (_b, sampled) = store(|i| i % 4 == 0, Some(0.25));
+    let (_b, sampled) = store(|i| i.is_multiple_of(4), Some(0.25));
     let f = forms(&all, "p", None, &Filters::default()).await.unwrap();
     let g = forms(&sampled, "p", None, &Filters::default())
         .await
