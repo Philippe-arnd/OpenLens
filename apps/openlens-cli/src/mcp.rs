@@ -296,7 +296,7 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "flag_set",
-                description: "Create or update a flag: put a risky change behind openlens.isEnabled(key), start with a small rollout or one role, then widen it once the board shows its cohort is fine.",
+                description: "Create or update a flag: put a risky change behind openlens.isEnabled(key), start with a small rollout or one role, then widen it once the board shows its cohort is fine. On an existing flag only the fields you pass change; the others (and its variants, users and holdout) are kept.",
                 input_schema: json!({"type":"object","properties":with(json!({
                     "key":{"type":"string"},
                     "enabled":{"type":"boolean"},
@@ -314,7 +314,7 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "survey_set",
-                description: "Create or update a micro-survey: one question shown right after `trigger` (a success event like entry_saved) to `sample`% of users (optionally some roles), once each. kind: rating (1-5), yes_no, choice (2-6 choices) or text. Ask about the moment that just happened, in plain words.",
+                description: "Create or update a micro-survey: one question shown right after `trigger` (a success event like entry_saved) to `sample`% of users (optionally some roles), once each. kind: rating (1-5), yes_no, choice (2-6 choices) or text. Ask about the moment that just happened, in plain words. A new survey needs question, kind and trigger; on an existing one only the fields you pass change.",
                 input_schema: json!({"type":"object","properties":with(json!({
                     "key":{"type":"string"},
                     "question":{"type":"string"},
@@ -324,7 +324,7 @@ impl Tools for OpenLensTools {
                     "sample":{"type":"integer","minimum":0,"maximum":100},
                     "roles":{"type":"array","items":{"type":"string"}},
                     "enabled":{"type":"boolean"}
-                })),"required":["key","question","kind","trigger"]}),
+                })),"required":["key"]}),
             },
             ToolSpec {
                 name: "login_link",
@@ -809,6 +809,32 @@ impl Tools for OpenLensTools {
             }
             "flag_set" => {
                 let key = s(args, "key").ok_or("key is required")?;
+                let rules = args
+                    .get("rules")
+                    .and_then(Value::as_array)
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(Value::as_str)
+                            .map(openlens_flags::Rule::parse)
+                            .collect::<Result<Vec<_>, String>>()
+                    })
+                    .transpose()?;
+                // An existing flag: `flags.update` changes only what was
+                // passed and keeps variants, users and holdout (#665).
+                let mut change = serde_json::Map::new();
+                for k in ["enabled", "rollout", "roles", "accounts", "description"] {
+                    if let Some(v) = args.get(k) {
+                        change.insert(k.into(), v.clone());
+                    }
+                }
+                if let Some(r) = &rules {
+                    change.insert("rules".into(), json!(r));
+                }
+                let path = format!("/api/projects/{}/flags/{key}", project(args));
+                let (st, v) = c.call("PATCH", &path, Some(Body::Json(Value::Object(change))))?;
+                if st != 404 || v.get("error").and_then(Value::as_str) != Some("no such flag") {
+                    return ok_or(st, v);
+                }
                 let body = json!({
                     "key": key,
                     "enabled": args.get("enabled").and_then(Value::as_bool).unwrap_or(true),
@@ -816,23 +842,9 @@ impl Tools for OpenLensTools {
                     "roles": args.get("roles").cloned().unwrap_or_else(|| json!([])),
                     "accounts": args.get("accounts").cloned().unwrap_or_else(|| json!([])),
                     "description": s(args, "description").unwrap_or_default(),
-                    "rules": args
-                        .get("rules")
-                        .and_then(Value::as_array)
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(Value::as_str)
-                                .map(openlens_flags::Rule::parse)
-                                .collect::<Result<Vec<_>, String>>()
-                        })
-                        .transpose()?
-                        .unwrap_or_default(),
+                    "rules": rules.unwrap_or_default(),
                 });
-                let (st, v) = c.call(
-                    "PUT",
-                    &format!("/api/projects/{}/flags/{key}", project(args)),
-                    Some(Body::Json(body)),
-                )?;
+                let (st, v) = c.call("PUT", &path, Some(Body::Json(body)))?;
                 ok_or(st, v)
             }
             "surveys" => {
@@ -845,20 +857,47 @@ impl Tools for OpenLensTools {
             }
             "survey_set" => {
                 let key = s(args, "key").ok_or("key is required")?;
-                let body = json!({
-                    "key": key,
-                    "question": s(args, "question").ok_or("question is required")?,
-                    "kind": s(args, "kind").ok_or("kind is required")?,
-                    "choices": args.get("choices").cloned().unwrap_or_else(|| json!([])),
-                    "trigger": s(args, "trigger").ok_or("trigger is required")?,
-                    "sample": args.get("sample").and_then(Value::as_u64).unwrap_or(10),
-                    "roles": args.get("roles").cloned().unwrap_or_else(|| json!([])),
-                    "enabled": args.get("enabled").and_then(Value::as_bool).unwrap_or(true),
-                });
+                let list = format!("/api/projects/{}/surveys", project(args));
+                let (st, v) = c.call("GET", &list, None)?;
+                let v = ok_or(st, v)?;
+                // An existing survey keeps every field not passed (#665).
+                let stored = v
+                    .get("surveys")
+                    .and_then(Value::as_array)
+                    .and_then(|a| {
+                        a.iter()
+                            .find(|x| x.get("key").and_then(Value::as_str) == Some(key.as_str()))
+                    })
+                    .cloned();
+                let mut body = if let Some(Value::Object(m)) = stored {
+                    m
+                } else {
+                    {
+                        let need =
+                            |k: &str| s(args, k).ok_or(format!("{k} is required for a new survey"));
+                        let mut m = serde_json::Map::new();
+                        m.insert("question".into(), json!(need("question")?));
+                        m.insert("kind".into(), json!(need("kind")?));
+                        m.insert("trigger".into(), json!(need("trigger")?));
+                        m.insert("choices".into(), json!([]));
+                        m.insert("sample".into(), json!(10));
+                        m.insert("roles".into(), json!([]));
+                        m.insert("enabled".into(), json!(true));
+                        m
+                    }
+                };
+                for k in [
+                    "question", "kind", "choices", "trigger", "sample", "roles", "enabled",
+                ] {
+                    if let Some(x) = args.get(k) {
+                        body.insert(k.into(), x.clone());
+                    }
+                }
+                body.insert("key".into(), json!(key));
                 let (st, v) = c.call(
                     "PUT",
-                    &format!("/api/projects/{}/surveys/{key}", project(args)),
-                    Some(Body::Json(body)),
+                    &format!("{list}/{key}"),
+                    Some(Body::Json(Value::Object(body))),
                 )?;
                 ok_or(st, v)
             }

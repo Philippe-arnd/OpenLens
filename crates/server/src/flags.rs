@@ -201,10 +201,18 @@ struct FlagSwitch {
     enabled: Option<bool>,
     #[serde(default)]
     rollout: Option<u8>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    roles: Option<Vec<String>>,
+    #[serde(default)]
+    accounts: Option<Vec<String>>,
+    #[serde(default)]
+    rules: Option<Vec<openlens_flags::Rule>>,
 }
 
-/// `PATCH /api/projects/{id}/flags/{key}` (#525): `flags.update`, switch an
-/// existing flag on or off and/or set its rollout, the rest unchanged.
+/// `PATCH /api/projects/{id}/flags/{key}` (#525): `flags.update`, change
+/// the given fields of an existing flag, the rest unchanged (#665).
 async fn admin_switch(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -226,6 +234,10 @@ async fn admin_switch(
         key,
         enabled: b.enabled,
         rollout: b.rollout,
+        description: b.description,
+        roles: b.roles,
+        accounts: b.accounts,
+        rules: b.rules,
     };
     match Update::run(&state, &Caller::default(), input).await {
         Ok(f) => Json(json!({ "flag": f })).into_response(),

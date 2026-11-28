@@ -791,6 +791,7 @@ pub(crate) async fn apply(
                 key: key.to_owned(),
                 enabled: a["enabled"].as_bool(),
                 rollout: a["rollout"].as_u64().and_then(|r| u8::try_from(r).ok()),
+                ..Default::default()
             };
             flags_cmd::Update::run(state, &Caller::default(), input)
                 .await

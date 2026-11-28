@@ -290,7 +290,7 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "PATCH",
         "/api/projects/{project}/flags/{key}",
         "write",
-        "Switch an existing flag on or off (`enabled`) and/or set its rollout (`rollout`, 0-100); the rest is unchanged.",
+        "Change the given fields of an existing flag (`enabled`, `rollout` 0-100, `description`, `roles`, `accounts`, `rules`); every field left out keeps its value.",
     ),
     (
         "DELETE",
