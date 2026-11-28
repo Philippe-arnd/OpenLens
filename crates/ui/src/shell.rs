@@ -443,6 +443,8 @@ fn page(
                 link rel="icon" type="image/svg+xml" href="/assets/favicon.svg";
             }
             body {
+                // #680: the first Tab stop skips the sidebar (WCAG 2.4.1).
+                a.skip-link href="#main" { "Skip to content" }
                 (icons::sprite())
                 div.shell {
                     aside.side aria-label="OpenLens" {
@@ -476,7 +478,7 @@ fn page(
                             }
                         }
                         @if !tabs.0.is_empty() { div.subnav { (tabs) } }
-                        main { (body) }
+                        main #main tabindex="-1" { (body) }
                         footer {
                             "OpenLens " (env!("CARGO_PKG_VERSION")) " · map → measure → focus → act → compare"
                             @if let Some(u) = update_available() {
@@ -725,6 +727,53 @@ mod tests {
         // Outside a project, no menu to open, but the fold links stay.
         let out = crate::message("Not found", "Nothing here.").into_string();
         assert!(!out.contains("popovertarget") && out.contains("/nav/collapsed"));
+    }
+
+    /// The opening tag of every element in `html` that Tab reaches, in document order.
+    fn tab_stops(html: &str) -> Vec<&str> {
+        html.match_indices('<')
+            .filter_map(|(i, _)| html[i..].find('>').map(|j| &html[i..=i + j]))
+            .filter(|t| {
+                let name = t[1..]
+                    .split(|c: char| c.is_whitespace() || c == '>')
+                    .next()
+                    .unwrap_or("");
+                !t.contains("tabindex=\"-1\"")
+                    && !t.contains(" disabled")
+                    && !t.contains("type=\"hidden\"")
+                    && (t.contains("tabindex=")
+                        || (name == "a" && t.contains(" href="))
+                        || ["button", "input", "select", "textarea", "summary"].contains(&name))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_first_tab_stop_skips_to_the_main_content() {
+        let html = layout("Events", Some(&demo()), html! { p { "x" } }).into_string();
+        let body = &html[html.find("<body").unwrap()..];
+        let stops = tab_stops(body);
+        // The sidebar alone holds many stops; the skip link comes before all of them.
+        assert!(stops.len() > NAV.len(), "{stops:?}");
+        let first = stops[0];
+        assert!(first.contains("class=\"skip-link\""), "{first}");
+        let target = first
+            .split("href=\"#")
+            .nth(1)
+            .and_then(|r| r.split('"').next())
+            .unwrap();
+        // The target exists once, is the main landmark, and takes focus
+        // without becoming a Tab stop itself.
+        let id = format!("id=\"{target}\"");
+        assert_eq!(body.matches(&id).count(), 1);
+        let at = body.find(&id).unwrap();
+        let tag = &body[body[..at].rfind('<').unwrap()..at + body[at..].find('>').unwrap()];
+        assert!(
+            tag.starts_with("<main") && tag.contains("tabindex=\"-1\""),
+            "{tag}"
+        );
+        // It comes after the sidebar, so the skip saves those stops.
+        assert!(at > body.find("accesskey=").unwrap());
     }
 
     #[test]

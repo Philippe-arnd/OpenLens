@@ -16,6 +16,9 @@
     --muted:   light-dark(oklch(49% 0.014 285),   oklch(70% 0.012 285));
     --line:    light-dark(oklch(91.5% 0.006 85),  oklch(28% 0.014 285));
     --line-2:  light-dark(oklch(95% 0.005 85),    oklch(24% 0.012 285));
+    /* Form control borders only (WCAG 1.4.11, #680): >= 3:1 against --bg, --surface
+       and --raised in both themes. --line stays for hairlines. */
+    --field-line: light-dark(oklch(62% 0.008 85), oklch(54% 0.014 285));
     --accent:  light-dark(oklch(51% 0.22 281),    oklch(73% 0.15 281));
     --on-accent: light-dark(oklch(99% 0 0),       oklch(17% 0.02 281));
     --good:    light-dark(oklch(49% 0.12 155),    oklch(76% 0.14 155));
@@ -45,6 +48,10 @@
     color: var(--ink); background: var(--bg);
     -webkit-font-smoothing: antialiased;
   }
+  /* Keep focused elements clear of the sticky top bar (WCAG 2.4.11, #680):
+     one 52px row plus its border; on a phone the context wraps to a second row. */
+  html { scroll-padding-top: 64px; }
+  @media (max-width: 640px) { html { scroll-padding-top: 104px; } }
   * { box-sizing: border-box; }
   body { margin: 0; min-height: 100vh; display: flex; flex-direction: column; }
   a { color: var(--violet); text-decoration: none; }
@@ -61,11 +68,11 @@
   button { font: inherit; font-weight: 500; font-size: 13px; border: 1px solid var(--ink); border-radius: var(--r-s); padding: 7px 14px;
     cursor: pointer; background: var(--ink); color: var(--bg); }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  select, input, textarea { font: inherit; font-size: 13px; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-s); padding: 7px 10px; }
+  select, input, textarea { font: inherit; font-size: 13px; color: var(--ink); background: var(--bg); border: 1px solid var(--field-line); border-radius: var(--r-s); padding: 7px 10px; }
   select:not([multiple]) { appearance: none; padding-right: 28px;
     background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
     background-position: right 14px center, right 10px center; background-size: 4px 4px; background-repeat: no-repeat; }
-  select:hover, input:hover, textarea:hover { border-color: color-mix(in oklab, var(--ink) 22%, var(--line)); }
+  select:hover, input:hover, textarea:hover { border-color: color-mix(in oklab, var(--ink) 35%, var(--field-line)); }
   /* Tables (v2): quiet sentence-case headers, hairline rows, aligned numbers. */
   table { width: 100%; border-collapse: collapse; }
   th, td { text-align: left; padding: 11px 10px; border-bottom: 1px solid var(--line-2); font-weight: 400; font-size: 13.5px; }
@@ -487,6 +494,11 @@
 }
 
 @layer utilities {
+  /* Skip link (#680): first stop on Tab, hidden until focused. */
+  .skip-link { position: absolute; left: 8px; top: 8px; z-index: 10; padding: 8px 14px; border-radius: var(--r-s);
+    background: var(--ink); color: var(--bg); font-weight: 500; transform: translateY(-200%); }
+  .skip-link:focus { transform: none; }
+  main:focus { outline: none; }
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 }
