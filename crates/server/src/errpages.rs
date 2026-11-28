@@ -73,12 +73,11 @@ mod tests {
     use super::*;
     use axum::Router;
     use axum::body::Body;
-    use axum::routing::get;
     use tower::ServiceExt;
 
     async fn slow(path: &str) -> (StatusCode, String, String) {
         let app = Router::new()
-            .route("/{*rest}", get(std::future::pending::<&'static str>))
+            .fallback(std::future::pending::<&'static str>)
             .layer(axum::middleware::from_fn(|req, next| {
                 within(Duration::from_millis(20), req, next)
             }));
