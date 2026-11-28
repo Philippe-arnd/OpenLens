@@ -319,3 +319,50 @@ async fn a_release_that_breaks_a_key_route_leads_the_board_with_the_route_named(
         .expect("the routes table")..];
     assert!(worse.contains("/api/auth/sign-in"), "{worse}");
 }
+
+/// The board judges the newest release alone (#748), on the days since
+/// the release before it started, and says what the releases list says
+/// for it. An error group seen in the release before is not new.
+#[tokio::test]
+async fn the_board_judges_the_newest_release_as_the_releases_list_does() {
+    let h = harness();
+    let ago = |hours: i64| (chrono::Utc::now() - chrono::Duration::hours(hours)).to_rfc3339();
+    let mut events = Vec::new();
+    for i in 0..4 {
+        let u = format!("u{i}");
+        for (rel, at) in [("v1", 24 * 20), ("v2", 24 * 6), ("v3", 30)] {
+            let s = format!("{rel}-s{i}");
+            events.push(serde_json::json!({"event": "$pageview", "distinct_id": u, "session_id": s, "timestamp": ago(at), "properties": {"$pathname": "/", "$release": rel}}));
+        }
+        for (rel, at) in [("v2", 24 * 6 - 1), ("v3", 29)] {
+            events.push(serde_json::json!({"event": "$error", "distinct_id": u, "session_id": format!("{rel}-s{i}"), "timestamp": ago(at), "properties": {"$message": "TypeError: x is undefined", "$release": rel}}));
+        }
+    }
+    capture(&h, events).await;
+    openlens_server::flush_now(&h.state).unwrap();
+
+    let r = get(&h, "/api/projects/default/releases", None, true).await;
+    let v: serde_json::Value = serde_json::from_str(&body_text(r).await).unwrap();
+    let listed = v["releases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["release"] == "v3")
+        .map(|x| x["verdict"].clone())
+        .unwrap();
+
+    let r = get(&h, "/api/projects/default/board", None, true).await;
+    assert_eq!(r.status(), StatusCode::OK);
+    let b: serde_json::Value = serde_json::from_str(&body_text(r).await).unwrap();
+    let latest = &b["latest_release"];
+    assert_eq!(latest["state"], "judged", "{latest}");
+    assert_eq!(latest["release"], "v3", "{latest}");
+    assert_eq!(latest["previous_release"], "v2", "{latest}");
+    assert_eq!(latest["verdict"], listed, "{latest}");
+    assert!(
+        latest["current"]["new_errors"]
+            .as_array()
+            .is_none_or(Vec::is_empty),
+        "the error was already in v2: {latest}"
+    );
+}

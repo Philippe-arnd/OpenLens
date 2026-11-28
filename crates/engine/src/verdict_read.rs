@@ -40,15 +40,17 @@ const DAYS: i64 = crate::releases::WINDOW_DAYS;
 /// Rows read at most per query.
 const MAX_ROWS: usize = 5_000;
 
-/// The numbers of each release of `environment` over the last 90 days, by
-/// release name.
+/// The numbers of each release of `environment` over the last `days` days
+/// (at most 90), by release name.
 async fn sides(
     q: &QueryEngine,
     project: &str,
     environment: &str,
     map: Option<(&FeatureMap, i64)>,
     now: DateTime<Utc>,
+    days: i64,
 ) -> Result<HashMap<String, Side>> {
+    let days = days.clamp(1, DAYS);
     let f = Filters {
         environment: environment.to_owned(),
         ..Filters::default()
@@ -99,9 +101,9 @@ async fn sides(
                sum(errors) AS errors, sum(tasks) AS tasks \
                FROM {rows} WHERE release IS NOT NULL GROUP BY release, session_id) s \
          GROUP BY release ORDER BY sessions DESC LIMIT {MAX_ROWS}",
-        rows = sessions.rows(&f, Span::days(DAYS))?
+        rows = sessions.rows(&f, Span::days(days))?
     );
-    let w = f.clause_at(DAYS, now)?;
+    let w = f.clause_at(days, now)?;
     let errors_sql = format!(
         "WITH e AS (SELECT distinct_id, release, timestamp, error_message AS msg, error_source AS source, \
            {SERVER_ERROR} AS srv \
@@ -124,7 +126,7 @@ async fn sides(
     let features_sql = if successes.is_empty() {
         None
     } else {
-        let (skip, rolled) = board_people::split(&rolled_features, now, DAYS, &f, &role);
+        let (skip, rolled) = board_people::split(&rolled_features, now, days, &f, &role);
         let mut rows = format!(
             "SELECT session_id, release, feature, sum(CASE WHEN {task} THEN 1 ELSE 0 END) AS ok \
              FROM {src} WHERE {w}{skip} AND session_id IS NOT NULL AND feature IS NOT NULL \
@@ -150,7 +152,7 @@ async fn sides(
             None => None,
         }
     };
-    let since = (now - chrono::Duration::days(DAYS + 1))
+    let since = (now - chrono::Duration::days(days + 1))
         .format("%Y-%m-%d")
         .to_string();
     let (kpis, errors, vitals, features, routes, runtime, dependencies) = futures::join!(
@@ -276,6 +278,37 @@ pub async fn judge(
     releases: &[Release],
     now: DateTime<Utc>,
 ) -> Result<Vec<Report>> {
+    judge_from(q, project, scope, releases, now, false).await
+}
+
+/// The verdict of the newest release with traffic only, against the one
+/// before it (#748): what the board shows. It reads the days since the
+/// release before it started (at most 90), not the 90 days every release
+/// needs: a new error group is then one not seen since the previous
+/// release started.
+///
+/// # Errors
+/// A failed query.
+pub async fn judge_latest(
+    q: &QueryEngine,
+    project: &str,
+    scope: Scope<'_>,
+    releases: &[Release],
+    now: DateTime<Utc>,
+) -> Result<Option<Report>> {
+    Ok(judge_from(q, project, scope, releases, now, true)
+        .await?
+        .pop())
+}
+
+async fn judge_from(
+    q: &QueryEngine,
+    project: &str,
+    scope: Scope<'_>,
+    releases: &[Release],
+    now: DateTime<Utc>,
+    latest_only: bool,
+) -> Result<Vec<Report>> {
     let Scope {
         environment,
         tz,
@@ -292,7 +325,16 @@ pub async fn judge(
         return Ok(Vec::new());
     }
     ours.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.release.cmp(&b.1.release)));
-    let sides = sides(q, project, environment, map, now).await?;
+    // The newest and the one before it: the days since the older of the
+    // two started, plus the day it started in.
+    let (skip, days) = if latest_only {
+        let skip = ours.len().saturating_sub(2);
+        let since = ours.get(skip).map_or(now, |(t, _)| *t);
+        (skip, (now - since).num_days() + 2)
+    } else {
+        (0, DAYS)
+    };
+    let sides = sides(q, project, environment, map, now, days).await?;
     let goals = if environment == crate::releases::PRODUCTION {
         goals
     } else {
@@ -304,17 +346,24 @@ pub async fn judge(
     };
     let mut out = Vec::with_capacity(ours.len());
     for (i, (first, r)) in ours.iter().enumerate() {
+        if latest_only && i + 1 < ours.len() {
+            continue;
+        }
         let mut current = sides
             .get(&r.release)
             .cloned()
             .unwrap_or_else(|| empty(&r.release));
         current.touched = touched.get(&r.release).cloned().unwrap_or_default();
-        let previous = i.checked_sub(1).and_then(|j| ours.get(j)).map(|(_, p)| {
-            sides
-                .get(&p.release)
-                .cloned()
-                .unwrap_or_else(|| empty(&p.release))
-        });
+        let previous = i
+            .checked_sub(1)
+            .filter(|j| *j >= skip)
+            .and_then(|j| ours.get(j))
+            .map(|(_, p)| {
+                sides
+                    .get(&p.release)
+                    .cloned()
+                    .unwrap_or_else(|| empty(&p.release))
+            });
         let age = (now - *first).num_hours().max(0);
         out.push(verdict::compare(
             environment,
