@@ -37,6 +37,7 @@ mod slo;
 mod status_page;
 mod team;
 mod totp;
+mod voice;
 
 struct Harness {
     _dir: tempfile::TempDir,

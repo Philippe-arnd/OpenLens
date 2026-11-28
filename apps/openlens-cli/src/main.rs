@@ -31,6 +31,7 @@ mod maintenance;
 mod release;
 mod status_page;
 mod verify;
+mod voice;
 use commands::*;
 pub(crate) use verify::*;
 
@@ -587,6 +588,11 @@ fn run(cli: Cli) -> Result<bool, String> {
         Command::Maintenance { action } => maintenance::run(&client()?, action),
         Command::Announce { action } => announce::run(&client()?, action),
         Command::StatusPage { action } => status_page::run(&client()?, action),
+        Command::Feedback {
+            project,
+            feature,
+            days,
+        } => voice::feedback(&client()?, project, feature.as_deref(), *days),
         Command::Status { project } => {
             let (status, v) =
                 client()?.call("GET", &format!("/api/projects/{project}/status"), None)?;

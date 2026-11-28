@@ -88,6 +88,8 @@ const TOOL_OF: &[(&str, &str)] = &[
     ("jobs.check_in", "check_in"),
     ("jobs.remove", "job_set"),
     ("jobs.set_availability", "job_set"),
+    // What users say (#718).
+    ("feedback.list", "feedback"),
 ];
 
 /// Commands deliberately without an MCP tool, each with its reason.

@@ -274,6 +274,15 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
             input_schema: json!({"type":"object","properties":filtered(json!({}))}),
         },
         ToolSpec {
+            name: "feedback",
+            description: "What users said ($feedback events, from openlens.feedback(text, { feature, rating }), a server SDK or a support tool) over `days` (1 to 90, default 30), for one `feature` key or all: the count, feedbacks per rating 1 to 5, without a rating, the mean rating, per feature, and the latest texts (newest first, `limit` 1 to 200, default 20) with rating, date, feature and who sent it. Texts are personal data: quote them only as needed, never in a public place; they are removed after 90 days (the rating stays). Read it next to the feature's numbers (feature_context) to see why users struggle.",
+            input_schema: json!({"type":"object","properties":with(json!({
+                "feature":{"type":"string"},
+                "days":{"type":"integer","minimum":1,"maximum":90},
+                "limit":{"type":"integer","minimum":1,"maximum":200}
+            }))}),
+        },
+        ToolSpec {
             name: "flows",
             description: "How sessions move between features, step by step: the nodes of each step and the links between them with their sessions, and how many sessions reached a success event. `from` (a feature key) starts at its first use; `to: success` keeps the sessions that reached one.",
             input_schema: json!({"type":"object","properties":filtered(json!({
@@ -468,6 +477,16 @@ pub(crate) fn call(c: &Client, name: &str, args: &Value) -> Option<Result<Value,
         "forms" => get(c, &query(args, "/forms", FILTERS)),
         "audience" => get(c, &query(args, "/audience", FILTERS)),
         "live" => get(c, &query(args, "/live", FILTERS)),
+        "feedback" => {
+            let mut path = query(args, "/feedback", &["feature", "env"]);
+            for k in ["days", "limit"] {
+                if let Some(n) = args.get(k).and_then(Value::as_i64) {
+                    path.push(if path.contains('?') { '&' } else { '?' });
+                    path.push_str(&format!("{k}={n}"));
+                }
+            }
+            get(c, &path)
+        }
         "flows" => {
             let keys = ["env", "role", "release", "from", "to"];
             get(c, &query(args, "/flows", &keys))

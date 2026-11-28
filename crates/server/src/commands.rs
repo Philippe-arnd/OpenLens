@@ -119,7 +119,8 @@ impl Host for AppState {
 }
 
 /// The caller of a command made from a dashboard request: the viewer's
-/// own time zone when it is valid, and the projects they may see (a
+/// own time zone when it is valid, whether they may read personal text
+/// (admins, #718), and the projects they may see (a
 /// signed-in viewer's, else a project-limited API token's; `None` for
 /// the admin token and admins of every project).
 pub(crate) fn caller(state: &AppState, headers: &axum::http::HeaderMap) -> Caller {
@@ -129,6 +130,7 @@ pub(crate) fn caller(state: &AppState, headers: &axum::http::HeaderMap) -> Calle
         None => crate::scopes::limited_to(state, headers),
     };
     Caller {
+        detail: viewer.as_ref().is_some_and(|v| v.admin),
         tz: viewer
             .and_then(|v| v.tz)
             .filter(|t| t.parse::<chrono_tz::Tz>().is_ok()),

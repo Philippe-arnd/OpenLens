@@ -251,6 +251,12 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "Outgoing dependencies of one environment (`env`, production by default) over `days` (1 to 90, default 7), from `http.client.request.duration` (the Node SDK's `captureOutgoing()` or OTLP): per external host (`server.address`, never a path), calls, failed calls (5xx or no response) and their share, calls without a response, p95 in ms (upper bound of the duration histogram), the largest duration, and how the host moved from the release before to the latest one (fails more, slower). Shown, never judged: a dependency never changes a release verdict. The hosts that fail more come first, then those that got slower, each by the largest change, then the most called.",
     ),
     (
+        "GET",
+        "/api/projects/{project}/feedback",
+        "read",
+        "What users said (`$feedback`) over `days` (1 to 90, default 30) in one environment (`env`, production by default), for one `feature` key or all: the count, feedbacks per rating 1 to 5, without a rating, the mean rating, per feature, and the latest texts (newest first, `limit` 1 to 200, default 20) with their rating, date, feature and who sent them. Texts are removed after 90 days; the ratings stay.",
+    ),
+    (
         "POST",
         "/api/projects/{project}/deploy-hook",
         "write",

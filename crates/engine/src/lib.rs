@@ -39,6 +39,8 @@ pub mod environments;
 mod errors;
 mod events;
 mod explore;
+/// What users say: `$feedback` per rating and feature (#718, D-116).
+pub mod feedback;
 mod feature_paths;
 mod feature_signals;
 pub mod flows;
@@ -525,6 +527,10 @@ pub struct Board {
     /// the card next to the usage chart.
     #[serde(skip)]
     pub in_flight: commands::in_flight::InFlight,
+    /// Set by the server (#718): feedbacks of the last 7 days per feature
+    /// key, for "N feedback this week" on the insight cards. Counts only.
+    #[serde(skip)]
+    pub feedback_week: Vec<(String, i64)>,
     /// Environments seen.
     pub environments: Vec<String>,
     /// Raw role values no rule of the feature map matches, with user counts.

@@ -26,6 +26,7 @@ pub mod delivery;
 pub mod dependencies;
 pub mod deploys;
 pub mod explore;
+pub mod feedback;
 pub mod flags;
 pub mod goals;
 pub mod goto;
@@ -189,6 +190,8 @@ pub const REGISTRY: &[Spec] = &[
     spec::<capacity::Get>(),
     // The portfolio across projects (#717).
     spec::<portfolio::Get>(),
+    // What users say (#718).
+    spec::<feedback::List>(),
 ];
 
 /// A 12-character id from `s` (the first bytes of its SHA-256, in hex).
@@ -204,6 +207,10 @@ pub struct Caller {
     /// The viewer's own time zone, when valid; `None` counts in the
     /// project's (D-017).
     pub tz: Option<String>,
+    /// The caller may read personal text, such as what a user wrote in a
+    /// feedback (#718, D-116): an admin or the automation token. Off by
+    /// default: a viewer gets counts.
+    pub detail: bool,
     /// The projects the caller may see; `None`: every project (an admin
     /// of every project, the admin token). Read by commands about no one
     /// project ([`Access::Signed`], #717).

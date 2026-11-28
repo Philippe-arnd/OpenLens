@@ -356,6 +356,20 @@ pub(super) enum Command {
         #[command(subcommand)]
         action: crate::maintenance::MaintenanceCmd,
     },
+    /// What users said (#718): feedback per rating and feature over
+    /// --days (1 to 90, default 30), with the latest texts and who sent
+    /// them. Texts older than 90 days are gone; the ratings stay.
+    Feedback {
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+        /// One feature key of the map.
+        #[arg(long)]
+        feature: Option<String>,
+        /// Days of the period, 1 to 90.
+        #[arg(long)]
+        days: Option<i64>,
+    },
     /// How sessions move between features (Sankey data, last 30 days).
     Flows {
         /// Project id.

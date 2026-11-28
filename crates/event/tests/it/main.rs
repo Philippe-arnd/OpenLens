@@ -322,3 +322,44 @@ fn error_acquisition_and_friction_facts_are_what_the_patterns_returned() {
         assert_eq!(facts(event, &text), Facts::default(), "{event} {head}");
     }
 }
+
+/// A feedback's text is cleaned and cut to 1,000 characters, its rating
+/// kept only from 1 to 5, and its feature kept as a property, not the
+/// `feature` column (a feedback is no use of the feature, #718); one with
+/// neither text nor rating is refused.
+#[test]
+fn feedback_text_is_cleaned_and_cut() {
+    let long = format!(
+        "  Too\nslow\u{7}{}",
+        "é".repeat(2 * openlens_event::feedback::MAX_CHARS)
+    );
+    let batch = CaptureBatch {
+        batch: vec![
+            raw(
+                "$feedback",
+                json!({"text": long, "feature": "export", "rating": 9}),
+            ),
+            raw("$feedback", json!({"$text": "  \u{1}  ", "$rating": "4"})),
+            raw("$feedback", json!({"$text": " \n "})),
+        ],
+        ..Default::default()
+    };
+    let out = normalize_batch("p", batch, Utc::now()).unwrap();
+    assert_eq!(out.events.len(), 2);
+    assert!(
+        out.rejected
+            .iter()
+            .any(|(i, e)| *i == 2 && *e == EventError::EmptyFeedback)
+    );
+    let props: serde_json::Value = serde_json::from_str(&out.events[0].properties).unwrap();
+    let text = props["$text"].as_str().unwrap();
+    assert!(text.chars().count() <= openlens_event::feedback::MAX_CHARS);
+    assert!(text.chars().count() < long.chars().count());
+    assert!(text.starts_with("Too slow") && !text.chars().any(char::is_control));
+    assert_eq!(props["$about"], "export");
+    assert!(props.get("$rating").is_none() && props.get("text").is_none());
+    assert!(out.events[0].feature.is_none());
+    let rated: serde_json::Value = serde_json::from_str(&out.events[1].properties).unwrap();
+    assert_eq!(rated["$rating"], 4);
+    assert!(rated.get("$text").is_none());
+}

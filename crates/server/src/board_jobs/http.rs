@@ -148,15 +148,8 @@ pub(crate) async fn page(
         let (board, revenue) = &**done;
         let host = crate::public_url(&headers);
         let revenue = revenue.as_ref().ok().and_then(Option::as_ref);
-        return crate::web::render_board(
-            &state,
-            &p,
-            &job.filters,
-            &host,
-            v.admin,
-            Ok(board.clone()),
-            revenue,
-        );
+        let board = crate::web::with_feedback(&state, &p.id, &job.filters, Ok(board.clone())).await;
+        return crate::web::render_board(&state, &p, &job.filters, &host, v.admin, board, revenue);
     }
     let info = openlens_ui::ProjectInfo {
         id: &p.id,

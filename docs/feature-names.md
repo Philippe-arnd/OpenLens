@@ -45,3 +45,4 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Status page | The public, read-only page of a project at `/status/<slug>`: its state, components, 90 daily bars, announcements and planned maintenance |
 | Component | A line of the status page: production or a monitored environment, under a public name |
 | Job check-ins | On Uptime: cron and background jobs that report each run; OpenLens learns how often they run and alerts when one is missed, fails or gets slower |
+| What users say | On a feature's page and in `feedback`: the `$feedback` users send (a text, the feature it is about, a rating 1 to 5), counted per rating, the texts for admins; "N feedback this week" on the feature's insight cards |

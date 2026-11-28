@@ -32,6 +32,7 @@ mod digest;
 mod environments;
 mod explore;
 mod features;
+mod feedback;
 mod flags;
 mod goals;
 mod hooks;
@@ -182,6 +183,7 @@ pub fn router(state: AppState) -> Router {
         .merge(check_ins::routes())
         .merge(capacity::routes())
         .merge(portfolio::routes())
+        .merge(feedback::routes())
         .layer(axum::middleware::from_fn(csrf::layer))
         .layer(axum::middleware::from_fn(trusted_headers_layer))
         // Pages, the API and Ask (a few model rounds) get two minutes.
@@ -552,6 +554,7 @@ fn compact(state: &AppState) -> Result<(), String> {
             }
             Err(err) => tracing::warn!(project = %p.id, %err, "click trimming failed"),
         }
+        feedback::trim(state, &p.id, now); // Texts go after 90 days (#718).
         match openlens_replay::prune(&state.data_dir, &p.id, now) {
             Ok(0) => {}
             Ok(n) => tracing::info!(project = %p.id, recordings = n, "expired old recordings"),

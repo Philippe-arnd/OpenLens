@@ -108,3 +108,35 @@ fn the_shed_blocks_are_gone_and_each_page_that_holds_one_is_a_click_away() {
         assert!(html.contains(&format!("href=\"{href}")), "{href}: {html}");
     }
 }
+
+/// A feature's insight card says how much feedback it got this week and
+/// links to it (#718); a card without feedback, or a role's, says nothing.
+#[test]
+fn feature_cards_link_the_week_feedback() {
+    let card = |kind: &'static str, subject: &str| openlens_engine::Insight {
+        kind,
+        title: format!("{kind} on {subject}"),
+        evidence: "evidence".into(),
+        next_step: "next".into(),
+        score: 1.0,
+        subject: subject.into(),
+        figure: None,
+    };
+    let quiet = Board {
+        insights: vec![card("friction", "export"), card("stick_driver", "search")],
+        ..full()
+    };
+    assert!(!super::tests::page(&quiet).contains("feedback this week"));
+    let heard = Board {
+        insights: vec![
+            card("friction", "export"),
+            card("stick_driver", "search"),
+            card("role_blind_spot", "search"),
+        ],
+        feedback_week: vec![("search".into(), 3)],
+        ..full()
+    };
+    let html = super::tests::page(&heard);
+    assert_eq!(html.matches("3 feedback this week").count(), 1, "{html}");
+    assert!(html.contains("/p/p1/features/search?"), "{html}");
+}
