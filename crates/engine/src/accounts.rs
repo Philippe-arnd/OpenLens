@@ -165,6 +165,9 @@ pub fn state(users: i64, a: &Activity) -> AccountState {
     }
 }
 
+/// An account's known users: the total, and how many per plan.
+type KnownUsers<'a> = (i64, Vec<(Option<&'a str>, i64)>);
+
 /// The accounts from the known users per plan (`(account, plan, users)`,
 /// from the people table) and the activity per account; at risk first.
 #[must_use]
@@ -172,7 +175,7 @@ pub fn assemble(
     known: &[(String, Option<String>, i64)],
     activity: &BTreeMap<String, Activity>,
 ) -> (Vec<AccountHealth>, SmallAccounts) {
-    let mut people: BTreeMap<&str, (i64, Vec<(Option<&str>, i64)>)> = BTreeMap::new();
+    let mut people: BTreeMap<&str, KnownUsers<'_>> = BTreeMap::new();
     for (account, plan, n) in known {
         let e = people.entry(account.as_str()).or_default();
         e.0 += n;
