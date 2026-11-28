@@ -11,5 +11,8 @@ publish.workspace = true
 [dependencies]
 serde_json.workspace = true
 
+[dev-dependencies]
+openlens-testkit = { path = "../testkit" }
+
 [lints]
 workspace = true

@@ -46,6 +46,28 @@ pub fn hostile_capture_bodies() -> Vec<Vec<u8>> {
     ]
 }
 
+/// Hostile stdin lines for the MCP server (#666), without their newline:
+/// invalid UTF-8, a multi-byte character cut at the size limit, lines
+/// past the 4 MiB limit, broken and deep JSON. The server answers each
+/// with an error and keeps serving.
+pub fn hostile_mcp_lines() -> Vec<Vec<u8>> {
+    let limit = 4 * 1024 * 1024;
+    let mut cut = vec![b'a'; limit];
+    cut.extend_from_slice("é".as_bytes());
+    vec![
+        vec![0xff],
+        vec![0xc3],
+        b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"\xff\"}".to_vec(),
+        cut,
+        vec![b'x'; limit + 1],
+        vec![b'{'; 5 * 1024 * 1024],
+        format!("{}1{}", "[".repeat(10_000), "]".repeat(10_000)).into_bytes(),
+        b"{\"jsonrpc\":\"2.0\",\"id\":{},\"method\":\"tools/call\"}".to_vec(),
+        b"\r".to_vec(),
+        b"null".to_vec(),
+    ]
+}
+
 /// Hostile plain texts a person may post (announcement titles and bodies,
 /// #562): markup and scripts that must be shown as text, quotes that
 /// would close an attribute, control characters, and lengths at and past
