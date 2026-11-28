@@ -8,6 +8,8 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Feature map | `openlens.features.yaml`, the declared features and roles of an app |
 | Value moment | The early behaviour that best predicts a user staying |
 | Stick drivers | Features ranked by how much they lift retention |
+| Visitors | The board's block for anonymous traffic, shown only when there is some: entry pages and channels with bounce and signup rate |
+| Lifecycle | `lifecycle` and the board: visitor → account created → activated → paid → retained, only the stages the data shows, with the visitor → account rate as a lower bound |
 | Churn points | Last features and steps seen before users go inactive |
 | Role gap | A raw role value that the feature map does not match yet |
 | Used with | On a feature page: the features used in the same sessions, which comes first, and whether the first leads to value in the second |
@@ -44,3 +46,4 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Status page | The public, read-only page of a project at `/status/<slug>`: its state, components, 90 daily bars, announcements and planned maintenance |
 | Component | A line of the status page: production or a monitored environment, under a public name |
 | Job check-ins | On Uptime: cron and background jobs that report each run; OpenLens learns how often they run and alerts when one is missed, fails or gets slower |
+| Sister hosts | The project's other hosts in the same environment (a landing page and its app, from the host rules), between which a link carries the anonymous visitor |

@@ -80,6 +80,42 @@ pub mod names {
     /// Distinct id of server events tied to no user (#593): left out of
     /// release shares.
     pub const SERVER_ID: &str = "$server";
+    /// The account's creation date on an `$identify` (#707, D-111), RFC
+    /// 3339: the person's signup when it is known.
+    pub const CREATED_AT: &str = "$created_at";
+}
+
+/// The earliest signup date accepted (#707, D-111): an older one is a
+/// placeholder (`1970-01-01`), not an account's creation.
+const SIGNUP_FLOOR: &str = "1990-01-01T00:00:00Z";
+
+/// An account's creation date as sent (`created_at`, RFC 3339), when it is
+/// one (#707, D-111): at most 64 bytes, parseable, not before 1990 and not
+/// after `now`. Anything else is ignored, never an error: the signup then
+/// falls back to the first `$identify`.
+#[must_use]
+pub fn signup_date(s: &str, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    if s.len() > 64 {
+        return None;
+    }
+    let t = parse_ts(s.trim())?;
+    let floor = parse_ts(SIGNUP_FLOOR)?;
+    (t >= floor && t <= now).then_some(t)
+}
+
+/// The signup date an `$identify`'s stored properties carry
+/// (`$created_at`, see [`signup_date`]).
+#[must_use]
+pub fn signup_of(properties: &str, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    if !properties.contains(names::CREATED_AT) {
+        return None;
+    }
+    let Ok(Value::Object(p)) = serde_json::from_str::<Value>(properties) else {
+        return None;
+    };
+    p.get(names::CREATED_AT)
+        .and_then(Value::as_str)
+        .and_then(|s| signup_date(s, now))
 }
 
 /// One event as sent by an SDK.

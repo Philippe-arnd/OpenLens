@@ -281,7 +281,7 @@ pub(crate) async fn export(
         "linked_anonymous_ids": ids.iter().filter(|i| **i != who).collect::<Vec<_>>(),
         "person": person.map(|p| json!({
             "role": p.role, "account": p.account, "plan": p.plan,
-            "first_seen": p.first_seen, "last_seen": p.last_seen,
+            "first_seen": p.first_seen, "last_seen": p.last_seen, "signed_up": p.signed_up,
         })),
         "role_history": roles.iter().map(|(r, s)| json!({ "role": r, "since": s })).collect::<Vec<_>>(),
         "recordings": recordings,

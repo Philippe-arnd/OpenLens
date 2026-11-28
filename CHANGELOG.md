@@ -4,8 +4,19 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **One visitor from the landing page to the app** (#710, D-112): `GET /flags` lists the project's sister hosts (the exact hosts its host rules map to the page's environment, at most 20). When an anonymous visitor follows a link to one of them, the browser SDK adds the anonymous id to that link (`_ol=<id>`, at the click only); the SDK on the other host adopts it when it has no history of that visitor, then removes it from the address bar. No cookie, never in cookieless mode or without consent; a single-host app sees no change.
+- **`verify` checks that a visit is linked to the person** (#711): `openlens-cli verify` (and the MCP `verify`) sends a test anonymous page view and an `$identify` linking it (a test person marked internal, in `development`), waits up to 45 s for the page view to belong to the person, and reports `visitor linked to the person`, saying when the project has a single production host. It does not change `ok`. The wiring guide gains a *Landing page and app* section: one project key on both, host rules naming both hosts, `identify` right after account creation with `created_at`.
+- **Signup date** (#707, D-111): `identify(id, { role, account, plan, created_at })` takes the account's creation date (RFC 3339 or a `Date`) in the browser SDK and in every server SDK (`Traits.CreatedAt` in Go), and `openlens-cli import` keeps the `created_at` of person lines. It is the person's signup (the earliest valid date wins; a date in the future or before 1990 is ignored), else their first `identify`: a customer created a year ago and first seen today is not a new account today. A person's profile and data export show it.
+
+- **Lifecycle** (#708, D-111): visitor → account created → activated → paid → retained / churned, with fixed definitions in `docs/kpis.md`, each stage shown only when its data exists (an internal tool sees account → activated → retained). The visitor → account rate (accounts whose anonymous visits were linked ÷ (never-linked visitors + those accounts)) is labelled a lower bound and comes with its upper bound; in cookieless mode it says it is not available. `GET /api/projects/{id}/lifecycle`, `openlens-cli lifecycle` and the MCP tool `lifecycle` (optional `by` = channel, role, plan or release) return the same numbers as the board.
+- **Visitors block on the board** (#709, D-111): when the window has anonymous traffic, the board shows the top 10 entry pages (the first page of each anonymous session) and channels, each with visitors, bounce rate and signup rate (visitors linked to an account created in the window, a lower bound). A project where everyone logs in does not show it.
+
 ### Changed
 
+- **A referrer on one of the project's hosts is `internal`** (#710, D-112), not `referral`: any host the host rules cover, except `ignore`d ones. A visit from the landing page to the app keeps the landing's channel.
+- **Acquisition counts users, not visitors** (#708): never-linked anonymous visitors no longer count as users; each row has `visitors`, `signed_up` (users whose signup falls in the 90 days) and `signup_rate` (a lower bound), shown on the Acquisition page when the project has anonymous traffic. `reached`, `returned` and `churned` count users only. The table is now counted in SQL, so it is no longer cut at 10,000 people.
 - **The npm packages are `@openlens-obs/web` and `@openlens-obs/node`** (the `@openlens` scope was taken on npm). Both are published on release tags from v0.8.0 on, with the release's version; `npm.yml` failed before on every tag, since the package versions stayed at 0.1.0.
 
 ## [0.7.0] - 2026-11-27

@@ -241,7 +241,7 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "verify",
-                description: "Wiring checklist: events arrive, users identified with a role, release tagged, map pushed, events per feature. Each failing check carries its fix. Also `release_layers`: which release layers are active (build fingerprint seen, deploy hook configured, releases recorded, verdicts present), each with how to turn it on.",
+                description: "Wiring checklist: events arrive, users identified with a role, release tagged, map pushed, events per feature, and `visitor linked to the person` (sends a test page view and identify, marked internal, in development; waits up to 45 s; says when the project has a single production host). Each failing check carries its fix. Also `release_layers`: which release layers are active (build fingerprint seen, deploy hook configured, releases recorded, verdicts present), each with how to turn it on.",
                 input_schema: json!({"type":"object","properties":proj}),
             },
             ToolSpec {

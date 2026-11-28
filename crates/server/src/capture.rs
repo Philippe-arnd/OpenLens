@@ -386,7 +386,8 @@ pub(crate) async fn capture(
             .unwrap_or(false)
     });
     crate::audience::init(&state.data_dir);
-    crate::audience::enrich(&mut normalized.events, &peer, &headers);
+    let env = crate::environments::current(&state, &project.id);
+    crate::audience::enrich(&mut normalized.events, &peer, &headers, &env.rules);
     let accepted = normalized.events.len();
     Metrics::add(&m.events_accepted, accepted as u64);
     Metrics::add(&m.events_rejected, normalized.rejected.len() as u64);

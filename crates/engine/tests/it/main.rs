@@ -18,6 +18,7 @@ mod commands;
 mod dependencies;
 mod jobs;
 mod journeys;
+mod lifecycle;
 mod maintenance;
 mod map_lookups;
 mod map_shape;
@@ -31,6 +32,7 @@ mod status_page;
 mod stored_totals;
 mod typed_facts;
 mod uptime_days;
+mod visitors;
 mod vitals;
 
 struct E<'a> {

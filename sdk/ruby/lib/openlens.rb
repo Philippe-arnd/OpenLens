@@ -70,8 +70,11 @@ module OpenLens
     end
 
     # Set the user's role (and account, plan): what OpenLens slices every KPI by.
-    def identify(distinct_id, role: nil, account: nil, plan: nil)
+    # created_at (a Time or an RFC 3339 string) is when the account was
+    # created: its signup, so a user who signed up before the wiring is not new.
+    def identify(distinct_id, role: nil, account: nil, plan: nil, created_at: nil)
       p = { "$role" => role, "$account" => account, "$plan" => plan }.compact
+      p["$created_at"] = created_at.respond_to?(:iso8601) ? created_at.iso8601 : created_at.to_s if created_at
       capture(distinct_id, "$identify", p)
     end
 

@@ -83,9 +83,22 @@ class OpenLens:
         """Mark a use of a feature (a task start)."""
         self.capture(distinct_id, "$feature", {**(properties or {}), "$feature": key})
 
-    def identify(self, distinct_id: str, role: Optional[str] = None, account: Optional[str] = None, plan: Optional[str] = None) -> None:
-        """Set the user's role (and account, plan): what OpenLens slices every KPI by."""
+    def identify(
+        self,
+        distinct_id: str,
+        role: Optional[str] = None,
+        account: Optional[str] = None,
+        plan: Optional[str] = None,
+        created_at: Any = None,
+    ) -> None:
+        """Set the user's role (and account, plan): what OpenLens slices every KPI by.
+
+        ``created_at`` (an RFC 3339 string or a ``datetime``) is when the account
+        was created: its signup, so a user who signed up before the wiring is
+        not counted as new."""
         p = {k: v for k, v in (("$role", role), ("$account", account), ("$plan", plan)) if v}
+        if created_at:
+            p["$created_at"] = created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at)
         self.capture(distinct_id, "$identify", p)
 
     def is_enabled(

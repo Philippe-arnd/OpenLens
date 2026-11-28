@@ -137,6 +137,7 @@ fn acquisition_tabs_mark_one_current_tab_each_and_keep_the_filters() {
         returned: 20,
         judged: 30,
         churned: 6,
+        ..AcquisitionRow::default()
     }];
     for (by, last) in [("channel", false), ("campaign", true)] {
         let html = render(acquisition(

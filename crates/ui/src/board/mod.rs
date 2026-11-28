@@ -2,8 +2,10 @@
 //!
 //! `now`: the status strip, "Production right now" (#614); `focus`: what
 //! to focus on (the lead insight, the ranked list); `tiles`: the
-//! outcomes (#616); `charts`: active users per day and the retention
-//! line; `features`: the Features table (#618). The other cards left for
+//! outcomes (#616); `lifecycle`: the stages from visitor to retained
+//! (#708); `visitors`: the anonymous traffic per entry page and channel
+//! (#709); `charts`: active users per day and the retention line;
+//! `features`: the Features table (#618). The other cards left for
 //! the pages that own them (#620): Web Vitals for Pages, the release table
 //! for Releases, paths to value for Feature flow, funnels and journeys for
 //! each feature's page, flag cohorts for Flags, role gaps and the roles ×
@@ -16,8 +18,10 @@ mod features;
 mod focus;
 mod in_flight;
 mod lead;
+mod lifecycle;
 mod now;
 mod tiles;
+mod visitors;
 
 pub(crate) use charts::{bar_with, barcell, tenth};
 pub(crate) use focus::{Side, compare};
@@ -99,6 +103,8 @@ pub fn board(
                 (now::strip(p.id, f, b))
                 (focus::focus(p.id, f, b, plain))
                 (tiles::outcomes(p.id, f, b, revenue))
+                (lifecycle::lifecycle(b))
+                (visitors::visitors(b))
                 div.split {
                     (charts::active_users(p.id, f, b, marks))
                     (in_flight::in_flight(p.id, b))

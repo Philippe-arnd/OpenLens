@@ -261,11 +261,13 @@ pub(crate) fn channel(
 
 /// Add `$country`, `$device`, `$browser` and `$os` to the page views of a
 /// batch (server values replace whatever the client sent under those
-/// names). Other events are left as they are.
+/// names). Other events are left as they are. `rules` are the project's
+/// host rules: a referrer on one of its hosts is `internal`.
 pub(crate) fn enrich(
     events: &mut [openlens_event::Event],
     peer: &crate::capture::Peer,
     headers: &HeaderMap,
+    rules: &openlens_engine::environments::Rules,
 ) {
     if !events.iter().any(|e| e.event == "$pageview") {
         return;
@@ -298,7 +300,17 @@ pub(crate) fn enrich(
         if props.contains_key("$lang") {
             let get = |k: &str| props.get(k).and_then(|v| v.as_str()).map(str::to_owned);
             let ref_host = get("$referrer").as_deref().and_then(host);
-            let own = e.url.as_deref().and_then(host);
+            // A referrer on another of the project's hosts (the landing
+            // page, #710, D-112) is internal like the page's own host.
+            let sister = get("$referrer")
+                .as_deref()
+                .and_then(openlens_event::host_of)
+                .is_some_and(|h| rules.is_own_host(&h));
+            let own = if sister {
+                ref_host.clone()
+            } else {
+                e.url.as_deref().and_then(host)
+            };
             let click = ["$gclid", "$fbclid", "$msclkid"]
                 .iter()
                 .any(|k| props.contains_key(*k));

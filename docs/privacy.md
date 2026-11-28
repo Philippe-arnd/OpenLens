@@ -11,13 +11,14 @@ What OpenLens stores, for how long, where, and what it never stores. Everything 
 - **Clicks:** the element's tag, its feature, and up to 60 characters of its text, only when the element is under `data-feature` (the app's own label) or when the text holds neither an `@` nor a run of more than 6 digits.
 - **Web Vitals** (#467): each measurement's value and rating, the device class (`$device`: phone, tablet, desktop), and for the slow element a short CSS selector (`$el`: tags, an id and up to two hand-written classes, at most 120 characters, never any text), its type, and the path of the resource it loaded (`$res`, without query string or fragment). Nothing is sent for an element under `data-openlens-ignore`, and only tag names under `data-openlens-mask`.
 - **Build fingerprint** (`$build`, #495): 8 hexadecimal characters, a hash of the addresses of the scripts and stylesheets the page loads from its own origin (path and query string, no other site). It says which build of the app ran, holds no personal data, and is the same for every visitor of that build. The server keeps, per project and environment, each fingerprint with the release name it gave it (at most 500).
-- **People:** role, account, plan, first and last seen; role history.
+- **People:** role, account, plan, first and last seen, the account's creation date when the app sends `created_at` (#707); role history. All of it is in the person's export and goes with their erasure.
 - **Dashboard users:** email, name, role, time zone, last sign-in. Login links and sessions are signed; secrets (S3) are sealed.
 - **Audit log** of admin actions (who, when, what), kept for the life of the install.
 
 ## On the visitor's device
 
 - **By default**, the SDK keeps in the browser's `localStorage` (no cookie): an anonymous id, the session id and its last activity (and whether that session is recorded), what `identify` was given (user id, role, account, plan, and the properties flag rules target), the active flags and variants, and which surveys were answered. When the page closes with more to send than the browser allows, the unsent requests (events and replay chunks) are kept there too, for at most 24 hours and 256 KB, and sent on the next visit (#433); withdrawing consent deletes them. Some regulators treat `localStorage` like a cookie: ask for consent where that applies, and the SDK respects it.
+- **Between the app's own hosts** (a landing page on `www.example.com`, the app on `app.example.com`, both in the project's host rules), the anonymous id travels in the address of the link the visitor follows, as `_ol=<random id>`, added only at the click, only for an anonymous visitor with consent (#710, D-112). The SDK on the other host adopts it if that visitor has no history there yet and removes it from the address bar at once. No cookie is set; the id is the random one the SDK already sends with every event, and it is never stored in a page URL. Never in cookieless mode, never without consent.
 - **With `data-cookieless`**, it stores nothing on the device (see *Cookieless mode* below).
 
 ## Never stored

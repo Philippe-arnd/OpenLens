@@ -40,6 +40,7 @@ pub(super) fn routes() -> Router<AppState> {
             get(churn_flags).post(churn_flag_make),
         )
         .route("/api/projects/{project}/acquisition", get(acquisition))
+        .route("/api/projects/{project}/lifecycle", get(lifecycle))
         .route("/api/projects/{project}/forms", get(forms))
         .route("/api/projects/{project}/audience", get(audience))
         .route("/api/projects/{project}/live", get(live))
@@ -402,6 +403,33 @@ async fn acquisition(
         touch: q.touch,
     };
     answer(explore::GetAcquisition::run(&state, &Caller::default(), input).await)
+}
+
+#[derive(Deserialize)]
+struct LifecycleQuery {
+    #[serde(flatten)]
+    f: FilterQuery,
+    by: Option<String>,
+}
+
+/// `GET /api/projects/{id}/lifecycle[?by=channel|role|plan|release]`:
+/// `explore.lifecycle` (#708).
+async fn lifecycle(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(q): Query<LifecycleQuery>,
+) -> Response {
+    let p = match open(&state, &headers, &id).await {
+        Ok(p) => p,
+        Err(r) => return *r,
+    };
+    let input = explore::LifecycleInput {
+        filters: q.f.filters(&p.timezone),
+        project: p.id,
+        by: q.by,
+    };
+    answer(explore::GetLifecycle::run(&state, &Caller::default(), input).await)
 }
 
 fn filtered(p: Project, q: &FilterQuery) -> explore::FilteredInput {

@@ -80,7 +80,11 @@ final class OpenLens
         $this->capture($distinctId, '$feature', array_merge($properties, ['$feature' => $key]));
     }
 
-    /** Set the user's role (and account, plan). @param array{role?: string, account?: string, plan?: string} $traits */
+    /**
+     * Set the user's role (and account, plan). `created_at` (a DateTimeInterface
+     * or an RFC 3339 string) is when the account was created: its signup.
+     * @param array{role?: string, account?: string, plan?: string, created_at?: string|\DateTimeInterface} $traits
+     */
     public function identify(string $distinctId, array $traits = []): void
     {
         $p = [];
@@ -88,6 +92,12 @@ final class OpenLens
             if (isset($traits[$t]) && $traits[$t] !== '') {
                 $p['$' . $t] = $traits[$t];
             }
+        }
+        $created = $traits['created_at'] ?? null;
+        if ($created instanceof \DateTimeInterface) {
+            $p['$created_at'] = $created->format(\DateTimeInterface::RFC3339);
+        } elseif (is_string($created) && $created !== '') {
+            $p['$created_at'] = $created;
         }
         $this->capture($distinctId, '$identify', $p);
     }

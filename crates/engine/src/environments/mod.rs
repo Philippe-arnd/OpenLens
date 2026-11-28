@@ -299,7 +299,36 @@ impl Rules {
             .max_by_key(|(len, _)| *len)
             .map(|(_, env)| env)
     }
+
+    /// Is `host` one of the project's own hosts (#710, D-112): a rule,
+    /// exact or `*.suffix`, gives it an environment (not `ignore`)?
+    #[must_use]
+    pub fn is_own_host(&self, host: &str) -> bool {
+        self.lookup(&host.to_ascii_lowercase())
+            .is_some_and(|e| e != IGNORE)
+    }
+
+    /// The sister hosts of `host` (#710, D-112): the exact hosts (no
+    /// `*.suffix`) the rules map to the same environment as `host`, `host`
+    /// itself left out, at most [`MAX_SISTERS`]. Empty when no rule
+    /// classifies `host` or it is ignored.
+    #[must_use]
+    pub fn sister_hosts(&self, host: &str) -> Vec<String> {
+        let host = host.to_ascii_lowercase();
+        let Some(env) = self.lookup(&host).filter(|e| *e != IGNORE) else {
+            return Vec::new();
+        };
+        self.rules
+            .iter()
+            .filter(|r| r.env == env && r.host != host && !r.host.starts_with("*."))
+            .map(|r| r.host.clone())
+            .take(MAX_SISTERS)
+            .collect()
+    }
 }
+
+/// Sister hosts handed to the browser SDK at most (#710, D-112).
+pub const MAX_SISTERS: usize = 20;
 
 /// Add or change the rule for a host (engine command).
 pub fn set_environment_rule(
@@ -580,6 +609,40 @@ mod tests {
         );
         // Server SDKs (no page address) keep what they sent.
         assert_eq!(resolve(&r, true, None, "production"), Resolution::Keep);
+    }
+
+    #[test]
+    fn sister_hosts_share_the_environment_and_are_exact() {
+        let r = rules(&[
+            ("www.example.com", "production"),
+            ("app.example.com", "production"),
+            ("*.example.com", "production"),
+            ("staging.example.com", "staging"),
+            ("junk.example.com", "ignore"),
+        ]);
+        let s = r.sister_hosts("www.example.com");
+        assert!(s.contains(&"app.example.com".to_owned()), "{s:?}");
+        assert!(
+            !s.iter().any(|h| h == "www.example.com"
+                || h.starts_with("*.")
+                || h == "staging.example.com"
+                || h == "junk.example.com"),
+            "{s:?}"
+        );
+        // A host only a pattern covers still gets the exact sisters.
+        assert!(
+            r.sister_hosts("blog.example.com")
+                .contains(&"www.example.com".to_owned())
+        );
+        assert!(r.sister_hosts("junk.example.com").is_empty());
+        assert!(r.sister_hosts("other.org").is_empty());
+        assert!(r.is_own_host("APP.example.com") && r.is_own_host("blog.example.com"));
+        assert!(!r.is_own_host("junk.example.com") && !r.is_own_host("other.org"));
+        let many: Vec<(String, &str)> = (0..MAX_SISTERS + 5)
+            .map(|i| (format!("h{i}.example.org"), "production"))
+            .collect();
+        let refs: Vec<(&str, &str)> = many.iter().map(|(h, e)| (h.as_str(), *e)).collect();
+        assert!(rules(&refs).sister_hosts("h0.example.org").len() <= MAX_SISTERS);
     }
 
     #[test]

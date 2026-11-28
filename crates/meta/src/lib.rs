@@ -59,6 +59,9 @@ pub struct Person {
     pub first_seen: String,
     /// Last identify seen.
     pub last_seen: String,
+    /// The account's creation date the app sent (`created_at`, #707,
+    /// D-111), RFC 3339; none when it never sent one.
+    pub signed_up: Option<String>,
 }
 
 mod access;
@@ -345,6 +348,14 @@ fn migrate(c: &Connection) -> rusqlite::Result<()> {
         if !has {
             c.execute_batch(ddl)?;
         }
+    }
+    // Persons: the account's creation date, when the app sends it
+    // (`created_at`, #707, D-111), in microseconds since the Unix epoch.
+    let has_signup: bool = c
+        .prepare("SELECT 1 FROM pragma_table_info('persons') WHERE name = 'signed_up'")?
+        .exists([])?;
+    if !has_signup {
+        c.execute_batch("ALTER TABLE persons ADD COLUMN signed_up INTEGER")?;
     }
     // Uptime history (#559): daily rows, environments and kept checks.
     uptime_history::migrate(c)?;

@@ -75,6 +75,7 @@ impl Serialize for Profile {
             "person": self.person.as_ref().map(|p| json!({
                 "distinct_id": p.distinct_id, "role": p.role, "account": p.account,
                 "plan": p.plan, "first_seen": p.first_seen, "last_seen": p.last_seen,
+                "signed_up": p.signed_up,
             })),
             "roles": self.roles,
             "replays": self.replays,
@@ -247,6 +248,48 @@ impl Command for GetAcquisition {
             .await
             .map_err(unavailable)?;
         Ok(Acquisition { by, last, rows })
+    }
+}
+
+/// The input of `explore.lifecycle`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LifecycleInput {
+    /// Project id.
+    pub project: String,
+    /// The board filters (and their window).
+    pub filters: Filters,
+    /// `channel`, `role`, `plan` or `release`; none: everyone.
+    #[serde(default)]
+    pub by: Option<String>,
+}
+
+/// `explore.lifecycle`: visitor → account created → activated → paid →
+/// retained, the stages with data only (#708, D-111).
+pub struct GetLifecycle;
+
+impl Command for GetLifecycle {
+    const NAME: &'static str = "explore.lifecycle";
+    const ACCESS: Access = Access::Read;
+    type Input = LifecycleInput;
+    type Output = crate::lifecycle::Lifecycle;
+
+    async fn run<H: Host>(
+        host: &H,
+        _: &Caller,
+        input: LifecycleInput,
+    ) -> Result<crate::lifecycle::Lifecycle, Error> {
+        let p = project(host, &input.project).await?;
+        let map = host.feature_map(&p.id).await;
+        let by = crate::lifecycle::By::parse(input.by.as_deref());
+        crate::lifecycle::lifecycle(
+            host.query(),
+            &p.id,
+            map.as_ref().map(|(m, v)| (m, *v)),
+            &input.filters,
+            by,
+        )
+        .await
+        .map_err(unavailable)
     }
 }
 

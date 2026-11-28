@@ -44,6 +44,10 @@ export interface Dimensions {
     plan?: string;
     /** The team's own account (staff, testers): left out of the board by default. */
     internal?: boolean;
+    /** When the account was created (RFC 3339 or a Date): its signup, so a
+     * user who signed up long before the wiring is not counted as new. Sent
+     * on `$identify` only, never stored on the device. */
+    created_at?: string | Date;
     /** Other properties flag rules can target (`seats`, `beta_tester`…): sent
      * to `/flags` to decide, never stored on events. At most 20. */
     properties?: Record<string, string | number | boolean>;
@@ -65,7 +69,6 @@ export declare function isEnabled(key: string): boolean;
 /** The variant of an experiment flag this user gets (null when the flag is
  * off or has no variants). Events carry it, so arms can be compared. */
 export declare function variant(key: string): string | null;
-/** Identify the logged-in user and the dimensions OpenLens slices by. */
 export declare function identify(id: string, dims?: Dimensions): void;
 /** Forget the user (call on logout). A no-op while nobody is identified, so
  * calling it on every logged-out page load does not mint a new visitor. */

@@ -15,7 +15,7 @@ Until they are published, copy the single source file: `sdk/node/src/index.js`, 
 ```js
 import { OpenLens } from "@openlens-obs/node";
 const ol = new OpenLens({ host: process.env.OPENLENS_HOST, key: process.env.OPENLENS_KEY, release: process.env.GIT_SHA });
-ol.identify(user.id, { role: user.role, account: user.orgId });
+ol.identify(user.id, { role: user.role, account: user.orgId, created_at: user.createdAt });
 ol.capture(user.id, "invoice_sent");
 if (await ol.isEnabled("new-billing", user.id, { role: user.role })) { /* … */ }
 // Flag rules on plan or other properties (never stored):
@@ -73,7 +73,7 @@ ol.captureUncaught(); // optional: crashes and unhandled rejections
 - **Stats window:** route stats, runtime health and outgoing calls are counted in windows of 10 minutes by default. The OpenLens server picks the window from its disk budget, hourly: 1 or 5 minutes when the room left after the floor (D-088) holds the extra stats points for 400 days and the busiest project has few active routes, else 10 minutes. It says so in every capture response, `x-openlens-stats-window: 60` (seconds), and the SDK follows it: on the next flush the windows being filled are sent with their own length, and new ones use the new length, aligned on it. Each stats event says its window in `$window_s`, and OpenLens reads any mix of windows, so totals, alerts and verdicts do not change with it. To pin one window, pass `statsWindowSeconds: 60`, `300` or `600` to `new OpenLens(...)` (anything else is ignored); it wins over the header (D-091). `GET /api/capacity` (admin) and the MCP `capacity` tool show the window in force and why (`stats_window`).
 - **Volume:** a server sends one batch every 5 s and one stats event per route and status code per window, every 10 minutes by default (and one runtime event per process, and with `captureOutgoing()` one per host, method and status code), far below the capture limits, whatever the traffic.
 
-Use the same `distinct_id` as the browser SDK's `identify()`, so server and browser events belong to the same person. Success events sent from the server count for the feature map like any other event.
+Use the same `distinct_id` as the browser SDK's `identify()`, so server and browser events belong to the same person. Every SDK's `identify` also takes the account's creation date, its signup (#707): `created_at` in Node, Python (`created_at=`), Ruby (`created_at:`) and PHP (`['created_at' => …]`), `Traits{CreatedAt: t}` in Go, as a date or an RFC 3339 string; it is sent as `$created_at` on `$identify` (a raw `POST /capture` can send that property too). A date in the future or before 1990 is ignored, and the earliest valid one is kept. Success events sent from the server count for the feature map like any other event.
 
 ## Job check-ins
 

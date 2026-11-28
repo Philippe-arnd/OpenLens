@@ -132,6 +132,8 @@ pub const REGISTRY: &[Spec] = &[
     spec::<explore::Breakdown>(),
     spec::<explore::Sql>(),
     spec::<explore::GetAcquisition>(),
+    // The lifecycle (#708).
+    spec::<explore::GetLifecycle>(),
     spec::<explore::Forms>(),
     spec::<explore::Churn>(),
     spec::<explore::FlagAudiences>(),

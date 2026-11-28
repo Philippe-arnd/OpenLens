@@ -307,16 +307,15 @@ impl QueryEngine {
         ctx.register_table("persons", identity.persons)
             .map_err(|e| QueryError::Storage(e.to_string()))?;
         ctx.register_udf(internal::is_internal_udf(identity.internal));
-        let merge = match identity.aliases {
-            // Nobody to merge: no lookup per row.
-            None => false,
-            Some(aliases) => {
-                ctx.register_udf(person_of_udf(identity.lookup));
-                ctx.register_table("person_aliases", aliases)
-                    .map_err(|e| QueryError::Storage(e.to_string()))?;
-                true
-            }
-        };
+        // Registered even when empty, so a query naming it (the lifecycle's
+        // linked visits, #708) reads no rows instead of failing.
+        ctx.register_table("person_aliases", identity.aliases)
+            .map_err(|e| QueryError::Storage(e.to_string()))?;
+        // Nobody to merge: no lookup per row.
+        let merge = !identity.lookup.is_empty();
+        if merge {
+            ctx.register_udf(person_of_udf(identity.lookup));
+        }
         let view = ctx
             .sql(&events_view_sql(merge))
             .await

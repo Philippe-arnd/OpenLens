@@ -192,6 +192,65 @@ fn verify_says_what_is_missing_without_failing_the_wiring() {
     }
 }
 
+/// A server that takes the test events, for the linkage check (#711).
+fn capturing(sql: fn(&str) -> Vec<Value>) -> Fake {
+    Fake::new(
+        vec![
+            ("POST", "/capture", 200, json!({ "accepted": 2 })),
+            (
+                "GET",
+                "/api/projects",
+                200,
+                json!({ "projects": [{ "id": "app", "key": "pk_app" }] }),
+            ),
+        ],
+        sql,
+    )
+}
+
+#[test]
+fn the_linkage_check_sends_a_visit_then_an_identify_and_finds_it_on_the_person() {
+    let one_host = json!([{ "host": "app.example.com", "env": "production" }]);
+    let fake = capturing(|_| n(1));
+    let c = crate::verify::linkage(&fake, "app", &one_host, std::time::Duration::ZERO).unwrap();
+    assert_eq!(c["check"], crate::verify::LINK_CHECK);
+    assert_eq!(c["ok"], true, "{c}");
+    assert!(
+        c["detail"]
+            .as_str()
+            .unwrap()
+            .contains("one production host"),
+        "{c}"
+    );
+    let (_, body) = fake.sent("POST", "/capture").unwrap();
+    let body: Value = serde_json::from_str(&body.unwrap()).unwrap();
+    let batch = body["batch"].as_array().unwrap();
+    let anon = batch[0]["distinct_id"].as_str().unwrap();
+    assert_eq!(body["key"], "pk_app");
+    assert_eq!(batch[0]["event"], "$pageview");
+    assert_eq!(batch[1]["properties"]["$anon_distinct_id"], anon);
+    assert_ne!(batch[1]["distinct_id"], anon);
+    assert_eq!(
+        batch[1]["properties"]["$internal"], true,
+        "the test person counts in no number"
+    );
+
+    // Not linked: a failed check that says why, and two hosts are named.
+    let two_hosts = json!([
+        { "host": "www.example.com", "env": "production" },
+        { "host": "app.example.com", "env": "production" },
+    ]);
+    let unlinked = capturing(|q| if q.contains("raw_events") { n(1) } else { n(0) });
+    let c =
+        crate::verify::linkage(&unlinked, "app", &two_hosts, std::time::Duration::ZERO).unwrap();
+    assert_eq!(c["ok"], false, "{c}");
+    let detail = c["detail"].as_str().unwrap();
+    assert!(
+        detail.contains("not given to the person") && detail.contains("www.example.com"),
+        "{c}"
+    );
+}
+
 #[test]
 fn release_layers_report_an_unreadable_releases_list_as_inactive() {
     let down = Fake::new(Vec::new(), |_| n(3));

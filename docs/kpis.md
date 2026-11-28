@@ -17,6 +17,7 @@ Roles are the main way to slice every number, so they are declared explicitly, n
 | KPI | Definition |
 | --- | --- |
 | **DAU / WAU / MAU** | Distinct identified users with at least one event on the day, in the last 7 days or in the last 30 days. Days are the reader's days: their own time zone, else the project's (D-017, D-018; `UTC` until set). Robots are never counted: the SDK skips them in browsers, and capture files anything posted with a crawler or monitor user agent under the `bot` environment. Anonymous visitors are counted separately ("not logged in"); a project that never calls `identify` counts every visitor. Users identified with `internal: true` (the team) are left out of every number unless *Include the team* is ticked (`internal=1` in the API). Events sent before login belong to the user once `identify` links the anonymous id, so a visit that starts logged out is not counted twice. |
+| **Signup** | When a person's account was created: the `created_at` the app sent with `identify` or `openlens-cli import` (RFC 3339; the earliest one wins; a date in the future or before 1990 is ignored), else their first `identify` ever. A customer created a year ago who is first seen today signed up a year ago, not today. In an internal tool it is the day the colleague joined the tool (#707, D-111). |
 | **Stickiness** | DAU / MAU, as a ratio. |
 | **Revenue** | The sum of the `revenue` (else `value`) property of the success events declared in the feature map, last 30 days, per `currency`. Amounts on other events are ignored. Currencies are never summed unless the map sets `revenue: { currency: EUR, rates: { USD: 0.92 } }` (fixed rates, no live rates). Per active user: the total over identified users active in the window (#231). |
 | **Known users** | Identified users seen in the last 90 days (the team excluded unless asked). The base of the active shares: DAU ÷ known users on the headline tile, MAU ÷ known users next to it (#217). |
@@ -90,6 +91,23 @@ The SDK also says where each vital comes from (raw facts, no text): the element 
 1. The server does slow work (database, rendering) before it answers. Cache the page's HTML or the slow queries behind it, and measure where the server time goes.
 2. Visitors are far from the server. Serve the pages from a CDN or a region closer to the visitors.
 3. Redirects run before the page. Link straight to the final address (no http to https or trailing-slash hops).
+
+## Lifecycle
+
+Where people are on the way from a first visit to a customer who stays (#708, D-111). Read over the board's window: since the current release, a date range when asked, else the last 30 days. Each stage is shown only when its data exists, with no setting (D-014): an internal tool, where everyone logs in and nobody pays, sees *account created → activated → retained*.
+
+| Stage | Definition |
+| --- | --- |
+| **Visitor** | Anonymous visitors seen in the window who were never linked to a user, plus the accounts created in the window whose linked anonymous ids were seen in it. Shown when the window has anonymous traffic. |
+| **Account created** | People whose **signup** (see Users) falls in the window and who have an event in it under the filters. |
+| **Activated** | Of the accounts created, those who reached a success event of the feature map (the value moment). Shown when the map declares success events. |
+| **Paid** | Of the accounts created, those with revenue (see Users) on a success event in the window. Shown when a success event carries revenue; a `plan` alone does not make anyone paid yet (#712). |
+| **Retained / churned** | Of the accounts created in the window before the churn window started (old enough to judge), those active in the last 7 days, and those inactive for longer than the churn window (`churn_after_days`). Shown for a window that ends now. |
+| **Visitor → account rate** | Accounts created in the window with at least one linked anonymous id seen in it ÷ (never-linked anonymous visitors of the window + those accounts). A **lower bound**: a signup on another device, after cleared storage or from an email link leaves no link. The upper bound, every account created ÷ (never-linked visitors + every account created), is given with it. In cookieless mode (most visitors carry the server's daily ids, which are never linked) the rate is *not available*. |
+
+`lifecycle` (MCP and `openlens-cli lifecycle`, `GET /api/projects/{id}/lifecycle`) returns the same numbers as the board for the same filters, optionally per first-touch channel, role, plan or release (`by`).
+
+**Visitors** (the board's block, shown only when the window has anonymous traffic, #709): per entry page (the first page view of each anonymous session) and per channel (that page view's landing channel), the top 10 by visitors, with sessions, bounce rate and **signup rate** = visitors linked to an account created in the window ÷ visitors (a lower bound). A session is anonymous when it was sent before login: it still counts after its id was linked.
 
 ## Features
 
