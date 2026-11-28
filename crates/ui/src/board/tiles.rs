@@ -361,7 +361,7 @@ pub(super) fn outcomes(
             more: None,
         })
     });
-    // Plans (#712, D-103): a tile only when the feature map declares plans.
+    // Plans (#712, D-113): a tile only when the feature map declares plans.
     let plans_tile = b.plans.as_ref().map(|p| {
         let mut sub = format!("{} downgrades, last 30 days", compact(p.downgrades));
         if !p.gaps.is_empty() {

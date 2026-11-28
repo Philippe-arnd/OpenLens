@@ -11,7 +11,7 @@ roles:
     match: ["coach", "therapist"]
   - key: member
     match: ["user", "member", "team_*"]
-# Optional (#712, D-103): the plans the app sells, lowest first, and the raw
+# Optional (#712, D-113): the plans the app sells, lowest first, and the raw
 # identify() plan values that map to them (first match wins). `paid` defaults
 # to true: write `paid: false` on the free plan. Without this section plan
 # changes are still kept, but upgrades, downgrades and conversion are not shown.

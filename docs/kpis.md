@@ -14,7 +14,7 @@ Roles are the main way to slice every number, so they are declared explicitly, n
 
 ## Plans: declared, matched, tracked (SaaS only)
 
-Everything on this list shows only when the app sends `plan` in `identify(id, { plan })` **and** the feature map declares a `plans:` section (D-103). An internal tool that sends no plan sees nothing new; there is no setting.
+Everything on this list shows only when the app sends `plan` in `identify(id, { plan })` **and** the feature map declares a `plans:` section (D-113). An internal tool that sends no plan sees nothing new; there is no setting.
 
 - **Declared:** `plans:` lists the app's canonical plans **from lowest to highest** (for example `free`, `pro`, `team`). Each plan says whether it is paid: `paid: true` by default, so the free plan must say `paid: false` (nothing is guessed from a name).
 - **Matched:** like roles, each plan lists the raw values the app sends (exact values or `*` patterns, case-insensitive; the first plan that matches wins). Raw values are always kept.

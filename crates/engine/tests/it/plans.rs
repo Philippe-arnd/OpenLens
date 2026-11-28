@@ -1,4 +1,4 @@
-//! Plans (#712, #713, D-103): upgrades and downgrades per period and
+//! Plans (#712, #713, D-113): upgrades and downgrades per period and
 //! release, plan gaps, the conversion drivers card, and nothing at all
 //! for an app without plans.
 

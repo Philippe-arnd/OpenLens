@@ -35,7 +35,7 @@ fn roles_resolve_first_match_wins_case_insensitive_with_wildcards() {
     assert_eq!(m.resolve_role("guest"), None);
 }
 
-/// Plans (#712, D-103): matched like roles, ordered lowest first, and paid
+/// Plans (#712, D-113): matched like roles, ordered lowest first, and paid
 /// only when the map says so.
 #[test]
 fn plans_tell_upgrades_from_downgrades_and_never_guess_paid() {

@@ -603,7 +603,7 @@ pub async fn board_reusing(
         tasks::retention(q, project, &p90, f, ident),
         crate::churn::line(q, project, map.map(|(m, _)| m), f, &src, ident),
         crate::board_backend::read(q, project, f, server_spans, map.map(|(m, _)| m), now),
-        // Plans (#712, #713, D-103): nothing without `plans:` in the map.
+        // Plans (#712, #713, D-113): nothing without `plans:` in the map.
         crate::plans::read(
             q,
             project,

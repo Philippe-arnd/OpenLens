@@ -532,7 +532,7 @@ pub struct Board {
     pub environments: Vec<String>,
     /// Raw role values no rule of the feature map matches, with user counts.
     pub role_gaps: Vec<(String, i64)>,
-    /// Upgrades, downgrades and plan gaps (#712, D-103); none when the
+    /// Upgrades, downgrades and plan gaps (#712, D-113); none when the
     /// feature map declares no plans, so an app without plans shows
     /// nothing about them.
     #[serde(skip_serializing_if = "Option::is_none")]

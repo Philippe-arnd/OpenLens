@@ -63,7 +63,7 @@ pub struct Profile {
     pub person: Option<Person>,
     /// (role, since), oldest first.
     pub roles: Vec<(String, String)>,
-    /// (raw plan, since), oldest first (#712, D-103).
+    /// (raw plan, since), oldest first (#712, D-113).
     pub plans: Vec<(String, String)>,
     /// Their session recordings.
     pub replays: Vec<openlens_replay::Summary>,

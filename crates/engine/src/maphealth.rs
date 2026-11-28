@@ -416,7 +416,7 @@ pub fn assess(m: &FeatureMap, u: &Usage) -> MapHealth {
             n,
         ));
     }
-    // Raw plan values no plan matches (#712, D-103), like role gaps: they
+    // Raw plan values no plan matches (#712, D-113), like role gaps: they
     // count as `unmatched:<value>` and in no upgrade or downgrade.
     if !m.plans.is_empty() {
         for (raw, n) in &u.plans {

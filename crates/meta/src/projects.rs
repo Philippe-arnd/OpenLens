@@ -268,7 +268,7 @@ impl Meta {
     }
 
     /// Plan history of a person, oldest first: `(raw plan, since)` (#712,
-    /// D-103). See [`plan_at`] for the plan at a given time.
+    /// D-113). See [`plan_at`] for the plan at a given time.
     pub fn plan_history(&self, project: &str, distinct_id: &str) -> Result<Vec<(String, String)>> {
         self.read(|c| {
             let mut st = c.prepare(
@@ -282,7 +282,7 @@ impl Meta {
 
 /// The raw plan a person had at `at`, from their [`Meta::plan_history`]
 /// (oldest first): the last change at or before `at`; none before the
-/// first one ("plan at event time", D-103).
+/// first one ("plan at event time", D-113).
 #[must_use]
 pub fn plan_at(history: &[(String, String)], at: DateTime<Utc>) -> Option<&str> {
     history

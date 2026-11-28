@@ -1,4 +1,4 @@
-//! Plans (#712, #713, D-103): upgrades and downgrades per period and per
+//! Plans (#712, #713, D-113): upgrades and downgrades per period and per
 //! release, the raw plan values no plan of the map matches (plan gaps),
 //! and the conversion drivers card.
 //!

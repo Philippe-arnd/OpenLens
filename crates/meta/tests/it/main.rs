@@ -66,7 +66,7 @@ fn role_changes_are_recorded_with_dates_and_repeats_are_not() {
     assert_eq!(person.plan.as_deref(), Some("pro"));
 }
 
-/// #712 (D-103): a user who moves from free to pro has the plan of the
+/// #712 (D-113): a user who moves from free to pro has the plan of the
 /// time: free before the change, pro after; a repeat is no change, and
 /// forgetting the user drops the history.
 #[test]

@@ -707,7 +707,7 @@ impl Tools for OpenLensTools {
                             "releases": top("releases", 2),
                             "total_events": v["total_events"],
                         });
-                        // Plans (#712, D-103): only when the map declares them.
+                        // Plans (#712, D-113): only when the map declares them.
                         if !v["plans"].is_null() {
                             report["plans"] = v["plans"].clone();
                             report["plan_rule"] = json!("plan at event time");

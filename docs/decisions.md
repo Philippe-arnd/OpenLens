@@ -917,7 +917,7 @@ Supersedes the trace-header and naming parts of D-082 (nothing of it was release
 
 **Amendment (2026-11-28, agent for #711):** `openlens-cli verify` (and the MCP `verify`) checks the link with real events: through `/capture` and the project key, an anonymous page view and then an `$identify` linking its id, then up to 45 s of polling until `events` gives that page view to the person (events are flushed about every 10 s and the links read every 30 s). The test person is marked `$internal` and both events are sent in `development` with `$verify: true`, so they count in no production number; nothing is deleted afterwards. The check is reported as `visitor linked to the person`, says when the project has fewer than two exact production hosts (no landing page to link), and does not change `ok`: a slow server is not a wiring fault.
 
-## D-103 (2026-11-28, agent for #712 and #713) Plans in the feature map: dated plan history, upgrades and downgrades, and conversion drivers, shown only for apps that declare plans
+## D-113 (2026-11-28, agent for #712 and #713) Plans in the feature map: dated plan history, upgrades and downgrades, and conversion drivers, shown only for apps that declare plans
 
 **Decision:**
 - **Feature map:** an optional `plans:` section lists the app's canonical plans **from lowest to highest**. Each plan has a `key`, the raw values it matches under `match` (exact values or `*` patterns, case-insensitive, the first matching plan wins, as for `roles:`) and `paid: true|false`. `paid` defaults to true; a free plan says `paid: false`, and the code never guesses it from a name (a plan keyed `free` without it is paid). At most 50 plans; keys and values follow the role rules; a free plan listed after a paid one is a warning.

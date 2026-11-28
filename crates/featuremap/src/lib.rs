@@ -47,7 +47,7 @@ pub struct FeatureMap {
     /// Canonical roles, in priority order (first match wins).
     #[serde(default)]
     pub roles: Vec<Role>,
-    /// Optional (#712, D-103): the plans the app sells, lowest first. Without
+    /// Optional (#712, D-113): the plans the app sells, lowest first. Without
     /// it, plan changes are still kept on raw values, but upgrades,
     /// downgrades and paid or free are unknown and not shown.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -88,7 +88,7 @@ pub struct Role {
     pub matches: Vec<String>,
 }
 
-/// A plan and the raw values that map to it (#712, D-103). Plans are listed
+/// A plan and the raw values that map to it (#712, D-113). Plans are listed
 /// lowest first: a move to a later plan is an upgrade, to an earlier one a
 /// downgrade.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -458,7 +458,7 @@ pub fn validate(m: &FeatureMap) -> Vec<Issue> {
     v
 }
 
-/// The `plans:` section (#712, D-103): keys, match values, and the order
+/// The `plans:` section (#712, D-113): keys, match values, and the order
 /// (free plans first, since plans go from lowest to highest).
 fn plans(m: &FeatureMap, v: &mut Vec<Issue>) {
     if m.plans.len() > MAX_PLANS {
@@ -649,7 +649,7 @@ impl FeatureMap {
         }
     }
 
-    /// A move from the raw plan `from` to the raw plan `to` (#712, D-103):
+    /// A move from the raw plan `from` to the raw plan `to` (#712, D-113):
     /// `Some(true)` an upgrade (free to paid, else a higher plan in the
     /// map's order), `Some(false)` a downgrade (the reverse), `None` when
     /// it is neither (the same plan) or unknown (a value no plan matches,
