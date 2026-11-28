@@ -68,6 +68,47 @@ Until #502 the board took one in-memory snapshot of the 90-day projection, then 
 
 **Watch out for subqueries in `OR`.** DataFusion turns `x IN (SELECT …)` into a semi-join, but not when it sits in an `OR` with `NOT EXISTS (…)`. The "identified users" filter written that way cost 20× more: 0.7 s instead of 35 ms per query. A scalar-subquery variant was fast, but it sometimes returned rows out of `ORDER BY` order. The engine now decides in Rust, from the cached `persons` count, and writes either the plain `IN` or `TRUE`. To see what each query costs, run with `RUST_LOG=openlens_query=debug`.
 
+## Event mix (#701, 2026-11-28)
+
+What the stored events are made of, on the two apps that send their production events to the owner's instance (Journal and Kanban, from 2026-11-22 to 2026-11-28 10:41 UTC, `raw_events`, production). Both are small (1 to 6 users a day), so the browser numbers are a first look, not a profile; the server numbers do not depend on traffic.
+
+**Browser events per active user-day** (an active user-day is one user with events on one UTC day):
+
+| Event | Journal | Kanban | Kind |
+| --- | --- | --- | --- |
+| `$click` | 3.9 | 8.0 | interaction (kept) |
+| `$vital` | 3.2 | 5.2 | distribution only |
+| `$scroll` | 2.8 | 5.6 | distribution only |
+| `$pageview` | 2.5 | 2.9 | interaction (kept) |
+| `$identify` | 1.4 | 7.0 | sent on every page load, mostly unchanged |
+| success and custom events | 1.6 | 4.2 | the signal |
+| `$submit`, `$request_failed` | 0.6 | 1.7 | kept |
+| total | 16 (225 events, 14 user-days) | 35 (346 events, 10 user-days) | |
+
+**Server events per day**, whatever the traffic (Node SDK, stats window of 60 s on a host with disk to spare, D-091), extrapolated from the first 10 h 41 of 2026-11-28:
+
+| Event | Journal | Kanban | What it held |
+| --- | --- | --- | --- |
+| `$runtime_stats` | ~1,440 | ~1,440 | one a minute, idle or not |
+| `$request_stats` | ~1,490 | ~2,920 | mostly `/health` and `/api/health` probes |
+| `$client_stats` | ~2,900 | — | one app calling `localhost` 6 times a minute and refused |
+
+Server telemetry was about **99%** of the events stored on 2026-11-28 (2,598 server events against 28 browser events for Journal, 1,940 against 36 for Kanban).
+
+**Targets** (what the lot A changes aim at):
+- **Browser:** at most about **25 stored events per active user-day** on an app of the persona's size (tens of thousands of users), with the distribution-only events (`$vital`, `$scroll`, `$field`) capped by a daily budget (#702, D-097) and `$identify` sent only when something changed (#703).
+- **Server:** an idle instance sends **a few hundred events a day** (runtime health every 10 minutes), then grows with the routes really used, never with health checks (#726, D-100).
+
+To measure it again (MCP `sql` or `openlens-cli sql`):
+
+```sql
+SELECT event, count(*) AS n,
+       count(DISTINCT distinct_id || CAST(date AS VARCHAR)) AS user_days
+FROM raw_events
+WHERE date >= DATE '2026-11-22' AND environment = 'production'
+GROUP BY event ORDER BY n DESC
+```
+
 ## How to run
 
 ```sh
