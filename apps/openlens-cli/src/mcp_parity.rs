@@ -45,6 +45,7 @@ const TOOL_OF: &[(&str, &str)] = &[
     ("explore.person", "user_timeline"),
     ("explore.breakdown", "kpi_report"),
     ("explore.acquisition", "acquisition"),
+    ("explore.lifecycle", "lifecycle"),
     ("explore.forms", "forms"),
     ("explore.churn", "churn"),
     ("explore.flag_audiences", "churn"),

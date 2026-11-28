@@ -31,7 +31,8 @@ Start from the summaries and drill down only where something stands out. Every t
 | Everything about one feature | `feature_context { key }`: definition, findings, users and success by role, top pages, ladder, area peers, features used with it, use per release with the map version in force | `sql` |
 | Which features go together? | `feature_relations { feature? }`: lift, which comes first, leads to value (30 days of sessions, no cap) | `feature_context { key }` |
 | Who leaves, and who is about to? | `churn`: churn rate, survival, where leavers were last, who is at risk now, and the win-back flags already made | `winback_flag { holdout? }`, then `flag_update { key, enabled: true }` |
-| Where do users come from? | `acquisition { by?, touch? }`: users, value reached, returning and churned per channel, source, campaign or referrer | `user_timeline` of a user |
+| Where do users come from? | `acquisition { by?, touch? }`: per channel, source, campaign or referrer, users (identified), visitors (anonymous, never linked), signups and signup rate (a lower bound), value reached, returning and churned | `user_timeline` of a user |
+| How many visitors become accounts, then customers who stay? | `lifecycle { by?, env?, role?, release? }`: visitor → account created → activated → paid → retained, only the stages with data (no visitor stage for an internal tool), and the visitor → account rate with its bounds (not available in cookieless mode); `by` = `channel`, `role`, `plan` or `release` | `acquisition { by: channel }` |
 | Where do people give up on a form? | `forms`: starts, submits, the field they stop at | the abandoned session's replay |
 | How do sessions move between features? | `flows { from?, to? }` | `feature_context { key }` |
 | Who uses the app, on what? Who is on it now? | `audience` (devices, browsers, OS, countries, languages, screens), `live` (last 5 and 30 minutes) | `kpi_report` with `by` |

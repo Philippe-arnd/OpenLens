@@ -7,6 +7,27 @@ use maud::{Markup, html};
 /// (tile label, definition). Labels with a variable part (the currency of
 /// *Revenue*) are matched on the text before ` (`.
 pub(crate) const KPI: &[(&str, &str)] = &[
+    // The lifecycle (#708, docs/kpis.md).
+    (
+        "Visitors",
+        "Anonymous visitors of the period never linked to a user, plus the accounts created in it whose anonymous visits were linked by identify.",
+    ),
+    (
+        "Accounts created",
+        "People whose signup falls in the period: the account's created_at when the app sends it with identify or the import, else their first identify ever.",
+    ),
+    (
+        "Activated",
+        "Accounts created in the period that reached a success event of the feature map (the value moment).",
+    ),
+    (
+        "Paid",
+        "Accounts created in the period with revenue on a success event.",
+    ),
+    (
+        "Retained",
+        "Accounts created in the period before the churn window started, active in the last 7 days. Churned: inactive for longer than the churn window.",
+    ),
     (
         "Active users",
         "Distinct identified users with at least one event over the board's period: since the current release (90 days at most; the last 14 days without a release), or the last 30 days on a shared board or one release. Known users: identified users seen in the last 90 days. Today, so far: users with an event today. Robots and, unless ticked, the team are left out.",

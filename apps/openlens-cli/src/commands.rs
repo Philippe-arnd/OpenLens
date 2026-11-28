@@ -358,6 +358,19 @@ pub(super) enum Command {
         #[command(subcommand)]
         action: crate::maintenance::MaintenanceCmd,
     },
+    /// The lifecycle of the last 30 days: visitor → account → activated →
+    /// paid → retained, the stages with data only (#708).
+    Lifecycle {
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+        /// Split by `channel`, `role`, `plan` or `release`.
+        #[arg(long)]
+        by: Option<String>,
+        /// Environment (default production).
+        #[arg(long)]
+        env: Option<String>,
+    },
     /// How sessions move between features (Sankey data, last 30 days).
     Flows {
         /// Project id.

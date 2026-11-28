@@ -489,7 +489,13 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "GET",
         "/api/projects/{project}/acquisition",
         "read",
-        "Users per channel, source, campaign or referrer (`by`), first or last touch (`touch`).",
+        "Users, never-linked visitors, signups and signup rate per channel, source, campaign or referrer (`by`), first or last touch (`touch`).",
+    ),
+    (
+        "GET",
+        "/api/projects/{project}/lifecycle",
+        "read",
+        "Visitor, account created, activated, paid and retained: the stages with data, the visitor → account rate (a lower bound), optionally per `by` (channel, role, plan, release).",
     ),
     (
         "GET",

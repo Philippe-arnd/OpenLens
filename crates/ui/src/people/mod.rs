@@ -201,20 +201,41 @@ pub fn acquisition(
     // The rows come ranked; the best is the first with a fair sample.
     let fair = rows.iter().find(|r| r.users >= 20);
     let best = fair.or(rows.first());
+    // Anonymous visitors never linked are not users (#708): their columns
+    // show only when the project has some.
+    let visitors = sum(|r| r.visitors);
+    let signed_up = sum(|r| r.signed_up);
     let tiles = html! {
         (plain_tile("Users acquired", html! { (compact(total)) }, format!("by {touch} touch, last 90 days")))
         (plain_tile("Reached value", html! { (pct(share(sum(|r| r.reached), total))) }, "reached a success event".to_owned()))
         (plain_tile("Came back", html! { (pct(share(sum(|r| r.returned), total))) }, "active on two days or more".to_owned()))
+        @if visitors > 0 {
+            (plain_tile("Signup rate", html! { (pct(share(signed_up, visitors + signed_up))) },
+                format!("{} signups for {} visitors never linked (a lower bound)", compact(signed_up), compact(visitors))))
+        }
         @if let Some(r) = best {
             (plain_tile(&format!("Best {}", dim.to_lowercase()), html! { (r.value) small { (pct(r.value_rate())) } },
                 format!("of its {} users reached value{}", compact(r.users), if fair.is_some() { "" } else { " (a small sample)" })))
         }
     };
+    let mut cols = vec![Col::Shown(dim), Col::Num("Users")];
+    if visitors > 0 {
+        cols.extend([Col::Num("Visitors"), Col::Num("Signup rate")]);
+    }
+    cols.extend([
+        Col::Shown("Reached value"),
+        Col::Num("Came back"),
+        Col::Num("Churned"),
+    ]);
     let body = html! {
         @for r in rows {
             tr {
                 th scope="row" { span.mono { (r.value) } @if r.users < 20 { " " span.tag.tone-warn title="Under 20 users: the rates move a lot" { "low sample" } } }
                 td.num { (compact(r.users)) span.muted.small { " · " (pct(share(r.users, total))) } }
+                @if visitors > 0 {
+                    td.num { (compact(r.visitors)) }
+                    td.num title={ (compact(r.signed_up)) " signed up" } { (pct(r.signup_rate)) }
+                }
                 td.bar { (barcell(r.value_rate())) }
                 td.num { (pct(share(r.returned, r.users))) }
                 td.num { @if r.judged > 0 { (pct(share(r.churned, r.judged))) } @else { span.muted { "—" } } }
@@ -258,9 +279,12 @@ pub fn acquisition(
                     (TableCard {
                         label: "Where users come from",
                         head: html! { h2 { "By " (dim.to_lowercase()) } span.muted.small { (rows.len()) " rows" } },
-                        cols: &[Col::Shown(dim), Col::Num("Users"), Col::Shown("Reached value"), Col::Num("Came back"), Col::Num("Churned")],
+                        cols: &cols,
                         body,
-                        foot: html! { div.pad { p.muted.small { "Reached value: a success event of the feature map (any feature use when none is declared). Came back: active on two days or more. Churned: of the users first seen before the churn window, those inactive for longer than it now." } } },
+                        foot: html! { div.pad { p.muted.small {
+                            "Users: identified people. Reached value: a success event of the feature map (any feature use when none is declared). Came back: active on two days or more. Churned: of the users first seen before the churn window, those inactive for longer than it now."
+                            @if visitors > 0 { " Visitors: anonymous visitors never linked to a user. Signup rate: users who signed up in the 90 days ÷ (visitors + those users), a lower bound (a signup on another device leaves no link)." }
+                        } } },
                     }.render())
                 }
             }

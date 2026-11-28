@@ -8,6 +8,7 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Feature map | `openlens.features.yaml`, the declared features and roles of an app |
 | Value moment | The early behaviour that best predicts a user staying |
 | Stick drivers | Features ranked by how much they lift retention |
+| Lifecycle | `lifecycle` and the board: visitor → account created → activated → paid → retained, only the stages the data shows, with the visitor → account rate as a lower bound |
 | Churn points | Last features and steps seen before users go inactive |
 | Role gap | A raw role value that the feature map does not match yet |
 | Used with | On a feature page: the features used in the same sessions, which comes first, and whether the first leads to value in the second |

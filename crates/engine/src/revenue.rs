@@ -43,6 +43,11 @@ pub struct Revenue {
     pub converted: bool,
 }
 
+/// An event's amount: its `revenue` property, else its `value` (#231).
+/// The lifecycle's paid stage reads the same (#708).
+pub(crate) const AMOUNT: &str = "coalesce(CAST(regexp_match(properties, '\"revenue\":(-?[0-9]+(\\.[0-9]+)?)')[1] AS DOUBLE), \
+     CAST(regexp_match(properties, '\"value\":(-?[0-9]+(\\.[0-9]+)?)')[1] AS DOUBLE))";
+
 /// Revenue of a project, or None when no success event carries an amount.
 pub async fn revenue(
     q: &QueryEngine,
@@ -68,8 +73,7 @@ pub async fn revenue(
         .map(|(_, s)| lit(s))
         .collect::<Result<Vec<_>>>()?
         .join(", ");
-    let amount = "coalesce(CAST(regexp_match(properties, '\"revenue\":(-?[0-9]+(\\.[0-9]+)?)')[1] AS DOUBLE), \
-                  CAST(regexp_match(properties, '\"value\":(-?[0-9]+(\\.[0-9]+)?)')[1] AS DOUBLE))";
+    let amount = AMOUNT;
     let cur = "upper(regexp_match(properties, '\"currency\":\"([A-Za-z]{3})\"')[1])";
     let sql = format!(
         "SELECT event, role, release, distinct_id, {cur} AS cur, {amount} AS amt FROM {src} \

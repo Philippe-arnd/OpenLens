@@ -92,6 +92,21 @@ The SDK also says where each vital comes from (raw facts, no text): the element 
 2. Visitors are far from the server. Serve the pages from a CDN or a region closer to the visitors.
 3. Redirects run before the page. Link straight to the final address (no http to https or trailing-slash hops).
 
+## Lifecycle
+
+Where people are on the way from a first visit to a customer who stays (#708, D-101). Read over the board's window: since the current release, a date range when asked, else the last 30 days. Each stage is shown only when its data exists, with no setting (D-014): an internal tool, where everyone logs in and nobody pays, sees *account created → activated → retained*.
+
+| Stage | Definition |
+| --- | --- |
+| **Visitor** | Anonymous visitors seen in the window who were never linked to a user, plus the accounts created in the window whose linked anonymous ids were seen in it. Shown when the window has anonymous traffic. |
+| **Account created** | People whose **signup** (see Users) falls in the window and who have an event in it under the filters. |
+| **Activated** | Of the accounts created, those who reached a success event of the feature map (the value moment). Shown when the map declares success events. |
+| **Paid** | Of the accounts created, those with revenue (see Users) on a success event in the window. Shown when a success event carries revenue; a `plan` alone does not make anyone paid yet (#712). |
+| **Retained / churned** | Of the accounts created in the window before the churn window started (old enough to judge), those active in the last 7 days, and those inactive for longer than the churn window (`churn_after_days`). Shown for a window that ends now. |
+| **Visitor → account rate** | Accounts created in the window with at least one linked anonymous id seen in it ÷ (never-linked anonymous visitors of the window + those accounts). A **lower bound**: a signup on another device, after cleared storage or from an email link leaves no link. The upper bound, every account created ÷ (never-linked visitors + every account created), is given with it. In cookieless mode (most visitors carry the server's daily ids, which are never linked) the rate is *not available*. |
+
+`lifecycle` (MCP and `openlens-cli lifecycle`, `GET /api/projects/{id}/lifecycle`) returns the same numbers as the board for the same filters, optionally per first-touch channel, role, plan or release (`by`).
+
 ## Features
 
 A **feature** is declared in the feature map. A **task** is one use of a feature, from its entry (route, `data-feature` element, or an `openlens.feature()` call) to its `success` event. A task with no success within 30 minutes is *abandoned*.

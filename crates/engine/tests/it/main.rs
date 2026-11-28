@@ -18,6 +18,7 @@ mod commands;
 mod dependencies;
 mod jobs;
 mod journeys;
+mod lifecycle;
 mod maintenance;
 mod map_lookups;
 mod map_shape;

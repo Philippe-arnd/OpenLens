@@ -46,6 +46,8 @@ pub mod forms;
 pub mod goals;
 pub mod inforce;
 mod insights;
+/// The lifecycle: visitor → account → activated → paid → retained (#708, D-101).
+pub mod lifecycle;
 /// Planned maintenance windows (#563, D-076).
 pub mod maintenance;
 mod mapdays;
@@ -542,6 +544,11 @@ pub struct Board {
     /// The release window of the period blocks and its comparison, when
     /// the board was asked for it (D-055); none: the fixed windows.
     pub window: Option<BoardWindow>,
+    /// The lifecycle of the window (#708, D-101), the same numbers as the
+    /// `lifecycle` command for these filters; none when the window has no
+    /// account created and no anonymous visitor.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lifecycle: Option<lifecycle::Lifecycle>,
     /// Closed UTC days the board reads that it cannot count (#489, D-070):
     /// their events are gone (cold tier, retention) and their rollups were
     /// not made with the map in force, so they count nobody. Oldest first.

@@ -296,6 +296,25 @@ pub async fn board_reusing(
          WHERE role IS NOT NULL AND feature IS NOT NULL GROUP BY role, feature"
     );
     let releases_sql = sessions.releases_sql(f)?;
+    // The lifecycle of the window (#708): the same reads as the
+    // `lifecycle` command, so both agree.
+    let life_reads = crate::lifecycle::Reads {
+        src: &src,
+        ident,
+        people: &people,
+        success_list: &success_list,
+        churn_days: map.map_or(14, |(m, _)| i64::from(m.churn_days())),
+    };
+    let life = crate::lifecycle::compute(
+        q,
+        project,
+        f,
+        span(30),
+        now,
+        &life_reads,
+        crate::lifecycle::By::None,
+    );
+
     // The environments and the stored row count do not depend on who did
     // what: they come from the segments, which are read once (#447), not
     // from a query.
@@ -354,6 +373,7 @@ pub async fn board_reusing(
         anonymous,
         known,
         compared,
+        life,
     ) = futures::join!(
         q.sql(project, &users_sql),
         board_kept::unless_kept(q, project, &sessions_sql, reuse),
@@ -368,11 +388,13 @@ pub async fn board_reusing(
         q.sql(project, &anonymous_sql),
         q.sql(project, &known_sql),
         compared,
+        life,
     );
 
     let mut b = Board {
         filters: Some(f.clone()),
         unavailable_days: unavailable,
+        lifecycle: Some(life?).filter(|l| l.note.is_none()),
         ..Board::default()
     };
     if let Some(r) = users?.rows.first() {

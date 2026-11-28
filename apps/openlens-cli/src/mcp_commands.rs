@@ -246,8 +246,15 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
             input_schema: json!({"type":"object","properties":with(json!({"holdout":{"type":"integer","minimum":0,"maximum":50}}))}),
         },
         ToolSpec {
+            name: "lifecycle",
+            description: "The lifecycle of the last 30 days (fixed definitions, docs/kpis.md): visitor (anonymous visitors never linked, plus the accounts whose anonymous visits were linked) → account created (signup in the window: `created_at` from identify or import, else the first identify) → activated (reached a success event of the map) → paid (revenue on a success event) → retained (of the accounts older than the churn window, active in the last 7 days; `retention` also has `judged` and `churned`). Only the stages with data are listed: an internal tool (everyone logged in) has no visitor stage, a project without revenue no paid stage. `visitor_rate.rate` is the visitor → account rate, a lower bound (linked accounts ÷ (never-linked visitors + linked accounts)), with `upper` (every account created ÷ (visitors + accounts)); in cookieless mode it is not available and says why. `by` splits it per first-touch channel, role, plan or release (`groups`). The board's Lifecycle block shows the same numbers for the same filters.",
+            input_schema: json!({"type":"object","properties":filtered(json!({
+                "by":{"type":"string","enum":["channel","role","plan","release"]}
+            }))}),
+        },
+        ToolSpec {
             name: "acquisition",
-            description: "Where users come from: per channel (default), source, campaign or referrer (`by`), by first touch (default) or last touch (`touch`): users, those who reached a success event, those active on two days or more, and those who churned.",
+            description: "Where users come from: per channel (default), source, campaign or referrer (`by`), by first touch (default) or last touch (`touch`): users (identified), visitors (anonymous visitors never linked to a user), signed_up (users whose signup falls in the 90 days) and signup_rate (signed_up ÷ (visitors + signed_up), a lower bound), and of the users those who reached a success event, those active on two days or more, and those who churned.",
             input_schema: json!({"type":"object","properties":filtered(json!({
                 "by":{"type":"string","enum":["channel","source","campaign","referrer"]},
                 "touch":{"type":"string","enum":["first","last"]}
@@ -458,6 +465,10 @@ pub(crate) fn call(c: &Client, name: &str, args: &Value) -> Option<Result<Value,
         "acquisition" => {
             let keys = ["env", "role", "release", "by", "touch"];
             get(c, &query(args, "/acquisition", &keys))
+        }
+        "lifecycle" => {
+            let keys = ["env", "role", "release", "by"];
+            get(c, &query(args, "/lifecycle", &keys))
         }
         "forms" => get(c, &query(args, "/forms", FILTERS)),
         "audience" => get(c, &query(args, "/audience", FILTERS)),

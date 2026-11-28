@@ -251,6 +251,48 @@ impl Command for GetAcquisition {
     }
 }
 
+/// The input of `explore.lifecycle`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LifecycleInput {
+    /// Project id.
+    pub project: String,
+    /// The board filters (and their window).
+    pub filters: Filters,
+    /// `channel`, `role`, `plan` or `release`; none: everyone.
+    #[serde(default)]
+    pub by: Option<String>,
+}
+
+/// `explore.lifecycle`: visitor → account created → activated → paid →
+/// retained, the stages with data only (#708, D-101).
+pub struct GetLifecycle;
+
+impl Command for GetLifecycle {
+    const NAME: &'static str = "explore.lifecycle";
+    const ACCESS: Access = Access::Read;
+    type Input = LifecycleInput;
+    type Output = crate::lifecycle::Lifecycle;
+
+    async fn run<H: Host>(
+        host: &H,
+        _: &Caller,
+        input: LifecycleInput,
+    ) -> Result<crate::lifecycle::Lifecycle, Error> {
+        let p = project(host, &input.project).await?;
+        let map = host.feature_map(&p.id).await;
+        let by = crate::lifecycle::By::parse(input.by.as_deref());
+        crate::lifecycle::lifecycle(
+            host.query(),
+            &p.id,
+            map.as_ref().map(|(m, v)| (m, *v)),
+            &input.filters,
+            by,
+        )
+        .await
+        .map_err(unavailable)
+    }
+}
+
 /// `explore.forms`: the forms and where people give up (#232).
 pub struct Forms;
 
