@@ -813,7 +813,7 @@ pub(crate) fn flag_cards(cohorts: &[FlagCohort]) -> Vec<Insight> {
         .filter(|c| c.with.users >= MIN_GROUP && c.without.users >= MIN_GROUP)
         .collect();
     let cutoff = |pick: fn(&FlagCohort) -> Option<f64>| {
-        let ps: Vec<f64> = judged.iter().filter_map(|c| pick(*c)).collect();
+        let ps: Vec<f64> = judged.iter().filter_map(|c| pick(c)).collect();
         crate::stats::fdr_cutoff(&ps, crate::stats::FDR)
     };
     let (cut_errors, cut_tasks) = (cutoff(|c| c.p_errors), cutoff(|c| c.p_tasks));
