@@ -3,9 +3,11 @@
 // once per process.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { OpenLens, STATS_WINDOW_HEADER, STATS_WINDOW_MS } from "../src/index.js";
+import { OpenLens, RUNTIME_WINDOW_MS, STATS_WINDOW_HEADER, STATS_WINDOW_MS } from "../src/index.js";
 
 const STATS = ["$request_stats", "$client_stats", "$runtime_stats"];
+/** The stats that follow the stats window; runtime health has its own (#726). */
+const ROUTE_STATS = ["$request_stats", "$client_stats"];
 
 /** A client whose fake server advertises `advertised` (a header value, or none). */
 function client(opts = {}) {
@@ -53,15 +55,21 @@ test("the window follows the server's header from the next flush, each event wit
   traffic(ol);
   await ol.flush();
   const closed = windows(got);
-  for (const name of STATS) {
+  for (const name of ROUTE_STATS) {
     const e = closed.find((x) => x.event === name);
     assert.ok(e, `${name} of the 10-minute window sent on the next flush`);
     assert.equal(e.properties.$window_s, STATS_WINDOW_MS / 1000);
   }
+  // Runtime health keeps its own 10-minute window (#726): not closed early.
+  assert.ok(!closed.some((x) => x.event === "$runtime_stats"), "runtime window still open");
   await ol.shutdown();
   const all = windows(got);
   truthful(all);
-  for (const name of STATS) {
+  assert.ok(
+    all.filter((e) => e.event === "$runtime_stats").every((e) => e.properties.$window_s === RUNTIME_WINDOW_MS / 1000),
+    "runtime stats every 10 minutes whatever the stats window",
+  );
+  for (const name of ROUTE_STATS) {
     assert.ok(
       all.some((e) => e.event === name && e.properties.$window_s === 60),
       `${name} then in 1-minute windows`,
@@ -109,4 +117,28 @@ test("a hostile or missing header keeps the window in force", async () => {
   assert.ok(sent.length > 0);
   truthful(sent);
   assert.ok(sent.every((e) => e.properties.$window_s === STATS_WINDOW_MS / 1000));
+});
+
+test("runtime stats come every 10 minutes even with 1-minute stats windows (#726)", async () => {
+  const realNow = Date.now;
+  // A fake clock at the start of a 10-minute window, one minute a step.
+  let now = Math.floor(realNow() / RUNTIME_WINDOW_MS) * RUNTIME_WINDOW_MS;
+  Date.now = () => now;
+  try {
+    const { got, ol } = client({ statsWindowSeconds: 60 });
+    ol.captureRuntime();
+    for (let i = 0; i < 20; i++) {
+      traffic(ol);
+      now += 60000;
+      await ol.flush();
+    }
+    const runtime = windows(got).filter((e) => e.event === "$runtime_stats");
+    const requests = windows(got).filter((e) => e.event === "$request_stats");
+    assert.ok(requests.length > runtime.length, "route stats follow the 1-minute window");
+    assert.equal(runtime.length, 2, "one runtime window per 10 minutes");
+    assert.ok(runtime.every((e) => e.properties.$window_s === RUNTIME_WINDOW_MS / 1000));
+    await ol.shutdown();
+  } finally {
+    Date.now = realNow;
+  }
 });

@@ -29,6 +29,10 @@ export declare const STATS_WINDOW_MS: number;
 /** The capture response header that carries the server's stats window, seconds. */
 export declare const STATS_WINDOW_HEADER: "x-openlens-stats-window";
 export declare const BOUNDS_S: number[];
+/** Length of one runtime-health window: `$runtime_stats` every 10 minutes, whatever the stats window. */
+export declare const RUNTIME_WINDOW_MS: number;
+/** Health-check route templates never counted as route stats (`/health/*`: any route under `/health/`). */
+export declare const HEALTH_ROUTES: readonly string[];
 export declare const SESSION_HEADER: "x-openlens-session";
 /** Distinct external hosts kept per stats window by `captureOutgoing()`; the rest count as `_OTHER`. */
 export declare const MAX_CLIENT_HOSTS: number;
@@ -42,10 +46,11 @@ export declare class OpenLens {
   captureException(err: unknown, ctx?: ExceptionContext): void;
   /** Report uncaught exceptions and unhandled rejections (opt-in). */
   captureUncaught(): void;
-  /** Count one request in its route's stats window (any framework); `ms` in milliseconds. */
+  /** Count one request in its route's stats window (any framework); `ms` in milliseconds.
+   * Health checks (`HEALTH_ROUTES`) are not counted. */
   recordRequest(r: RequestRecord): void;
-  /** Runtime health: one `$runtime_stats` at the process start, then one per stats window
-   * (event-loop delay p50/p99, largest RSS and heap used). On with `express()`. */
+  /** Runtime health: one `$runtime_stats` at the process start, then one every 10 minutes
+   * (event-loop delay p50/p99, largest RSS and heap used of those 10 minutes). On with `express()`. */
   captureRuntime(): void;
   /** Outgoing calls (global `fetch`, `http`/`https`) per external host: one `$client_stats` per
    * method, host and status per stats window. The host only, never the path or query; calls to
@@ -62,6 +67,8 @@ export declare class OpenLens {
   shutdown(): Promise<void>;
 }
 export declare function requestContext(headers: Record<string, string | string[] | undefined>): RequestContext;
+/** Is `route` a health check: one of `HEALTH_ROUTES`, without case, query or trailing slash? */
+export declare function isHealthRoute(route: string): boolean;
 export declare function appFrame(stack?: string): string | undefined;
 export declare function detectRelease(env: Record<string, string | undefined>): string | undefined;
 export default OpenLens;

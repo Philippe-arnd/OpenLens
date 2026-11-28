@@ -23,6 +23,26 @@ export const BOUNDS_S = [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 
 /** The header that carries the OpenLens session id: ours, so no tracing
  * instrumentation forwards it to other services (#601). */
 export const SESSION_HEADER = "x-openlens-session";
+/** Length of one runtime-health window (#726, D-100): `$runtime_stats` every
+ * 10 minutes whatever the stats window, so an idle app sends 144 a day. */
+export const RUNTIME_WINDOW_MS = 10 * 60 * 1000;
+/** Health-check route templates never counted as route stats (#726, D-100):
+ * compared without case and without a trailing slash; `/health/*` is any
+ * route under `/health/`. The server also drops the project's own uptime
+ * health path. */
+export const HEALTH_ROUTES = [
+  "/health",
+  "/healthz",
+  "/health/*",
+  "/api/health",
+  "/api/healthz",
+  "/livez",
+  "/readyz",
+  "/ready",
+  "/live",
+  "/ping",
+  "/status",
+];
 /** Distinct (method, route, status code) keys kept per window: a bound on memory. */
 const MAX_STATS_KEYS = 500;
 /** Same error message sent at most this many times per minute. */
@@ -205,7 +225,8 @@ export class OpenLens {
 
   /**
    * Count one request in its route's stats (any framework). `route` is the
-   * route template (`/api/entries/:id`), never the raw URL. `traceId` and
+   * route template (`/api/entries/:id`), never the raw URL. Health checks
+   * ({@link HEALTH_ROUTES}) are not counted. `traceId` and
    * `sessionId` describe the request if it becomes an exemplar (#607): the
    * slowest of its key's window, or the first answered 5xx. An exemplar
    * keeps the session, never the user (D-089).
@@ -215,6 +236,8 @@ export class OpenLens {
   recordRequest(r) {
     try {
       if (!r || !r.route) return;
+      // Health checks are not route stats (#726, D-100).
+      if (isHealthRoute(r.route)) return;
       const now = Date.now();
       const len = this.statsWindowMs;
       const start = windowStart(now, len);
@@ -447,10 +470,10 @@ export class OpenLens {
   /**
    * Runtime health (#610): event-loop delay, memory and process starts.
    * At once, one `$runtime_stats` with `process.start: true` (sent by the
-   * next flush, so a process that crash-loops is still counted); then, for
-   * every stats window, one `$runtime_stats` with the event-loop delay p50
-   * and p99 (seconds) and the largest RSS and heap used (bytes) of the
-   * window, sampled on each flush. On with `express()`; call it for other
+   * next flush, so a process that crash-loops is still counted); then, every
+   * 10 minutes whatever the stats window (#726, D-100), one `$runtime_stats`
+   * with the event-loop delay p50 and p99 (seconds) and the largest RSS and
+   * heap used (bytes) of those 10 minutes, sampled on each flush. On with `express()`; call it for other
    * frameworks. Calling it again does nothing.
    */
   captureRuntime() {
@@ -463,7 +486,7 @@ export class OpenLens {
       } catch {
         loop = undefined;
       }
-      const len = this.statsWindowMs;
+      const len = RUNTIME_WINDOW_MS;
       this.runtime = { start: windowStart(Date.now(), len), len, loop, rss: 0, heap: 0 };
       this.sampleRuntime();
       if (!processStartSent) {
@@ -493,7 +516,8 @@ export class OpenLens {
     const r = this.runtime;
     if (!r) return;
     const now = Date.now();
-    if (!all && !this.closed(r, now)) return;
+    // Its own 10-minute window (#726): the stats window does not close it.
+    if (!all && r.start + r.len > now) return;
     // OpenTelemetry runtime metric names (#610): `nodejs.eventloop.delay.*`
     // in seconds, `process.memory.usage` (RSS) and `v8js.memory.heap.used`
     // in bytes, here the largest sample of the window.
@@ -504,8 +528,7 @@ export class OpenLens {
     }
     r.loop?.reset();
     this.push("$runtime_stats", SERVER_ID, props, undefined, new Date(r.start));
-    // The next window, at the length in force now, aligned on it.
-    r.len = this.statsWindowMs;
+    // The next 10-minute window, aligned on it.
     r.start = windowStart(now, r.len);
     r.rss = 0;
     r.heap = 0;
@@ -736,6 +759,14 @@ function errorType(err) {
   const pick = (v) => (typeof v === "string" && /^[A-Za-z0-9._:-]{1,64}$/.test(v) ? v : undefined);
   if (!err || typeof err !== "object") return "_OTHER";
   return pick(err.code) || pick(err.cause && err.cause.code) || pick(err.name) || "_OTHER";
+}
+
+/** Is `route` a health check (#726, D-100): one of HEALTH_ROUTES, without
+ * case, query or trailing slash? */
+export function isHealthRoute(route) {
+  const r = String(route).trim().split(/[?#]/)[0].replace(/\/+$/, "").toLowerCase();
+  if (!r) return false;
+  return HEALTH_ROUTES.some((h) => (h.endsWith("/*") ? r.startsWith(h.slice(0, -1)) : r === h));
 }
 
 /** Start of the stats window of length `len` (ms) that holds `ms`:

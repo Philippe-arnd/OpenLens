@@ -23,6 +23,10 @@
 //!   session when known, so a page can open the replay at that time; a
 //!   slower route's p95 check carries its slowest.
 //!
+//! - **Health checks** ([`health`], #726, D-100): the route stats of
+//!   health probes are dropped at ingestion, so none of these reads sees
+//!   them.
+//!
 //! The stats are read from `raw_events`: the `events` view leaves them
 //! out, so no user KPI ever counts them.
 
@@ -34,6 +38,8 @@ use serde::Serialize;
 
 use crate::verdict::{Check, Outcome};
 use crate::{EngineError, Result, int, stats, text};
+
+pub mod health;
 
 /// Upper bounds of the histogram buckets as the SDKs send them: one more
 /// bucket holds the rest.
