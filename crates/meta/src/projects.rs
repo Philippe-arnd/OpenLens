@@ -153,6 +153,7 @@ impl Meta {
                 "person_ids",
                 "person_id_seq",
                 "role_history",
+                "plan_history",
                 "feature_maps",
                 "imports",
                 "flags",
@@ -265,6 +266,32 @@ impl Meta {
             Ok(rows.collect::<rusqlite::Result<_>>()?)
         })
     }
+
+    /// Plan history of a person, oldest first: `(raw plan, since)` (#712,
+    /// D-103). See [`plan_at`] for the plan at a given time.
+    pub fn plan_history(&self, project: &str, distinct_id: &str) -> Result<Vec<(String, String)>> {
+        self.read(|c| {
+            let mut st = c.prepare(
+                "SELECT plan, since FROM plan_history WHERE project = ?1 AND distinct_id = ?2 ORDER BY since",
+            )?;
+            let rows = st.query_map(params![project, distinct_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            Ok(rows.collect::<rusqlite::Result<_>>()?)
+        })
+    }
+}
+
+/// The raw plan a person had at `at`, from their [`Meta::plan_history`]
+/// (oldest first): the last change at or before `at`; none before the
+/// first one ("plan at event time", D-103).
+#[must_use]
+pub fn plan_at(history: &[(String, String)], at: DateTime<Utc>) -> Option<&str> {
+    history
+        .iter()
+        .rev()
+        .find(|(_, since)| {
+            DateTime::parse_from_rfc3339(since).is_ok_and(|s| s.with_timezone(&Utc) <= at)
+        })
+        .map(|(plan, _)| plan.as_str())
 }
 
 /// One identify to record (D-009): the person, their traits, and when.
@@ -285,26 +312,39 @@ pub struct Seen<'a> {
     pub signed_up: Option<DateTime<Utc>>,
 }
 
-/// Upsert the person of `s` and, when the role changed, append to the role
-/// history; inside the caller's transaction. True when the person's signup
-/// date changed (an earlier `created_at`, #707), which the query layer reads.
+/// Whether a sent trait differs from the stored one: nothing sent is no
+/// change; a first value is one.
+fn trait_changed(previous: Option<&Option<String>>, new: Option<&str>) -> bool {
+    match (previous, new) {
+        (_, None) => false,
+        (Some(Some(old)), Some(new)) => old != new,
+        _ => true,
+    }
+}
+
+/// Upsert the person of `s` and, when the role or the plan changed, append
+/// to the role history (D-009) or the plan history (#712, D-113); inside
+/// the caller's transaction. True when the person's signup date changed
+/// (an earlier `created_at`, #707), which the query layer reads.
 pub(crate) fn identify_in(c: &Connection, project: &str, s: &Seen<'_>) -> Result<bool> {
     let at = s.at.to_rfc3339();
-    let previous: Option<(Option<String>, Option<i64>)> = c
+    let stored: Option<(Option<String>, Option<String>, Option<i64>)> = c
         .prepare_cached(
-            "SELECT role, signed_up FROM persons WHERE project = ?1 AND distinct_id = ?2",
+            "SELECT role, plan, signed_up FROM persons WHERE project = ?1 AND distinct_id = ?2",
         )?
         .query_row(params![project, s.distinct_id], |r| {
-            Ok((r.get(0)?, r.get(1)?))
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
         })
         .optional()?;
     let signed_up = s.signed_up.map(|t| t.timestamp_micros());
     // The earliest creation date wins (an import and the SDK may disagree).
-    let earlier = match (previous.as_ref().and_then(|p| p.1), signed_up) {
+    let earlier = match (stored.as_ref().and_then(|p| p.2), signed_up) {
         (Some(old), Some(new)) => new < old,
         (None, Some(_)) => true,
         _ => false,
     };
+    let previous: Option<Option<String>> = stored.as_ref().map(|(role, _, _)| role.clone());
+    let plan_changed = trait_changed(stored.as_ref().map(|(_, plan, _)| plan), s.plan);
     c.prepare_cached(
         "INSERT INTO persons (project, distinct_id, role, account, plan, first_seen, last_seen, signed_up)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?7)
@@ -326,17 +366,18 @@ pub(crate) fn identify_in(c: &Connection, project: &str, s: &Seen<'_>) -> Result
         at,
         signed_up
     ])?;
-    let previous = previous.map(|p| p.0);
-    let changed = match (&previous, s.role) {
-        (_, None) => false,
-        (Some(Some(old)), Some(new)) => old != new,
-        _ => true,
-    };
+    let changed = trait_changed(previous.as_ref(), s.role);
     if let (true, Some(r)) = (changed, s.role) {
         c.prepare_cached(
             "INSERT INTO role_history (project, distinct_id, role, since) VALUES (?1, ?2, ?3, ?4)",
         )?
         .execute(params![project, s.distinct_id, r, at])?;
+    }
+    if let (true, Some(p)) = (plan_changed, s.plan) {
+        c.prepare_cached(
+            "INSERT INTO plan_history (project, distinct_id, plan, since) VALUES (?1, ?2, ?3, ?4)",
+        )?
+        .execute(params![project, s.distinct_id, p, at])?;
     }
     Ok(earlier)
 }

@@ -1,4 +1,4 @@
-//! Metadata store (SQLite): projects, API keys, persons and role history.
+//! Metadata store (SQLite): projects, API keys, persons, role and plan history.
 //!
 //! Small, transactional and rarely written, so it lives in one SQLite file
 //! next to the event segments. Events themselves never go here.
@@ -72,7 +72,7 @@ mod config;
 mod forget;
 mod identity;
 pub use identity::{Identified, IdentityTables, PersonIdentity};
-pub use projects::Seen;
+pub use projects::{Seen, plan_at};
 /// Deploys reported by the deploy hook, and its secret (#504).
 pub mod deploys;
 /// Job check-ins: cron and background jobs and their last runs (#609).
@@ -161,6 +161,13 @@ CREATE TABLE IF NOT EXISTS role_history (
   since TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS role_history_person ON role_history (project, distinct_id, since);
+CREATE TABLE IF NOT EXISTS plan_history (
+  project TEXT NOT NULL,
+  distinct_id TEXT NOT NULL,
+  plan TEXT NOT NULL,
+  since TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS plan_history_person ON plan_history (project, distinct_id, since);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS api_tokens (
   id TEXT PRIMARY KEY,

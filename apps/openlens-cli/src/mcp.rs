@@ -256,12 +256,12 @@ impl Tools for OpenLensTools {
             },
             ToolSpec {
                 name: "kpi_report",
-                description: "Headline KPIs in one compact payload: users (DAU/WAU/MAU, stickiness), sessions, vitals, top features and roles, latest two releases. With `by` (role|account|plan|page|feature), also users, sessions, events, tasks and errors per value (30 days). Roles are 'role at event time'.",
+                description: "Headline KPIs in one compact payload: users (DAU/WAU/MAU, stickiness), sessions, vitals, top features and roles, latest two releases. With `by` (role|account|plan|page|feature), also users, sessions, events, tasks and errors per value (30 days). Roles are 'role at event time'. When the feature map declares `plans:`, also `plans`: upgrades and downgrades (last 30 days, the 30 before, per release) and plan gaps, plans being 'plan at event time'.",
                 input_schema: json!({"type":"object","properties":with(json!({"env":{"type":"string"},"role":{"type":"string"},"release":{"type":"string"},"by":{"type":"string","enum":["role","account","plan","page","feature"]}}))}),
             },
             ToolSpec {
                 name: "user_timeline",
-                description: "One user's story: role, account, plan, role changes, recorded sessions (with dashboard links) and their latest 100 events (90 days). Use it to see what a churned or frustrated user did.",
+                description: "One user's story: role, account, plan, role and plan changes, recorded sessions (with dashboard links) and their latest 100 events (90 days). Use it to see what a churned or frustrated user did.",
                 input_schema: json!({"type":"object","properties":with(json!({"distinct_id":{"type":"string"}})),"required":["distinct_id"]}),
             },
             ToolSpec {
@@ -695,7 +695,7 @@ impl Tools for OpenLensTools {
                             }
                             None => Value::Null,
                         };
-                        json!({
+                        let mut report = json!({
                             "role_rule": "role at event time",
                             "breakdown": breakdown,
                             "filters": v["filters"],
@@ -706,7 +706,13 @@ impl Tools for OpenLensTools {
                             "roles": top("roles", 8),
                             "releases": top("releases", 2),
                             "total_events": v["total_events"],
-                        })
+                        });
+                        // Plans (#712, D-103): only when the map declares them.
+                        if !v["plans"].is_null() {
+                            report["plans"] = v["plans"].clone();
+                            report["plan_rule"] = json!("plan at event time");
+                        }
+                        report
                     }
                     _ => v,
                 })

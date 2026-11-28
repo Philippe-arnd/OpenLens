@@ -35,6 +35,34 @@ fn roles_resolve_first_match_wins_case_insensitive_with_wildcards() {
     assert_eq!(m.resolve_role("guest"), None);
 }
 
+/// Plans (#712, D-103): matched like roles, ordered lowest first, and paid
+/// only when the map says so.
+#[test]
+fn plans_tell_upgrades_from_downgrades_and_never_guess_paid() {
+    let m = parse(
+        "plans:\n  - key: free\n    match: [free, Trial]\n    paid: false\n  - key: pro\n    match: ['pro*']\n  - key: team\n    match: [team]\n",
+    )
+    .map
+    .unwrap();
+    assert_eq!(m.canonical_plan("PRO_yearly"), "pro");
+    assert!(m.canonical_plan("enterprise").starts_with("unmatched:"));
+    assert_eq!(m.plan_move("free", "pro"), Some(true));
+    assert_eq!(m.plan_move("team", "pro_monthly"), Some(false));
+    assert_eq!(m.plan_move("pro", "pro_yearly"), None, "same plan");
+    assert_eq!(m.plan_move("pro", "enterprise"), None, "unknown");
+    assert!(m.knows_paid() && m.plan_paid_sql().is_some());
+    // A plan named `free` without `paid: false` is paid: no guessing.
+    let named = parse("plans:\n  - key: free\n    match: [free]\n  - key: pro\n    match: [pro]\n")
+        .map
+        .unwrap();
+    assert!(!named.knows_paid() && named.plan_paid_sql().is_none());
+    // A free plan listed after a paid one is out of order.
+    let late = parse(
+        "plans:\n  - key: pro\n    match: [pro]\n  - key: free\n    match: [free]\n    paid: false\n",
+    );
+    assert!(late.issues.iter().any(|i| i.path == "plans[1].paid"));
+}
+
 #[test]
 fn routes_match_params_and_wildcards_only_where_declared() {
     let m = parse(

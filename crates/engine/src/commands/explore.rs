@@ -63,6 +63,8 @@ pub struct Profile {
     pub person: Option<Person>,
     /// (role, since), oldest first.
     pub roles: Vec<(String, String)>,
+    /// (raw plan, since), oldest first (#712, D-103).
+    pub plans: Vec<(String, String)>,
     /// Their session recordings.
     pub replays: Vec<openlens_replay::Summary>,
     /// Their latest events.
@@ -78,6 +80,7 @@ impl Serialize for Profile {
                 "signed_up": p.signed_up,
             })),
             "roles": self.roles,
+            "plans": self.plans,
             "replays": self.replays,
             "events": self.events,
         })
@@ -103,6 +106,7 @@ impl Command for GetPerson {
         let map = map(host, &p.id).await;
         let person = host.meta().person(&p.id, &who).ok().flatten();
         let roles = host.meta().role_history(&p.id, &who).unwrap_or_default();
+        let plans = host.meta().plan_history(&p.id, &who).unwrap_or_default();
         let replays = openlens_replay::list(host.data_dir(), &p.id, Some(&who)).unwrap_or_default();
         let events = crate::person_events(host.query(), &p.id, map.as_ref(), &who, 100)
             .await
@@ -115,6 +119,7 @@ impl Command for GetPerson {
         Ok(Profile {
             person,
             roles,
+            plans,
             replays,
             events,
         })

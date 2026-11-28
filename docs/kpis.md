@@ -12,6 +12,21 @@ Roles are the main way to slice every number, so they are declared explicitly, n
 - **Tracked over time:** role changes are stored with their date, and each event keeps the role the user had *at the time*. A user who moves from `member` to `admin` counts in the right bucket before and after the change. Reports state which rule they use, either "role at event time" (the default) or "current role".
 - **Multiple roles:** a user with several roles has a primary role, which is the first listed match in `roles:` order. Their other roles stay queryable.
 
+## Plans: declared, matched, tracked (SaaS only)
+
+Everything on this list shows only when the app sends `plan` in `identify(id, { plan })` **and** the feature map declares a `plans:` section (D-103). An internal tool that sends no plan sees nothing new; there is no setting.
+
+- **Declared:** `plans:` lists the app's canonical plans **from lowest to highest** (for example `free`, `pro`, `team`). Each plan says whether it is paid: `paid: true` by default, so the free plan must say `paid: false` (nothing is guessed from a name).
+- **Matched:** like roles, each plan lists the raw values the app sends (exact values or `*` patterns, case-insensitive; the first plan that matches wins). Raw values are always kept.
+- **Unmatched values** count as `unmatched:<value>`, in no upgrade or downgrade. The map health (`features lint --live`, finding `plan_gap`), the Feature map page and the board's `plans.gaps` list them until someone maps them.
+- **Tracked over time:** each plan change is stored with its date (`plan_history`, written when an `$identify` carries a plan different from the current one, by capture and by the import), and each event keeps the plan the user had *at the time* ("plan at event time", the default and only rule). A user who moves from `free` to `pro` counts as free before the change and as pro after it.
+- **Without `plans:`** the plan history is still kept on raw values, but upgrades, downgrades, paid and free are unknown and not shown.
+
+| KPI | Definition |
+| --- | --- |
+| **Upgrades** | Moves to a higher plan in the map's order, or from a free plan to a paid one, read from successive `$identify` plans of each user (90 days read). Counted over the last 30 days against the 30 days before, and per release (the release the user was on when the new plan was sent; the 5 newest). A change within one plan (`pro` → `pro_yearly`) is not a move. |
+| **Downgrades** | The reverse: a lower plan, or paid to free. |
+
 ## Users
 
 | KPI | Definition |
@@ -135,5 +150,6 @@ How a project ships, per environment, over a period (the last 90 days by default
 ## Where they show up
 - **Focus board** (home screen): ranked insight cards, then a KPI strip (DAU/WAU/MAU and users who came back, stickiness, average session, tasks per user per day, sessions with errors) and Web Vitals at p75. A filter bar sets role, release and environment.
 - **Focus board sections:** feature pulse (adoption, uses per user, active days, completion, task time), *Who uses what* (roles × features), weekly retention cohorts, journeys, funnels, flag cohorts and release comparison.
-- **MCP:** `kpi_report { env, role, release, by: role | account | plan | page | feature }` returns the headline KPIs plus a 30-day breakdown in one compact payload. `insights` returns the cards, and `user_timeline` returns one person's story.
+- **Plans tile** (only with `plans:` in the map): upgrades in the last 30 days against the 30 before, with the downgrades and the number of plan gaps.
+- **MCP:** `kpi_report { env, role, release, by: role | account | plan | page | feature }` returns the headline KPIs plus a 30-day breakdown in one compact payload, and `plans` (upgrades, downgrades, per release, gaps; `plan_rule: "plan at event time"`) when the map declares plans. `insights` returns the cards, and `user_timeline` returns one person's story.
 - **Export:** `openlens-cli export` writes the raw events as JSONL, day by day, for analysis elsewhere.

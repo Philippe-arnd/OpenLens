@@ -592,6 +592,7 @@ pub async fn board_reusing(
         retention,
         churn_line,
         server,
+        plan_moves,
     ) = futures::try_join!(
         insights::compute(q, project, &card_rows, f, ident, churn, &successes),
         insights::journeys(q, project, &success_reads, &journey_rows, f, &successes),
@@ -602,7 +603,10 @@ pub async fn board_reusing(
         tasks::retention(q, project, &p90, f, ident),
         crate::churn::line(q, project, map.map(|(m, _)| m), f, &src, ident),
         crate::board_backend::read(q, project, f, server_spans, map.map(|(m, _)| m), now),
+        // Plans (#712, D-103): nothing without `plans:` in the map.
+        crate::plans::read(q, project, f, map.map(|(m, _)| m)),
     )?;
+    b.plans = plan_moves;
     b.server = Some(server);
     b.churn = Some(churn_line);
     b.retention_trend = tasks::retention_trend(&retention);

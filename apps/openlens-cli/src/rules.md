@@ -10,6 +10,9 @@
 - When you move, add or delete code, keep the `paths` of the features it belongs to current:
   each release's changed files are matched against them to say which features it touched.
 - When you add or rename a user role, map its raw value under `roles:`.
+- If the app sells plans and sends `plan` to `identify()`, keep `plans:` current like `roles:`:
+  the canonical plans from lowest to highest, each with the raw values the code uses under `match`,
+  and `paid: false` on the free plan (`paid` defaults to true). When you add or rename a plan, map it there.
 - Run `openlens-cli features lint --src .` before committing, then `openlens-cli features push` on deploy.
 - The MCP tool `suggested_features` lists pages and `data-feature` values used in production that
   no feature claims, each with a proposed entry; `set_feature` adds or updates one entry. Write the

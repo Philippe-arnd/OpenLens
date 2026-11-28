@@ -30,7 +30,8 @@ const MAX_FINDINGS: usize = 50;
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Finding {
     /// `coverage`, `overlap`, `dead`, `success_never`, `success_always`,
-    /// `undeclared`, `requires`, `too_big`, `too_small`, `step_order`, `drift`.
+    /// `undeclared`, `requires`, `too_big`, `too_small`, `step_order`, `drift`,
+    /// `plan_gap` (#712).
     pub kind: &'static str,
     /// `error` or `warning`.
     pub level: &'static str,
@@ -189,6 +190,9 @@ pub struct Usage {
     pub relations: Option<crate::relations::Counts>,
     /// The current release's routes (#283, D-070).
     pub drift: crate::drift::Observed,
+    /// Raw plan values sent, with their users, last 30 days (#712): read
+    /// only when the map declares plans.
+    pub plans: Vec<(String, i64)>,
 }
 
 fn finding(
@@ -412,6 +416,25 @@ pub fn assess(m: &FeatureMap, u: &Usage) -> MapHealth {
             n,
         ));
     }
+    // Raw plan values no plan matches (#712, D-103), like role gaps: they
+    // count as `unmatched:<value>` and in no upgrade or downgrade.
+    if !m.plans.is_empty() {
+        for (raw, n) in &u.plans {
+            if m.resolve_plan(raw).is_none() {
+                findings.push(finding(
+                    "plan_gap",
+                    "warning",
+                    None,
+                    format!("the app sends the plan `{raw}` but no plan of the map matches it"),
+                    format!("{n} users in 30 days"),
+                    Some(format!(
+                        "# Add it to the `match` list of the plan it belongs to:\nplans:\n  - key: <plan>\n    match: [\"{raw}\"]"
+                    )),
+                    *n,
+                ));
+            }
+        }
+    }
     // data-feature values the map does not declare.
     for (k, n) in &u.tagged {
         if m.current_key(k).is_none() && openlens_featuremap::valid_key(k) {
@@ -612,6 +635,18 @@ async fn measure(
     for r in &c?.rows {
         if let Some(k) = text(r, "feature") {
             u.tagged.push((k, int(r, "n")));
+        }
+    }
+    // Raw plan values, for plan gaps (#712): only a map with plans has any.
+    if !m.plans.is_empty() {
+        let plans = format!(
+            "SELECT plan, count(DISTINCT distinct_id) AS n FROM events WHERE {w30} \
+             AND plan IS NOT NULL GROUP BY plan ORDER BY n DESC LIMIT 200"
+        );
+        for r in &q.sql(project, &plans).await?.rows {
+            if let Some(p) = text(r, "plan") {
+                u.plans.push((p, int(r, "n")));
+            }
         }
     }
     let (s, d, rel, gone) = futures::join!(

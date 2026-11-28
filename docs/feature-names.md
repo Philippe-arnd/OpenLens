@@ -12,6 +12,7 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Lifecycle | `lifecycle` and the board: visitor → account created → activated → paid → retained, only the stages the data shows, with the visitor → account rate as a lower bound |
 | Churn points | Last features and steps seen before users go inactive |
 | Role gap | A raw role value that the feature map does not match yet |
+| Plan gap | A raw plan value that the feature map's `plans:` does not match yet (#712) |
 | Used with | On a feature page: the features used in the same sessions, which comes first, and whether the first leads to value in the second |
 | Automatic release | A release named `YYYY-MM-DD.N` by the server when a new build fingerprint arrives with no release |
 | Time in staging | On the Releases page: from a build's first event in staging to its first in production |
