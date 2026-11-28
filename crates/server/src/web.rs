@@ -20,7 +20,6 @@ mod login;
 mod replays;
 mod second_factor;
 pub(crate) use appearance::{current_admin, current_portfolio, display_layer};
-pub(crate) use board_view::render_board;
 use board_view::*;
 pub(crate) use board_view::{render_board, with_feedback};
 use heatmap::*;
