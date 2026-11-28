@@ -131,6 +131,9 @@ print(json.dumps({
     # default board may be computed ahead after start, so the page's
     # "cold" time can be a cache hit; these are the real compute times.
     "board_compute_ms": board_ms,
+    "board_compute_ms_p50": sorted(board_ms)[len(board_ms) // 2] if board_ms else None,
+    "board_compute_ms_max": max(board_ms) if board_ms else None,
+    "peak_rss_mb_max": max((r["peak_rss_mb"] for r in runs), default=None),
     "four_filtered_boards_max_s": float(conc), "data_dir_mb": int(disk),
 }, indent=2))
 PY
@@ -138,4 +141,15 @@ cat scale.json
 # The 25 slowest queries of this cap, longest first.
 sed 's/\x1b\[[0-9;]*m//g' server.log | grep ' query ' | sed -n 's/.* ms=\([0-9]*\) sql=\(.*\)/\1\t\2/p' | sort -rn | head -25 > queries.txt || true
 rm -f runs.jsonl concurrent.txt cold.html
-{ echo "## Board at scale: $EVENTS events, cap ${MEMORY:-none}"; echo; echo '```json'; cat scale.json; echo '```'; echo '```'; cat diag.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+# What the footprint decision checks first: the board's real compute time
+# (the page's "cold" time is a cache hit since D-072) and the peak memory.
+python3 - <<'PY2' > headline.md
+import json
+d = json.load(open("scale.json"))
+print("| Board compute p50 / max | Role-filtered board | 4 filtered boards, max | Peak RSS |")
+print("| ---: | ---: | ---: | ---: |")
+p50, mx = d["board_compute_ms_p50"], d["board_compute_ms_max"]
+print(f"| {p50 if p50 is not None else '?'} / {mx if mx is not None else '?'} ms | {d['board_role_filter_cold_s']:.2f} s | {d['four_filtered_boards_max_s']:.2f} s | {d['peak_rss_mb_max']} MB |")
+PY2
+{ echo "## Board at scale: $EVENTS events, cap ${MEMORY:-none}"; echo; cat headline.md; echo; echo '```json'; cat scale.json; echo '```'; echo '```'; cat diag.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+rm -f headline.md
