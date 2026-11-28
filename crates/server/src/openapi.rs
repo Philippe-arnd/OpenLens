@@ -252,6 +252,12 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
     ),
     (
         "GET",
+        "/api/projects/{project}/accounts",
+        "read",
+        "Account health when the app sends `account`, over the last 30 days in one environment (`env`, production by default): per account its known users, active users and their share (and the share over the 30 days before), the weekly return of its users, churned users, its plan (the one most of its users have) and its state (`healthy`, `at_risk`: the active share fell by a third or more or 25% of its users churned, `inactive`: no active user for 14 days). At risk first, then inactive, then healthy; `state` keeps one state, `limit` (1 to 500, default 50) caps the list. Accounts with fewer than 3 known users are only counted, together, under `small`.",
+    ),
+    (
+        "GET",
         "/api/projects/{project}/feedback",
         "read",
         "What users said (`$feedback`) over `days` (1 to 90, default 30) in one environment (`env`, production by default), for one `feature` key or all: the count, feedbacks per rating 1 to 5, without a rating, the mean rating, per feature, and the latest texts (newest first, `limit` 1 to 200, default 20) with their rating, date, feature and who sent them. Texts are removed after 90 days; the ratings stay.",

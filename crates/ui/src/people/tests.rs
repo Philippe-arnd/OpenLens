@@ -190,6 +190,7 @@ fn the_audience_title_is_the_page_title_and_country_names_stay_in_the_map() {
         &Filters::default(),
         &a,
         true,
+        None,
     ));
     let first = html.find("<title>").unwrap();
     let head_title = &html[first..first + html[first..].find("</title>").unwrap()];
@@ -233,6 +234,7 @@ fn people_pages_carry_no_style_attribute_and_no_script() {
             &f,
             &openlens_engine::Audience::default(),
             false,
+            None,
         )),
         render(acquisition(&p, &b, &f, &[], "channel", false)),
         churn_page(vec![("billing".into(), 12, 0.4, 0.1)]),

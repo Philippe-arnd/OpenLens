@@ -12,6 +12,8 @@ use openlens_query::{QueryEngine, QueryError};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
+/// Account health, when the app sends `account` (#719, D-117).
+pub mod accounts;
 mod acquisition;
 mod board;
 /// The board's server side: key actions and the 5xx share (#623).
@@ -39,10 +41,10 @@ pub mod environments;
 mod errors;
 mod events;
 mod explore;
-/// What users say: `$feedback` per rating and feature (#718, D-116).
-pub mod feedback;
 mod feature_paths;
 mod feature_signals;
+/// What users say: `$feedback` per rating and feature (#718, D-116).
+pub mod feedback;
 pub mod flows;
 pub mod forms;
 pub mod goals;

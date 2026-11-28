@@ -4,6 +4,7 @@
 //! Layer: L5 (see `docs/architecture.md`).
 
 mod access;
+mod accounts;
 mod alerts;
 mod allowlist;
 mod announcements;
@@ -184,6 +185,7 @@ pub fn router(state: AppState) -> Router {
         .merge(capacity::routes())
         .merge(portfolio::routes())
         .merge(feedback::routes())
+        .merge(accounts::routes())
         .layer(axum::middleware::from_fn(csrf::layer))
         .layer(axum::middleware::from_fn(trusted_headers_layer))
         // Pages, the API and Ask (a few model rounds) get two minutes.

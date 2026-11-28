@@ -370,6 +370,21 @@ pub(super) enum Command {
         #[arg(long)]
         days: Option<i64>,
     },
+    /// Account health (#719), when the app sends `account`: per account
+    /// its users, active users and their share, weekly return, churned
+    /// users, plan and state (healthy, at_risk, inactive), at risk first.
+    /// Accounts with fewer than 3 users are counted together.
+    Accounts {
+        /// Project id.
+        #[arg(long, default_value = "default")]
+        project: String,
+        /// Only this state: healthy, at_risk or inactive.
+        #[arg(long)]
+        state: Option<String>,
+        /// Accounts listed, 1 to 500 (default 50).
+        #[arg(long)]
+        limit: Option<u32>,
+    },
     /// How sessions move between features (Sankey data, last 30 days).
     Flows {
         /// Project id.

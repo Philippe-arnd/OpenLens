@@ -593,6 +593,11 @@ fn run(cli: Cli) -> Result<bool, String> {
             feature,
             days,
         } => voice::feedback(&client()?, project, feature.as_deref(), *days),
+        Command::Accounts {
+            project,
+            state,
+            limit,
+        } => voice::accounts(&client()?, project, state.as_deref(), *limit),
         Command::Status { project } => {
             let (status, v) =
                 client()?.call("GET", &format!("/api/projects/{project}/status"), None)?;

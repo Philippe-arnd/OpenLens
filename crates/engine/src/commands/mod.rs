@@ -17,6 +17,7 @@ use serde::de::DeserializeOwned;
 
 use crate::{Board, Filters};
 
+pub mod accounts;
 pub mod alerts;
 pub mod announcements;
 pub mod ask;
@@ -192,6 +193,8 @@ pub const REGISTRY: &[Spec] = &[
     spec::<portfolio::Get>(),
     // What users say (#718).
     spec::<feedback::List>(),
+    // Account health (#719).
+    spec::<accounts::List>(),
 ];
 
 /// A 12-character id from `s` (the first bytes of its SHA-256, in hex).

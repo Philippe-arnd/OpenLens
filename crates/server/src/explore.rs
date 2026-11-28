@@ -693,9 +693,11 @@ pub(crate) async fn audience(
     let f = q.filters(&auth::tz_for(&state, &headers, &p.timezone));
     let map = crate::load_map(&state, &p.id).await;
     let caller = Caller::default();
-    let (b, a) = tokio::join!(
+    let (b, a, accounts) = tokio::join!(
         crate::boards::board(&state, &p.id, &f, map.as_ref().map(|(m, v)| (m, *v))),
-        cmd::GetAudience::run(&state, &caller, filtered(&p, &f))
+        cmd::GetAudience::run(&state, &caller, filtered(&p, &f)),
+        // Account health, shown when the app sends `account` (#719).
+        crate::accounts::of_project(&state, &p.id, &f.environment)
     );
     let info = openlens_ui::ProjectInfo {
         id: &p.id,
@@ -705,7 +707,14 @@ pub(crate) async fn audience(
     match (b, a) {
         (Ok(b), Ok(a)) => html_page(
             StatusCode::OK,
-            openlens_ui::audience(&info, &b, &f, &a, crate::audience::has_geo()),
+            openlens_ui::audience(
+                &info,
+                &b,
+                &f,
+                &a,
+                crate::audience::has_geo(),
+                accounts.as_ref(),
+            ),
         ),
         (Err(e), _) => cant_show(&e.to_string()),
         (_, Err(e)) => cant_show(&e.to_string()),

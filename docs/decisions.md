@@ -906,3 +906,19 @@ The weekly digest across projects: the Monday email goes to `OPENLENS_DIGEST_TO`
 **Why:** micro-surveys ask one question; #718 asks for the qualitative half of the loop, next to the feature it is about. Keeping it one event with a cleaned text, and reusing the event store, the maintenance pass and the erasure path, adds no table and no setting. The text is the most personal thing OpenLens stores after replays, hence the short retention and the admin-only reading.
 
 **Consequences:** no new setting. Days already moved to the cold tier (older than 120 days) before this change are not trimmed there; they age out with the 400 days. A rating alone is a valid feedback. `sql` (admin token) and Ask with person-level detail can still read a text younger than 90 days, like any other property.
+
+
+
+## D-117 (2026-11-28, agent for #719) Account health: fixed windows and thresholds, small accounts grouped, shown on People › Audience
+
+**Decision:**
+- **When.** Only when the app sends `account` (`identify(id, { account })`, stored on the person and on each event); otherwise the command answers an empty list with a note and no page changes (D-014).
+- **Per account, over the last 30 days** in one environment (production by default), the team's own users left out: *known users* (people whose last `account` is this one, or the people seen with it in the last 60 days when that is more, so an app that sends `account` on events without `identify` still counts), *active users* (an interaction, the rule sessions use, in the last 30 days) and their share, the same share over the 30 days before, *weekly retention* (of its users active 8 to 14 days ago, the share active again in the last 7), *churned users* (active in the 30 days before, not in the last 30), and its *plan* (the one most of its known users have now; ties go to the first by name).
+- **State,** fixed: `inactive` when no user was active for 14 days; else `at_risk` when the active share fell by a third or more (active ≤ ⅔ of the 30 days before, on the same known users) or churned users are 25 % or more of its known users; else `healthy`. Ranked at risk first (largest drop first), then inactive, then healthy. The JSON says `at_risk`; the page says "at risk". A request may name `at risk` too.
+- **Small accounts.** An account with fewer than **3** known users is not listed by name: the small accounts are counted together (accounts, users, active users). A share of one or two people is noise, and an account that small can be one person.
+- **Where.** The engine command `accounts.list` (`GET /api/projects/{id}/accounts`, `openlens-cli accounts`, MCP `accounts { state?, limit? }`, at most 500 accounts listed, 50 by default) and an *Accounts* section at the end of People › Audience (the "who" page), shown only when there is an account. The label stays "Accounts" for internal tools too (where an account is a team); the code says account.
+- **How it is read.** One query over 60 days of `events` (per account and person, then per account) and one grouped read of the people table; nothing is stored. More than 10,000 accounts are cut, and the answer says so (`truncated`).
+
+**Why:** for B2B apps the account is the unit that pays and churns (#719). Fixed windows and thresholds keep it a method rather than a setting, and they match the churn page's 30-day view. Rolling 7-day windows for the weekly return avoid time zone questions (D-017 keeps project days for calendar KPIs).
+
+**Consequences:** no new setting. A person who moved from one account to another counts in their current account as known, and in both as active while their events carry both. Account names are the app's own ids: viewers see them, as they already do in the breakdown by account.

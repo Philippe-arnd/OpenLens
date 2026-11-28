@@ -283,6 +283,14 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
             }))}),
         },
         ToolSpec {
+            name: "accounts",
+            description: "Account health, when the app sends `account` (identify(id, { account })): per account over the last 30 days its known users, active users and their share (and the share over the 30 days before), the weekly return of its users, churned users, its plan (the one most of its users have) and its state: `at_risk` (active share fell by a third or more, or 25% of its users churned), `inactive` (no active user for 14 days) or `healthy`. At risk first; `state` keeps one state, `limit` 1 to 500 (default 50). Accounts with fewer than 3 users are only counted, under `small`. For an internal tool, read accounts as teams. Drill into an account with kpi_report by account.",
+            input_schema: json!({"type":"object","properties":with(json!({
+                "state":{"type":"string","enum":["healthy","at_risk","inactive"]},
+                "limit":{"type":"integer","minimum":1,"maximum":500}
+            }))}),
+        },
+        ToolSpec {
             name: "flows",
             description: "How sessions move between features, step by step: the nodes of each step and the links between them with their sessions, and how many sessions reached a success event. `from` (a feature key) starts at its first use; `to: success` keeps the sessions that reached one.",
             input_schema: json!({"type":"object","properties":filtered(json!({
@@ -477,6 +485,14 @@ pub(crate) fn call(c: &Client, name: &str, args: &Value) -> Option<Result<Value,
         "forms" => get(c, &query(args, "/forms", FILTERS)),
         "audience" => get(c, &query(args, "/audience", FILTERS)),
         "live" => get(c, &query(args, "/live", FILTERS)),
+        "accounts" => {
+            let mut path = query(args, "/accounts", &["state", "env"]);
+            if let Some(n) = args.get("limit").and_then(Value::as_i64) {
+                path.push(if path.contains('?') { '&' } else { '?' });
+                path.push_str(&format!("limit={n}"));
+            }
+            get(c, &path)
+        }
         "feedback" => {
             let mut path = query(args, "/feedback", &["feature", "env"]);
             for k in ["days", "limit"] {

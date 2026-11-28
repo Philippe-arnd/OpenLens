@@ -46,3 +46,4 @@ Plain words first. Generic category terms (funnel, retention, heatmap, feature f
 | Component | A line of the status page: production or a monitored environment, under a public name |
 | Job check-ins | On Uptime: cron and background jobs that report each run; OpenLens learns how often they run and alerts when one is missed, fails or gets slower |
 | What users say | On a feature's page and in `feedback`: the `$feedback` users send (a text, the feature it is about, a rating 1 to 5), counted per rating, the texts for admins; "N feedback this week" on the feature's insight cards |
+| Accounts | On People › Audience and in `accounts`, when the app sends `account`: each account's known and active users, weekly return, churned users, plan and state (healthy, at risk, inactive), at risk first; accounts under 3 users counted together as small accounts. For an internal tool, an account reads as a team |

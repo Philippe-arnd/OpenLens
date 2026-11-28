@@ -1,5 +1,7 @@
 //! `openlens-cli feedback` (#718, D-116): what users said, per rating and
-//! feature, with the latest texts (`feedback.list` through the REST API).
+//! feature, with the latest texts (`feedback.list` through the REST API);
+//! `openlens-cli accounts` (#719, D-117): account health
+//! (`accounts.list`).
 
 use crate::{Client, out};
 
@@ -33,6 +35,29 @@ pub(crate) fn feedback(
     let (status, v) = c.call(
         "GET",
         &format!("/api/projects/{}/feedback?{}", enc(project), q.join("&")),
+        None,
+    )?;
+    out(&v);
+    Ok(status == 200)
+}
+
+/// `GET /api/projects/{project}/accounts`, printed.
+pub(crate) fn accounts(
+    c: &Client,
+    project: &str,
+    state: Option<&str>,
+    limit: Option<u32>,
+) -> Result<bool, String> {
+    let mut q = Vec::new();
+    if let Some(s) = state {
+        q.push(format!("state={}", enc(s)));
+    }
+    if let Some(n) = limit {
+        q.push(format!("limit={n}"));
+    }
+    let (status, v) = c.call(
+        "GET",
+        &format!("/api/projects/{}/accounts?{}", enc(project), q.join("&")),
         None,
     )?;
     out(&v);
