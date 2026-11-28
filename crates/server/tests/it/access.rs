@@ -854,7 +854,7 @@ async fn a_cold_board_streams_its_shell_first_and_a_warm_one_does_not() {
     assert!(loading < kpis, "the waiting panel comes before the board");
     assert!(cold.contains("Computing the board…") && cold.contains("a few seconds"));
     assert!(cold.contains(r#"aria-live="polite""#));
-    assert_eq!(cold.matches("<main>").count(), 1, "one page");
+    assert_eq!(cold.matches("<main").count(), 1, "one page");
     assert!(cold.trim_end().ends_with("</html>"));
     // Warm: the cached board, with no waiting panel.
     let warm = body_text(get(&h, "/p/default", Some(&owner), false).await).await;
