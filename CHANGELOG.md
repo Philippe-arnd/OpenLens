@@ -4,6 +4,10 @@ All notable changes to OpenLens are recorded here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **A persona-size benchmark profile** (#706): `cargo xtask bench-gen <dir> --profile persona` writes the app of the target persona as stored after the event budget: 120,000 known users (about 30,000 active a day), about 25 browser events per active user-day, distribution-only events on about 2,000 sampled user-days a day with `$sample`, plans and roles, anonymous landing visits, and one server's route and runtime stats every 10 minutes, about 68 M events over 90 days (the exact count is printed). `--events N` scales its users. `docs/benchmarks.md` describes it under "Persona size"; its results are not measured yet.
+
 ### Changed
 
 - **Insight cards correct for multiple comparisons** (#705, D-099): stick drivers and role blind spots now need a two-proportion test besides their lift threshold, and they, flag regressions, flag wins and feature relations' *leads to value* hold their p-values to a Benjamini–Hochberg cutoff at a 5% false discovery rate within each family, so a board with many features, roles or flags no longer shows cards by chance. The release verdict does the same for its feature success rates and its routes' 5xx shares.

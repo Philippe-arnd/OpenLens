@@ -153,7 +153,9 @@ pub fn hostile_check_in_queries() -> Vec<String> {
 use chrono::{DateTime, Duration, Utc};
 use openlens_event::Event;
 
+mod persona;
 mod realistic;
+pub use persona::{PERSONA_KNOWN_USERS, PERSONA_NOMINAL_EVENTS, PERSONA_SAMPLED_PER_DAY, Persona};
 pub use realistic::{EVENTS_PER_USER, realistic_feature_map, realistic_user};
 
 /// Deterministic xorshift PRNG (no dependency, reproducible datasets).

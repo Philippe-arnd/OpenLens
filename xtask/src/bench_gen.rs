@@ -12,6 +12,17 @@
 //! 24-feature, 3-role feature map, and stores it as the project's map
 //! (version 1): pushing the same file later keeps that version (D-046).
 //!
+//! `--profile persona` (#706) writes the app of the target persona after
+//! the event budget (D-097): 120,000 known users, about 30,000 active a
+//! day, about 25 stored browser events per active user-day, anonymous
+//! landing visits, and one server's route and runtime stats (see
+//! `openlens_testkit::Persona`). Its size is derived from those numbers
+//! and printed at the end (about 68 M events). Without `--events` it is
+//! written at full size; `--events N` scales the known users (and the
+//! visitors with them) to about `N` events, the server stats staying one
+//! server's. `--users` is ignored. `--map-out` writes the realistic map,
+//! which fits it.
+//!
 //! Then the closed days are rolled up (#322, D-025, D-038, D-041) with the
 //! server's own functions and that map, so the board reads what a server
 //! running for weeks would (D-040), not only events. `--no-rollups` skips
@@ -22,15 +33,16 @@ use std::time::Instant;
 const CHUNK: u64 = 250_000;
 
 pub(crate) fn bench_gen(args: &[String]) -> Result<(), String> {
-    let usage = "usage: cargo xtask bench-gen <data-dir> [--events N] [--users N] [--profile realistic] [--map-out FILE] [--no-rollups]";
+    let usage = "usage: cargo xtask bench-gen <data-dir> [--events N] [--users N] [--profile realistic|persona] [--map-out FILE] [--no-rollups]";
     let dir = args
         .first()
         .filter(|a| !a.starts_with("--"))
         .ok_or(usage)?
         .clone();
-    let mut events: u64 = 63_000_000;
+    let mut events: Option<u64> = None;
     let mut users: u64 = 200_000;
     let mut realistic = false;
+    let mut persona = false;
     let mut map_out: Option<String> = None;
     let mut rollups = true;
     let mut it = args.iter().skip(1);
@@ -42,9 +54,10 @@ pub(crate) fn bench_gen(args: &[String]) -> Result<(), String> {
         let v = it.next().ok_or(usage)?;
         let number = || v.replace('_', "").parse::<u64>().map_err(|_| usage);
         match a.as_str() {
-            "--events" => events = number()?,
+            "--events" => events = Some(number()?),
             "--users" => users = number()?,
             "--profile" if v == "realistic" => realistic = true,
+            "--profile" if v == "persona" => persona = true,
             "--map-out" => map_out = Some(v.clone()),
             _ => return Err(usage.into()),
         }
@@ -59,27 +72,19 @@ pub(crate) fn bench_gen(args: &[String]) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     let now = chrono::Utc::now();
     let started = Instant::now();
-    let mut done = 0;
-    let mut next_user = 0;
-    while done < events {
-        let chunk = if realistic {
-            realistic_chunk(&mut next_user, events - done, now)
-        } else {
-            openlens_testkit::scale_chunk("default", events, users, done, CHUNK, now)
-        };
-        if chunk.is_empty() {
-            return Err("no events generated".into());
-        }
-        done += chunk.len() as u64;
-        w.append(&chunk).map_err(|e| e.to_string())?;
-        w.flush().map_err(|e| e.to_string())?;
-        if done % (CHUNK * 20) == 0 || done == events {
-            eprintln!(
-                "xtask: {done} / {events} events written ({:.0} s)",
-                started.elapsed().as_secs_f64()
-            );
-        }
-    }
+    let app = persona.then(|| match events {
+        Some(n) => openlens_testkit::Persona::scaled(n),
+        None => openlens_testkit::Persona::full(),
+    });
+    let events = if let Some(app) = &app {
+        let written = write_persona(&mut w, app, now, started)?;
+        users = app.known_users() + app.visitors();
+        written
+    } else {
+        let events = events.unwrap_or(63_000_000);
+        users = write_events(&mut w, events, users, realistic, now, started)?;
+        events
+    };
     let days = openlens_storage::compact(std::path::Path::new(&dir), "default", now)
         .map_err(|e| e.to_string())?;
     let meta = openlens_meta::Meta::open(&std::path::Path::new(&dir).join("meta.db"))
@@ -105,23 +110,103 @@ pub(crate) fn bench_gen(args: &[String]) -> Result<(), String> {
         0
     };
     let rollup_seconds = rolled.elapsed().as_secs_f64();
-    if realistic {
-        users = next_user;
-    }
     println!(
         "{}",
         serde_json::json!({
             "events": events,
             "users": users,
-            "profile": if realistic { "realistic" } else { "uniform" },
+            "profile": if persona { "persona" } else if realistic { "realistic" } else { "uniform" },
             "days_compacted": days,
             "days_rolled": days_rolled,
             "rollup_seconds": (rollup_seconds * 10.0).round() / 10.0,
             "seconds": started.elapsed().as_secs(),
             "dir": dir,
+            "persona": app.map(|a| serde_json::json!({
+                "known_users": a.known_users(),
+                "visitors": a.visitors(),
+                "daily_users": a.daily_users().round(),
+                "sample_rate": a.sample_rate(),
+            })),
         })
     );
     Ok(())
+}
+
+/// Write `events` events of the uniform or the realistic profile. Returns
+/// the people they come from.
+fn write_events(
+    w: &mut openlens_storage::Writer,
+    events: u64,
+    users: u64,
+    realistic: bool,
+    now: chrono::DateTime<chrono::Utc>,
+    started: Instant,
+) -> Result<u64, String> {
+    let mut done = 0;
+    let mut next_user = 0;
+    while done < events {
+        let chunk = if realistic {
+            realistic_chunk(&mut next_user, events - done, now)
+        } else {
+            openlens_testkit::scale_chunk("default", events, users, done, CHUNK, now)
+        };
+        if chunk.is_empty() {
+            return Err("no events generated".into());
+        }
+        done += chunk.len() as u64;
+        w.append(&chunk).map_err(|e| e.to_string())?;
+        w.flush().map_err(|e| e.to_string())?;
+        if done % (CHUNK * 20) == 0 || done == events {
+            eprintln!(
+                "xtask: {done} / {events} events written ({:.0} s)",
+                started.elapsed().as_secs_f64()
+            );
+        }
+    }
+    Ok(if realistic { next_user } else { users })
+}
+
+/// Write every unit of the persona app, about [`CHUNK`] events at a time.
+/// Returns the events written: the profile's size.
+fn write_persona(
+    w: &mut openlens_storage::Writer,
+    app: &openlens_testkit::Persona,
+    now: chrono::DateTime<chrono::Utc>,
+    started: Instant,
+) -> Result<u64, String> {
+    eprintln!(
+        "xtask: persona, {} known users (about {:.0} active a day), {} anonymous visitors, sample rate {:.4}",
+        app.known_users(),
+        app.daily_users(),
+        app.visitors(),
+        app.sample_rate()
+    );
+    let mut done = 0u64;
+    let mut chunks = 0u64;
+    let mut chunk = Vec::new();
+    let units = app.units();
+    for k in 0..units {
+        chunk.extend(app.unit("default", k, now));
+        if (chunk.len() as u64) < CHUNK && k + 1 < units {
+            continue;
+        }
+        done += chunk.len() as u64;
+        w.append(&chunk).map_err(|e| e.to_string())?;
+        w.flush().map_err(|e| e.to_string())?;
+        chunk.clear();
+        chunks += 1;
+        if chunks % 20 == 0 || k + 1 == units {
+            eprintln!(
+                "xtask: {done} events written, {} / {units} units ({:.0} s)",
+                k + 1,
+                started.elapsed().as_secs_f64()
+            );
+        }
+    }
+    if done == 0 {
+        return Err("no events generated".into());
+    }
+    Ok(done)
 }
 
 /// Roll up every closed day of `project` lacking a rollup, as the
