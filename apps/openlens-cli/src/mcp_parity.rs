@@ -51,6 +51,9 @@ const TOOL_OF: &[(&str, &str)] = &[
     ("alerts.set", "alert_set"),
     ("alerts.test", "alert_set"),
     ("tickets.target", "ticket_target"),
+    // Next actions (#715, D-104).
+    ("actions.next", "next_actions"),
+    ("actions.propose", "propose_action"),
     ("flags.list", "flags"),
     ("flags.update", "flag_update"),
     ("explore.person", "user_timeline"),
@@ -120,6 +123,11 @@ const PENDING: &[&str] = &[
     // The sidebar's Go to… field (#541): navigation for people in the
     // dashboard. Agents name features and people by key in every tool.
     "goto.lookup",
+    // A person's decisions on a next action (#715, D-104): an agent
+    // proposes (`propose_action`), an admin approves or dismisses it on
+    // the Next actions page.
+    "actions.approve",
+    "actions.dismiss",
 ];
 
 /// Tools that are not engine commands yet: their logic still sits behind

@@ -585,6 +585,15 @@ fn run(cli: Cli) -> Result<bool, String> {
             out(&v);
             Ok(status == 200)
         }
+        Command::NextActions { project, state } => {
+            let mut path = format!("/api/projects/{project}/next-actions");
+            if let Some(s) = state {
+                path.push_str(&format!("?state={s}"));
+            }
+            let (status, v) = client()?.call("GET", &path, None)?;
+            out(&v);
+            Ok(status == 200)
+        }
         Command::Maintenance { action } => maintenance::run(&client()?, action),
         Command::Announce { action } => announce::run(&client()?, action),
         Command::StatusPage { action } => status_page::run(&client()?, action),

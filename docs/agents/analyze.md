@@ -4,6 +4,7 @@ Start from the summaries and drill down only where something stands out. Every t
 
 | PM question | Tool | Drill down with |
 | --- | --- | --- |
+| What should I work on next? | `next_actions` (optional `state`): the board's findings, the most hit error groups, goals at risk or off track and map health errors, deduplicated and ranked by impact × confidence, each with a stable `id` and a state (`new`, `proposed`, `approved`, `shipped`, `learned`). Take the top `approved` action (`state: approved`), ship it with the release tagged, and read the list again: it moves to `shipped` then `learned` with the ticket's outcome; keep no state of your own | `propose_action { id, note? }` to take a `new` one: its ticket is drafted, nothing is posted, and a person approves it on the Next actions page, which files it |
 | What should we focus on? | `insights`: ranked cards with evidence and next steps, plus paths to value | `sql` |
 | Headline KPIs by role, environment or release | `kpi_report` (optional `role`, `env`, `release`) | `board` (everything) |
 | Split by account, plan, page or feature | `kpi_report` with `by` (`role`, `account`, `plan`, `page`, `feature`) | `sql` |

@@ -107,6 +107,10 @@ pub(crate) const KPI: &[(&str, &str)] = &[
 /// on a literal one left plain, except the counts in [`NOT_METRIC`].
 pub(crate) const COLUMNS: &[(&str, &str)] = &[
     (
+        "Rank",
+        "Impact × confidence, from 0 to 1, with a fixed formula per kind of finding: a regressed release ranks highest, then goals off track, errors that hit many users, and insight cards.",
+    ),
+    (
         "Rage clicks",
         "Clicks in a burst: three fast clicks on the same element, a sign that it did not respond as expected.",
     ),
@@ -553,6 +557,7 @@ mod tests {
             include_str!("profile.rs"),
             include_str!("slo.rs"),
             include_str!("environments.rs"),
+            include_str!("next_actions.rs"),
         ];
         let mut seen = 0;
         for src in sources {

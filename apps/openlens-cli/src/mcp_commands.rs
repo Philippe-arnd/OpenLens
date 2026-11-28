@@ -1,7 +1,7 @@
 //! MCP tools over engine commands that only a page ran before (#525,
 //! follow-up of #308, D-058): goals' removal and objectives, alerts and
 //! uptime (and its history, #559), the GitHub repository of tickets, switching a flag, churn and
-//! the win-back flag, and the explore reports. Like every tool, each one
+//! the win-back flag, the explore reports, and the next actions (#715). Like every tool, each one
 //! calls the REST API (D-020). Kept apart from `mcp.rs` so that file stays
 //! small; [`specs`] are listed after its tools and [`call`] answers the
 //! names it does not know.
@@ -104,6 +104,16 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
         with(f)
     };
     vec![
+        ToolSpec {
+            name: "next_actions",
+            description: "What to work on next, in one call: the findings of the board (insight cards, the regressed latest release), the most hit error groups, the goals at risk or off track and the feature map's errors, deduplicated and ranked by impact × confidence (at most 20). Each action has a stable id, its evidence and links, and a state: new → proposed (an agent proposed it, its ticket is drafted) → approved (a person filed its ticket) → shipped (issue closed, seen in a release) → learned (the outcome is measured and in the learning log: improved, worse or inconclusive, with the method), or dismissed (hidden 30 days by a person). The state is kept by OpenLens, not by you: take the top `approved` action (state='approved'), ship it, and read it again to see it move to shipped then learned. `unavailable` names the sources that could not be read.",
+            input_schema: json!({"type":"object","properties":with(json!({"state":{"type":"string","enum":["new","proposed","approved","shipped","learned","dismissed"]}}))}),
+        },
+        ToolSpec {
+            name: "propose_action",
+            description: "Propose to work on a next action (its id from next_actions), with an optional note on what you plan. Its ticket is drafted and kept with the action; nothing is posted to GitHub. A person approves it on the Next actions page, which files the ticket; until then it stays `proposed`. Proposing again, or an action already further, changes nothing. A dismissed action cannot be proposed until its dismissal ends.",
+            input_schema: json!({"type":"object","properties":with(json!({"id":{"type":"string"},"note":{"type":"string","maxLength":500}})),"required":["id"]}),
+        },
         ToolSpec {
             name: "routes",
             description: "The app's server routes over the last `days` (1 to 90, default 7) in one environment (production unless env), from the server SDK's middleware: per method and route template, requests, 5xx count and share, p50 and p95 in ms (upper bounds of the duration histogram), the largest duration, the feature whose key action the route is (`server:` in the feature map), and its exemplars: `slowest` (the slowest request of the period) and `first_5xx` (the first answered 5xx), each with ms, time, status and, when known, trace id and session id (open its replay at that time). Release verdicts judge the same routes (5xx share up significantly, or p95 1.5 times and 200 ms slower); `release_report` shows them as `route` checks, a slower route's p95 check with its slowest request as `exemplar`. Empty, with a note, until the server SDK sends stats. `dependencies` lists the app's outgoing calls per external host over the same days (from the Node SDK's `captureOutgoing()` or OTLP `http.client.request.duration`): calls, failed calls (5xx or no response) and their share, p95 in ms, and how each host moved since the release before (`fails_more`, `slower`). Dependencies are shown, never judged: `release_report` lists those that got worse as `dependencies`, and they never change a verdict. A host failing for 15 minutes raises a `dep:<host>` alert.",
@@ -402,6 +412,11 @@ fn routes(c: &Client, args: &Value) -> Result<Value, String> {
 /// Run the tool `name`, or `None` when it is not one of [`specs`].
 pub(crate) fn call(c: &Client, name: &str, args: &Value) -> Option<Result<Value, String>> {
     Some(match name {
+        "next_actions" => get(c, &query(args, "/next-actions", &["state"])),
+        "propose_action" => required(args, "id").and_then(|id| {
+            let path = at(args, &format!("/next-actions/{}/propose", enc(&id)));
+            send(c, "POST", &path, Some(json!({ "note": s(args, "note") })))
+        }),
         "routes" => routes(c, args),
         "runtime" => get(c, &query(args, "/runtime", &["env"])),
         "capacity" => get(c, "/api/capacity"),

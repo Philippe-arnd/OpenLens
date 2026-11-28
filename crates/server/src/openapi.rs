@@ -167,6 +167,18 @@ pub(crate) const ROUTES: &[(&str, &str, &str, &str)] = &[
         "Open an issue from a finding.",
     ),
     (
+        "GET",
+        "/api/projects/{project}/next-actions",
+        "read",
+        "Next actions: findings ranked by impact × confidence, each with its state (new, proposed, approved, shipped, learned); `state` keeps one state.",
+    ),
+    (
+        "POST",
+        "/api/projects/{project}/next-actions/{action}/propose",
+        "read",
+        "Propose to work on a next action (`note`): its ticket is drafted and kept, nothing is posted. A person approves it on the Next actions page.",
+    ),
+    (
         "POST",
         "/api/projects/{project}/import",
         "write",
